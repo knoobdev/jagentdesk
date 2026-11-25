@@ -1,32 +1,45 @@
-import type {
-  AgentSnapshotPayload,
-  AgentStreamEventPayload,
-  CreateAgentWorktreeTarget,
-  HubExecutionControlAction,
+import {
+  type AgentSnapshotPayload,
+  type AgentStreamEventPayload,
+  type CreateAgentWorktreeTarget,
+  type HubExecutionControlAction,
 } from "@jagentdesk/protocol/messages";
-
-import type { AgentManager, AgentManagerEvent, ManagedAgent } from "../agent/agent-manager.js";
-import type { McpServerConfig } from "../agent/agent-sdk-types.js";
-import type { AgentStorage, StoredAgentRecord } from "../agent/agent-storage.js";
-import type { BoundCreateAgentCommand } from "../agent/create-agent/create.js";
-import type { CreateJAgentDeskWorktreeWorkflowResult } from "../worktree-session.js";
-import type { ActiveWorkspaceRef } from "../workspace-archive-service.js";
+import {
+  type AgentManager,
+  type AgentManagerEvent,
+  type ManagedAgent,
+} from "../agent/agent-manager.js";
+import { type McpServerConfig } from "../agent/agent-sdk-types.js";
+import { type AgentStorage, type StoredAgentRecord } from "../agent/agent-storage.js";
+import { type BoundCreateAgentCommand } from "../agent/create-agent/create.js";
+import { type CreateJAgentDeskWorktreeWorkflowResult } from "../worktree-session.js";
+import { type ActiveWorkspaceRef } from "../workspace-archive-service.js";
 import { buildStoredAgentPayload } from "../agent/agent-projections.js";
 import { serializeAgentSnapshot, serializeAgentStreamEvent } from "../messages.js";
 import { daemonExecutionKey, type DaemonAgentOwner } from "../agent/agent-owner.js";
 
 export interface HubExecutionAgentCreateInput {
   executionId: string;
+
   provider: string;
+
   cwd: string;
+
   workspaceId?: string;
+
   prompt: string;
+
   model?: string;
+
   modeId?: string;
+
   thinkingOptionId?: string;
-  featureValues?: Record<string, unknown>;
+  providerOptions?: import("@jagentdesk/protocol/agent-types").ProviderOptions;
+
   env?: Record<string, string>;
+
   mcpServers?: Record<string, McpServerConfig>;
+
   worktree?: CreateAgentWorktreeTarget;
 }
 
@@ -74,14 +87,23 @@ export interface HubExecutionAgents {
 
 export class DaemonExecutions implements HubExecutionAgents {
   private readonly daemonId: string;
+
   private readonly agentManager: AgentManager;
+
   private readonly agentStorage: AgentStorage;
+
   private readonly createAgentCommand: BoundCreateAgentCommand;
+
   private readonly pendingCreates = new Map<string, Promise<OwnedAgentSnapshot>>();
+
   private readonly pendingControlActions = new Map<string, Promise<void>>();
+
   private readonly controlTails = new Map<string, Promise<void>>();
+
   private authorityGeneration = 0;
+
   private authorityActive = true;
+
   private readonly cleanupFailedCreate: NonNullable<DaemonExecutionsOptions["cleanupFailedCreate"]>;
 
   constructor(private readonly options: DaemonExecutionsOptions) {
@@ -193,7 +215,7 @@ export class DaemonExecutions implements HubExecutionAgents {
         workspaceId: input.workspaceId,
         mode: input.modeId,
         thinking: input.thinkingOptionId,
-        features: input.featureValues,
+        providerOptions: input.providerOptions,
         env: input.env,
         ...(input.mcpServers ? { config: { mcpServers: input.mcpServers } } : {}),
         worktree: toCreateAgentWorktree(input.worktree),
@@ -295,7 +317,11 @@ export class DaemonExecutions implements HubExecutionAgents {
       agent: live
         ? serializeAgentSnapshot(live)
         : {
-            ...buildStoredAgentPayload(record, this.agentManager.getRegisteredProviderIds()),
+            ...buildStoredAgentPayload(
+              record,
+              this.agentManager.getRegisteredProviderIds(),
+              (provider, own) => this.agentManager.effectiveOptionsFor(provider, own),
+            ),
             status: "closed",
           },
     };

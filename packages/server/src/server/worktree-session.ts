@@ -156,7 +156,7 @@ export type CreateJAgentDeskWorktreeWorkflowFn = (
 
 interface HandleWorkspaceSetupStatusRequestDependencies {
   emit: EmitSessionMessage;
-  workspaceSetupSnapshots: ReadonlyMap<string, WorkspaceSetupSnapshot>;
+  workspaceSetupSnapshots: Pick<ReadonlyMap<string, WorkspaceSetupSnapshot>, "get">;
 }
 
 interface HandleCreateJAgentDeskWorktreeRequestDependencies {

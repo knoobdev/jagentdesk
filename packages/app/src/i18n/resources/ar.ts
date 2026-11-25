@@ -1,15 +1,13 @@
-import { botsStrings } from "./bots";
-import { builtinPluginStrings } from "./builtin-plugins";
-import type { TranslationResources } from "./en";
+import { type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 import { activityGraphStrings } from "./activity-graph";
-import { sshModuleStrings } from "./ssh-modules";
 
 export const ar: TranslationResources = {
-  bots: botsStrings,
-  builtinPlugins: builtinPluginStrings,
-  ssh: sshModuleStrings,
-  activityGraph: activityGraphStrings,
+  pluginCombobox: {
+    searching: "جارٍ البحث…",
+    empty: "لا توجد نتائج",
+    failed: "فشل البحث: {{message}}",
+  },
   paneFind: {
     connectionFailure: "Could not search this chat. Check the host connection and retry.",
     historyChangedFailure: "The chat changed while searching. Search again.",
@@ -149,8 +147,11 @@ export const ar: TranslationResources = {
       desktop: "أرسل رسالة إلى الوكيل أو ضع علامة على @files أو استخدم /commands و /skills",
       mobile: "الرسالة، @files ، /commands",
       fallback: "رسالة...",
+      terminal: "Prompt",
     },
     input: {
+      fullscreen: "Fullscreen",
+      exitFullscreen: "Exit fullscreen",
       longPressToSendNow: "Long press to send now",
 
       longPressToQueue: "Long press to queue",
@@ -1267,6 +1268,8 @@ export const ar: TranslationResources = {
       project: "المشروع",
       base: "الأساس",
       baseNotApplicable: "غير قابل للتطبيق",
+      host: "المضيف",
+      branch: "الفرع",
     },
     titlePlaceholder: "العنوان (اختياري)",
     errors: {
@@ -1306,6 +1309,22 @@ export const ar: TranslationResources = {
       inProjectDirectory: "في مجلد المشروع",
       inWorktree: "في شجرة عمل",
       title: "ابدأ من",
+    },
+    launch: {
+      commandPlaceholder: "Run a command, or leave empty for a blank terminal",
+      promptPlaceholder: "Prompt {{name}}",
+      submit: "Launch",
+      chat: "Chat",
+      terminal: "Terminal",
+      title: "What to launch",
+      manageProfiles: "Manage profiles",
+    },
+    tooltips: {
+      project: "Choose the project",
+      host: "Choose the host",
+      isolation: "Choose the isolation level",
+      startingRef: "اختر من أين تبدأ",
+      launch: "Choose what to launch",
     },
   },
   desktop: {
@@ -1563,6 +1582,16 @@ export const ar: TranslationResources = {
     noMatches: "لا توجد نماذج تطابق بحثك",
     searchPlaceholder: "نماذج البحث...",
     openProviderSettings: "افتح إعدادات{{provider}}",
+    editProfilesLabel: "تحرير ملفات الوكيل",
+    searchAllPlaceholder: "ابحث في كل النماذج...",
+    createProfileFromModel: "إنشاء ملف شخصي من هذا النموذج",
+    editProfileLabel: "تحرير {{name}}",
+    editProfilesCount: "تحرير الملفات الشخصية ({{count}})",
+    profiles: "الملفات الشخصية",
+    createProfile: "إنشاء ملف شخصي",
+    noMatchesForQuery: 'لا توجد نماذج تطابق "{{query}}"',
+    providers: "المزودون",
+    model: "النموذج",
   },
   providerCatalog: {
     title: "إضافة مزود",
@@ -2548,6 +2577,41 @@ export const ar: TranslationResources = {
           localErrorMessage: "Unable to remove localhost connection",
         },
       },
+      agentProfiles: {
+        featureCountOne: "{{count}} سمة",
+        featureCount: "{{count}} سمة",
+        editProfileTitle: "تعديل ملف تعريف الوكيل",
+        addProfileTitle: "إضافة ملف تعريف وكيل",
+        iconLabel: "الأيقونة",
+        nameLabel: "الاسم",
+        namePlaceholder: "عمل الواجهة",
+        providerLabel: "المزود",
+        providerPlaceholder: "اختر مزودًا",
+        noProviders: "لا يوجد مزودون متاحون على هذا المضيف",
+        modelLabel: "النموذج",
+        noModels: "لا توجد نماذج يمكن الاختيار من بينها لهذا المزود",
+        modeLabel: "الوضع",
+        noModes: "لا توجد أوضاع يمكن الاختيار من بينها لهذا المزود",
+        thinkingLabel: "التفكير",
+        noThinkingOptions: "لا توجد مستويات تفكير لهذا النموذج",
+        featuresLabel: "السمات",
+        notesLabel: "متى يُستخدم",
+        notesHint: "يساعد الوكلاء على اختيار ملف التعريف هذا عند بدء وكيل آخر.",
+        notesPlaceholder: "استخدمه لعمل الواجهة — المكونات والتخطيط ورموز التصميم.",
+        saving: "جارٍ الحفظ...",
+        save: "حفظ",
+        moveUp: "نقل لأعلى",
+        moveDown: "نقل لأسفل",
+        editProfile: "تعديل الملف",
+        remove: "إزالة",
+        removeConfirmTitle: "إزالة الملف؟",
+        removeConfirmMessage: 'إزالة "{{name}}"؟',
+        sectionTitle: "ملفات تعريف الوكيل",
+        unsupported: "يشغّل هذا المضيف نسخة Daemon لا تدعم ملفات تعريف الوكيل بعد",
+        unavailable: "اتصل بهذا المضيف لإدارة ملفات تعريف الوكيل",
+        emptyState: "لا توجد ملفات تعريف بعد. أضف واحدًا لبدء الوكلاء من مزود ونموذج محفوظين.",
+        newProfile: "ملف تعريف جديد",
+      },
     },
     providers: {
       title: "مقدمي الخدمات",
@@ -3201,6 +3265,7 @@ export const ar: TranslationResources = {
         "\u062A\u062D\u0642\u0642 \u0645\u0646 \u0627\u062A\u0635\u0627\u0644\u0643 \u0648\u062D\u0627\u0648\u0644 \u0645\u0631\u0629 \u0623\u062E\u0631\u0649.",
     },
   },
+  activityGraph: activityGraphStrings,
   providerUsage: {
     checkUsage: "التحقق من الاستخدام",
     checkUsageHint: "ينطبق على {{host}} على جميع الأجهزة",

@@ -92,3 +92,7 @@ export function hasFinePointer(): boolean {
 export function hasTouchPrimaryPointer(): boolean {
   return source.hasTouchPrimaryPointer();
 }
+
+export function hasTouchScreen(): boolean {
+  return source.getSnapshot().touchScreen;
+}

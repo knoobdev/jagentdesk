@@ -16,13 +16,15 @@ const sendGradientMapping = (theme: Theme) => ({ colors: theme.chrome.sendGradie
 export function GumloopComposerFrame({
   enabled,
   children,
+  fullscreen = false,
 }: {
   enabled: boolean;
   children: ReactNode;
+  fullscreen?: boolean;
 }) {
   if (!enabled) return children;
   return (
-    <View style={styles.frame}>
+    <View style={[styles.frame, fullscreen && styles.fullscreen]} testID="gumloop-composer-frame">
       <ThemedGradientFill
         direction="horizontal"
         radius={GUMLOOP_COMPOSER_RADIUS + FRAME_WIDTH}
@@ -39,6 +41,7 @@ export function GumloopSendGradient() {
 }
 
 const styles = StyleSheet.create((theme: Theme) => ({
+  fullscreen: { flex: 1 },
   frame: {
     padding: FRAME_WIDTH,
     borderRadius: GUMLOOP_COMPOSER_RADIUS + FRAME_WIDTH,

@@ -1,3 +1,9 @@
+import type {
+  AgentOptionControl,
+  AgentOptionSelectControl,
+  AgentOptionToggleControl,
+} from "@jagentdesk/protocol/agent-types";
+export type { AgentOptionControl, AgentOptionSelectControl, AgentOptionToggleControl };
 import type { AgentMessage } from "@jagentdesk/protocol/agent-message";
 import type { Options as ClaudeAgentOptions } from "@anthropic-ai/claude-agent-sdk";
 import type {
@@ -10,17 +16,17 @@ import type {
   ProviderOptions,
   ToolPolicy,
 } from "@jagentdesk/protocol/agent-types";
-import type {
-  AgentAttachment,
-  ProviderInstallationInspection,
+import {
+  type AgentAttachment,
+  type ProviderInstallationInspection,
 } from "@jagentdesk/protocol/messages";
-import type {
-  ProviderInspection,
-  ProviderUpdateCheck,
-  ProviderUpdateReport,
-  ProviderUpdateResult,
+import {
+  type ProviderInspection,
+  type ProviderUpdateCheck,
+  type ProviderUpdateReport,
+  type ProviderUpdateResult,
 } from "@jagentdesk/plugin/server/provider";
-import type { JAgentDeskToolCatalog } from "./tools/types.js";
+import { type JAgentDeskToolCatalog } from "./tools/types.js";
 
 export type {
   AgentFeature,
@@ -161,7 +167,7 @@ export interface AgentCreateConfigParent {
 export interface ResolveAgentCreateConfigInput {
   provider: AgentProvider;
   requestedMode: string | undefined;
-  featureValues: Record<string, unknown> | undefined;
+  providerOptions: ProviderOptions | undefined;
   parent: AgentCreateConfigParent | null;
   unattended: boolean;
   availableModes: AgentMode[] | undefined;
@@ -169,13 +175,13 @@ export interface ResolveAgentCreateConfigInput {
 
 export interface ResolveAgentCreateConfigResult {
   modeId: string | undefined;
-  featureValues: Record<string, unknown> | undefined;
+  providerOptions: ProviderOptions | undefined;
 }
 
 export interface AgentCreateConfigUnattendedInput {
   modeId: string | null;
   config: AgentSessionConfig;
-  features?: AgentFeature[];
+  controls?: AgentOptionControl[];
   availableModes: AgentMode[];
 }
 
@@ -430,6 +436,14 @@ export type AgentStreamEvent =
       provider: AgentProvider;
       thinkingOptionId: string | null;
     }
+  /**
+   * The provider changed options on its own: after `createSession`/`resumeSession` or
+   * `applyOptions` it ended up different from what it was given, or later it changed a setting
+   * itself. The daemon stores the patch and forwards it; it does not undo it. `null` removes the
+   * agent's own value. Only for changes that happen on the provider's own initiative: the result
+   * of opening goes in `openOptionsPatch` and the result of `applyOptions` is its return value.
+   */
+  | { type: "options_changed"; provider: AgentProvider; patch: Record<string, unknown> }
   | {
       type: "turn_failed";
       provider: AgentProvider;
@@ -612,35 +626,51 @@ export interface ImportedProviderSession {
 
 export interface AgentSessionConfig {
   provider: AgentProvider;
+
   cwd: string;
+
   /**
    * Provider-agnostic system/developer instruction string.
    * Mapped by each provider to its native instruction field.
    */
   systemPrompt?: string;
+
   /**
    * Daemon-level instructions appended at runtime. This is deliberately not
    * persisted into agent config so daemon setting changes apply cleanly.
    */
   daemonAppendSystemPrompt?: string;
+
   /** Plugin instructions for this launch; never persisted. */
   pluginAppendSystemPrompt?: string[];
+
   modeId?: string;
+
   model?: string;
+
   thinkingOptionId?: string;
-  featureValues?: Record<string, unknown>;
+
   title?: string | null;
+
   approvalPolicy?: string;
+
   sandboxMode?: string;
+
   networkAccess?: boolean;
+
   webSearch?: boolean;
+
   extra?: {
     codex?: AgentMetadata;
     claude?: Partial<ClaudeAgentOptions>;
   };
+
   providerOptions?: ProviderOptions;
+
   toolPolicy?: ToolPolicy;
+
   mcpServers?: Record<string, McpServerConfig>;
+
   /**
    * Internal agents are hidden from listings and don't trigger notifications.
    * They are used for ephemeral system tasks like commit/PR generation.
@@ -733,48 +763,98 @@ export interface AgentUsageSession {
 export interface AgentSession {
   /** Persist the session's current handle immediately after an interactive resume. */
   readonly persistenceUpdatedOnResume?: boolean;
+
   usageSession?(): AgentUsageSession | null;
+
   readonly provider: AgentProvider;
+
   readonly id: string | null;
+
   readonly capabilities: AgentCapabilityFlags;
-  readonly features?: AgentFeature[];
+
+  /** Composer controls over top-level option keys. Values come from the agent's effective options. */
+  readonly controls?: AgentOptionControl[];
+
+  /**
+   * How the session ended up different from the options it was opened with, as a patch (`null`
+   * removes a key). Set by the time `createSession`/`resumeSession` resolves; the daemon stores it
+   * before the agent is published.
+   */
+  readonly openOptionsPatch?: Record<string, unknown>;
+
   /** New provider-owned rows to commit on registration. streamHistory must also
    * replay them at their original timestamps; restored sessions omit old rows. */
   readonly initialTimeline?: ImportedTimelineEntry[];
+
   run(prompt: AgentPromptInput, options?: AgentRunOptions): Promise<AgentRunResult>;
+
   /** Turn IDs remain unique through resume and daemon restarts. */
   startTurn(prompt: AgentPromptInput, options?: AgentRunOptions): Promise<{ turnId: string }>;
+
   subscribe(callback: (event: AgentStreamEvent) => void): () => void;
+
   streamHistory(): AsyncGenerator<AgentStreamEvent>;
+
   getRuntimeInfo(): Promise<AgentRuntimeInfo>;
+
   getAvailableModes(): Promise<AgentMode[]>;
+
   getCurrentMode(): Promise<string | null>;
+
   setMode(modeId: string): Promise<void | AgentProviderNotice>;
+
   getPendingPermissions(): AgentPermissionRequest[];
+
   respondToPermission(
     requestId: string,
     response: AgentPermissionResponse,
   ): Promise<AgentPermissionResult | void>;
+
   /** Null until a new provider process could resume this session; see docs/providers.md. */
   describePersistence(): AgentPersistenceHandle | null;
+
   interrupt(): Promise<void>;
+
   /** Stop one currently owned background item and wait for provider confirmation. */
   stopBackgroundWork?(id: string): Promise<void>;
+
   /** True only when releasing this runtime loses no background work or pending replies.
    * An optional additional veto: missing methods use daemon baseline eligibility;
    * implemented checks that reject or return false keep the runtime resident. */
   canStopRuntime?(): Promise<boolean>;
+
   /** Release live runtime resources without archiving or deleting the durable native session. */
   close(): Promise<void>;
+
   listCommands?(): Promise<AgentSlashCommand[]>;
+
   /** A returned model is the effective selection committed by this mutation.
    * Returning void means the requested selection was accepted. No status read is required. */
   setModel?(modelId: string | null): Promise<void | { model: string | null }>;
+
   setThinkingOption?(thinkingOptionId: string | null): Promise<void | AgentProviderNotice>;
-  setFeature?(featureId: string, value: unknown): Promise<void>;
+
+  /**
+   * Apply an options patch. `options` holds only the keys the patch touches, resolved against
+   * the `config.json` defaults; `null` means nothing is set for the key, so return it to the
+   * session's own default if that can be done. Leave every other setting alone. Throw to reject a
+   * value, or a key the running session cannot apply (one the provider reads only when it
+   * opens): the daemon stores the patch only when this resolves, so a stored option always
+   * describes what runs, and the call is all-or-nothing.
+   * Emit nothing from here. Return the options the session ended up with when they differ from
+   * the request (a patch, `null` removes a key), for example a value it kept because it could not
+   * be reverted; the daemon stores it together with the patch. When a throw leaves the session's
+   * state moved anyway, report the moved values once as `options_changed` after the call has
+   * ended, so the stored options still match what runs.
+   */
+  applyOptions?(options: ProviderOptions): Promise<Record<string, unknown> | void>;
+
   revertConversation?(input: { messageId: string }): Promise<void>;
+
   revertFiles?(input: { messageId: string }): Promise<void>;
+
   revertBoth?(input: { messageId: string }): Promise<void>;
+
   /**
    * Out-of-band prompt handler. When non-null, the manager runs the returned
    * handler instead of allocating a turn. The handler emits stream events
@@ -786,6 +866,7 @@ export interface AgentSession {
   tryHandleOutOfBand?(prompt: AgentPromptInput): {
     run(ctx: { emit: (event: AgentStreamEvent) => void }): Promise<void>;
   } | null;
+
   /**
    * Inject a user message into the currently-active turn without cancelling it
    * ("steering"). Only defined by providers that support mid-turn injection.
@@ -830,6 +911,11 @@ export interface ResolveAgentDefaultModeInput {
   signal?: AbortSignal;
 }
 
+export interface AgentDraftControls {
+  controls: AgentOptionControl[];
+  options: ProviderOptions;
+}
+
 export interface AgentClientInstallationContext {
   /** Aborted when JAgentDesk stops waiting for the result. */
   signal: AbortSignal;
@@ -867,19 +953,24 @@ export interface AgentClient {
   resolveUsageLaunch?(): Promise<
     import("@jagentdesk/plugin/server/provider").ProviderLaunch | undefined
   >;
+
   readonly provider: AgentProvider;
+
   readonly capabilities: AgentCapabilityFlags;
+
   createSession(
     config: AgentSessionConfig,
     launchContext?: AgentLaunchContext,
     options?: AgentCreateSessionOptions,
   ): Promise<AgentSession>;
+
   resumeSession(
     handle: AgentPersistenceHandle,
     overrides?: Partial<AgentSessionConfig>,
     launchContext?: AgentLaunchContext,
     options?: AgentResumeSessionOptions,
   ): Promise<AgentSession>;
+
   /**
    * Discover models and modes together. Implementations may use one upstream
    * process, separate upstream calls, static modes, or private helpers; callers
@@ -890,42 +981,64 @@ export interface AgentClient {
     options: FetchCatalogOptions,
     context?: ProviderRefreshContext,
   ): Promise<ProviderCatalog>;
+
   /** Apply provider-owned defaults to a model supplied through provider configuration. */
   resolveConfiguredModel?(model: AgentModelDefinition): AgentModelDefinition;
+
   resolveDefaultModeId?(input: ResolveAgentDefaultModeInput): Promise<string | undefined>;
+
   resolveCreateConfig?(input: ResolveAgentCreateConfigInput): ResolveAgentCreateConfigResult;
+
   isCreateConfigUnattended?(input: AgentCreateConfigUnattendedInput): boolean;
+
   listCommands?(config: AgentSessionConfig): Promise<AgentSlashCommand[]>;
-  listFeatures?(config: AgentSessionConfig): Promise<AgentFeature[]>;
+
+  /**
+   * The controls of a draft, with the options a session opened from `config` would run with:
+   * `config.providerOptions` (defaults already merged in) plus what the provider resolves
+   * natively for the ones nobody set.
+   */
+  listControls?(config: AgentSessionConfig): Promise<AgentDraftControls>;
+
+  /** Effective options: provider defaults from `config.json` deep-merged with the agent's own. */
+  effectiveOptions?(own: ProviderOptions | undefined): ProviderOptions;
+
   listImportableSessions?(
     options?: ListImportableSessionsOptions,
   ): Promise<ImportableProviderSession[]>;
+
   importSession?(
     input: ImportProviderSessionInput,
     context: ImportProviderSessionContext,
   ): Promise<ImportedProviderSession>;
+
   /**
    * Check if this provider is available (CLI binary is installed).
    * Returns true if available, false otherwise.
    */
   isAvailable(signal?: AbortSignal): Promise<boolean>;
+
   getDiagnostic?(context?: AgentClientDiagnosticContext): Promise<{ diagnostic: string }>;
+
   /**
    * Installation links and the installed version. The same contract as plugin providers'
    * `ProviderRegistration.installation`; built-ins resolve their own launch inside `inspect`.
    * Never consulted by availability, discovery, or session creation.
    */
   readonly installation?: AgentClientInstallation;
+
   /**
    * Archive a durable native session (best-effort). Runtime release belongs to AgentSession.close().
    * Called when JAgentDesk archives an agent so the provider's own UI reflects the same state.
    */
   archiveNativeSession?(handle: AgentPersistenceHandle): Promise<void>;
+
   /**
    * Unarchive a durable native session in the provider.
    * Called before JAgentDesk clears its archived flag so provider resume can succeed.
    */
   unarchiveNativeSession?(handle: AgentPersistenceHandle): Promise<void>;
+
   /**
    * Release any provider-owned resources held by this client (background
    * processes, sockets, cached subprocesses, etc.). Called when the daemon

@@ -1,48 +1,43 @@
 import { OpenCodeV2Session } from "./session.js";
 import { V2_CAPABILITIES } from "./capabilities.js";
 import {
-  features,
   permissionRules,
   applyResumeOverrides,
   requiresDedicatedV2Server,
+  controls,
 } from "./configuration.js";
 import { commands } from "./commands.js";
-
 import { waitForLocationReady } from "./readiness.js";
-
-import type { SessionInfo } from "@opencode/client";
-
-import type { Logger } from "pino";
-import type {
-  AgentCapabilityFlags,
-  AgentClient,
-  AgentCreateSessionOptions,
-  AgentResumeSessionOptions,
-  AgentFeature,
-  AgentLaunchContext,
-  AgentPersistenceHandle,
-  AgentSession,
-  AgentSessionConfig,
-  FetchCatalogOptions,
-  ImportableProviderSession,
-  ImportProviderSessionInput,
-  ImportProviderSessionContext,
-  ListImportableSessionsOptions,
-  ProviderRefreshContext,
+import { type SessionInfo } from "@opencode/client";
+import { type Logger } from "pino";
+import {
+  type AgentCapabilityFlags,
+  type AgentClient,
+  type AgentCreateSessionOptions,
+  type AgentResumeSessionOptions,
+  type AgentLaunchContext,
+  type AgentPersistenceHandle,
+  type AgentSession,
+  type AgentSessionConfig,
+  type FetchCatalogOptions,
+  type ImportableProviderSession,
+  type ImportProviderSessionInput,
+  type ImportProviderSessionContext,
+  type ListImportableSessionsOptions,
+  type ProviderRefreshContext,
+  type AgentDraftControls,
 } from "../../../agent-sdk-types.js";
 import {
   createProviderEnv,
   type ProviderRuntimeSettings,
 } from "../../../provider-launch-config.js";
-import type { ManagedProcessRegistry } from "../../../../managed-processes/managed-processes.js";
-
+import { type ManagedProcessRegistry } from "../../../../managed-processes/managed-processes.js";
 import { importSessionFromPersistence } from "../../../provider-session-import.js";
-
-import type { OpenCodeBridge } from "../bridge.js";
+import { type OpenCodeBridge } from "../bridge.js";
 import { resolveOpenCodeHomeDir } from "../paths.js";
 import { V2Runtime, type V2Connection } from "./runtime.js";
-import type { OpenCodeProviderInjection } from "../../../../custom-providers/materialization.js";
-import type { OpenCodeServiceSelection } from "./service-selection.js";
+import { type OpenCodeProviderInjection } from "../../../../custom-providers/materialization.js";
+import { type OpenCodeServiceSelection } from "./service-selection.js";
 import { modelRef, modesFromV2, modelsFromV2 } from "./mapping.js";
 
 interface V2AgentOptions {
@@ -57,9 +52,13 @@ interface V2AgentOptions {
 
 export class OpenCodeV2AgentClient implements AgentClient {
   readonly provider = "opencode";
+
   readonly capabilities: AgentCapabilityFlags;
+
   private readonly runtime: Pick<V2Runtime, "acquire" | "shutdown">;
+
   private readonly connections = new Map<string, V2Connection>();
+
   constructor(private readonly options: V2AgentOptions) {
     this.capabilities = {
       ...V2_CAPABILITIES,
@@ -71,12 +70,15 @@ export class OpenCodeV2AgentClient implements AgentClient {
         ...options,
       });
   }
+
   async isAvailable() {
     return true;
   }
+
   async shutdown() {
     await this.runtime.shutdown();
   }
+
   async fetchCatalog(options: FetchCatalogOptions, context?: ProviderRefreshContext) {
     const connection = await this.runtime.acquire({
       fresh: options.force,
@@ -237,8 +239,8 @@ export class OpenCodeV2AgentClient implements AgentClient {
       throw error;
     }
   }
-  async listFeatures(config: AgentSessionConfig): Promise<AgentFeature[]> {
-    return features(config);
+  async listControls(config: AgentSessionConfig): Promise<AgentDraftControls> {
+    return { controls, options: config.providerOptions ?? {} };
   }
   async listCommands(config: AgentSessionConfig) {
     const connection = await this.runtime.acquire();

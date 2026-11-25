@@ -44,23 +44,23 @@ import {
   type InlinePathTarget,
 } from "@/components/message";
 import { PlanCard } from "@/components/plan-card";
-import type { StreamItem } from "@/types/stream";
-import type { PendingMessageSubmission } from "@/composer/submission/model";
-import type { TurnPresentation } from "@/timeline/turn-liveness";
-import type { PendingPermission } from "@/types/shared";
-import type {
-  AgentCapabilityFlags,
-  AgentPermissionAction,
-  AgentPermissionResponse,
+import { type StreamItem } from "@/types/stream";
+import { type PendingMessageSubmission } from "@/composer/submission/model";
+import { type TurnPresentation } from "@/timeline/turn-liveness";
+import { type PendingPermission } from "@/types/shared";
+import {
+  type AgentCapabilityFlags,
+  type AgentPermissionAction,
+  type AgentPermissionResponse,
 } from "@jagentdesk/protocol/agent-types";
-import type { AgentScreenAgent } from "@/hooks/use-agent-screen-state-machine";
+import { type AgentScreenAgent } from "@/hooks/use-agent-screen-state-machine";
 import { useSessionStore } from "@/stores/session-store";
 import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
 import { useLoadOlderAgentHistory } from "@/hooks/use-load-older-agent-history";
 import { useSettings, resolveContentMaxWidth } from "@/hooks/use-settings";
-import type { ToastApi } from "@/components/toast-host";
+import { type ToastApi } from "@/components/toast-host";
 import { returnToTimelineTail } from "./timeline-tail-navigation";
-import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
+import { type DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import { ToolCallDetailsContent } from "@/components/tool-call-details";
 import { QuestionFormCard } from "@/components/question-form-card";
 import { ToolCallSheetProvider } from "@/components/tool-call-sheet";
@@ -76,7 +76,7 @@ import { ChatOutlineRail, useChatOutlineRailLayout } from "@/agent-stream/chat-o
 import { useChatOutline } from "@/agent-stream/chat-outline/use-chat-outline";
 import { flashTimelineRow } from "@/agent-stream/flash-row";
 import { resolveNodeAction, type ActivityNodeAction } from "@/activity-graph/activity-graph-target";
-import type { ActivityGraphNodeRef } from "@jagentdesk/protocol/agent-activity-graph";
+import { type ActivityGraphNodeRef } from "@jagentdesk/protocol/agent-activity-graph";
 import { ChatFind } from "@/agent-stream/chat-find";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { planTimelineTailFetch } from "@/timeline/timeline-sync-plan";
@@ -110,7 +110,7 @@ import {
 } from "./use-stream-history-window";
 import { useForkAgent } from "@/hooks/use-fork-agent";
 import { isWeb } from "@/constants/platform";
-import type { Theme } from "@/styles/theme";
+import { type Theme } from "@/styles/theme";
 import { recordRenderProfileReasons } from "@/utils/render-profiler";
 import { useRetainedPanelActive } from "@/components/retained-panel";
 
@@ -261,6 +261,10 @@ const gumloopStreamStyles = StyleSheet.create((theme) => ({
   agentBody: { paddingLeft: GUMLOOP_MESSAGE_INDENT },
 }));
 
+function canShowChatOutline(historyReady: boolean, supported: boolean, enabled: boolean): boolean {
+  return historyReady && supported && enabled;
+}
+
 export interface AgentStreamViewProps {
   agentId: string;
   serverId?: string;
@@ -311,7 +315,9 @@ const AGENT_CAPABILITY_FLAG_KEYS: (keyof AgentCapabilityFlags)[] = [
 ];
 
 const EMPTY_STREAM_HEAD: StreamItem[] = [];
+
 const EMPTY_PENDING_MESSAGE_SUBMISSIONS: readonly PendingMessageSubmission[] = [];
+
 const GROUPED_TOOL_CALL_DETAIL_MAX_HEIGHT = 200;
 
 const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamViewProps>(
@@ -589,7 +595,11 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         ),
       [baseRenderModel.history, baseRenderModel.segments.liveHead],
     );
-    const outlineEnabled = supportsChatOutline && chatOutlineEnabled;
+    const outlineEnabled = canShowChatOutline(
+      isAuthoritativeHistoryReady,
+      supportsChatOutline,
+      chatOutlineEnabled,
+    );
     const outlineLayout = useChatOutlineRailLayout(outlineEnabled);
     const chatOutline = useChatOutline({
       agentId,
@@ -1205,7 +1215,8 @@ function collectAgentSetupDiffs(left: AgentScreenAgent, right: AgentScreenAgent)
   if (left.runtimeInfo?.thinkingOptionId !== right.runtimeInfo?.thinkingOptionId) {
     reasons.push("agent.runtimeInfo.thinkingOptionId");
   }
-  if (left.features !== right.features) reasons.push("agent.features");
+  if (left.options !== right.options) reasons.push("agent.options");
+  if (left.controls !== right.controls) reasons.push("agent.controls");
   return reasons;
 }
 
@@ -1282,6 +1293,7 @@ function agentStreamViewPropsEqual(
 }
 
 export const AgentStreamView = memo(AgentStreamViewComponent, agentStreamViewPropsEqual);
+
 AgentStreamView.displayName = "AgentStreamView";
 
 interface ToolCallSlotProps extends Omit<
@@ -1305,12 +1317,15 @@ function ToolCallSlot({
 }
 
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
+
 const ThemedCheckIcon = withUnistyles(Check);
+
 const ThemedXIcon = withUnistyles(X);
 
 const primaryColorMapping = (theme: Theme) => ({
   color: theme.colors.foreground,
 });
+
 const mutedColorMapping = (theme: Theme) => ({
   color: theme.colors.foregroundMuted,
 });

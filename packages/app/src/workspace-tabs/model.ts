@@ -1,5 +1,5 @@
-import type { AgentProvider } from "@jagentdesk/protocol/agent-types";
-import type { WorkspaceFileTabTarget } from "@/workspace/file-open";
+import { type AgentProvider } from "@jagentdesk/protocol/agent-types";
+import { type WorkspaceFileTabTarget } from "@/workspace/file-open";
 
 export interface WorkspaceDraftTabSetup {
   provider: AgentProvider;
@@ -7,7 +7,7 @@ export interface WorkspaceDraftTabSetup {
   modeId: string | null;
   model: string | null;
   thinkingOptionId: string | null;
-  featureValues: Record<string, unknown>;
+  providerOptions: Record<string, unknown>;
 }
 
 export interface WorkspaceWorkingDiffTabTarget {

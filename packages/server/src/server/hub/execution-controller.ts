@@ -1,11 +1,11 @@
 import { isAbsolute } from "node:path";
-import type {
-  HubExecutionAgentCreateRequest,
-  HubExecutionControlRequest,
-  SessionOutboundMessage,
+import {
+  type HubExecutionAgentCreateRequest,
+  type HubExecutionControlRequest,
+  type SessionOutboundMessage,
 } from "@jagentdesk/protocol/messages";
-
-import type { HubExecutionAgents, OwnedAgentEvent } from "./daemon-executions.js";
+import { type HubExecutionAgents, type OwnedAgentEvent } from "./daemon-executions.js";
+import { foldFeatureValues } from "../agent/option-controls.js";
 
 interface HubExecutionControllerOptions {
   agents: HubExecutionAgents;
@@ -14,11 +14,17 @@ interface HubExecutionControllerOptions {
 
 export class HubExecutionController {
   private readonly agents: HubExecutionAgents;
+
   private readonly send: (message: SessionOutboundMessage) => void;
+
   private readonly unsubscribe: () => void;
+
   private readonly pendingCreates = new Set<Promise<void>>();
+
   private readonly pendingControls = new Set<Promise<void>>();
+
   private cleanupPromise: Promise<void> | null = null;
+
   private closed = false;
 
   constructor(options: HubExecutionControllerOptions) {
@@ -100,7 +106,8 @@ export class HubExecutionController {
         model: message.model,
         modeId: message.modeId,
         thinkingOptionId: message.thinkingOptionId,
-        featureValues: message.featureValues,
+        // COMPAT(featureValues): added in v0.15.0, remove after 2027-05-01.
+        providerOptions: foldFeatureValues(message).providerOptions,
         env: message.env,
         mcpServers: message.mcpServers,
         worktree: message.worktree,

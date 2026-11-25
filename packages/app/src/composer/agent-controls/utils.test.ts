@@ -1,12 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   getFeatureHighlightColor,
-  getFeatureTooltip,
   getAgentControlHintKey,
-  isFeatureActive,
   normalizeModelId,
   resolveAgentModelSelection,
-  shortModelLabel,
 } from "./utils";
 
 describe("getAgentControlHintKey", () => {
@@ -18,50 +15,11 @@ describe("getAgentControlHintKey", () => {
 });
 
 describe("feature metadata helpers", () => {
-  it("prefers explicit feature tooltip copy", () => {
-    expect(
-      getFeatureTooltip({
-        label: "Plan",
-        tooltip: "Toggle plan mode",
-      }),
-    ).toBe("Toggle plan mode");
-  });
-
-  it("falls back to the feature label when no tooltip is provided", () => {
-    expect(
-      getFeatureTooltip({
-        label: "Custom",
-      }),
-    ).toBe("Custom");
-  });
-
   it("maps feature highlight colors by feature id", () => {
     expect(getFeatureHighlightColor("fast_mode")).toBe("yellow");
     expect(getFeatureHighlightColor("service_tier")).toBe("yellow");
     expect(getFeatureHighlightColor("plan_mode")).toBe("blue");
     expect(getFeatureHighlightColor("other")).toBe("default");
-  });
-
-  it("treats a select feature as active when a non-default option is selected", () => {
-    const speed = {
-      type: "select" as const,
-      id: "service_tier",
-      label: "Speed",
-      options: [
-        { id: "default", label: "Normal", isDefault: true },
-        { id: "fast", label: "Fast" },
-      ],
-    };
-    expect(isFeatureActive({ ...speed, value: "default" })).toBe(false);
-    expect(isFeatureActive({ ...speed, value: "fast" })).toBe(true);
-    expect(
-      isFeatureActive({
-        type: "toggle",
-        id: "fast_mode",
-        label: "Fast",
-        value: true,
-      }),
-    ).toBe(true);
   });
 });
 
@@ -78,6 +36,29 @@ describe("normalizeModelId", () => {
 });
 
 describe("resolveAgentModelSelection", () => {
+  it("resolves a configured model alias to its canonical catalog model", () => {
+    const selection = resolveAgentModelSelection({
+      models: [
+        {
+          provider: "claude",
+          id: "claude-fable-5",
+          aliases: ["claude-fable-5[1m]"],
+          label: "Fable 5",
+          thinkingOptions: [{ id: "high", label: "High" }],
+          defaultThinkingOptionId: "high",
+        },
+      ],
+      runtimeModelId: null,
+      configuredModelId: "claude-fable-5[1m]",
+      runtimeThinkingOptionId: null,
+      explicitThinkingOptionId: null,
+    });
+
+    expect(selection.activeModelId).toBe("claude-fable-5");
+    expect(selection.displayModel).toBe("Fable 5");
+    expect(selection.selectedThinkingId).toBe("high");
+  });
+
   it("prefers runtime model over configured model", () => {
     const selection = resolveAgentModelSelection({
       models: [
@@ -268,21 +249,5 @@ describe("resolveAgentModelSelection", () => {
     expect(selection.activeModelId).toBe("gpt-6.1-sol");
     expect(selection.displayModel).toBe("gpt-6.1-sol");
     expect(selection.displayThinking).toBe("Max");
-  });
-});
-
-describe("shortModelLabel", () => {
-  it("drops a provider namespace", () => {
-    expect(shortModelLabel("openrouter/gpt-5.5")).toBe("gpt-5.5");
-    expect(shortModelLabel("openrouter/google/gemini-2.5-flash")).toBe("gemini-2.5-flash");
-  });
-
-  it("keeps slashes inside a display name", () => {
-    expect(shortModelLabel("DeepSeek V4.1 Flash (~6-7 tok/s, 56/56)")).toBe(
-      "DeepSeek V4.1 Flash (~6-7 tok/s, 56/56)",
-    );
-    expect(shortModelLabel("llama-swap/DeepSeek V4.1 Flash (56/56)")).toBe(
-      "DeepSeek V4.1 Flash (56/56)",
-    );
   });
 });

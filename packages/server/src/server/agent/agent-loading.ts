@@ -1,11 +1,9 @@
-import type { Logger } from "pino";
-
-import type { AgentProvider } from "./agent-sdk-types.js";
-import type { AgentManager, ManagedAgent } from "./agent-manager.js";
-import type { AgentStorage } from "./agent-storage.js";
+import { type Logger } from "pino";
+import { type AgentProvider } from "./agent-sdk-types.js";
+import { type AgentManager, type ManagedAgent } from "./agent-manager.js";
+import { type AgentStorage } from "./agent-storage.js";
 import {
   buildConfigOverrides,
-  buildSessionConfig,
   extractAttention,
   extractTimestamps,
   isStoredAgentProviderAvailable,
@@ -28,7 +26,7 @@ const pendingAgentInitializations = new Map<string, PendingAgentInitialization>(
 
 export type AgentLoaderManager = Pick<
   AgentManager,
-  | "createAgent"
+  | "createAgentFromRecord"
   | "getAgent"
   | "getRegisteredProviderIds"
   | "hydrateTimelineFromProvider"
@@ -123,19 +121,11 @@ export async function ensureAgentLoaded(
       );
       deps.logger.info({ agentId, provider: record.provider }, "Agent resumed from persistence");
     } else {
-      const config = buildSessionConfig(record, {
-        validProviders,
-      });
-      if (!config) {
-        throw new Error(`Agent ${agentId} references unavailable provider '${record.provider}'`);
-      }
-      snapshot = await deps.agentManager.createAgent(config, agentId, {
-        labels: record.labels,
-        workspaceId: record.workspaceId,
-        owner: record.owner,
-        background: record.background,
-        env: record.launchEnv,
-      });
+      // No provider handle to resume: this starts the agent's first session rather than
+      // bringing one back, so it stamps activity and carries no stored attention. Records
+      // without a handle never got far enough to accumulate either. The manager rereads the
+      // record inside the agent's lane, so a write that lands after this read is not lost.
+      snapshot = await deps.agentManager.createAgentFromRecord(agentId);
       deps.logger.info({ agentId, provider: record.provider }, "Agent created from stored config");
     }
 

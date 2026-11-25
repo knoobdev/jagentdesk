@@ -1,5 +1,4 @@
-import { execFile } from "node:child_process";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { existsSync, readFileSync, realpathSync, statSync, watch } from "node:fs";
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
@@ -9,34 +8,34 @@ import { promisify } from "node:util";
 import { Writable } from "node:stream";
 import pino from "pino";
 import { WebSocket } from "ws";
-import type {
-  AgentSnapshotPayload,
-  HubExecutionAgentCreateResponse,
-  HubExecutionControlAction,
-  HubExecutionControlResponse,
-  HubExecutionAgentStream,
-  HubExecutionAgentUpdate,
-  RpcErrorMessage,
-  CreateAgentWorktreeTarget,
-  SessionOutboundMessage,
-  SessionInboundMessage,
+import {
+  type AgentSnapshotPayload,
+  type HubExecutionAgentCreateResponse,
+  type HubExecutionControlAction,
+  type HubExecutionControlResponse,
+  type HubExecutionAgentStream,
+  type HubExecutionAgentUpdate,
+  type RpcErrorMessage,
+  type CreateAgentWorktreeTarget,
+  type SessionOutboundMessage,
+  type SessionInboundMessage,
 } from "../../messages.js";
 import {
   createJAgentDeskDaemon,
   type JAgentDeskDaemon,
   type JAgentDeskDaemonConfig,
 } from "../../bootstrap.js";
-import type { WebSocketLike } from "../../websocket-server.js";
-import type {
-  AgentClient,
-  AgentCreateSessionOptions,
-  AgentLaunchContext,
-  AgentPromptInput,
-  AgentPersistenceHandle,
-  AgentSession,
-  AgentSessionConfig,
-  FetchCatalogOptions,
-  ProviderCatalog,
+import { type WebSocketLike } from "../../websocket-server.js";
+import {
+  type AgentClient,
+  type AgentCreateSessionOptions,
+  type AgentLaunchContext,
+  type AgentPromptInput,
+  type AgentPersistenceHandle,
+  type AgentSession,
+  type AgentSessionConfig,
+  type FetchCatalogOptions,
+  type ProviderCatalog,
 } from "../../agent/agent-sdk-types.js";
 import { createTestAgentClients } from "../../test-utils/fake-agent-client.js";
 import { DaemonClient } from "../../test-utils/daemon-client.js";
@@ -47,26 +46,30 @@ import {
   createAgentCommand,
   type CreateAgentCommandDependencies,
 } from "../../agent/create-agent/create.js";
-import type {
-  HubRelationshipClock,
-  HubRelationshipRetryPolicy,
-  ScheduledRelationshipTask,
+import {
+  type HubRelationshipClock,
+  type HubRelationshipRetryPolicy,
+  type ScheduledRelationshipTask,
 } from "../relationship-controller.js";
-import type {
-  HubEnrollment,
-  HubEnrollmentResult,
-  HubRelationshipRemote,
-  HubRevocation,
-  HubSocketConnection,
-  HubSocketCredentials,
-  HubSocketEvents,
+import {
+  type HubEnrollment,
+  type HubEnrollmentResult,
+  type HubRelationshipRemote,
+  type HubRevocation,
+  type HubSocketConnection,
+  type HubSocketCredentials,
+  type HubSocketEvents,
+  HubEnrollmentRejectedError,
 } from "../relationship-remote.js";
-import { HubEnrollmentRejectedError } from "../relationship-remote.js";
 
 const execFileAsync = promisify(execFile);
+
 const HUB_ORIGIN = "https://hub.test";
+
 const SOCKET_URL = "wss://hub.test/daemon";
+
 const REPOSITORY_ROOT = path.resolve(import.meta.dirname, "../../../../../..");
+
 const REMOVAL_RETRY_CODES = new Set(["EBUSY", "ENOTEMPTY", "EPERM"]);
 
 async function removeDirectoryAfterWritesSettle(directory: string): Promise<void> {
@@ -445,7 +448,7 @@ type AcceptedCreate = Omit<
 
 const providerCatalog = {
   async resolveCreateConfig(input) {
-    return { modeId: input.requestedMode, featureValues: input.featureValues };
+    return { modeId: input.requestedMode, providerOptions: input.providerOptions };
   },
 } satisfies CreateAgentCommandDependencies["providerSnapshotManager"];
 

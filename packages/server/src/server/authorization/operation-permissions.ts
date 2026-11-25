@@ -1,9 +1,10 @@
-import type { SessionInboundMessage, SessionOutboundMessage } from "../messages.js";
-import type { DaemonPermission } from "./index.js";
+import { type SessionInboundMessage, type SessionOutboundMessage } from "../messages.js";
+import { type DaemonPermission } from "./index.js";
 
 export type PermissionRequirement = DaemonPermission | readonly DaemonPermission[] | null;
 
 type InboundOperation = SessionInboundMessage["type"];
+
 type OutboundOperation = SessionOutboundMessage["type"];
 
 const INBOUND_PERMISSION = {
@@ -134,6 +135,8 @@ const INBOUND_PERMISSION = {
   client_heartbeat: "workspace.read",
   close_items_request: "workspace.manage",
   create_agent_request: "workspace.write",
+  "agent.create.request": ["workspace.write", "hub.execute"],
+  "creation.subscribe.request": "workspace.read",
   create_jagentdesk_worktree_request: "workspace.manage",
   create_terminal_request: "workspace.write",
   "daemon.config.reload.request": "daemon.manage",
@@ -241,6 +244,7 @@ const INBOUND_PERMISSION = {
   list_available_providers_request: "daemon.read",
   list_commands_request: "daemon.read",
   list_provider_features_request: "daemon.read",
+  "provider.controls.list.request": "daemon.read",
   list_provider_models_request: "daemon.read",
   list_provider_modes_request: "daemon.read",
   list_terminals_request: "workspace.read",
@@ -358,6 +362,8 @@ const INBOUND_PERMISSION = {
   "workspace.label.delete.request": "workspace.manage",
   "workspace.label.list.request": "workspace.read",
   "workspace.label.update.request": "workspace.manage",
+  "agent.metadata.update.request": "workspace.write",
+  "workspace.metadata.update.request": "workspace.manage",
   "workspace.pin.set.request": "workspace.manage",
   "workspace.base_branch.set.request": "workspace.write",
   "workspace.recovery.inspect.request": "workspace.read",
@@ -367,6 +373,7 @@ const INBOUND_PERMISSION = {
   "workspace.script.start.request": "workspace.write",
   "workspace.script.stop.request": "workspace.write",
   "workspace.title.set.request": "workspace.manage",
+  "workspace.setup.subscribe.request": "workspace.read",
   workspace_setup_status_request: "workspace.read",
   write_project_config_request: "workspace.write",
   // --- JAgentDesk feature operations (browser/cluster/database/skills/orchestration/
@@ -802,6 +809,10 @@ const OUTBOUND_PERMISSION = {
   "hosts.route.open.response": null,
   "hosts.route.frame": null,
   "hosts.route.closed": null,
+  "agent.create.response": ["workspace.write", "hub.execute"],
+  "agent.create.update": ["workspace.write", "hub.execute"],
+  "workspace.create.update": "workspace.manage",
+  "creation.subscribe.response": "workspace.read",
   activity_log: "workspace.read",
   "agent.activity_graph.changed": "workspace.read",
   "agent.activity_graph.get.response": "workspace.read",
@@ -984,6 +995,7 @@ const OUTBOUND_PERMISSION = {
   list_available_providers_response: "daemon.read",
   list_commands_response: "daemon.read",
   list_provider_features_response: "daemon.read",
+  "provider.controls.list.response": "daemon.read",
   list_provider_models_response: "daemon.read",
   list_provider_modes_response: "daemon.read",
   list_terminals_response: "workspace.read",
@@ -1106,6 +1118,8 @@ const OUTBOUND_PERMISSION = {
   "workspace.label.list.response": "workspace.read",
   "workspace.label.update": "workspace.read",
   "workspace.label.update.response": "workspace.manage",
+  "agent.metadata.update.response": "workspace.write",
+  "workspace.metadata.update.response": "workspace.manage",
   "workspace.pin.set.response": "workspace.manage",
   "workspace.base_branch.set.response": "workspace.write",
   "workspace.recovery.inspect.response": "workspace.read",
@@ -1116,6 +1130,7 @@ const OUTBOUND_PERMISSION = {
   "workspace.script.stop.response": "workspace.write",
   "workspace.title.set.response": "workspace.manage",
   workspace_setup_progress: "workspace.read",
+  "workspace.setup.subscribe.response": "workspace.read",
   workspace_setup_status_response: "workspace.read",
   workspace_update: "workspace.read",
   write_project_config_response: "workspace.write",

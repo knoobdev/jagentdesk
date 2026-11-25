@@ -4,14 +4,12 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join, resolve as resolvePath } from "node:path";
-import type { Logger } from "pino";
+import { type Logger } from "pino";
 import stripAnsi from "strip-ansi";
 import { z } from "zod";
-
 import {
   type AgentCapabilityFlags,
   type AgentClient,
-  type AgentFeature,
   type AgentLaunchContext,
   type AgentMetadata,
   type AgentMode,
@@ -43,6 +41,7 @@ import {
   type ListImportableSessionsOptions,
   type ProviderCatalog,
   type ProviderRefreshContext,
+  type AgentDraftControls,
 } from "../../agent-sdk-types.js";
 import { importSessionFromPersistence } from "../../provider-session-import.js";
 import { createCliInstallation } from "../cli-installation.js";
@@ -93,16 +92,16 @@ import {
   readPiImportSessionConfig,
 } from "./session-descriptor.js";
 import { modelDisplayLabel } from "../model-label.js";
-import type { PiRuntime, PiRuntimeSession, PiStartSessionInput } from "./runtime.js";
-import type {
-  PiAgentSessionEvent,
-  PiAgentMessage,
-  PiImageContent,
-  PiModel,
-  PiRpcSlashCommand,
-  PiRuntimeEvent,
-  PiSessionState,
-  PiThinkingLevel,
+import { type PiRuntime, type PiRuntimeSession, type PiStartSessionInput } from "./runtime.js";
+import {
+  type PiAgentSessionEvent,
+  type PiAgentMessage,
+  type PiImageContent,
+  type PiModel,
+  type PiRpcSlashCommand,
+  type PiRuntimeEvent,
+  type PiSessionState,
+  type PiThinkingLevel,
 } from "./rpc-types.js";
 import { PiUsagePoller, type PiUsagePollScheduler } from "./usage-poller.js";
 import { PiFirstTokenTimer, piReplyStep, piSessionMetrics } from "./metrics.js";
@@ -118,16 +117,27 @@ import {
 } from "./tool-call-mapper.js";
 
 const PI_PROVIDER = "pi";
+
 const DEFAULT_PI_THINKING_LEVEL: PiThinkingLevel = "medium";
+
 const PI_BINARY_COMMAND = process.env.PI_COMMAND ?? process.env.PI_ACP_PI_COMMAND ?? "pi";
+
 const JAGENTDESK_PI_TREE_EXTENSION_COMMAND = "jagentdesk_tree";
+
 const JAGENTDESK_PI_CAPTURE_EXTENSION_COMMAND = "jagentdesk_capture_entries";
+
 const JAGENTDESK_PI_REWIND_ENTRY_TYPE = "jagentdesk_rewind";
+
 const JAGENTDESK_PI_ENTRY_CAPTURE_MARKER = "JAGENTDESK_ENTRY_CAPTURE";
+
 const JAGENTDESK_PI_SUBMITTED_USER_ENTRY_MARKER = "JAGENTDESK_SUBMITTED_USER_ENTRY";
+
 const JAGENTDESK_PI_COMMAND_RESULT_MARKER = "JAGENTDESK_COMMAND_RESULT";
+
 const DEFAULT_PI_EXTENSION_RESULT_TIMEOUT_MS = 30_000;
+
 const DEFAULT_PI_RPC_TIMEOUT_MS = 60_000;
+
 const QUESTION_RESPONSE_HEADER = "Response";
 
 export const PiProviderOptionsSchema = z
@@ -2614,12 +2624,17 @@ export class PiRpcAgentSession implements AgentSession {
 
 export class PiRpcAgentClient implements AgentClient {
   readonly provider: AgentProvider;
+
   readonly capabilities: AgentCapabilityFlags;
+
   readonly installation: AgentClientInstallation;
 
   private readonly logger: Logger;
+
   private readonly runtimeSettings?: ProviderRuntimeSettings;
+
   private readonly runtime?: PiRuntime;
+
   private readonly usagePollScheduler?: PiUsagePollScheduler;
 
   constructor(options: PiRpcAgentClientOptions) {
@@ -2859,8 +2874,8 @@ export class PiRpcAgentClient implements AgentClient {
     }
   }
 
-  async listFeatures(_config: AgentSessionConfig): Promise<AgentFeature[]> {
-    return [];
+  async listControls(config: AgentSessionConfig): Promise<AgentDraftControls> {
+    return { controls: [], options: config.providerOptions ?? {} };
   }
 
   async listImportableSessions(

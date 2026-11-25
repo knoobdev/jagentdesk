@@ -13,7 +13,7 @@ import { useComposerGithubAutoAttach } from "./auto-attach";
 
 type ForgeSearchPayload = ForgeSearchResponse["payload"];
 
-const remoteUrl = "git@github.com:acme/jagentdesk.git";
+const remoteUrl = "git@github.com:acme/example.git";
 const cwd = "/repo";
 
 const pr101: ForgeSearchItem = {
@@ -117,6 +117,7 @@ function useHarness(client: ForgeSearchClient, input: HarnessInput = {}) {
     attachments,
     client: searchClient,
     isConnected: true,
+    supportsForgeSearch: true,
     serverId: "server-1",
     cwd: workingDirectory,
     setAttachments,

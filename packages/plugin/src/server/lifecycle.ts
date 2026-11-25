@@ -1,11 +1,12 @@
-import type { AgentToolDefinition } from "./agent-tools.js";
-import type {
-  AgentPermissionRequest,
-  AgentPermissionResponse,
-  AgentSessionConfig,
+import { type AgentToolDefinition } from "./agent-tools.js";
+import {
+  type AgentPermissionRequest,
+  type AgentPermissionResponse,
+  type AgentSessionConfig,
+  type JsonValue,
 } from "@jagentdesk/protocol/agent-types";
-import type { JAgentDeskApi } from "@jagentdesk/client";
-import type { WorkspaceCreateRequest } from "@jagentdesk/protocol/messages";
+import { type JAgentDeskApi } from "@jagentdesk/client";
+import { type WorkspaceCreateRequest } from "@jagentdesk/protocol/messages";
 
 export interface PluginHookContext {
   jagentdesk: JAgentDeskApi;
@@ -18,6 +19,8 @@ export interface PluginHookWorkspace {
   cwd: string;
   name: string | null;
   archivedAt: string | null;
+  /** Data plugins stored on the workspace. JAgentDesk never reads a key. */
+  metadata: Record<string, JsonValue>;
 }
 
 export interface PluginHookWorktree {
@@ -62,29 +65,52 @@ export type PluginWorktreeCreateRequest = {
 
 export interface PluginHookAgent {
   id: string;
+
   workspaceId: string | null;
+
   parentAgentId: string | null;
+
   provider: string;
+
   cwd: string;
+
   title: string | null;
+
+  /** Data plugins stored on the agent. JAgentDesk never reads a key. */
+  metadata: Record<string, JsonValue>;
+
   readonly background: boolean;
 }
 
 export interface PluginSessionOpenRequest {
   agentId: string;
+
   workspaceId: string | null;
+
   provider: string;
+
   cwd: string;
+
   reason: "create" | "resume" | "refresh" | "import";
+
   purpose: "interactive" | "history";
+
   readonly title: string | null;
+
   /** A helper hidden from tabs, lists and attention. Fixed at creation. */
   readonly background: boolean;
+
   readonly labels: Readonly<Record<string, string>>;
+
+  readonly metadata: Readonly<Record<string, JsonValue>>;
+
   /** Instructions appended for this open; not saved on the agent. */
   appendSystemPrompt?: string[];
+
   tools: AgentToolDefinition[];
+
   env: Record<string, string>;
+
   mcpServers: NonNullable<AgentSessionConfig["mcpServers"]>;
 }
 
@@ -119,16 +145,20 @@ export interface PluginHookEvents {
 
 export interface PluginHookRequests {
   "worktree.create.before": PluginWorktreeCreateRequest;
-  "agent.create.before": { config: AgentSessionConfig; env?: Record<string, string> };
+  "agent.create.before": {
+    config: AgentSessionConfig;
+    env?: Record<string, string>;
+    /** Stored on the new agent. Always present in the payload; return it changed to change it. */
+    metadata?: Record<string, JsonValue>;
+  };
   "agent.open.before": PluginSessionOpenRequest;
   "workspace.create.before": Omit<WorkspaceCreateRequest, "type" | "requestId">;
 }
 
-/** What a hook may return. An omitted background stays as it was. */
+/** What a hook may return. An omitted `metadata` stays as it was. */
 type PluginHookRequestResults = Omit<PluginHookRequests, "agent.open.before"> & {
-  // Read-only fields added after the first SDK stay optional in a result; omitted means unchanged.
-  "agent.open.before": Omit<PluginSessionOpenRequest, "background"> & {
-    readonly background?: boolean;
+  "agent.open.before": Omit<PluginSessionOpenRequest, "metadata"> & {
+    metadata?: Readonly<Record<string, JsonValue>>;
   };
 };
 
@@ -148,6 +178,7 @@ export type PluginHookPayload<Name extends keyof PluginHooks> = {
       ? Payload
       : never;
 }[Name];
+
 export type PluginHookResult<Name extends keyof PluginHooks> = {
   [Key in keyof PluginHooks]: PluginHooks[Key] extends { result: infer Result }
     ? Result | void
@@ -211,17 +242,21 @@ const legacyEvents = {
   "agent.permission_requested": "agent.permission.before",
   "agent.permission_resolved": "agent.permission.after",
 } as const;
+
 const legacyRequests = {
   "workspace.create": "workspace.create.before",
   "agent.create": "agent.create.before",
   "agent.session_open": "agent.open.before",
 } as const;
+
 export type PluginLifecycleEvents = {
   [Name in keyof typeof legacyEvents]: PluginHookEvents[(typeof legacyEvents)[Name]];
 };
+
 export type PluginBeforeRequests = {
   [Name in keyof typeof legacyRequests]: PluginHookRequests[(typeof legacyRequests)[Name]];
 };
+
 type PluginBeforeResults = {
   [Name in keyof typeof legacyRequests]: PluginHookRequestResults[(typeof legacyRequests)[Name]];
 };

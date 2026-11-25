@@ -442,3 +442,16 @@ export function isAttachmentSelectedForGithubItem(
 }
 
 export const toggleGithubAttachment = toggleForgeAttachment;
+
+export const findForgeItemByOption = findGithubItemByOption;
+export const isAttachmentSelectedForForgeItem = isAttachmentSelectedForGithubItem;
+export function toggleForgeAttachmentFromPicker(input: {
+  current: UserComposerAttachment[];
+  item: ForgeSearchItem;
+  markForgeAttachmentRemoved: (attachment: UserComposerAttachment) => void;
+}) {
+  return toggleGithubAttachmentFromPicker({
+    ...input,
+    markGithubAttachmentRemoved: input.markForgeAttachmentRemoved,
+  });
+}

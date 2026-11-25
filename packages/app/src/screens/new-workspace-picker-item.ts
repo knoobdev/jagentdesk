@@ -1,7 +1,7 @@
-import type { CheckoutStatusPayload } from "@/git/checkout-status-cache";
-import type { CreateJAgentDeskWorktreeInput } from "@jagentdesk/client/internal/daemon-client";
-import type { ForgeSearchItem } from "@jagentdesk/protocol/messages";
-import type { ComboboxOptionModel } from "@/components/ui/combobox-options";
+import { type CheckoutStatusPayload } from "@/git/checkout-status-cache";
+import { type CreateJAgentDeskWorktreeInput } from "@jagentdesk/client/internal/daemon-client";
+import { type ForgeSearchItem } from "@jagentdesk/protocol/messages";
+import { type ComboboxOptionModel } from "@/components/ui/combobox-options";
 import { getForgePresentation } from "@/git/forge";
 
 export interface BranchPickerDetail {
@@ -42,7 +42,9 @@ export const DEFAULT_REF_ACTION: Record<PickerItem["kind"], RefAction> = {
 };
 
 const BRANCH_OPTION_PREFIX = "branch:";
+
 const PR_OPTION_PREFIX = "github-pr:";
+
 const REMOTE_TRACKING_PREFIX = "refs/remotes/";
 
 export function branchPickerOptionId(refName: string): string {
@@ -229,9 +231,9 @@ export function pickerItemToCheckoutRequest(
 }
 
 /**
- * Whether creating a worktree from this request cuts a new branch. No request at all (a detached
- * HEAD gives the screen no default base) cuts one from the repository's default branch. A request
- * with no action is read as the daemon reads it: a change request is checked out.
+ * Whether creating a worktree from this request cuts a new branch, which is what the daemon does
+ * for anything but a checkout. No request at all (a detached HEAD gives the screen no default
+ * base) cuts one from the repository's default branch.
  */
 export function startsNewBranch(request: PickerCheckoutRequest | undefined): boolean {
   if (!request) return true;

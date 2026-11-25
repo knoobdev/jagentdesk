@@ -504,6 +504,7 @@ const pureBlackDarkColors = buildDarkSemanticColors({
 
 export const SPACING = {
   0: 0,
+  0.5: 2,
   1: 4,
   1.5: 6,
   2: 8,
@@ -540,6 +541,8 @@ export const ICON_SIZE = {
   md: 16,
   lg: 20,
 } as const;
+
+export const ICON_STROKE_WIDTH = 1.5;
 
 export const FONT_WEIGHT = {
   normal: "normal" as const,

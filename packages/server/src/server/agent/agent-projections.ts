@@ -1,3 +1,4 @@
+import type { AgentOptionControl } from "./agent-sdk-types.js";
 import { isSameOrDescendantPath } from "../path-utils.js";
 import type {
   AgentListItemPayload,
@@ -7,7 +8,6 @@ import type {
 import type { SerializableAgentConfig, StoredAgentRecord } from "./agent-storage.js";
 import type {
   AgentCapabilityFlags,
-  AgentFeature,
   AgentMetadata,
   AgentMetric,
   AgentMode,
@@ -19,9 +19,12 @@ import type {
   AgentUsage,
   ImportableProviderSession,
 } from "./agent-sdk-types.js";
-import type { ManagedAgent } from "./agent-manager.js";
-import type { JsonValue } from "../json-utils.js";
+import { type ManagedAgent } from "./agent-manager.js";
+import { type JsonValue } from "../json-utils.js";
 import { isStoredAgentProviderAvailable, toAgentPersistenceHandle } from "../persistence-hooks.js";
+import { type ProviderOptions } from "@jagentdesk/protocol/agent-types";
+import { featuresFromControls } from "@jagentdesk/protocol/option-controls";
+
 export type { ManagedAgent };
 
 interface ProjectionOptions {
@@ -90,12 +93,13 @@ export function toStoredAgentRecord(
     title: options?.title ?? null,
     labels: agent.labels,
     archivedAt: options?.archivedAt ?? null,
+    metadata: agent.metadata,
     lastStatus: agent.lifecycle,
     lastModeId: agent.currentModeId ?? config?.modeId ?? null,
     config: config ?? null,
     launchEnv: agent.launchEnv ? { ...agent.launchEnv } : undefined,
     runtimeInfo,
-    features: normalizeFeatures(agent.features),
+    controls: normalizeControls(agent.controls),
     persistence,
     ...projectSessionMetrics(agent.sessionMetrics),
     lastError: agent.lastError ?? undefined,
@@ -144,11 +148,17 @@ export function toAgentPayload(
     capabilities: cloneCapabilities(agent.capabilities),
     currentModeId: agent.currentModeId,
     availableModes: cloneAvailableModes(agent.availableModes),
-    features: normalizeFeatures(agent.features),
+    // COMPAT(featureValues): added in v0.15.0, remove after 2027-05-01.
+    features: featuresFromControls({ controls: agent.controls, options: agent.effectiveOptions }),
+    ...(agent.effectiveOptions
+      ? { options: sanitizeEffectiveOptions(agent.effectiveOptions) }
+      : {}),
+    controls: normalizeControls(agent.controls),
     pendingPermissions: sanitizePendingPermissions(agent.pendingPermissions),
     persistence: projectPersistenceHandleForWire(agent.persistence),
     title: options?.title ?? null,
     labels: agent.labels,
+    metadata: agent.metadata,
     archivedAt: options?.archivedAt ?? null,
     ...visibilityFlags(agent),
     ...projectSessionMetrics(agent.sessionMetrics),
@@ -223,6 +233,28 @@ function visibilityFlags(agent: {
   };
 }
 
+/** The options an agent runs with, given the options it owns; see `toAgentPayload`. */
+export type EffectiveOptionsResolver = (
+  provider: AgentProvider,
+  own: ProviderOptions | undefined,
+) => ProviderOptions;
+
+function buildStoredOptionControls(
+  record: StoredAgentRecord,
+  effectiveOptionsFor: EffectiveOptionsResolver,
+): Pick<AgentSnapshotPayload, "features" | "options" | "controls"> {
+  const controls = normalizeControls(record.controls);
+  const options = sanitizeEffectiveOptions(
+    effectiveOptionsFor(record.provider, record.config?.providerOptions ?? undefined),
+  );
+  return {
+    // COMPAT(featureValues): added in v0.15.0, remove after 2027-05-01.
+    features: featuresFromControls({ controls, options }),
+    options,
+    controls,
+  };
+}
+
 function visibleStoredBackgroundWork(
   record: StoredAgentRecord,
   summary: AgentSnapshotPayload["backgroundWork"],
@@ -233,6 +265,7 @@ function visibleStoredBackgroundWork(
 export function buildStoredAgentPayload(
   record: StoredAgentRecord,
   validProviders: Iterable<AgentProvider>,
+  effectiveOptionsFor: EffectiveOptionsResolver,
   backgroundWork?: AgentSnapshotPayload["backgroundWork"],
 ): AgentSnapshotPayload {
   const defaultCapabilities = {
@@ -252,6 +285,7 @@ export function buildStoredAgentPayload(
   const lastUserMessageAt = record.lastUserMessageAt ? new Date(record.lastUserMessageAt) : null;
 
   const runtimeInfo = buildStoredRuntimeInfo(record);
+  const optionControls = buildStoredOptionControls(record, effectiveOptionsFor);
   const providerAvailable = isStoredAgentProviderAvailable(record, validProviders);
   const persistence = projectPersistenceHandleForWire(
     buildStoredPersistenceHandle(record, validProviders),
@@ -277,6 +311,7 @@ export function buildStoredAgentPayload(
     capabilities: defaultCapabilities,
     currentModeId: record.lastModeId ?? null,
     availableModes: [],
+    ...optionControls,
     pendingPermissions: [],
     persistence,
     title: record.title ?? null,
@@ -286,8 +321,10 @@ export function buildStoredAgentPayload(
     archivedAt: record.archivedAt ?? null,
     ...visibilityFlags(record),
     labels: normalizeLabels(record.labels),
+    metadata: record.metadata,
     ...(record.usageTotals ? { usageTotals: record.usageTotals } : {}),
     ...projectSessionMetrics(record.sessionMetrics),
+    ...(typeof record.lastError === "string" ? { lastError: record.lastError } : {}),
     ...(providerAvailable ? {} : { providerUnavailable: true }),
   };
 }
@@ -420,15 +457,20 @@ function buildSerializableConfig(config: AgentSessionConfig): SerializableAgentC
   if (config.thinkingOptionId) {
     serializable.thinkingOptionId = config.thinkingOptionId;
   }
-  if (Object.prototype.hasOwnProperty.call(config, "featureValues")) {
-    const featureValues = sanitizeMetadata(config.featureValues);
-    if (featureValues !== undefined) {
-      serializable.featureValues = featureValues;
-    }
-  }
   const extra = sanitizeMetadata(config.extra);
   if (extra !== undefined) {
     serializable.extra = extra;
+  }
+  if (config.providerOptions !== undefined) {
+    const providerOptions = sanitizeOptionalJson(config.providerOptions);
+    if (providerOptions && isJsonObject(providerOptions)) {
+      serializable.providerOptions = providerOptions;
+    }
+  }
+  if (config.toolPolicy) {
+    serializable.toolPolicy = {
+      preapproved: config.toolPolicy.preapproved.map((grant) => ({ ...grant })),
+    };
   }
   if (config.systemPrompt) {
     serializable.systemPrompt = config.systemPrompt;
@@ -497,8 +539,15 @@ function cloneAvailableModes(modes: AgentMode[]): AgentMode[] {
   return modes.map((mode) => ({ ...mode }));
 }
 
-function normalizeFeatures(features: AgentFeature[] | null | undefined): AgentFeature[] {
-  return Array.isArray(features) ? features.map((feature) => ({ ...feature })) : [];
+function normalizeControls(
+  controls: AgentOptionControl[] | null | undefined,
+): AgentOptionControl[] {
+  return Array.isArray(controls) ? controls.map((control) => ({ ...control })) : [];
+}
+
+function sanitizeEffectiveOptions(options: Record<string, unknown>): ProviderOptions {
+  const sanitized = sanitizeOptionalJson(options);
+  return sanitized && isJsonObject(sanitized) ? sanitized : {};
 }
 
 function sanitizeOptionalJson(value: unknown): JsonValue | undefined {

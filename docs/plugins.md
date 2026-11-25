@@ -136,6 +136,15 @@ controls card visibility on this device; the Built-in switches control discovery
 Quota fetches run while Usage, a context popover, or the visible sidebar summary needs them.
 Insights keeps JAgentDesk’s per-turn token and cost history under its own Built-in switch.
 
+## Composer surfaces
+
+Composer items share the composer's model and option controls. Keep legacy composer pills on this
+host too, so toolbar measurement and compact overflow account for every plugin control.
+
+A sheet or popover can mount in a separate React tree. Carry the installation's runtime contexts
+through `usePluginRuntimeContextBridge`; the composer and New workspace contexts belong to the
+surface that opened it. Creating a second runtime loses that surface's draft and translation state.
+
 ## Remaining host gaps
 
 The supported Paseo version range covers the ported runtime API, not every upstream host
@@ -145,7 +154,6 @@ surface. These integrations still depend on other platform batches:
 - Full owned-list observation recovery needs the client list subscription engine (B5).
 - Background counts and snapshot flags need background agent/work ownership (B7, #9362).
 - Worktree manager creation/removal/restoration needs workspace automation gates (B9, #10278).
-- Workspace receipt replay and automatic `firstAgentContext` creation need CreationService (B9).
 - Reloading plugin configuration from disk needs the config reload RPC (B2, #7959).
 
 Runtime e2e tests are enabled in `packages/server/src/server/plugins/`. Individual cases that

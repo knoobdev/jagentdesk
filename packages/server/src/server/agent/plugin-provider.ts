@@ -2,9 +2,9 @@ import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { PluginSessionHistory } from "./plugin-session-history.js";
 import { resolve as resolvePath } from "node:path";
-import type { Logger } from "pino";
-import type { JsonValue } from "@jagentdesk/protocol/agent-types";
-import type { ProviderInstallationInspection } from "@jagentdesk/protocol/messages";
+import { type Logger } from "pino";
+import { type JsonValue, type ProviderOptions } from "@jagentdesk/protocol/agent-types";
+import { type ProviderInstallationInspection } from "@jagentdesk/protocol/messages";
 import {
   PROVIDER_CAPABILITIES,
   PROVIDER_PROTOCOL_VERSION,
@@ -33,39 +33,39 @@ import {
   type ProviderContent,
   type ProviderTimelineItem,
 } from "@jagentdesk/plugin/server/provider";
-import type {
-  AgentCapabilityFlags,
-  AgentClient,
-  AgentClientInstallation,
-  AgentClientUpdateCheckContext,
-  AgentClientUpdateContext,
-  AgentCreateSessionOptions,
-  AgentFeature,
-  AgentLaunchContext,
-  AgentMode,
-  AgentModelDefinition,
-  AgentPermissionRequest,
-  AgentPermissionResponse,
-  AgentPersistenceHandle,
-  AgentPromptInput,
-  AgentRunOptions,
-  AgentRunResult,
-  AgentSession,
-  AgentSessionConfig,
-  AgentSlashCommand,
-  AgentStreamEvent,
-  AgentTimelineItem,
-  FetchCatalogOptions,
-  ImportableProviderSession,
-  ImportedProviderSession,
-  ImportProviderSessionContext,
-  ImportProviderSessionInput,
-  ListImportableSessionsOptions,
-  ProviderCatalog,
-  ProviderRefreshContext,
-  SteerActiveTurnOptions,
-  SteerResult,
-  AgentClientDiagnosticContext,
+import {
+  type AgentCapabilityFlags,
+  type AgentClient,
+  type AgentClientInstallation,
+  type AgentClientUpdateCheckContext,
+  type AgentClientUpdateContext,
+  type AgentCreateSessionOptions,
+  type AgentLaunchContext,
+  type AgentMode,
+  type AgentModelDefinition,
+  type AgentPermissionRequest,
+  type AgentPermissionResponse,
+  type AgentPersistenceHandle,
+  type AgentPromptInput,
+  type AgentRunOptions,
+  type AgentRunResult,
+  type AgentSession,
+  type AgentSessionConfig,
+  type AgentSlashCommand,
+  type AgentStreamEvent,
+  type AgentTimelineItem,
+  type FetchCatalogOptions,
+  type ImportableProviderSession,
+  type ImportedProviderSession,
+  type ImportProviderSessionContext,
+  type ImportProviderSessionInput,
+  type ListImportableSessionsOptions,
+  type ProviderCatalog,
+  type ProviderRefreshContext,
+  type SteerActiveTurnOptions,
+  type SteerResult,
+  type AgentClientDiagnosticContext,
+  type AgentOptionControl,
 } from "./agent-sdk-types.js";
 import {
   resolveProviderLaunch,
@@ -79,9 +79,11 @@ import {
   formatProviderDiagnostic,
   type DiagnosticEntry,
 } from "./providers/diagnostic-utils.js";
-import type { RegisteredProviderDefinition } from "./provider-registry.js";
+import { type RegisteredProviderDefinition } from "./provider-registry.js";
 import { runProviderTurn } from "./providers/provider-runner.js";
 import { StaleProviderSessionError } from "./stale-provider-session-error.js";
+import { isDeepStrictEqual } from "node:util";
+import { readPluginOptionState } from "./plugin-provider-options.js";
 
 interface Deferred<Value> {
   promise: Promise<Value>;
@@ -673,21 +675,33 @@ class ProviderRuntime {
 
 class ProviderRuntimeSession {
   readonly history: ProviderEvent[] = [];
+
   private historyClaimed = false;
+
   private readonly listeners = new Set<(event: ProviderEvent) => void>();
+
   private capabilities: readonly string[] = [];
+
   private openRequest: { requestId: string; deferred: Deferred<void> } | null = null;
+
   private readonly prompts = new Map<
     string,
     Deferred<Extract<ProviderEvent, { type: "session.prompt_result" }>>
   >();
+
   private readonly activeTurnIds = new Set<string>();
+
   private terminal = false;
+
   // The provider ended this session with session.closed, so it has nothing left to close.
   private closedByProvider = false;
+
   private closePromise: Promise<void> | null = null;
-  config: ProviderConfigState = { models: [], modes: [], thinkingOptions: [], settings: [] };
+
+  config: ProviderConfigState = { models: [], modes: [], thinkingOptions: [] };
+
   commands: ProviderCommand[] = [];
+
   persistence: ProviderPersistence | null = null;
 
   constructor(
@@ -1039,12 +1053,17 @@ interface PendingChild {
 
 class PluginAgentClient implements AgentClient {
   readonly provider: string;
+
   private readonly label: string;
+
   private readonly runtime: ProviderRuntime;
+
   private readonly rootsBySession = new Map<string, PluginAgentSession>();
+
   private readonly pendingChildren: PendingChild[] = [];
 
   readonly getCatalogCacheKey?: (options: FetchCatalogOptions) => Promise<string | undefined>;
+
   readonly installation?: AgentClientInstallation;
 
   constructor(registration: ProviderRegistration, runtimeSettings?: ProviderRuntimeSettings) {
@@ -1231,7 +1250,7 @@ class PluginAgentClient implements AgentClient {
       this.provider,
       bridge,
       forget,
-      async (persistence, state) => {
+      async (persistence, state, options) => {
         forget();
         return await this.runtime.openSession({
           sessionId: randomUUID(),
@@ -1240,9 +1259,8 @@ class PluginAgentClient implements AgentClient {
             model: state.model,
             mode: state.mode,
             thinkingOption: state.thinkingOption,
-            settings: Object.fromEntries(
-              state.settings.map((setting) => [setting.id, setting.value]),
-            ),
+            settings: options,
+            providerOptions: options,
           },
           persistence,
           history: "replay",
@@ -1255,6 +1273,7 @@ class PluginAgentClient implements AgentClient {
             env: { ...this.runtime.connectedLaunch.env, ...config.env },
           }
         : undefined,
+      config.settings,
     );
     bind(bridge);
     return session;
@@ -1310,22 +1329,47 @@ function isTextSnapshotItem(
 
 class PluginAgentSession implements AgentSession {
   private readonly listeners = new Set<(event: AgentStreamEvent) => void>();
+
   private readonly history = new PluginSessionHistory();
+
   private readonly pendingPermissions = new Map<string, AgentPermissionRequest>();
+
   private readonly permissionResponses = new Map<string, AgentPermissionResponse>();
+
   private readonly revertTokens = new Map<string, ProviderTimelineItem["revertToken"]>();
+
   private readonly timelineSnapshots = new Map<string, TimelineTextSnapshot>();
+
   private readonly subagentIdsBySession = new Map<string, string | null>();
+
   private readonly children = new Map<
     string,
     { session: ProviderRuntimeSession; unsubscribe: () => void }
   >();
+
   private readonly childSnapshots = new Map<string, Map<string, TimelineTextSnapshot>>();
+
   // Outcome of each child's latest finished turn, so a plain close does not report it as completed.
   private readonly childTurnOutcomes = new Map<string, "completed" | "canceled" | "failed">();
+
   private unsubscribe: (() => void) | null = null;
+
+  /** How the opened session differs from the options it was given. */
+  readonly openOptionsPatch: Record<string, JsonValue>;
+
+  private knownOptions: Record<string, JsonValue> = {};
+
+  // The options a reopened session starts with: what it launched with, then every value the
+  // plugin reported or was given, minus every key that was reset.
+  private readonly committedOptions: Record<string, JsonValue>;
+
+  /** While `applyOptions` waits on the plugin, its `session.config` answers that call. */
+  private applyingOptions = false;
+
   private currentTurnId: string | null = null;
+
   private closed = false;
+
   private replay: {
     persistence: ProviderPersistence;
     config: ProviderConfigState;
@@ -1333,6 +1377,7 @@ class PluginAgentSession implements AgentSession {
     scope: "conversation" | "both";
     closed: boolean;
   } | null = null;
+
   private replaying: Promise<void> | null = null;
 
   constructor(
@@ -1342,11 +1387,17 @@ class PluginAgentSession implements AgentSession {
     private readonly reopen: (
       persistence: ProviderPersistence,
       state: ProviderConfigState,
+      options: Readonly<Record<string, JsonValue>>,
     ) => Promise<ProviderRuntimeSession>,
     private readonly onBind: (bridge: ProviderRuntimeSession) => void,
     private readonly usageLaunch: ProviderLaunch | undefined,
+    givenOptions: Readonly<Record<string, JsonValue>>,
   ) {
     this.subagentIdsBySession.set(bridge.id, null);
+    // Every setting the session opened with that was not given, including ones nobody set.
+    this.committedOptions = { ...givenOptions };
+    this.openOptionsPatch = this.optionDifferences(givenOptions);
+    this.commitOptions();
     for (const event of bridge.history) this.accept(event, false);
     this.unsubscribe = bridge.onEvent((event) => this.accept(event, true));
   }
@@ -1376,15 +1427,8 @@ class PluginAgentSession implements AgentSession {
     };
   }
 
-  get features(): AgentFeature[] {
-    return this.bridge.config.settings.map((setting) =>
-      setting.type === "toggle"
-        ? { ...setting }
-        : {
-            ...setting,
-            options: setting.options.map((option) => ({ ...option, id: option.value })),
-          },
-    );
+  get controls(): AgentOptionControl[] {
+    return readPluginOptionState(this.bridge.config).controls;
   }
 
   async run(prompt: AgentPromptInput, options?: AgentRunOptions): Promise<AgentRunResult> {
@@ -1548,11 +1592,39 @@ class PluginAgentSession implements AgentSession {
     await this.bridge.configure({ thinkingOption: thinkingOptionId });
   }
 
-  async setFeature(featureId: string, value: unknown): Promise<void> {
+  /** The agent manager sends one apply at a time per session. */
+  async applyOptions(options: ProviderOptions): Promise<Record<string, JsonValue>> {
     this.assertReplayComplete();
-    await this.bridge.configure({
-      settings: { [featureId]: toJsonValue(value, `setting '${featureId}'`) },
-    });
+    const before = this.currentOptions();
+    const { legacySettings } = readPluginOptionState(this.bridge.config);
+    // The plugin applies every key it is given or rejects the whole request.
+    const settings: Record<string, JsonValue> = {};
+    for (const [id, value] of Object.entries(options)) {
+      settings[id] = toJsonValue(value, `option '${id}'`);
+    }
+    if (Object.keys(settings).length === 0) return {};
+    this.applyingOptions = true;
+    try {
+      // COMPAT(plugin-provider-settings): added in v0.15.0, remove after 2027-05-01. A plugin
+      // reporting `settings` is sent the same keys under that name.
+      await this.bridge.configure({
+        providerOptions: settings,
+        ...(legacySettings ? { settings } : {}),
+      });
+    } catch (error) {
+      // Nothing is stored for a refused patch, so what the plugin moved is reported once the
+      // call has ended.
+      this.applyingOptions = false;
+      for (const event of this.reportOptionChanges()) this.publish(event);
+      throw error;
+    } finally {
+      this.applyingOptions = false;
+    }
+    // A requested key is a request, not a report: only a key the plugin reported before can be
+    // one it has now dropped.
+    const ended = this.optionChanges({ ...before, ...settings }, before);
+    this.commitOptions(settings);
+    return ended;
   }
 
   async revertConversation(input: { messageId: string }): Promise<void> {
@@ -1744,10 +1816,66 @@ class PluginAgentSession implements AgentSession {
     };
   }
 
+  private currentOptions(): Record<string, JsonValue> {
+    return readPluginOptionState(this.bridge.config).options;
+  }
+
+  /** Options whose value differs from `known`: the plugin's own change or its opening state. */
+  private optionDifferences(known: Readonly<Record<string, JsonValue>>): Record<string, JsonValue> {
+    const patch: Record<string, JsonValue> = {};
+    for (const [id, value] of Object.entries(this.currentOptions())) {
+      if (!isDeepStrictEqual(known[id], value)) patch[id] = value;
+    }
+    return patch;
+  }
+
+  /**
+   * Settle the options a reopened session starts with: what is committed, then the request the
+   * plugin accepted, then what it reported back. A key it reported before and no longer reports
+   * was reset.
+   */
+  private commitOptions(accepted: Readonly<Record<string, JsonValue>> = {}): void {
+    for (const [id, value] of Object.entries(accepted)) {
+      if (value === null) delete this.committedOptions[id];
+      else this.committedOptions[id] = value;
+    }
+    const current = this.currentOptions();
+    for (const id of Object.keys(this.knownOptions)) {
+      if (!(id in current)) delete this.committedOptions[id];
+    }
+    Object.assign(this.committedOptions, current);
+    this.knownOptions = current;
+  }
+
+  /**
+   * What changed against the options `known` to be set: values that differ, and `null` for a key
+   * in `reported` that the plugin no longer reports, which went back to its default.
+   */
+  private optionChanges(
+    known: Readonly<Record<string, JsonValue>>,
+    reported: Readonly<Record<string, JsonValue>>,
+  ): Record<string, JsonValue> {
+    const patch = this.optionDifferences(known);
+    const current = this.currentOptions();
+    for (const id of Object.keys(reported)) {
+      if (known[id] !== null && !(id in current)) patch[id] = null;
+    }
+    return patch;
+  }
+
+  private reportOptionChanges(): AgentStreamEvent[] {
+    if (this.applyingOptions) return [];
+    const patch = this.optionChanges(this.knownOptions, this.knownOptions);
+    if (Object.keys(patch).length === 0) return [];
+    this.commitOptions();
+    return [{ type: "options_changed", provider: this.provider, patch }];
+  }
+
   private translateConfig(
     event: Extract<ProviderEvent, { type: "session.config" }>,
   ): AgentStreamEvent[] {
     return [
+      ...this.reportOptionChanges(),
       {
         type: "mode_changed",
         provider: this.provider,
@@ -1906,7 +2034,7 @@ class PluginAgentSession implements AgentSession {
       await this.bridge.close();
       replay.closed = true;
     }
-    const bridge = await this.reopen(replay.persistence, replay.config);
+    const bridge = await this.reopen(replay.persistence, replay.config, this.committedOptions);
     this.bridge = bridge;
     this.subagentIdsBySession.set(bridge.id, null);
     for (const event of bridge.history) this.accept(event, false);
@@ -2012,7 +2140,8 @@ function mapSessionConfig(
     model: config.model,
     mode: config.modeId,
     thinkingOption: config.thinkingOptionId,
-    settings: toJsonObject(config.featureValues ?? {}, "provider settings"),
+    // The plugin SDK reads composer values from `settings`; they are options here.
+    settings: toJsonObject(config.providerOptions ?? {}, "provider settings"),
     providerOptions: config.providerOptions,
     title: config.title ?? undefined,
     persist,

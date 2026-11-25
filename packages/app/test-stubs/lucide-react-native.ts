@@ -135,3 +135,26 @@ export const Puzzle = StubIcon;
 export const SquareSlash = StubIcon;
 
 export const Sparkles = StubIcon;
+
+export const BookOpen = StubIcon;
+export const Boxes = StubIcon;
+export const Bug = StubIcon;
+export const Cloud = StubIcon;
+export const Compass = StubIcon;
+export const Cpu = StubIcon;
+export const Database = StubIcon;
+export const Feather = StubIcon;
+export const FlaskConical = StubIcon;
+export const Hammer = StubIcon;
+export const ListTodo = StubIcon;
+export const Microscope = StubIcon;
+export const Package = StubIcon;
+export const Palette = StubIcon;
+export const Rocket = StubIcon;
+export const Shield = StubIcon;
+export const ShieldEllipsis = StubIcon;
+export const ShieldPlus = StubIcon;
+export const TestTube = StubIcon;
+export const Zap = StubIcon;
+
+export const Flag = StubIcon;

@@ -1,15 +1,13 @@
-import { botsStrings } from "./bots";
-import { builtinPluginStrings } from "./builtin-plugins";
-import type { TranslationResources } from "./en";
+import { type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 import { activityGraphStrings } from "./activity-graph";
-import { sshModuleStrings } from "./ssh-modules";
 
 export const fr: TranslationResources = {
-  bots: botsStrings,
-  builtinPlugins: builtinPluginStrings,
-  ssh: sshModuleStrings,
-  activityGraph: activityGraphStrings,
+  pluginCombobox: {
+    searching: "Recherche…",
+    empty: "Aucun résultat",
+    failed: "Échec de la recherche : {{message}}",
+  },
   paneFind: {
     connectionFailure: "Could not search this chat. Check the host connection and retry.",
     historyChangedFailure: "The chat changed while searching. Search again.",
@@ -136,8 +134,11 @@ export const fr: TranslationResources = {
         "\u00C9crivez \u00E0 l\u2019agent, mentionnez des @fichiers ou utilisez les /commandes et /skills",
       mobile: "Message, @fichiers, /commandes",
       fallback: "Message\u2026",
+      terminal: "Prompt",
     },
     input: {
+      fullscreen: "Fullscreen",
+      exitFullscreen: "Exit fullscreen",
       longPressToSendNow: "Long press to send now",
 
       longPressToQueue: "Long press to queue",
@@ -1262,6 +1263,8 @@ export const fr: TranslationResources = {
       project: "Projet",
       base: "Base",
       baseNotApplicable: "Non applicable",
+      host: "Hôte",
+      branch: "Branche",
     },
     titlePlaceholder: "Titre (facultatif)",
     errors: {
@@ -1301,6 +1304,22 @@ export const fr: TranslationResources = {
       inProjectDirectory: "Dans le répertoire du projet",
       inWorktree: "Dans un worktree",
       title: "Partir de",
+    },
+    launch: {
+      commandPlaceholder: "Saisissez une commande, ou laissez vide pour un terminal vierge",
+      promptPlaceholder: "Prompt pour {{name}}",
+      submit: "Lancer",
+      chat: "Chat",
+      terminal: "Terminal",
+      title: "Que lancer ?",
+      manageProfiles: "Gérer les profils",
+    },
+    tooltips: {
+      project: "Choisir le projet",
+      host: "Choisir l’hôte",
+      isolation: "Choisir le niveau d’isolation",
+      startingRef: "Choisir le point de départ",
+      launch: "Choisir quoi lancer",
     },
   },
   desktop: {
@@ -1579,6 +1598,16 @@ export const fr: TranslationResources = {
     noMatches: "Aucun modèle ne correspond à votre recherche",
     searchPlaceholder: "Rechercher des mod\u00E8les\u2026",
     openProviderSettings: "Ouvrir les param\u00E8tres de {{provider}}",
+    editProfilesLabel: "Modifier les profils d’agent",
+    searchAllPlaceholder: "Rechercher dans tous les modèles…",
+    createProfileFromModel: "Créer un profil à partir de ce modèle",
+    editProfileLabel: "Modifier {{name}}",
+    editProfilesCount: "Modifier les profils ({{count}})",
+    profiles: "Profils",
+    createProfile: "Créer un profil",
+    noMatchesForQuery: "Aucun modèle ne correspond à « {{query}} »",
+    providers: "Fournisseurs",
+    model: "Modèle",
   },
   providerCatalog: {
     title: "Ajouter un fournisseur",
@@ -2590,6 +2619,43 @@ export const fr: TranslationResources = {
           localErrorMessage: "Impossible de supprimer la connexion localhost",
         },
       },
+      agentProfiles: {
+        featureCountOne: "{{count}} fonctionnalité",
+        featureCount: "{{count}} fonctionnalités",
+        editProfileTitle: "Modifier le profil d’agent",
+        addProfileTitle: "Ajouter un profil d’agent",
+        iconLabel: "Icône",
+        nameLabel: "Nom",
+        namePlaceholder: "Travail sur l’UI",
+        providerLabel: "Fournisseur",
+        providerPlaceholder: "Sélectionner un fournisseur",
+        noProviders: "Aucun fournisseur disponible sur cet hôte",
+        modelLabel: "Modèle",
+        noModels: "Ce fournisseur ne propose aucun modèle",
+        modeLabel: "Mode",
+        noModes: "Ce fournisseur ne propose aucun mode",
+        thinkingLabel: "Réflexion",
+        noThinkingOptions: "Ce modèle n’a aucun niveau de réflexion",
+        featuresLabel: "Fonctionnalités",
+        notesLabel: "Quand l’utiliser",
+        notesHint: "Aide les agents à choisir ce profil lorsqu’ils démarrent un autre agent.",
+        notesPlaceholder:
+          "À utiliser pour le travail sur l’UI : composants, mise en page et design tokens.",
+        saving: "Enregistrement…",
+        save: "Enregistrer",
+        moveUp: "Monter",
+        moveDown: "Descendre",
+        editProfile: "Modifier le profil",
+        remove: "Supprimer",
+        removeConfirmTitle: "Supprimer le profil ?",
+        removeConfirmMessage: "Supprimer « {{name}} » ?",
+        sectionTitle: "Profils d’agent",
+        unsupported: "Le daemon de cet hôte ne prend pas encore en charge les profils d’agent",
+        unavailable: "Connectez-vous à cet hôte pour gérer les profils d’agent",
+        emptyState:
+          "Aucun profil pour le moment. Ajoutez-en un pour démarrer des agents avec un fournisseur et un modèle enregistrés.",
+        newProfile: "Nouveau profil",
+      },
     },
     providers: {
       title: "Fournisseurs",
@@ -3243,6 +3309,7 @@ export const fr: TranslationResources = {
       description: "V\u00E9rifiez votre connexion et r\u00E9essayez.",
     },
   },
+  activityGraph: activityGraphStrings,
   providerUsage: {
     checkUsage: "Vérifier l’utilisation",
     checkUsageHint: "S’applique à {{host}} sur tous les appareils",

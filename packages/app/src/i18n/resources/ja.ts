@@ -1,15 +1,13 @@
-import { botsStrings } from "./bots";
-import { builtinPluginStrings } from "./builtin-plugins";
-import type { TranslationResources } from "./en";
+import { type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 import { activityGraphStrings } from "./activity-graph";
-import { sshModuleStrings } from "./ssh-modules";
 
 export const ja: TranslationResources = {
-  bots: botsStrings,
-  builtinPlugins: builtinPluginStrings,
-  ssh: sshModuleStrings,
-  activityGraph: activityGraphStrings,
+  pluginCombobox: {
+    searching: "検索中…",
+    empty: "結果がありません",
+    failed: "検索に失敗しました: {{message}}",
+  },
   paneFind: {
     connectionFailure: "Could not search this chat. Check the host connection and retry.",
     historyChangedFailure: "The chat changed while searching. Search again.",
@@ -138,8 +136,11 @@ export const ja: TranslationResources = {
       desktop: "エージェントにメッセージ、@ファイル、/コマンドや/スキルを入力",
       mobile: "メッセージ、@ファイル、/コマンド",
       fallback: "メッセージ...",
+      terminal: "Prompt",
     },
     input: {
+      fullscreen: "Fullscreen",
+      exitFullscreen: "Exit fullscreen",
       longPressToSendNow: "Long press to send now",
 
       longPressToQueue: "Long press to queue",
@@ -1252,6 +1253,8 @@ export const ja: TranslationResources = {
       project: "プロジェクト",
       base: "ベース",
       baseNotApplicable: "該当なし",
+      host: "ホスト",
+      branch: "ブランチ",
     },
     titlePlaceholder: "タイトル（任意）",
     errors: {
@@ -1291,6 +1294,22 @@ export const ja: TranslationResources = {
       inProjectDirectory: "プロジェクトディレクトリ内",
       inWorktree: "ワークツリー内",
       title: "開始点",
+    },
+    launch: {
+      commandPlaceholder: "Run a command, or leave empty for a blank terminal",
+      promptPlaceholder: "Prompt {{name}}",
+      submit: "Launch",
+      chat: "Chat",
+      terminal: "Terminal",
+      title: "What to launch",
+      manageProfiles: "Manage profiles",
+    },
+    tooltips: {
+      project: "Choose the project",
+      host: "Choose the host",
+      isolation: "Choose the isolation level",
+      startingRef: "開始点を選択",
+      launch: "Choose what to launch",
     },
   },
   desktop: {
@@ -1549,6 +1568,16 @@ export const ja: TranslationResources = {
     noMatches: "検索に一致するモデルがありません",
     searchPlaceholder: "モデルを検索...",
     openProviderSettings: "{{provider}}の設定を開く",
+    editProfilesLabel: "エージェントプロファイルを編集",
+    searchAllPlaceholder: "すべてのモデルを検索...",
+    createProfileFromModel: "このモデルからプロファイルを作成",
+    editProfileLabel: "{{name}}を編集",
+    editProfilesCount: "プロファイルを編集（{{count}}）",
+    profiles: "プロファイル",
+    createProfile: "プロファイルを作成",
+    noMatchesForQuery: "「{{query}}」に一致するモデルがありません",
+    providers: "プロバイダー",
+    model: "モデル",
   },
   providerCatalog: {
     title: "プロバイダーを追加",
@@ -2539,6 +2568,42 @@ export const ja: TranslationResources = {
           localErrorMessage: "localhost接続を削除できません",
         },
       },
+      agentProfiles: {
+        featureCountOne: "{{count}}個の機能",
+        featureCount: "{{count}}個の機能",
+        editProfileTitle: "エージェントプロファイルを編集",
+        addProfileTitle: "エージェントプロファイルを追加",
+        iconLabel: "アイコン",
+        nameLabel: "名前",
+        namePlaceholder: "UI作業",
+        providerLabel: "プロバイダー",
+        providerPlaceholder: "プロバイダーを選択",
+        noProviders: "このホストで利用できるプロバイダーがありません",
+        modelLabel: "モデル",
+        noModels: "このプロバイダーには選択できるモデルがありません",
+        modeLabel: "モード",
+        noModes: "このプロバイダーには選択できるモードがありません",
+        thinkingLabel: "思考",
+        noThinkingOptions: "このモデルには思考レベルがありません",
+        featuresLabel: "機能",
+        notesLabel: "使用する場面",
+        notesHint: "別のエージェントを起動するとき、このプロファイルを選ぶために使用されます。",
+        notesPlaceholder: "UI作業に使用 — コンポーネント、レイアウト、デザイントークンなど。",
+        saving: "保存中...",
+        save: "保存",
+        moveUp: "上に移動",
+        moveDown: "下に移動",
+        editProfile: "プロファイルを編集",
+        remove: "削除",
+        removeConfirmTitle: "プロファイルを削除しますか？",
+        removeConfirmMessage: '"{{name}}"を削除しますか？',
+        sectionTitle: "エージェントプロファイル",
+        unsupported: "このホストで動作するデーモンはまだエージェントプロファイルに対応していません",
+        unavailable: "エージェントプロファイルを管理するにはこのホストに接続してください",
+        emptyState:
+          "プロファイルがまだありません。保存したプロバイダーとモデルでエージェントを起動するために追加してください。",
+        newProfile: "新しいプロファイル",
+      },
     },
     providers: {
       title: "プロバイダー",
@@ -3189,6 +3254,7 @@ export const ja: TranslationResources = {
         "\u63A5\u7D9A\u3092\u78BA\u8A8D\u3057\u3066\u3082\u3046\u4E00\u5EA6\u304A\u8A66\u3057\u304F\u3060\u3055\u3044\u3002",
     },
   },
+  activityGraph: activityGraphStrings,
   providerUsage: {
     checkUsage: "使用状況を確認",
     checkUsageHint: "すべてのデバイスで {{host}} に適用",

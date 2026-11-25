@@ -3,26 +3,27 @@ import { readFileSync, writeFileSync, rmSync, readdirSync } from "node:fs";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type {
-  AgentCapabilityFlags,
-  AgentClient,
-  AgentFeature,
-  AgentLaunchContext,
-  AgentMode,
-  AgentModelDefinition,
-  AgentPersistenceHandle,
-  AgentPromptInput,
-  AgentRunOptions,
-  AgentRunResult,
-  AgentSession,
-  AgentSessionConfig,
-  AgentStreamEvent,
-  AgentSlashCommand,
-  AgentUsage,
-  FetchCatalogOptions,
+import {
+  type AgentCapabilityFlags,
+  type AgentClient,
+  type AgentLaunchContext,
+  type AgentMode,
+  type AgentModelDefinition,
+  type AgentPersistenceHandle,
+  type AgentPromptInput,
+  type AgentRunOptions,
+  type AgentRunResult,
+  type AgentSession,
+  type AgentSessionConfig,
+  type AgentStreamEvent,
+  type AgentSlashCommand,
+  type AgentUsage,
+  type FetchCatalogOptions,
+  type AgentPermissionRequest,
+  type AgentPermissionResponse,
 } from "../agent/agent-sdk-types.js";
-import type { AgentPermissionRequest, AgentPermissionResponse } from "../agent/agent-sdk-types.js";
 import { isLikelyExternalToolName } from "@jagentdesk/protocol/tool-name-normalization";
+import { type ProviderOptions } from "@jagentdesk/protocol/agent-types";
 
 const TEST_CAPABILITIES: AgentCapabilityFlags = {
   supportsStreaming: true,
@@ -37,6 +38,27 @@ const TEST_CAPABILITIES: AgentCapabilityFlags = {
 };
 
 const TEST_FEATURE_ID = "test_feature";
+
+const TEST_THINKING_OPTIONS: AgentSelectOption[] = [
+  { id: "low", label: "Low", isDefault: true },
+  { id: "high", label: "High" },
+];
+
+const TEST_MODELS: Record<string, Array<{ id: string; label: string }>> = {
+  claude: [
+    { id: "haiku", label: "Haiku" },
+    { id: "sonnet", label: "Sonnet" },
+  ],
+  codex: [
+    { id: "gpt-5.4-mini", label: "gpt-5.4-mini" },
+    { id: "gpt-5.4", label: "gpt-5.4" },
+  ],
+  opencode: [
+    { id: "test-model", label: "Test Model" },
+    { id: "test-model-alt", label: "Test Model Alt" },
+  ],
+};
+
 const TEST_MODES: AgentMode[] = [
   { id: "bypassPermissions", label: "Bypass", description: "No permissions" },
   { id: "default", label: "Default", description: "Ask for permissions" },
@@ -330,23 +352,39 @@ function buildLargeTimelineItem(input: {
 
 class FakeAgentSession implements AgentSession {
   readonly capabilities: AgentCapabilityFlags;
+
   readonly id: string;
+
   private readonly providerName: string;
+
   private readonly config: AgentSessionConfig;
+
   private interruptSignal = createDeferred<void>();
+
   private memoryMarker: string | null = null;
+
   private pendingPermissions: AgentPermissionRequest[] = [];
+
   private permissionGate: Deferred<AgentPermissionResponse> | null = null;
+
   private readonly historyPath: string;
+
   private readonly subscribers = new Set<(event: AgentStreamEvent) => void>();
+
   private nextTurnOrdinal = 0;
+
   private activeForegroundTurnId: string | null = null;
 
   readonly steerActiveTurn: AgentSession["steerActiveTurn"];
+
   private readonly onInterrupt: (() => void) | undefined;
+
   private readonly closeSession: (() => Promise<void>) | undefined;
+
   private readonly onStartTurn: TestAgentClientOptions["onStartTurn"];
+
   private readonly beforeTurnComplete: TestAgentClientOptions["beforeTurnComplete"];
+
   private readonly historyEvents: readonly AgentStreamEvent[] | undefined;
 
   constructor(options: FakeAgentSessionOptions) {
@@ -376,14 +414,13 @@ class FakeAgentSession implements AgentSession {
     return this.providerName;
   }
 
-  get features(): AgentFeature[] {
+  get controls(): AgentOptionControl[] {
     return [
       {
         type: "toggle",
-        id: TEST_FEATURE_ID,
+        key: TEST_FEATURE_ID,
         label: "Test feature",
         description: "Deterministic provider feature used by MCP integration tests.",
-        value: this.config.featureValues?.[TEST_FEATURE_ID] === true,
       },
     ];
   }
@@ -860,11 +897,8 @@ class FakeAgentSession implements AgentSession {
     this.config.modeId = modeId;
   }
 
-  async setFeature(featureId: string, value: unknown): Promise<void> {
-    this.config.featureValues = {
-      ...this.config.featureValues,
-      [featureId]: value,
-    };
+  async applyOptions(options: ProviderOptions): Promise<void> {
+    this.config.providerOptions = { ...this.config.providerOptions, ...options };
   }
 
   getPendingPermissions(): AgentPermissionRequest[] {
@@ -1284,30 +1318,18 @@ class FakeAgentClient implements AgentClient {
   async fetchCatalog(
     _options: FetchCatalogOptions,
   ): Promise<{ models: AgentModelDefinition[]; modes: AgentMode[] }> {
-    if (this.provider === "claude") {
-      return {
-        models: [
-          { provider: this.provider, id: "haiku", label: "Haiku", isDefault: true },
-          { provider: this.provider, id: "sonnet", label: "Sonnet", isDefault: false },
-        ],
-        modes: TEST_MODES,
-      };
-    }
-    if (this.provider === "codex") {
-      return {
-        models: [
-          {
-            provider: this.provider,
-            id: "gpt-5.4-mini",
-            label: "gpt-5.4-mini",
-            isDefault: true,
-          },
-        ],
-        modes: TEST_MODES,
-      };
-    }
+    // Every provider lists two models that each list thinking options, so the live model and
+    // thinking switches have listed values to switch between.
+    const listed = TEST_MODELS[this.provider] ?? TEST_MODELS.opencode;
     return {
-      models: [{ provider: this.provider, id: "test-model", label: "Test Model", isDefault: true }],
+      models: listed.map((model, index) => ({
+        provider: this.provider,
+        id: model.id,
+        label: model.label,
+        isDefault: index === 0,
+        thinkingOptions: TEST_THINKING_OPTIONS,
+        defaultThinkingOptionId: "low",
+      })),
       modes: TEST_MODES,
     };
   }

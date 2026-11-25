@@ -42,6 +42,18 @@ const patchedPackages = [
     nodeModulesPath: "node_modules/react-native-gesture-handler",
     patchPrefix: "react-native-gesture-handler+",
   },
+  // Exports BottomSheetModalInternalProvider so a subtree can host its own sheets on the shared
+  // modal stack (see packages/app/src/components/ui/isolated-bottom-sheet-modal/index.tsx), and
+  // keeps a dismissing modal's status through its final onChange(-1), so a modal with
+  // enableDismissOnClose=false that unmounts while presented still leaves the portal, and removes
+  // the portal of a modal that unmounts before its opening animation starts.
+  // Dimensions subscription cleanup: https://github.com/gorhom/react-native-bottom-sheet/issues/2734
+  // and https://github.com/gorhom/react-native-bottom-sheet/pull/2751. Remove the useAnimatedLayout
+  // hunks once an installed release includes the cleanup; retain the other local hunks.
+  {
+    nodeModulesPath: "node_modules/@gorhom/bottom-sheet",
+    patchPrefix: "@gorhom+bottom-sheet+",
+  },
   {
     nodeModulesPath: "packages/server/node_modules/@opencode-ai/sdk",
     patchPrefix: "@opencode-ai+sdk+",

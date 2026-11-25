@@ -1,3 +1,7 @@
+import type {
+  ProviderControlsListRequestMessage,
+  ProviderControlsListResponseMessage,
+} from "@jagentdesk/protocol/messages";
 import type { CreateAgentRequestOptions } from "./daemon-client.js";
 import type { AgentAddress } from "@jagentdesk/protocol/addresses";
 import { parentAddressLabels } from "@jagentdesk/protocol/agent-labels";
@@ -29,20 +33,22 @@ import type {
   WorkspaceDescriptorPayload,
   WorkspaceCreateRequest,
 } from "@jagentdesk/protocol/messages";
-import { DaemonClient } from "./daemon-client.js";
-export { DaemonClient };
-import type {
-  AgentBackgroundWorkItem,
-  FetchAgentsEntry,
-  FetchAgentsOptions,
-  FetchAgentsPageInfo,
-  FetchAgentTimelineCursor,
-  FetchAgentTimelineDirection,
-  FetchAgentTimelinePayload,
-  FetchAgentTimelineProjection,
-  SendMessageOptions,
-  WaitForFinishResult,
+import {
+  DaemonClient,
+  type AgentBackgroundWorkItem,
+  type FetchAgentsEntry,
+  type FetchAgentsOptions,
+  type FetchAgentsPageInfo,
+  type FetchAgentTimelineCursor,
+  type FetchAgentTimelineDirection,
+  type FetchAgentTimelinePayload,
+  type FetchAgentTimelineProjection,
+  type SendMessageOptions,
+  type WaitForFinishResult,
 } from "./daemon-client.js";
+import { type JsonValue } from "@jagentdesk/protocol/agent-types";
+
+export { DaemonClient };
 
 /**
  * Coding turns routinely run for minutes, so the handle waits far longer than
@@ -170,12 +176,15 @@ export interface JAgentDeskWorkspaceHandle {
   readonly directory: string | null;
   readonly name: string | null;
   readonly status: JAgentDeskWorkspace["status"] | null;
+  /** Data plugins stored on the workspace. JAgentDesk never reads a key. */
+  readonly metadata: NonNullable<JAgentDeskWorkspace["metadata"]> | null;
   readonly agents: {
     create(options: JAgentDeskWorkspaceAgentCreateOptions): Promise<JAgentDeskAgentHandle>;
   };
   current(): JAgentDeskWorkspace | null;
   refresh(options?: { requestId?: string }): Promise<JAgentDeskWorkspace | null>;
   setTitle(title: string | null, requestId?: string): Promise<{ title: string | null }>;
+  setMetadata(patch: Record<string, JsonValue>): Promise<void>;
   setBaseBranch(options: {
     baseRef: string;
     requestId?: string;
@@ -236,8 +245,12 @@ export interface JAgentDeskAgentConfig {
   provider: string;
   modeId?: JAgentDeskAgentSessionConfig["modeId"];
   thinkingOptionId?: JAgentDeskAgentSessionConfig["thinkingOptionId"];
+  /** @deprecated Put these in `options`; they are folded into it on send. */
   featureValues?: JAgentDeskProviderFeatureValues;
-  /** JSON-safe provider-native settings, validated by the selected provider. */
+  /**
+   * JSON-safe provider settings, validated by the selected provider. They include the settings the
+   * provider offers a composer control for, such as `service_tier` or `fast_mode`.
+   */
   options?: JAgentDeskAgentSessionConfig["providerOptions"];
   systemPrompt?: JAgentDeskAgentSessionConfig["systemPrompt"];
   toolPolicy?: JAgentDeskAgentSessionConfig["toolPolicy"];
@@ -266,6 +279,8 @@ export interface JAgentDeskAgentCreateOptions {
   background?: CreateAgentRequestMessage["background"];
   requestId?: string;
   labels?: Record<string, string>;
+  /** Data plugins store on the agent: JSON values under keys such as `"linear.issue"`. */
+  metadata?: CreateAgentRequestMessage["metadata"];
 }
 
 export type JAgentDeskWorkspaceAgentCreateOptions = Omit<JAgentDeskAgentCreateOptions, "cwd">;
@@ -383,7 +398,14 @@ export interface JAgentDeskAgentHandle {
   readonly activeTurn: NonNullable<JAgentDeskAgent["activeTurn"]> | null;
   readonly lastUsage: NonNullable<JAgentDeskAgent["lastUsage"]> | null;
   readonly lastError: NonNullable<JAgentDeskAgent["lastError"]> | null;
+  /** @deprecated Use `controls` and `options`. */
   readonly features: NonNullable<JAgentDeskAgent["features"]> | null;
+  /** The provider options the agent runs with: `config.json` defaults merged with its own. */
+  readonly options: NonNullable<JAgentDeskAgent["options"]> | null;
+  /** How the provider wants its options drawn. Controls hold no value; read `options`. */
+  readonly controls: NonNullable<JAgentDeskAgent["controls"]> | null;
+  /** Data plugins stored on the agent. JAgentDesk never reads a key. */
+  readonly metadata: NonNullable<JAgentDeskAgent["metadata"]> | null;
   readonly runtimeInfo: NonNullable<JAgentDeskAgent["runtimeInfo"]> | null;
   readonly archivedAt: NonNullable<JAgentDeskAgent["archivedAt"]> | null;
   readonly timeline: JAgentDeskAgentTimelineHandle;
@@ -411,6 +433,8 @@ export interface JAgentDeskAgentHandle {
   archive(): Promise<{ archivedAt: string }>;
   detach(): Promise<void>;
   respondToPermission(options: JAgentDeskAgentRespondToPermissionOptions): Promise<void>;
+  setOptions(patch: Record<string, unknown>): Promise<void>;
+  setMetadata(patch: Record<string, JsonValue>): Promise<void>;
   subscribe(handler: (update: JAgentDeskAgentUpdate) => void): () => void;
 }
 
@@ -439,14 +463,21 @@ export interface JAgentDeskAgentActions {
 
 export type JAgentDeskProviderModelsResult = ListProviderModelsResponseMessage["payload"];
 export type JAgentDeskProviderModesResult = ListProviderModesResponseMessage["payload"];
-type JAgentDeskProviderFeaturesDraft = ListProviderFeaturesRequestMessage["draftConfig"];
-export interface JAgentDeskProviderFeaturesInput extends Omit<
-  JAgentDeskProviderFeaturesDraft,
+type JAgentDeskProviderControlsDraft = ProviderControlsListRequestMessage["draftConfig"];
+export interface JAgentDeskProviderControlsInput extends Omit<
+  JAgentDeskProviderControlsDraft,
   "provider" | "model"
 > {
   /** Provider and model in `provider/model` format. */
   provider: string;
 }
+export type JAgentDeskProviderControlsResult = ProviderControlsListResponseMessage["payload"];
+/** @deprecated Use `JAgentDeskProviderControlsInput`. */
+export type JAgentDeskProviderFeaturesInput = Omit<
+  ListProviderFeaturesRequestMessage["draftConfig"],
+  "provider" | "model"
+> & { provider: string };
+/** @deprecated Use `JAgentDeskProviderControlsResult`. */
 export type JAgentDeskProviderFeaturesResult = ListProviderFeaturesResponseMessage["payload"];
 export type JAgentDeskProviderAvailabilityResult = ListAvailableProvidersResponse["payload"];
 export type JAgentDeskProviderSnapshotResult = GetProvidersSnapshotResponseMessage["payload"];
@@ -481,6 +512,15 @@ export interface JAgentDeskProviderActions {
     provider: JAgentDeskAgentProvider,
     options?: JAgentDeskProviderListOptions,
   ): Promise<JAgentDeskProviderModesResult>;
+  /**
+   * The controls a draft agent would show and the options it would run with, resolved by the
+   * daemon from `config.json` defaults and the draft's own `providerOptions`.
+   */
+  listControls(
+    draftConfig: JAgentDeskProviderControlsInput,
+    options?: { requestId?: string },
+  ): Promise<JAgentDeskProviderControlsResult>;
+  /** @deprecated Use `listControls`. */
   listFeatures(
     draftConfig: JAgentDeskProviderFeaturesInput,
     options?: { requestId?: string },
@@ -734,6 +774,10 @@ export function createJAgentDeskApi(
         const { provider, model } = parseProviderModel(providerModel);
         return daemonClient.listProviderFeatures({ ...draftConfig, provider, model }, options);
       },
+      listControls: ({ provider: providerModel, ...draftConfig }, options) => {
+        const { provider, model } = parseProviderModel(providerModel);
+        return daemonClient.listProviderControls({ ...draftConfig, provider, model }, options);
+      },
       listAvailable: (options) => daemonClient.listAvailableProviders(options),
       snapshot: (options) => daemonClient.getProvidersSnapshot(options),
       waitForReady: (options) => waitForProvidersReady(daemonClient, options),
@@ -806,6 +850,9 @@ function createWorkspaceHandleFactory(
       get status() {
         return current?.status ?? null;
       },
+      get metadata() {
+        return current?.metadata ?? null;
+      },
       agents: {
         create: async (options) => {
           const snapshot = current ?? (await refresh());
@@ -821,6 +868,10 @@ function createWorkspaceHandleFactory(
       current: () => current,
       refresh,
       setTitle: (title, requestId) => daemonClient.setWorkspaceTitle(id, title, requestId),
+      setMetadata: async (patch) => {
+        const metadata = await daemonClient.setWorkspaceMetadata(id, patch);
+        if (current) current = { ...current, metadata };
+      },
       setBaseBranch: (options) =>
         daemonClient.setWorkspaceBaseBranch({ ...options, workspaceId: id }),
       archive: async (requestId) => {
@@ -947,6 +998,15 @@ function createAgentHandleFactory(daemonClient: DaemonClient): AgentHandleFactor
       get features() {
         return current?.features ?? null;
       },
+      get options() {
+        return current?.options ?? null;
+      },
+      get controls() {
+        return current?.controls ?? null;
+      },
+      get metadata() {
+        return current?.metadata ?? null;
+      },
       get runtimeInfo() {
         return current?.runtimeInfo ?? null;
       },
@@ -967,6 +1027,13 @@ function createAgentHandleFactory(daemonClient: DaemonClient): AgentHandleFactor
       },
       send: async (text, options) => {
         await daemonClient.sendAgentMessage(id, text, options);
+      },
+      setOptions: async (patch) => {
+        await daemonClient.setAgentOptions(id, patch);
+      },
+      setMetadata: async (patch) => {
+        const metadata = await daemonClient.setAgentMetadata(id, patch);
+        if (current) current = { ...current, metadata };
       },
       respondToPermission: async ({ requestId, response }) => {
         await daemonClient.respondToPermission(id, requestId, response);

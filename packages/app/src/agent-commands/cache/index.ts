@@ -1,10 +1,10 @@
-import type { QueryClient } from "@tanstack/react-query";
-import type { AgentProvider } from "@jagentdesk/protocol/agent-types";
-import type { ProviderSnapshotEntry } from "@jagentdesk/protocol/agent-types";
+import { type QueryClient } from "@tanstack/react-query";
+import { type AgentProvider, type ProviderSnapshotEntry } from "@jagentdesk/protocol/agent-types";
 import equal from "fast-deep-equal";
 import { normalizeWorkspacePath } from "@/utils/workspace-identity";
 
 export const AGENT_COMMANDS_QUERY_ROOT = "agentCommands";
+
 export const agentCommandQueryPolicy = {
   staleTime: 600_000,
   gcTime: 1_800_000,
@@ -18,7 +18,7 @@ export interface AgentCommandsDraftConfig {
   modeId?: string;
   model?: string;
   thinkingOptionId?: string;
-  featureValues?: Record<string, unknown>;
+  providerOptions?: Record<string, unknown>;
 }
 
 export function normalizeAgentCommandsCwd(cwd: string): string {
@@ -98,7 +98,7 @@ export function draftAgentCommandsQueryKey(input: {
     "thinking",
     draftConfig.thinkingOptionId ?? null,
     "features",
-    draftConfig.featureValues ?? null,
+    draftConfig.providerOptions ?? null,
   ] as const;
 }
 

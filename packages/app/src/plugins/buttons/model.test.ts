@@ -18,6 +18,8 @@ function installation(): InstalledPlugin {
     settingsScreens: [],
     surfaces: [],
     sidebarItems: [],
+    composerItems: [],
+    newWorkspaceItems: [],
     workspacePanels: [],
     commandCenterItems: [],
     clientSlashCommands: [],

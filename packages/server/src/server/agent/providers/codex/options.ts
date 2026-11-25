@@ -1,4 +1,4 @@
-import type { ProviderOptions, ToolPolicy } from "@jagentdesk/protocol/agent-types";
+import { type ProviderOptions, type ToolPolicy } from "@jagentdesk/protocol/agent-types";
 import { z } from "zod";
 
 const ApprovalPolicySchema = z.union([
@@ -37,6 +37,9 @@ const NetworkPolicySchema = z
 // Codex config reference, maintained against Codex CLI 0.143+.
 export const CodexProviderOptionsSchema = z
   .object({
+    // Composer controls, not Codex config: the provider reads them and keeps them out of `config`.
+    service_tier: z.string().optional(),
+    plan_mode: z.boolean().optional(),
     approval_policy: ApprovalPolicySchema.optional(),
     sandbox_mode: z.enum(["read-only", "workspace-write", "danger-full-access"]).optional(),
     sandbox_workspace_write: z

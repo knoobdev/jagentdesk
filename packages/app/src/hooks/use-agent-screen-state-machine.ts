@@ -1,10 +1,7 @@
 import type { ViewedTimelineStatus } from "@/timeline/viewed-timeline-sync";
 import { useRef } from "react";
-import type {
-  AgentCapabilityFlags,
-  AgentFeature,
-  AgentProvider,
-} from "@jagentdesk/protocol/agent-types";
+import { type AgentCapabilityFlags, type AgentProvider } from "@jagentdesk/protocol/agent-types";
+import { type Agent } from "@/stores/session-store";
 
 export interface AgentScreenAgent {
   serverId: string;
@@ -22,7 +19,8 @@ export interface AgentScreenAgent {
     modeId?: string | null;
     thinkingOptionId?: string | null;
   } | null;
-  features?: readonly AgentFeature[];
+  options?: Agent["options"];
+  controls?: Agent["controls"];
   lastError?: string | null;
   projectPlacement?: {
     projectKey?: string;

@@ -1,26 +1,8 @@
 import type { PluginSidebarViewContribution } from "@jagentdesk/plugin/client";
 import { PluginTranslationRuntime, type PluginLocaleSource } from "@jagentdesk/plugin/client/host";
-import type { PluginText } from "@jagentdesk/plugin/client";
-import { localizePluginContribution, registerTranslatedButton } from "./translations";
-import type { createPluginHosts } from "./hosts";
-import { openExternalUrl } from "@/utils/open-external-url";
-import * as pluginUiRuntime from "./react-native/ui";
-import { useSettings } from "./settings/use-settings";
-import * as pluginSharedRuntime from "@jagentdesk/plugin";
 import * as pluginClientRuntime from "@jagentdesk/plugin/client";
-import * as React from "react";
-import * as ReactJsxRuntime from "react/jsx-runtime";
-// eslint-disable-next-line no-restricted-imports -- plugin client runtime injects host ReactNative.
-import * as ReactNative from "react-native";
-// eslint-disable-next-line no-restricted-imports -- plugin bundles receive TanStack's real runtime, not JAgentDesk's query wrappers.
-import * as ReactQuery from "@tanstack/react-query";
-import * as Zod from "zod";
 import {
-  type PluginAttachmentSourceContribution,
-  type PluginCleanup,
-  type PluginThemeContribution,
-} from "@jagentdesk/plugin";
-import {
+  type PluginText,
   type PluginCommandCenterItemContribution,
   type PluginClientContext,
   type PluginScreenContribution,
@@ -34,14 +16,38 @@ import {
   type PluginWorkspacePanelContribution,
   type PluginButtonRegistration,
 } from "@jagentdesk/plugin/client";
-import type { EvaluatedPlugin } from "./types";
-import type { ComponentType } from "react";
+import { localizePluginContribution, registerTranslatedButton } from "./translations";
+import { type createPluginHosts } from "./hosts";
+import { openExternalUrl } from "@/utils/open-external-url";
+import * as pluginUiRuntime from "./react-native/ui";
+import { useSettings } from "./settings/use-settings";
+import * as pluginSharedRuntime from "@jagentdesk/plugin";
+import {
+  type PluginAttachmentSourceContribution,
+  type PluginCleanup,
+  type PluginThemeContribution,
+} from "@jagentdesk/plugin";
+import * as React from "react";
+import { type ComponentType } from "react";
+import * as ReactJsxRuntime from "react/jsx-runtime";
+import * as ReactNative from "react-native";
+// Plugin bundles receive TanStack hooks as part of their public SDK.
+// oxlint-disable-next-line no-restricted-imports
+import * as ReactQuery from "@tanstack/react-query";
+import * as Zod from "zod";
+import { type EvaluatedPlugin } from "./types";
 import { resolvePluginIcon, parsePluginIcon, parseSerializablePluginIcon } from "./icons";
 import { pluginReactNativeRuntime } from "./react-native/runtime";
 import { parsePluginThemeContribution } from "./themes";
 
+// eslint-disable-next-line no-restricted-imports -- plugin client runtime injects host ReactNative.
+
+// eslint-disable-next-line no-restricted-imports -- plugin bundles receive TanStack's real runtime, not JAgentDesk's query wrappers.
+
 const CONTRIBUTION_ID = /^[a-z][a-z0-9-]*$/;
+
 const PANEL_LOCATIONS = ["workspace", "explorer"] as const;
+
 const TIMELINE_ITEM_TYPES = new Set([
   "user_message",
   "assistant_message",
@@ -94,6 +100,7 @@ export type PluginClientRuntime = Pick<
   | "openSettings"
   | "openScreen"
   | "openSurface"
+  | "composers"
   | "openPanel"
   | "subscribe"
 > & {
@@ -127,6 +134,8 @@ export function runPluginClientBundle(
     sidebarItems: [],
     sidebarHeaderItems: [],
     sidebarFooterItems: [],
+    composerItems: [],
+    newWorkspaceItems: [],
     workspacePanels: [],
     filePanels: [],
     commandCenterItems: [],
@@ -139,6 +148,8 @@ export function runPluginClientBundle(
   const surfaceIds = new Set<string>();
   const settingsScreenIds = new Set<string>();
   const sidebarItemIds = new Set<string>();
+  const composerItemIds = new Set<string>();
+  const newWorkspaceItemIds = new Set<string>();
   const workspacePanelIds = new Set<string>();
   const commandCenterItemIds = new Set<string>();
   const clientSlashCommandNames = new Set<string>();
@@ -227,6 +238,34 @@ export function runPluginClientBundle(
         { ...contribution, id: normalizedId },
         () => surfaceIds.delete(normalizedId),
         contribution,
+      );
+    },
+    addComposerItem(contribution) {
+      const normalizedId = requireId(contribution.id, "composer item id");
+      if (composerItemIds.has(normalizedId))
+        throw new Error(`Duplicate composer item: ${normalizedId}`);
+      if (!isComponentType(contribution.Component)) {
+        throw new Error(`Composer item ${normalizedId} is not a component`);
+      }
+      composerItemIds.add(normalizedId);
+      return register(
+        collector.composerItems,
+        { id: normalizedId, Component: contribution.Component },
+        () => composerItemIds.delete(normalizedId),
+      );
+    },
+    addNewWorkspaceItem(contribution) {
+      const normalizedId = requireId(contribution.id, "New workspace item id");
+      if (newWorkspaceItemIds.has(normalizedId))
+        throw new Error(`Duplicate New workspace item: ${normalizedId}`);
+      if (!isComponentType(contribution.Component)) {
+        throw new Error(`New workspace item ${normalizedId} is not a component`);
+      }
+      newWorkspaceItemIds.add(normalizedId);
+      return register(
+        collector.newWorkspaceItems,
+        { id: normalizedId, Component: contribution.Component },
+        () => newWorkspaceItemIds.delete(normalizedId),
       );
     },
     addSidebarHeaderItem(contribution) {
@@ -634,6 +673,8 @@ export function runPluginClientBundle(
     sidebarHeaderItems: collector.sidebarHeaderItems,
     sidebarFooterItems: collector.sidebarFooterItems,
     filePanels: collector.filePanels,
+    composerItems: collector.composerItems,
+    newWorkspaceItems: collector.newWorkspaceItems,
     workspacePanels: collector.workspacePanels as EvaluatedPlugin["workspacePanels"],
     commandCenterItems: collector.commandCenterItems,
     clientSlashCommands: collector.clientSlashCommands,

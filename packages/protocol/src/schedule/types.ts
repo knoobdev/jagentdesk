@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AgentProviderSchema } from "../provider-manifest.js";
 
 export const ScheduleStatusSchema = z.enum(["active", "paused", "completed"]);
+
 export type ScheduleStatus = z.infer<typeof ScheduleStatusSchema>;
 
 export const ScheduleCadenceSchema = z.discriminatedUnion("type", [
@@ -15,6 +16,7 @@ export const ScheduleCadenceSchema = z.discriminatedUnion("type", [
     timezone: z.string().trim().min(1).optional(),
   }),
 ]);
+
 export type ScheduleCadence = z.infer<typeof ScheduleCadenceSchema>;
 
 export const ScheduleTargetSchema = z.discriminatedUnion("type", [
@@ -51,6 +53,7 @@ export const ScheduleTargetSchema = z.discriminatedUnion("type", [
     }),
   }),
 ]);
+
 export type ScheduleTarget = z.infer<typeof ScheduleTargetSchema>;
 
 export const ScheduleRunSchema = z.object({
@@ -64,6 +67,7 @@ export const ScheduleRunSchema = z.object({
   output: z.string().nullable(),
   error: z.string().nullable(),
 });
+
 export type ScheduleRun = z.infer<typeof ScheduleRunSchema>;
 
 export const StoredScheduleSchema = z.object({
@@ -82,11 +86,13 @@ export const StoredScheduleSchema = z.object({
   maxRuns: z.number().int().positive().nullable(),
   runs: z.array(ScheduleRunSchema),
 });
+
 export type StoredSchedule = z.infer<typeof StoredScheduleSchema>;
 
 export const ScheduleSummarySchema = StoredScheduleSchema.omit({
   runs: true,
 });
+
 export type ScheduleSummary = z.infer<typeof ScheduleSummarySchema>;
 
 export interface CreateScheduleInput {

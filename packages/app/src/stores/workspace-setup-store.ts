@@ -1,6 +1,8 @@
-import type { SessionOutboundMessage } from "@jagentdesk/protocol/messages";
+import { type SessionOutboundMessage } from "@jagentdesk/protocol/messages";
 import { create } from "zustand";
 import { buildWorkspaceTabPersistenceKey } from "@/workspace-tabs/model";
+import { createNameId } from "mnemonic-id";
+import { generateDraftId } from "@/stores/draft-keys";
 
 export type WorkspaceCreationMethod = "open_project" | "create_worktree";
 
@@ -38,18 +40,28 @@ export function shouldShowWorkspaceSetup(snapshot: WorkspaceSetupSnapshot | null
 }
 
 interface WorkspaceSetupStoreState {
-  pendingWorkspaceSetup: PendingWorkspaceSetup | null;
+  pendingWorkspaceSetup:
+    | (PendingWorkspaceSetup & { creationId: string; worktreeSlug: string })
+    | null;
+
   snapshots: Record<string, WorkspaceSetupSnapshot>;
+
   requestedKeys: Set<string>;
+
   beginWorkspaceSetup: (value: PendingWorkspaceSetup) => void;
+
   clearWorkspaceSetup: () => void;
+
   upsertProgress: (input: { serverId: string; payload: WorkspaceSetupProgressPayload }) => void;
+
   ensureSetupStatus: (input: {
     serverId: string;
     workspaceId: string;
     client: WorkspaceSetupStatusClient;
   }) => void;
+
   removeWorkspace: (input: { serverId: string; workspaceId: string }) => void;
+
   clearServer: (serverId: string) => void;
 }
 
@@ -62,7 +74,13 @@ export const useWorkspaceSetupStore = create<WorkspaceSetupStoreState>()((set, g
   snapshots: {},
   requestedKeys: new Set(),
   beginWorkspaceSetup: (value) => {
-    set({ pendingWorkspaceSetup: value });
+    set({
+      pendingWorkspaceSetup: {
+        ...value,
+        creationId: generateDraftId(),
+        worktreeSlug: createNameId(),
+      },
+    });
   },
   clearWorkspaceSetup: () => {
     set({ pendingWorkspaceSetup: null });

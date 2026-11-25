@@ -1,5 +1,5 @@
 import { normalizeWorkspaceFileLocation, workspaceFileLocationsEqual } from "@/workspace/file-open";
-import type { WorkspaceDraftTabSetup, WorkspaceTabTarget } from "@/workspace-tabs/model";
+import { type WorkspaceDraftTabSetup, type WorkspaceTabTarget } from "@/workspace-tabs/model";
 
 export function normalizeWorkspaceTabTarget(
   value: WorkspaceTabTarget | null | undefined,
@@ -107,7 +107,7 @@ export function normalizeWorkspaceDraftTabSetup(
     thinkingOptionId: trimOptionalString(
       typeof record.thinkingOptionId === "string" ? record.thinkingOptionId : null,
     ),
-    featureValues: isPlainRecord(record.featureValues) ? { ...record.featureValues } : {},
+    providerOptions: isPlainRecord(record.providerOptions) ? { ...record.providerOptions } : {},
   };
 }
 
@@ -190,7 +190,7 @@ function workspaceDraftTabSetupsEqual(
     left.modeId === right.modeId &&
     left.model === right.model &&
     left.thinkingOptionId === right.thinkingOptionId &&
-    recordsShallowEqual(left.featureValues, right.featureValues)
+    recordsShallowEqual(left.providerOptions, right.providerOptions)
   );
 }
 
