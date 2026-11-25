@@ -357,7 +357,7 @@ jobs:
     name: Mobile iOS device IPA (Xcode, unsigned)
     needs: [validate, create-release]
     if: github.event_name != 'workflow_dispatch' || inputs.only == 'all' || inputs.only == 'ios'
-    runs-on: macos-15
+    runs-on: macos-26
     env:
       CI: "1"
       LANG: en_US.UTF-8
@@ -386,24 +386,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for xcode_app in \
-            /Applications/Xcode_16.4.app \
-            /Applications/Xcode_16.3.app \
-            /Applications/Xcode_16.2.app \
-            /Applications/Xcode_16.1.app \
-            /Applications/Xcode.app; do
-            if [[ -d "$xcode_app/Contents/Developer" ]]; then
-              sudo xcode-select --switch "$xcode_app/Contents/Developer"
-              break
-            fi
-          done
+          # Expo 57 ships SwiftPM packages with swift-tools-version 6.2, which needs Xcode 26.
+          xcode_app="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | grep -v -i beta | sort -V | tail -n 1 || true)"
+          if [[ -z "$xcode_app" && -d /Applications/Xcode.app ]]; then
+            xcode_app=/Applications/Xcode.app
+          fi
+          if [[ -z "$xcode_app" ]]; then
+            echo "No Xcode 26 installation found on this runner."
+            ls -d /Applications/Xcode*.app || true
+            exit 1
+          fi
+          sudo xcode-select --switch "$xcode_app/Contents/Developer"
           xcodebuild -version
+          swift --version
           xcode_version="$(xcodebuild -version | awk '$1 == "Xcode" {print $2}')"
           xcode_major="${xcode_version%%.*}"
-          xcode_minor="${xcode_version#*.}"
-          xcode_minor="${xcode_minor%%.*}"
-          if (( xcode_major < 16 || (xcode_major == 16 && xcode_minor < 1) )); then
-            echo "Xcode $xcode_version is too old; React Native 0.81 requires Xcode 16.1 or newer."
+          if (( xcode_major < 26 )); then
+            echo "Xcode $xcode_version is too old; Expo 57 needs Xcode 26 (Swift tools 6.2)."
             exit 1
           fi
 
