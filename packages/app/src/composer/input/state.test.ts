@@ -1,15 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   applyDictationTranscript,
-  type MessageInputEnterContext,
-  resolveMessageInputEnterAction,
   computeCanStartDictation,
+  resolveActiveSendBehavior,
   resolveComposerSurfacePresentation,
+  resolveComposerSurfaceText,
+  resolveGlyphRailOffset,
+  resolveRetainedSelection,
   runAlternateSendAction,
-  resolveAlternateSendAction,
   runDefaultSendAction,
   runMessageInputKeyboardAction,
   stopRealtimeVoice,
+  type MessageInputEnterContext,
+  resolveMessageInputEnterAction,
+  resolveAlternateSendAction,
 } from "./state";
 
 const connected = { isConnected: true } as never;
@@ -176,7 +180,7 @@ describe("dictation transcript behavior", () => {
       defaultSendBehavior: "interrupt",
       isAgentRunning: false,
       onQueue: undefined,
-      onChangeText: (text) => actions.push(`change:${text}`),
+      replaceText: (text) => actions.push(`replace:${text}`),
       onSubmit: (payload) => actions.push(`submit:${payload.text}`),
       attachments: [],
       cwd: "/repo",
@@ -184,13 +188,19 @@ describe("dictation transcript behavior", () => {
     });
 
     expect(actions).toEqual([
-      "change:typed context spoken prompt",
+      "replace:typed context spoken prompt",
       "submit:typed context spoken prompt",
     ]);
   });
 });
 
 describe("composer send behavior", () => {
+  it("sends immediately when queue mode cannot advance past a permission", () => {
+    expect(resolveActiveSendBehavior("queue", true)).toBe("interrupt");
+    expect(resolveActiveSendBehavior("queue", false)).toBe("queue");
+    expect(resolveActiveSendBehavior("steer", true)).toBe("steer");
+  });
+
   function actions() {
     const calls: string[] = [];
     return {
@@ -224,6 +234,29 @@ describe("composer send behavior", () => {
     expect(alternateAction.calls).toEqual(["queue"]);
   });
 
+  it("uses Enter to steer and Mod+Enter to queue when steer is selected", () => {
+    const defaultAction = actions();
+    runDefaultSendAction({
+      defaultSendBehavior: "steer",
+      isAgentRunning: true,
+      onQueue: defaultAction.onQueue,
+      handleSendMessage: defaultAction.handleSendMessage,
+      handleQueueMessage: defaultAction.handleQueueMessage,
+    });
+
+    const alternateAction = actions();
+    runAlternateSendAction({
+      defaultSendBehavior: "steer",
+      isAgentRunning: true,
+      onQueue: alternateAction.onQueue,
+      handleSendMessage: alternateAction.handleSendMessage,
+      handleQueueMessage: alternateAction.handleQueueMessage,
+    });
+
+    expect(defaultAction.calls).toEqual(["send"]);
+    expect(alternateAction.calls).toEqual(["queue"]);
+  });
+
   it("uses Enter to queue and Mod+Enter to submit when queue is selected", () => {
     const defaultAction = actions();
     runDefaultSendAction({
@@ -245,6 +278,47 @@ describe("composer send behavior", () => {
 
     expect(defaultAction.calls).toEqual(["queue"]);
     expect(alternateAction.calls).toEqual(["send"]);
+  });
+
+  it("sends with the alternate action while no turn is running", () => {
+    for (const defaultSendBehavior of ["steer", "interrupt", "queue"] as const) {
+      const alternateAction = actions();
+      runAlternateSendAction({
+        defaultSendBehavior,
+        isAgentRunning: false,
+        onQueue: alternateAction.onQueue,
+        handleSendMessage: alternateAction.handleSendMessage,
+        handleQueueMessage: alternateAction.handleQueueMessage,
+      });
+      expect(alternateAction.calls).toEqual(["send"]);
+    }
+  });
+
+  it("offers an alternate action only while a turn runs and the composer can queue", () => {
+    const onQueue = () => undefined;
+    expect(
+      resolveAlternateSendAction({ defaultSendBehavior: "steer", isAgentRunning: true, onQueue }),
+    ).toBe("queue");
+    expect(
+      resolveAlternateSendAction({
+        defaultSendBehavior: "interrupt",
+        isAgentRunning: true,
+        onQueue,
+      }),
+    ).toBe("queue");
+    expect(
+      resolveAlternateSendAction({ defaultSendBehavior: "queue", isAgentRunning: true, onQueue }),
+    ).toBe("send");
+    expect(
+      resolveAlternateSendAction({ defaultSendBehavior: "steer", isAgentRunning: false, onQueue }),
+    ).toBeNull();
+    expect(
+      resolveAlternateSendAction({
+        defaultSendBehavior: "queue",
+        isAgentRunning: true,
+        onQueue: undefined,
+      }),
+    ).toBeNull();
   });
 });
 
@@ -496,54 +570,45 @@ describe("stopRealtimeVoice", () => {
   });
 });
 
-describe("alternate send action", () => {
-  function actions() {
-    const calls: string[] = [];
-    return {
-      calls,
-      handleSendMessage: () => calls.push("send"),
-      handleQueueMessage: () => calls.push("queue"),
-      onQueue: () => undefined,
-    };
-  }
-  it("sends with the alternate action while no turn is running", () => {
-    for (const defaultSendBehavior of ["steer", "interrupt", "queue"] as const) {
-      const alternateAction = actions();
-      runAlternateSendAction({
-        defaultSendBehavior,
-        isAgentRunning: false,
-        onQueue: alternateAction.onQueue,
-        handleSendMessage: alternateAction.handleSendMessage,
-        handleQueueMessage: alternateAction.handleQueueMessage,
-      });
-      expect(alternateAction.calls).toEqual(["send"]);
-    }
+describe("composer surface text", () => {
+  it("measures a new nonempty replacement before it reaches the editing handle", () => {
+    const replacement = { kind: "replace" as const, key: "draft:2", text: "First\nSecond\nThird" };
+    expect(resolveComposerSurfaceText("Short draft", replacement, "draft:1")).toBe(
+      replacement.text,
+    );
   });
 
-  it("offers an alternate action only while a turn runs and the composer can queue", () => {
-    const onQueue = () => undefined;
+  it("keeps live typing once the replacement is applied", () => {
+    const replacement = { kind: "replace" as const, key: "draft:2", text: "First\nSecond\nThird" };
+    expect(resolveComposerSurfaceText("Edited live draft", replacement, "draft:2")).toBe(
+      "Edited live draft",
+    );
+  });
+
+  it("keeps the live buffer when the initial publication is already applied", () => {
+    const replacement = { kind: "initial" as const, key: "draft:0", text: "Stale publication" };
+    expect(resolveComposerSurfaceText("Live edited draft", replacement, "draft:0")).toBe(
+      "Live edited draft",
+    );
+  });
+});
+
+describe("retained selection", () => {
+  it("keeps a caret that fits and clamps one that no longer does", () => {
+    expect(resolveRetainedSelection({ start: 4, end: 17 }, 40)).toEqual({ start: 4, end: 17 });
+    expect(resolveRetainedSelection({ start: 4, end: 17 }, 10)).toEqual({ start: 4, end: 10 });
+    expect(resolveRetainedSelection({ start: 12, end: 17 }, 10)).toEqual({ start: 10, end: 10 });
+    expect(resolveRetainedSelection({ start: -1, end: 3 }, 10)).toEqual({ start: 0, end: 3 });
+  });
+});
+
+describe("fullscreen glyph rail", () => {
+  it("nudges 16px fullscreen glyphs onto the Send arrow's ink edge", () => {
     expect(
-      resolveAlternateSendAction({ defaultSendBehavior: "steer", isAgentRunning: true, onQueue }),
-    ).toBe("queue");
+      resolveGlyphRailOffset({ controlSize: 28, sendIconSize: 16, glyphIconSize: 16 }),
+    ).toBeCloseTo(4 / 3);
     expect(
-      resolveAlternateSendAction({
-        defaultSendBehavior: "interrupt",
-        isAgentRunning: true,
-        onQueue,
-      }),
-    ).toBe("queue");
-    expect(
-      resolveAlternateSendAction({ defaultSendBehavior: "queue", isAgentRunning: true, onQueue }),
-    ).toBe("send");
-    expect(
-      resolveAlternateSendAction({ defaultSendBehavior: "steer", isAgentRunning: false, onQueue }),
-    ).toBeNull();
-    expect(
-      resolveAlternateSendAction({
-        defaultSendBehavior: "queue",
-        isAgentRunning: true,
-        onQueue: undefined,
-      }),
-    ).toBeNull();
+      resolveGlyphRailOffset({ controlSize: 28, sendIconSize: 20, glyphIconSize: 16 }),
+    ).toBeCloseTo(1 / 6);
   });
 });

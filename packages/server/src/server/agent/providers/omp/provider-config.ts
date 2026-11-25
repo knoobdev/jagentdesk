@@ -3,18 +3,22 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { OMP_MODES } from "@jagentdesk/protocol/provider-manifest";
 import { z } from "zod";
-
-import type { ProviderRuntimeSettings } from "../../provider-launch-config.js";
+import { type ProviderRuntimeSettings } from "../../provider-launch-config.js";
 
 const DEFAULT_OMP_MODE_ID = "full";
+
 const DEFAULT_OMP_READY_TIMEOUT_MS = 20_000;
+
 const DEFAULT_OMP_RPC_TIMEOUT_MS = 60_000;
 
 export const MIN_SUPPORTED_OMP_VERSION = "16.3.9";
+
 export { OMP_MODES };
 
 export const OmpProviderOptionsSchema = z
   .object({
+    // Composer control, not a runtime option: the session reads it and asks OMP to match.
+    fast_mode: z.boolean().optional(),
     sessionDir: z.string().min(1).optional(),
     rpcTimeoutMs: z.number().int().positive().optional(),
     smolModel: z.string().min(1).optional(),

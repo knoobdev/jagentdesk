@@ -1,7 +1,7 @@
 import { StyleSheet } from "react-native-unistyles";
 
 // Shared Sideload tab styles. Every value is a theme token (the Paseo design system values
-// live in the theme), so the tab follows light/dark and the ClickUp chrome like SimFleet.
+// live in the theme), so the tab follows light/dark and the Gumloop chrome like SimFleet.
 export const sideloadStyles = StyleSheet.create((theme) => ({
   section: {
     gap: theme.spacing[3],

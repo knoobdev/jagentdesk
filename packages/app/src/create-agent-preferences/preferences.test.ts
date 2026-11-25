@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CreateAgentPreferencesService } from "./service";
 import {
+  applyAgentProfilePreferences,
   mergeCreateAgentSelectionPreferences,
   mergeProviderPreferences,
   parseFormPreferences,
@@ -49,6 +50,25 @@ describe("create agent preferences", () => {
     });
   });
 
+  it("does not commit a failed write or leak it into the next update", async () => {
+    const storage = new FakeCreateAgentPreferenceStorage();
+    const preferences = new CreateAgentPreferencesService(storage);
+
+    const failedWrite = preferences.update({ provider: "claude" });
+    await storage.nextWrite();
+    storage.failOldestWrite(new Error("disk full"));
+    await expect(failedWrite).rejects.toThrow("disk full");
+
+    expect(await preferences.load()).toEqual({});
+
+    const successfulWrite = preferences.update({ isolation: "worktree" });
+    await storage.nextWrite();
+    storage.finishOldestWrite();
+    await successfulWrite;
+
+    expect(storage.savedPreferences()).toEqual({ isolation: "worktree" });
+  });
+
   it("flushes the full create-agent selection into provider preferences", async () => {
     const storage = new FakeCreateAgentPreferenceStorage();
     const preferences = new CreateAgentPreferencesService(storage);
@@ -60,7 +80,7 @@ describe("create agent preferences", () => {
         modelId: "gpt-5.5",
         modeId: "full-access",
         thinkingOptionId: "high",
-        featureValues: { fast_mode: true },
+        options: { service_tier: "fast" },
       }),
     );
 
@@ -75,7 +95,7 @@ describe("create agent preferences", () => {
           model: "gpt-5.5",
           mode: "full-access",
           thinkingByModel: { "gpt-5.5": "high" },
-          featureValues: { fast_mode: true },
+          options: { service_tier: "fast" },
         },
       },
     });
@@ -99,7 +119,7 @@ describe("create agent preferences", () => {
           model: "gpt-5.6",
           mode: undefined,
           thinkingByModel: undefined,
-          featureValues: undefined,
+          options: undefined,
         },
       }),
     ).toEqual({
@@ -114,8 +134,136 @@ describe("create agent preferences", () => {
     });
   });
 
+  it("erases a saved mode when a complete selection explicitly has no mode", () => {
+    expect(
+      mergeCreateAgentSelectionPreferences({
+        preferences: {
+          provider: "pi",
+          providerPreferences: { pi: { model: "anthropic/sonnet", mode: "full-access" } },
+        },
+        provider: "pi",
+        modelId: "anthropic/sonnet",
+        modeId: null,
+      }),
+    ).toEqual({
+      provider: "pi",
+      providerPreferences: { pi: { model: "anthropic/sonnet" } },
+    });
+  });
+
+  it("repairs the previous provider while applying a profile", () => {
+    expect(
+      applyAgentProfilePreferences({
+        preferences: {
+          provider: "pi",
+          providerPreferences: {
+            pi: { model: "anthropic/sonnet", mode: "full-access" },
+            mock: { model: "ten-second-stream", mode: "load-test" },
+          },
+        },
+        previousProvider: "pi",
+        previousProviderModeIds: [],
+        provider: "mock",
+        modelId: "one-minute-stream",
+        modeId: "approval-test",
+        thinkingOptionId: "",
+        options: {},
+      }),
+    ).toEqual({
+      provider: "mock",
+      providerPreferences: {
+        pi: { model: "anthropic/sonnet" },
+        mock: { model: "one-minute-stream", mode: "approval-test", options: {} },
+      },
+    });
+  });
+
   it("loads invalid stored preferences as empty preferences", () => {
     expect(parseFormPreferences({ providerPreferences: { codex: { mode: 42 } } })).toEqual({});
+  });
+
+  it("strips the explicitly supported legacy location fields", () => {
+    expect(
+      parseFormPreferences({
+        workingDir: "/old/workspace",
+        provider: "codex",
+        providerPreferences: {
+          codex: {
+            model: "gpt-5.4-mini",
+            mode: "full-access",
+            thinkingOptionId: "high",
+          },
+        },
+        serverId: "old-host",
+      }),
+    ).toEqual({
+      provider: "codex",
+      providerPreferences: {
+        codex: {
+          model: "gpt-5.4-mini",
+          mode: "full-access",
+          thinkingByModel: { "gpt-5.4-mini": "high" },
+        },
+      },
+    });
+  });
+
+  it("reads preferences saved as featureValues as options", () => {
+    expect(
+      parseFormPreferences({
+        provider: "codex",
+        providerPreferences: { codex: { featureValues: { service_tier: "priority" } } },
+      }),
+    ).toEqual({
+      provider: "codex",
+      providerPreferences: { codex: { options: { service_tier: "priority" } } },
+    });
+  });
+
+  it("reads a remembered Codex fast_mode as the service tier it meant, so the draft shows Fast", () => {
+    expect(
+      parseFormPreferences({
+        provider: "codex",
+        providerPreferences: {
+          codex: { options: { fast_mode: true, sandbox_mode: "read-only" } },
+          claude: { options: { fast_mode: true } },
+        },
+      }),
+    ).toEqual({
+      provider: "codex",
+      providerPreferences: {
+        codex: { options: { service_tier: "fast", sandbox_mode: "read-only" } },
+        claude: { options: { fast_mode: true } },
+      },
+    });
+
+    expect(
+      parseFormPreferences({
+        providerPreferences: { codex: { featureValues: { fast_mode: false } } },
+      }),
+    ).toEqual({ providerPreferences: { codex: { options: { service_tier: "default" } } } });
+
+    // A tier already remembered wins over the key it replaced.
+    expect(
+      parseFormPreferences({
+        providerPreferences: { codex: { options: { fast_mode: true, service_tier: "default" } } },
+      }),
+    ).toEqual({ providerPreferences: { codex: { options: { service_tier: "default" } } } });
+  });
+
+  it("keeps options that are not booleans or strings, such as a profile's sandbox settings", () => {
+    const options = {
+      sandbox_workspace_write: { network_access: true, writable_roots: ["/tmp"] },
+      max_turns: 3,
+    };
+
+    expect(
+      parseFormPreferences({ provider: "codex", providerPreferences: { codex: { options } } }),
+    ).toEqual({ provider: "codex", providerPreferences: { codex: { options } } });
+  });
+
+  it("rejects unknown persisted fields outside the explicit legacy shape", () => {
+    expect(parseFormPreferences({ provider: "codex", surprise: true })).toEqual({});
   });
 
   it("persists and reloads the workspace isolation choice", async () => {
@@ -133,11 +281,53 @@ describe("create agent preferences", () => {
     });
   });
 
+  it("preserves legacy favourites across preference writes until host migration", async () => {
+    const favoriteModels = [{ provider: "claude", modelId: "opus" }];
+    const storage = new FakeCreateAgentPreferenceStorage({ stored: { favoriteModels } });
+    const preferences = new CreateAgentPreferencesService(storage);
+
+    const save = preferences.update({ isolation: "worktree" });
+    await storage.nextWrite();
+    storage.finishOldestWrite();
+    await save;
+
+    expect(storage.savedPreferences()).toEqual({ favoriteModels, isolation: "worktree" });
+  });
+
   it("treats stored preferences without an isolation choice as undefined", () => {
     expect(parseFormPreferences({ provider: "codex" }).isolation).toBeUndefined();
   });
 
   it("rejects an unknown isolation value as invalid stored preferences", () => {
     expect(parseFormPreferences({ provider: "codex", isolation: "sandbox" })).toEqual({});
+  });
+
+  it("persists and reloads a terminal launch target", async () => {
+    const storage = new FakeCreateAgentPreferenceStorage();
+    const preferences = new CreateAgentPreferencesService(storage);
+
+    const save = preferences.update({ launchTarget: { kind: "terminal", profileId: "claude" } });
+    await storage.nextWrite();
+    storage.finishOldestWrite();
+    await save;
+
+    expect(storage.savedPreferences()).toEqual({
+      launchTarget: { kind: "terminal", profileId: "claude" },
+    });
+    expect(await new CreateAgentPreferencesService(storage).load()).toEqual({
+      launchTarget: { kind: "terminal", profileId: "claude" },
+    });
+  });
+
+  it("treats stored preferences without a launch target as undefined, defaulting to chat", () => {
+    expect(parseFormPreferences({ provider: "codex" }).launchTarget).toBeUndefined();
+  });
+
+  it("rejects a terminal launch target missing a profileId as invalid stored preferences", () => {
+    expect(parseFormPreferences({ launchTarget: { kind: "terminal" } })).toEqual({});
+  });
+
+  it("rejects an unknown launch target kind as invalid stored preferences", () => {
+    expect(parseFormPreferences({ launchTarget: { kind: "shell" } })).toEqual({});
   });
 });

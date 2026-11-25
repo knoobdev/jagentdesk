@@ -319,7 +319,7 @@ export function ContextMenuTrigger({
 
   const handleContextMenu = useCallback(
     (event: unknown) => {
-      if (isNative) {
+      if (isNative || !shouldEnableOnThisPlatform) {
         return;
       }
       if (typeof event === "object" && event !== null) {
@@ -330,7 +330,7 @@ export function ContextMenuTrigger({
       }
       openAtEvent(event);
     },
-    [openAtEvent],
+    [openAtEvent, shouldEnableOnThisPlatform],
   );
 
   const pressableStyle = useCallback(

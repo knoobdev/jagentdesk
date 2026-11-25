@@ -1,5 +1,5 @@
-import type { RuntimeCleanupCandidate } from "./idle-runtime-cleanup/index.js";
-import type { ProviderJAgentDeskToolsPolicy } from "@jagentdesk/protocol/provider-config";
+import { type RuntimeCleanupCandidate } from "./idle-runtime-cleanup/index.js";
+import { type ProviderJAgentDeskToolsPolicy } from "@jagentdesk/protocol/provider-config";
 import { isJAgentDeskToolPolicyEnabled } from "./jagentdesk-tool-policy.js";
 import type { AttachedAgentTool, PluginAgentToolsRuntime } from "../plugins/agent-tools.js";
 import type { AgentToolResult } from "@jagentdesk/plugin/server";
@@ -7,7 +7,7 @@ import { TimelineProjection } from "./timeline-projection.js";
 import type { PluginLifecycle } from "../plugins/lifecycle/index.js";
 import { describeHookAgent, publishAgentStream } from "../plugins/lifecycle/index.js";
 import type { PluginSessionOpenRequest } from "@jagentdesk/plugin/server";
-import { ensureAgentLoaded } from "./agent-loading.js";
+import { ensureAgentLoaded, AgentNotFoundError } from "./agent-loading.js";
 import { randomUUID } from "node:crypto";
 import { AgentTurnChangedError } from "./agent-prompt.js";
 import { continuesAssistantMessage, projectTimelineRows } from "./timeline-projection.js";
@@ -26,11 +26,15 @@ import {
   isOpenAgentTabLabel,
   PARENT_AGENT_ID_LABEL,
 } from "@jagentdesk/protocol/agent-labels";
-import type { Logger } from "pino";
-import type { ToolPolicy } from "@jagentdesk/protocol/agent-types";
+import { type Logger } from "pino";
+import {
+  type ToolPolicy,
+  type AgentUsageTotals,
+  type JsonValue,
+  type ProviderOptions,
+} from "@jagentdesk/protocol/agent-types";
 import { z } from "zod";
-import type { TerminalManager } from "../../terminal/terminal-manager.js";
-
+import { type TerminalManager } from "../../terminal/terminal-manager.js";
 import {
   AgentTurnStartCanceledError,
   getAgentStreamEventTurnId,
@@ -39,7 +43,6 @@ import {
   type AgentCreateSessionOptions,
   type AgentResumePurpose,
   type AgentResumeSessionOptions,
-  type AgentFeature,
   type AgentLaunchContext,
   type AgentSlashCommand,
   type AgentMode,
@@ -64,11 +67,13 @@ import {
   type ImportedTimelineEntry,
   type ImportableProviderSession,
   type ListImportableSessionsOptions,
+  type AgentDraftControls,
+  type AgentOptionControl,
 } from "./agent-sdk-types.js";
 import { buildArchivedAgentRecord, type ArchivedStoredAgentRecord } from "./agent-archive.js";
 import { buildAgentForkContextAttachment } from "./activity-curator.js";
 import type { AgentAttachment } from "@jagentdesk/protocol/messages";
-import type { AgentUsageTotals } from "@jagentdesk/protocol/agent-types";
+
 import { sanitizeAgentMetrics, withModelMetric } from "./agent-metrics.js";
 import type { StoredAgentRecord, AgentStorage } from "./agent-storage.js";
 import type { AgentOwner } from "./agent-owner.js";
@@ -76,11 +81,11 @@ import {
   InMemoryAgentTimelineStore,
   type SeedAgentTimelineOptions,
 } from "./agent-timeline-store.js";
-import type {
-  AgentTimelineFetchOptions,
-  AgentTimelineFetchResult,
-  AgentTimelineRow,
-  AgentTimelineStore,
+import {
+  type AgentTimelineFetchOptions,
+  type AgentTimelineFetchResult,
+  type AgentTimelineRow,
+  type AgentTimelineStore,
 } from "./agent-timeline-store-types.js";
 import {
   AGENT_STREAM_COALESCE_DEFAULT_WINDOW_MS,
@@ -101,7 +106,7 @@ import {
   withRuntimeJAgentDeskMcpServer,
 } from "./runtime-mcp-config.js";
 import { resolveCreateAgentTitles } from "./create-agent-title.js";
-import type { JAgentDeskToolCatalogFactory } from "./tools/types.js";
+import { type JAgentDeskToolCatalogFactory } from "./tools/types.js";
 import {
   ProviderSubagentStore,
   type ProviderSubagentDescriptor,
@@ -114,10 +119,23 @@ import {
   type DaemonBackgroundWorkInput,
   type DaemonBackgroundWorkKey,
 } from "./background-work/index.js";
-import { extractAttention } from "../persistence-hooks.js";
+import { extractAttention, buildSessionConfig } from "../persistence-hooks.js";
+import { ProviderOptionsValidationError } from "./provider-options.js";
+import { applyRecordPatch } from "../record-patch.js";
+import {
+  applyProviderOptionsPatch,
+  exposeFeatureValuesToHook,
+  convertLegacyOptions,
+  MalformedLegacyOptionError,
+  resolveAdapter,
+  foldHookFeatureValues,
+  type ProviderOptionsPatch,
+} from "./option-controls.js";
 
 const RELOAD_SESSION_CLOSE_TIMEOUT_MS = 3_000;
+
 const INTERRUPT_SESSION_TIMEOUT_MS = 2_000;
+
 const STORED_AGENT_CAPABILITIES: AgentCapabilityFlags = {
   supportsStreaming: false,
   supportsSessionPersistence: true,
@@ -249,9 +267,6 @@ function buildStoredAgentConfig(record: StoredAgentRecord): AgentSessionConfig {
   if (record.config.thinkingOptionId != null) {
     config.thinkingOptionId = record.config.thinkingOptionId;
   }
-  if (record.config.featureValues != null) {
-    config.featureValues = record.config.featureValues;
-  }
   if (record.config.providerOptions != null) {
     config.providerOptions = record.config.providerOptions;
   }
@@ -265,6 +280,7 @@ function buildStoredAgentConfig(record: StoredAgentRecord): AgentSessionConfig {
 }
 
 export { AGENT_LIFECYCLE_STATUSES, type AgentLifecycleStatus };
+
 export type {
   AgentTimelineCursor,
   AgentTimelineFetchDirection,
@@ -351,11 +367,14 @@ interface ProviderEnabledFlag {
     toolPolicy: ToolPolicy | undefined,
   ) => AgentSessionConfig;
 }
+
 type ProviderEnabledMap = Partial<Record<AgentProvider, ProviderEnabledFlag>>;
+
 type ProviderClientMap = Partial<Record<AgentProvider, AgentClient>>;
 
 export interface CreateAgentOptions {
   labels?: Record<string, string>;
+  metadata?: AgentMetadata;
   initialPrompt?: string;
   env?: Record<string, string>;
   persistSession?: boolean;
@@ -475,43 +494,71 @@ interface HandleStreamEventOptions {
 
 interface ManagedAgentBase {
   id: string;
+
   provider: AgentProvider;
+
   cwd: string;
+
   /**
    * Workspace this agent belongs to, stamped at creation. Independent of cwd:
    * cwd answers "where does it run", workspaceId answers "which workspace owns it".
    * Null/undefined for legacy agents created before ownership stamping.
    */
   workspaceId?: string;
+
   owner?: AgentOwner;
+
   capabilities: AgentCapabilityFlags;
+
   config: AgentSessionConfig;
+
   /** Explicit launch overrides, before per-opening hooks and daemon-owned variables. */
   launchEnv?: Record<string, string>;
+
   runtimeInfo?: AgentRuntimeInfo;
+
   createdAt: Date;
+
   updatedAt: Date;
+
   availableModes: AgentMode[];
-  features?: AgentFeature[];
+
+  controls?: AgentOptionControl[];
+
+  /** `config.json` defaults deep-merged with `config.providerOptions`; refreshed on every state emit. */
+  effectiveOptions?: ProviderOptions;
+
   currentModeId: string | null;
+
   pendingPermissions: Map<string, AgentPermissionRequest>;
+
   bufferedPermissionResolutions: Map<
     string,
     Extract<AgentStreamEvent, { type: "permission_resolved" }>
   >;
+
   inFlightPermissionResponses: Set<string>;
+
   pendingReplacement: boolean;
+
   persistence: AgentPersistenceHandle | null;
+
   historyPrimed: boolean;
+
   lastUserMessageAt: Date | null;
+
   activeTurnId: string | null;
+
   activeTurnStartedAt: Date | null;
+
   lastUsage?: AgentUsage;
+
   /**
    * Cumulative usage accumulated across every completed turn. Persisted, unlike
    * {@link lastUsage} (a per-turn snapshot). Feeds the Usage & Cost insights.
    */
   usageTotals?: AgentUsageTotals;
+
   /**
    * Usage reported by `usage_updated` events during the CURRENT turn. Reset when
    * a turn starts. Used to bill into {@link usageTotals} when a turn ends without
@@ -523,23 +570,33 @@ interface ManagedAgentBase {
   /** Provider-owned session metrics, replaced whole on every provider update. */
   sessionMetrics?: AgentMetric[];
   lastError?: string;
+
   attention: AttentionState;
+
   foregroundTurnWaiters: Set<ForegroundTurnWaiter>;
+
   finalizedForegroundTurnIds: Set<string>;
+
   unsubscribeSession: (() => void) | null;
+
   /**
    * Internal agents are hidden from listings and don't trigger notifications.
    */
   internal?: boolean;
+
   /**
    * Background agents are durable but hidden from default discovery and never raise attention.
    * Fixed at creation.
    */
   background?: boolean;
+
   /**
    * User-defined labels for categorizing agents (e.g., { surface: "workspace" }).
    */
   labels: Record<string, string>;
+
+  /** Plugin-owned data. JAgentDesk persists and forwards it and never reads a key. */
+  metadata: AgentMetadata;
 }
 
 type ManagedAgentWithSession = ManagedAgentBase & {
@@ -598,6 +655,7 @@ type ActiveManagedAgent =
   | ManagedAgentError;
 
 type LiveManagedAgent = ActiveManagedAgent;
+
 type AgentLabelPatch = Record<string, string | null>;
 
 /**
@@ -636,6 +694,7 @@ function providerHistoryEntries(event: AgentStreamEvent): ProviderHistoryEntry[]
   }
   return [];
 }
+type AgentMetadata = Record<string, JsonValue>;
 
 function attachManagedTurnIdentity(
   agent: ActiveManagedAgent,
@@ -683,6 +742,7 @@ interface WriteLabelsResult {
 interface AgentMetadataPatch {
   title?: string;
   labels?: AgentLabelPatch;
+  metadata?: Record<string, JsonValue | null>;
 }
 
 const SYSTEM_ERROR_PREFIX = "[System Error]";
@@ -720,6 +780,7 @@ interface SteerEventBarrier {
 }
 
 const BUSY_STATUSES: Set<AgentLifecycleStatus> = new Set(["initializing", "running"]);
+
 const AgentIdSchema = z.guid();
 
 function isAgentBusy(status: AgentLifecycleStatus): boolean {
@@ -743,6 +804,11 @@ function abortMessage(reason: unknown, fallbackMessage: string): string {
 function createAbortError(signal: AbortSignal | undefined, fallbackMessage: string): Error {
   const message = abortMessage(signal?.reason, fallbackMessage);
   return Object.assign(new Error(message), { name: "AbortError" });
+}
+
+/** The user labels and plugin metadata an agent carries; both default to empty. */
+function agentEntityData(source?: { labels?: Record<string, string>; metadata?: AgentMetadata }) {
+  return { labels: source?.labels ?? {}, metadata: source?.metadata ?? {} };
 }
 
 // JAGENTDESK_WORKSPACE_ID lets an agent rename or archive its own workspace; several workspaces can
@@ -781,21 +847,6 @@ function validateAgentId(agentId: string, source: string): string {
     throw new Error(`${source}: agentId must be a UUID`);
   }
   return result.data;
-}
-
-function applyLabelPatch(
-  labels: Record<string, string>,
-  patch: AgentLabelPatch,
-): Record<string, string> {
-  const nextLabels = { ...labels };
-  for (const [key, value] of Object.entries(patch)) {
-    if (value === null) {
-      delete nextLabels[key];
-    } else {
-      nextLabels[key] = value;
-    }
-  }
-  return nextLabels;
 }
 
 function buildExplicitTimelineSeedForRegister(
@@ -899,68 +950,118 @@ function detachedAgentLabelPatch(labels: Record<string, string>): AgentLabelPatc
 
 export class AgentManager {
   private readonly pluginLifecycle: PluginLifecycle | undefined;
+
   private readonly clients = new Map<AgentProvider, AgentClient>();
+
   private readonly providerEnabled = new Map<AgentProvider, boolean>();
+
   private readonly providerDefinitions = new Map<AgentProvider, ProviderEnabledFlag>();
+
   private readonly agents = new Map<string, LiveManagedAgent>();
+
   private readonly timelineStore: InMemoryAgentTimelineStore;
+
   private readonly providerSubagents = new ProviderSubagentStore();
+
   private readonly backgroundWork = new AgentBackgroundWorkStore();
+
   private readonly agentsAwaitingInitialSnapshotPersist = new Set<string>();
+
   private readonly sessionEventTails = new Map<string, Promise<void>>();
+
   private readonly steerEventBarriers = new Map<string, SteerEventBarrier>();
+
   private readonly foregroundMutationTails = new Map<string, Promise<void>>();
+
   private readonly replacementMutationTails = new Map<string, Promise<void>>();
+
   private readonly runs = new AgentRunState();
+
   private readonly subscribers = new Set<SubscriptionRecord>();
+
   private readonly stopListeners = new Set<(agentId: string) => void>();
+
   private readonly idFactory: () => string;
+
   private readonly registry?: AgentStorage;
+
   private readonly durableTimelineStore?: AgentTimelineStore;
+
   private readonly previousStatuses = new Map<string, AgentLifecycleStatus>();
+
   private readonly backgroundTasks = new Set<Promise<void>>();
+
   private readonly agentRegistrationTasks = new Set<Promise<void>>();
+
   private readonly inFlightAgentCloses = new Map<string, Promise<void>>();
+
   private readonly historySessions = new WeakSet<AgentSession>();
+
   private readonly runtimeCleanupIdentities = new WeakMap<
     AgentSession,
     { readonly openedAt: number }
   >();
+
   private readonly collectingRuntimes = new Set<string>();
+
   private readonly lifecycleMutationTails = new Map<string, Promise<void>>();
+
   private readonly pendingCancellations = new Map<string, Promise<unknown>>();
+
   private readonly agentStreamCoalescer: AgentStreamCoalescer;
+
   private mcpBaseUrl: string | null;
+
   private readonly mcpAuthToken: string | null;
+
   private sessionOpenGeneration = 0;
+
   private readonly sessionOpenGenerations = new Map<string, number>();
+
   private readonly attachedPluginTools = new Map<string, AttachedAgentTool[]>();
+
   private readonly pluginAgentTools: PluginAgentToolsRuntime | undefined;
+
   private jagentdeskToolsEnabled = true;
+
   private readonly resolveJAgentDeskToolPolicy: NonNullable<
     AgentManagerOptions["resolveJAgentDeskToolPolicy"]
   >;
+
   private readonly jagentdeskToolPolicies = new Map<
     string,
     ProviderJAgentDeskToolsPolicy | undefined
   >();
+
   private jagentdeskToolCatalogFactory: JAgentDeskToolCatalogFactory | null = null;
+
   private appendSystemPrompt: string;
+
   private operatorContext = "";
+
   private launchEnvProvider: AgentLaunchEnvProvider | null = null;
+
   private onAgentAttention?: AgentAttentionCallback;
+
   private onAgentArchived?: AgentArchivedCallback;
+
   private onWorkspaceStateMayHaveChanged?: (params: { cwd: string }) => void;
+
   private logger: Logger;
+
   private readonly rescueTimeouts: Required<AgentManagerRescueTimeouts>;
+
   private readonly beforeSteerUnavailableFallback?: AgentManagerOptions["beforeSteerUnavailableFallback"];
+
   private readonly onUsageBilled?: AgentManagerOptions["onUsageBilled"];
+
   /**
    * Chat-history snapshot staged by a mid-conversation provider switch, keyed by
    * agentId. Consumed (and cleared) when the next user turn seeds the new
    * provider with the prior conversation.
    */
   private readonly pendingProviderSwitchSeed = new Map<string, AgentAttachment>();
+
   /**
    * In-flight host tool permission requests, keyed by requestId. Resolved when
    * the client answers via {@link respondToPermission}.
@@ -969,6 +1070,7 @@ export class AgentManager {
     string,
     (response: AgentPermissionResponse) => void
   >();
+
   private acceptingAgentRegistrations = true;
 
   constructor(options: AgentManagerOptions) {
@@ -1417,11 +1519,15 @@ export class AgentManager {
     }
   }
 
-  async listDraftFeatures(config: AgentSessionConfig): Promise<AgentFeature[]> {
+  async listDraftControls(config: AgentSessionConfig): Promise<AgentDraftControls> {
     const normalizedConfig = await this.normalizeConfig(config, { resolveDefaultModel: false });
     const client = this.requireClient(normalizedConfig.provider);
-    if (!normalizedConfig.model && !client.listFeatures) {
-      return [];
+    const options = this.effectiveOptionsFor(
+      normalizedConfig.provider,
+      normalizedConfig.providerOptions,
+    );
+    if (!normalizedConfig.model && !client.listControls) {
+      return { controls: [], options };
     }
     const available = await client.isAvailable();
     if (!available) {
@@ -1430,13 +1536,18 @@ export class AgentManager {
       );
     }
 
-    if (client.listFeatures) {
-      return await client.listFeatures(normalizedConfig);
+    if (client.listControls) {
+      return await client.listControls(normalizedConfig);
     }
 
     const session = await client.createSession(normalizedConfig);
     try {
-      return session.features ?? [];
+      // The options a session opens with, as create would report them, so the controls'
+      // selection matches what the first turn runs with.
+      return {
+        controls: session.controls ?? [],
+        options: this.openedEffectiveOptions({ session, launchedOptions: options }),
+      };
     } finally {
       try {
         await session.close();
@@ -1580,28 +1691,75 @@ export class AgentManager {
     return this.providerSubagents.fetchTimeline(parentAgentId, subagentId, options);
   }
 
-  createAgent(
+  async createAgent(
     config: AgentSessionConfig,
     agentId: string | undefined,
     options: CreateAgentOptions,
   ): Promise<ManagedAgent> {
-    return this.trackAgentRegistrationOperation(this.createAgentInternal(config, agentId, options));
+    const resolvedAgentId = validateAgentId(agentId ?? this.idFactory(), "createAgent");
+    return this.trackAgentRegistrationOperation(
+      this.runLifecycleMutation(resolvedAgentId, () =>
+        this.createAgentInternal(config, resolvedAgentId, options),
+      ),
+    );
+  }
+
+  /**
+   * Opens a stored agent whose provider left no session to resume: its first session, created
+   * from the record as it is when the lane reaches it. A write queued ahead (`setMetadata`,
+   * `setLabels`) is in that record; one queued behind applies to the live agent.
+   */
+  createAgentFromRecord(agentId: string): Promise<ManagedAgent> {
+    const resolvedAgentId = validateAgentId(agentId, "createAgentFromRecord");
+    return this.trackAgentRegistrationOperation(
+      this.runLifecycleMutation(resolvedAgentId, async () => {
+        const record = await this.requireRegistry().get(resolvedAgentId);
+        if (!record) throw new AgentNotFoundError(resolvedAgentId);
+        const config = buildSessionConfig(record, {
+          validProviders: this.getRegisteredProviderIds(),
+        });
+        if (!config) {
+          throw new Error(
+            `Agent ${resolvedAgentId} references unavailable provider '${record.provider}'`,
+          );
+        }
+        return this.createAgentInternal(config, resolvedAgentId, {
+          labels: record.labels,
+          metadata: record.metadata,
+          workspaceId: record.workspaceId,
+          owner: record.owner,
+          background: record.background,
+          env: record.launchEnv,
+        });
+      }),
+    );
   }
 
   private async createAgentInternal(
     config: AgentSessionConfig,
-    agentId: string | undefined,
+    resolvedAgentId: string,
     options: CreateAgentOptions,
   ): Promise<ManagedAgent> {
     this.assertAcceptingAgentRegistrations();
-    const resolvedAgentId = validateAgentId(agentId ?? this.idFactory(), "createAgent");
+    config = this.withConvertedOptions(config);
     if (this.pluginLifecycle && !config.internal) {
+      const sent = exposeFeatureValuesToHook(config);
       const request = await this.pluginLifecycle.before("agent.create.before", {
-        config,
+        config: sent,
         env: options.env,
+        metadata: options.metadata ?? {},
       });
-      config = { ...request.config, internal: config.internal };
-      options = { ...options, env: request.env };
+      // COMPAT(featureValues): added in v0.15.0, remove after 2027-05-01. A plugin written
+      // against the previous SDK edits `config.featureValues`.
+      config = {
+        ...foldHookFeatureValues({
+          returned: request.config,
+          sent,
+          convert: (values) => this.convertLegacyOptions(request.config.provider, values),
+        }),
+        internal: config.internal,
+      };
+      options = { ...options, env: request.env, metadata: request.metadata ?? options.metadata };
     }
     await this.deleteAgentState(resolvedAgentId);
     const { storedConfig, launchConfig } = await this.prepareSessionConfig(
@@ -1624,14 +1782,18 @@ export class AgentManager {
         title: options.initialTitle ?? storedConfig.title ?? null,
         background: options.background,
         labels: options.labels ?? {},
+        metadata: options.metadata ?? {},
       },
     );
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
     const createOptions = this.buildCreateSessionOptions(options);
+    const launchedOptions = this.launchOptionsFor({ client, own: storedConfig.providerOptions });
     const session = await client.createSession(providerLaunchConfig, launchContext, createOptions);
     await this.requireExternalMcpSupport(session, providerLaunchConfig, launchContext);
     const agent = await this.registerSession(session, storedConfig, resolvedAgentId, {
+      launchedOptions,
       labels: options.labels,
+      metadata: options.metadata,
       initialTitle: options.initialTitle,
       workspaceId: options.workspaceId,
       owner: options.owner,
@@ -1665,6 +1827,7 @@ export class AgentManager {
       updatedAt?: Date;
       lastUserMessageAt?: Date | null;
       labels?: Record<string, string>;
+      metadata?: AgentMetadata;
       workspaceId?: string;
       owner?: AgentOwner;
       background?: boolean;
@@ -1686,6 +1849,7 @@ export class AgentManager {
       updatedAt?: Date;
       lastUserMessageAt?: Date | null;
       labels?: Record<string, string>;
+      metadata?: AgentMetadata;
       workspaceId?: string;
       owner?: AgentOwner;
       background?: boolean;
@@ -1733,12 +1897,11 @@ export class AgentManager {
         reason: "resume",
         purpose,
         workspaceId,
-        title: record?.title ?? mergedConfig.title ?? null,
-        labels: record?.labels ?? options?.labels ?? {},
-        background: options?.background,
+        ...resumeLaunchIdentity(record, mergedConfig, options),
       },
     );
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
+    const launchedOptions = this.launchOptionsFor({ client, own: storedConfig.providerOptions });
     const session = await client.resumeSession(
       handle,
       providerLaunchConfig,
@@ -1748,7 +1911,11 @@ export class AgentManager {
     if (purpose === "history") this.historySessions.add(session);
     await this.requireExternalMcpSupport(session, providerLaunchConfig, launchContext);
     return this.registerSession(session, storedConfig, resolvedAgentId, {
+      launchedOptions,
       ...options,
+      // The caller read its metadata before this turn in the lane; a setMetadata queued ahead of
+      // it has saved a newer record, the one the open hooks saw.
+      ...(record ? { metadata: record.metadata } : {}),
       restoring: true,
       sessionMetrics: readSessionMetrics(record),
       launchEnv,
@@ -1807,6 +1974,7 @@ export class AgentManager {
       },
     );
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
+    const launchedOptions = this.launchOptionsFor({ client, own: storedConfig.providerOptions });
     const imported = await client.importSession(
       {
         providerHandleId: input.providerHandleId,
@@ -1830,6 +1998,7 @@ export class AgentManager {
 
       handedToRegistration = true;
       const agent = await this.registerSession(imported.session, importedConfig, resolvedAgentId, {
+        launchedOptions,
         labels: input.labels,
         workspaceId: input.workspaceId,
         timelineRows,
@@ -1910,10 +2079,12 @@ export class AgentManager {
         title: await this.resolveInitialPersistedTitle(agentId, existing.config, null),
         background: existing.background,
         labels: existing.labels,
+        metadata: existing.metadata,
       },
     );
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
 
+    const launchedOptions = this.launchOptionsFor({ client, own: storedConfig.providerOptions });
     const session = handle
       ? await client.resumeSession(handle, providerLaunchConfig, launchContext)
       : await client.createSession(providerLaunchConfig, launchContext);
@@ -1943,7 +2114,9 @@ export class AgentManager {
       // Preserve existing labels and timeline during reload.
       handedToRegistration = true;
       return this.registerSession(session, storedConfig, agentId, {
+        launchedOptions,
         labels: existing.labels,
+        metadata: existing.metadata,
         workspaceId: existing.workspaceId,
         owner: existing.owner,
         background: existing.background,
@@ -2307,7 +2480,11 @@ export class AgentManager {
         createdAt: new Date(record.createdAt),
         updatedAt,
         availableModes: [],
-        features: record.features,
+        controls: record.controls,
+        effectiveOptions: this.effectiveOptionsFor(
+          record.provider,
+          record.config?.providerOptions ?? undefined,
+        ),
         currentModeId: record.lastModeId ?? null,
         pendingPermissions: new Map(),
         bufferedPermissionResolutions: new Map(),
@@ -2330,9 +2507,15 @@ export class AgentManager {
         internal: record.internal,
         background: record.background,
         labels: record.labels,
+        metadata: record.metadata,
       },
     });
   }
+
+  // Mode, model, thinking and options change inside the agent's lifecycle lane, like every other
+  // mutation of one agent. A provider session therefore never has two of `setMode`, `setModel`,
+  // `setThinkingOption` and `applyOptions` in flight at once, and none of them overlaps an open,
+  // reload or close; providers do no sequencing of their own.
 
   async setAgentMode(agentId: string, modeId: string): Promise<AgentProviderNotice | null> {
     return this.runLifecycleMutation(agentId, () =>
@@ -2352,6 +2535,7 @@ export class AgentManager {
       }),
     );
   }
+
   /**
    * Switch a live agent to a DIFFERENT provider mid-conversation while keeping
    * its history. A native provider session is not portable, so we snapshot the
@@ -2405,7 +2589,7 @@ export class AgentManager {
       model: normalizedModelId,
       modeId: undefined,
       thinkingOptionId: undefined,
-      featureValues: undefined,
+      providerOptions: undefined,
       extra: undefined,
     } as AgentSessionConfig;
 
@@ -2436,6 +2620,8 @@ export class AgentManager {
 
       handedToRegistration = true;
       const registered = await this.registerSession(session, storedConfig, agentId, {
+        launchedOptions: this.launchOptionsFor({ client, own: storedConfig.providerOptions }),
+        metadata: existing.metadata,
         labels: existing.labels,
         workspaceId: existing.workspaceId,
         owner: existing.owner,
@@ -2494,6 +2680,7 @@ export class AgentManager {
       }),
     );
   }
+
   async setAgentThinkingOption(
     agentId: string,
     thinkingOptionId: string | null,
@@ -2530,21 +2717,133 @@ export class AgentManager {
       }),
     );
   }
-  async setAgentFeature(agentId: string, featureId: string, value: unknown): Promise<void> {
-    return this.runLifecycleMutation(agentId, () =>
-      this.withLiveInteractiveSessionUnlocked(agentId, async (agent) => {
-        if (!agent.session.setFeature) {
-          throw new Error("Agent session does not support setting features");
-        }
 
-        await agent.session.setFeature(featureId, value);
+  /**
+   * Applies an options patch to a running agent (see `AgentSession.applyOptions`). The provider
+   * gets each key the patch touches, resolved against the `config.json` defaults, with `null`
+   * where nothing is set. The patch and whatever the provider says it ended up with are stored in
+   * one step once the provider accepts. Patches to one agent run one at a time, in arrival order.
+   */
+  async setAgentOptions(agentId: string, requested: ProviderOptionsPatch): Promise<void> {
+    return this.runLifecycleMutation(agentId, async () => {
+      const agent = await this.ensureInteractiveSessionUnlocked(agentId);
+      const patch = this.convertLegacyOptions(agent.provider, requested);
+      let ended: ProviderOptionsPatch = {};
+      let sent: ProviderOptionsPatch = {};
+      if (Object.keys(patch).length > 0) {
+        // A provider that cannot apply options to a running agent must not store them either.
+        if (!agent.session.applyOptions) {
+          throw new ProviderOptionsValidationError(
+            agent.provider,
+            Object.keys(patch).map((key) => ({
+              path: [key],
+              message: "cannot change on a running session; it applies when the agent is opened",
+            })),
+          );
+        }
+        const set = Object.fromEntries(Object.entries(patch).filter(([, value]) => value != null));
+        const resolved = this.effectiveOptionsFor(agent.provider, set);
+        sent = Object.fromEntries(Object.keys(patch).map((key) => [key, resolved[key] ?? null]));
+        ended = (await agent.session.applyOptions(sent)) ?? {};
+        // Changes the provider made on its own while applying are older than its final answer.
         await this.drainSessionEvents(agentId);
-        agent.config.featureValues = { ...agent.config.featureValues, [featureId]: value };
-        this.touchUpdatedAt(agent);
-        this.emitState(agent);
-      }),
-    );
+      }
+      this.storeOptionsPatch({ agent, patch: { ...patch, ...ended } });
+      this.updateEffectiveOptions({ agent, sent, reported: ended });
+      this.touchUpdatedAt(agent);
+      this.emitState(agent);
+    });
   }
+
+  /** The config as the opened session left it: its own difference from the options it was given. */
+  private withOpenedOptions(input: {
+    config: AgentSessionConfig;
+    session: AgentSession;
+  }): AgentSessionConfig {
+    const { config } = input;
+    const opened = input.session.openOptionsPatch;
+    if (!opened || Object.keys(opened).length === 0) return config;
+    const own = applyProviderOptionsPatch({ options: config.providerOptions, patch: opened });
+    return { ...config, providerOptions: Object.keys(own).length > 0 ? own : undefined };
+  }
+
+  private storeOptionsPatch(input: { agent: ManagedAgent; patch: ProviderOptionsPatch }): void {
+    const { agent } = input;
+    const own = applyProviderOptionsPatch({
+      options: agent.config.providerOptions,
+      patch: input.patch,
+    });
+    agent.config.providerOptions = Object.keys(own).length > 0 ? own : undefined;
+  }
+
+  /**
+   * What the running session has: the options it opened with, moved only by what an apply sent
+   * it (defaults merged in, `null` where a removal left nothing) and by what the provider reports
+   * back. The agent's own stored options keep only the raw patch.
+   */
+  private updateEffectiveOptions(input: {
+    agent: ManagedAgent;
+    sent: ProviderOptionsPatch;
+    reported: ProviderOptionsPatch;
+  }): void {
+    input.agent.effectiveOptions = applyProviderOptionsPatch({
+      options: input.agent.effectiveOptions,
+      patch: { ...input.sent, ...input.reported },
+    });
+  }
+
+  /**
+   * Defaults merge into what the session was given; what it reports it ended up with comes
+   * after, so an option it dropped does not come back from a default.
+   */
+  private openedEffectiveOptions(input: {
+    session: AgentSession;
+    launchedOptions: ProviderOptions;
+  }): ProviderOptions {
+    return applyProviderOptionsPatch({
+      options: input.launchedOptions,
+      patch: input.session.openOptionsPatch ?? {},
+    });
+  }
+
+  /** The options a client opens with: its own defaults merged under the agent's. */
+  private launchOptionsFor(input: {
+    client: AgentClient;
+    own: ProviderOptions | undefined;
+  }): ProviderOptions {
+    return input.client.effectiveOptions?.(input.own) ?? input.own ?? {};
+  }
+
+  /**
+   * What an agent of this provider runs with, given its own options: the defaults under them.
+   * Stored records are read through here before they are reopened, so the legacy conversion
+   * runs here too; a record converted on open passes through unchanged. A legacy value the
+   * conversion cannot read stays as stored: this describes the record, and opening or changing
+   * the agent is what rejects the value.
+   */
+  effectiveOptionsFor(provider: AgentProvider, own: ProviderOptions | undefined): ProviderOptions {
+    const client = this.clients.get(provider);
+    const converted = this.convertStoredOptions(provider, own);
+    return client ? this.launchOptionsFor({ client, own: converted }) : (converted ?? {});
+  }
+
+  private convertStoredOptions(
+    provider: AgentProvider,
+    own: ProviderOptions | undefined,
+  ): ProviderOptions | undefined {
+    try {
+      return this.convertLegacyOptions(provider, own);
+    } catch (error) {
+      if (error instanceof MalformedLegacyOptionError) return own;
+      throw error;
+    }
+  }
+
+  // COMPAT(featureValues): added in v0.9.59, remove after 2027-05-25 once legacy callers use options.
+  async setAgentFeature(agentId: string, featureId: string, value: unknown): Promise<void> {
+    await this.setAgentOptions(agentId, { [featureId]: value });
+  }
+
   async setTitle(agentId: string, title: string): Promise<void> {
     const agent = this.requireAgent(agentId);
     const normalizedTitle = title.trim();
@@ -2570,10 +2869,30 @@ export class AgentManager {
     });
   }
 
+  /** Applies a plugin-metadata patch (null removes a key) and returns the stored result. */
+  async setMetadata(
+    agentId: string,
+    patch: Record<string, JsonValue | null>,
+  ): Promise<AgentMetadata> {
+    return this.runLifecycleMutation(agentId, async () => {
+      const liveAgent = this.agents.get(agentId);
+      if (liveAgent) {
+        liveAgent.metadata = applyRecordPatch<JsonValue>(liveAgent.metadata, patch);
+        this.touchUpdatedAt(liveAgent);
+        await this.persistSnapshot(liveAgent);
+        this.emitState(liveAgent, { persist: false });
+        return liveAgent.metadata;
+      }
+      const record = await this.writeStoredMetadata(agentId, { metadata: patch });
+      if (!record.internal) this.dispatchStoredAgentState(record);
+      return record.metadata;
+    });
+  }
+
   private async writeLabels(agentId: string, patch: AgentLabelPatch): Promise<WriteLabelsResult> {
     const liveAgent = this.agents.get(agentId);
     if (liveAgent) {
-      liveAgent.labels = applyLabelPatch(liveAgent.labels, patch);
+      liveAgent.labels = applyRecordPatch(liveAgent.labels, patch);
       this.touchUpdatedAt(liveAgent);
       await this.persistSnapshot(liveAgent);
       this.emitState(liveAgent, { persist: false });
@@ -2598,7 +2917,8 @@ export class AgentManager {
     const nextRecord = {
       ...record,
       ...(patch.title ? { title: patch.title } : {}),
-      ...(patch.labels ? { labels: applyLabelPatch(record.labels, patch.labels) } : {}),
+      ...(patch.labels ? { labels: applyRecordPatch(record.labels, patch.labels) } : {}),
+      ...(patch.metadata ? { metadata: applyRecordPatch(record.metadata, patch.metadata) } : {}),
       updatedAt: this.nextStoredUpdatedAt(record),
     };
     await registry.upsert(nextRecord);
@@ -2715,18 +3035,30 @@ export class AgentManager {
     agentId: string,
     updates?: { workspaceId?: string; labels?: AgentLabelPatch },
   ): Promise<boolean> {
+    return this.runLifecycleMutation(agentId, () =>
+      this.unarchiveSnapshotUnlocked(agentId, updates),
+    );
+  }
+
+  private async unarchiveSnapshotUnlocked(
+    agentId: string,
+    updates?: { workspaceId?: string; labels?: AgentLabelPatch },
+  ): Promise<boolean> {
     const registry = this.requireRegistry();
     const record = await registry.get(agentId);
     if (!record || !record.archivedAt) {
       return false;
     }
 
+    // Close and native restore share the lifecycle lane with persisted resume.
+    // No new history or interactive runtime can acquire the writer between them.
+    if (this.agents.has(agentId)) await this.closeAgentRuntime(agentId);
     await this.syncNativeArchiveState(record.provider, record.persistence, "restore");
 
     const nextRecord: StoredAgentRecord = {
       ...record,
       ...(updates?.workspaceId ? { workspaceId: updates.workspaceId } : {}),
-      ...(updates?.labels ? { labels: applyLabelPatch(record.labels, updates.labels) } : {}),
+      ...(updates?.labels ? { labels: applyRecordPatch(record.labels, updates.labels) } : {}),
       archivedAt: null,
       updatedAt: new Date().toISOString(),
     };
@@ -3804,7 +4136,7 @@ export class AgentManager {
       return isCreateConfigUnattended({
         modeId: agent.currentModeId,
         config: agent.config,
-        features: agent.features,
+        controls: agent.controls,
         availableModes: agent.availableModes,
       });
     } catch (error) {
@@ -4279,13 +4611,14 @@ export class AgentManager {
 
   private async registerSession(
     session: AgentSession,
-    config: AgentSessionConfig,
+    openedConfig: AgentSessionConfig,
     agentId: string,
-    options?: {
+    options: {
       createdAt?: Date;
       updatedAt?: Date;
       lastUserMessageAt?: Date | null;
       labels?: Record<string, string>;
+      metadata?: AgentMetadata;
       timeline?: AgentTimelineItem[];
       timelineRows?: AgentTimelineRow[];
       timelineNextSeq?: number;
@@ -4301,6 +4634,12 @@ export class AgentManager {
        * attention come from what was already recorded, and installing the session is not
        * activity in it.
        */
+      /**
+       * The effective options the opening resolved before the session started. Registration
+       * starts from these rather than reading the defaults again, which may have been edited
+       * while the provider was opening.
+       */
+      launchedOptions: ProviderOptions;
       restoring?: boolean;
       initialTitle?: string | null;
       publishWhenReady?: boolean;
@@ -4313,6 +4652,7 @@ export class AgentManager {
     let registered = false;
     try {
       this.assertAcceptingAgentRegistrations();
+      const config = this.withOpenedOptions({ config: openedConfig, session });
       const resolvedAgentId = validateAgentId(agentId, "registerSession");
       if (this.agents.has(resolvedAgentId)) {
         throw new Error(`Agent with id ${resolvedAgentId} already exists`);
@@ -4335,6 +4675,10 @@ export class AgentManager {
         resolvedAgentId,
         session,
         config,
+        effectiveOptions: this.openedEffectiveOptions({
+          session,
+          launchedOptions: options.launchedOptions,
+        }),
         now,
         durableTimelineHasRows,
         background: options?.background === true,
@@ -4483,6 +4827,7 @@ export class AgentManager {
     resolvedAgentId: string;
     session: AgentSession;
     config: AgentSessionConfig;
+    effectiveOptions: ProviderOptions;
     now: Date;
     durableTimelineHasRows: boolean;
     background: boolean;
@@ -4492,6 +4837,7 @@ export class AgentManager {
           updatedAt?: Date;
           lastUserMessageAt?: Date | null;
           labels?: Record<string, string>;
+          metadata?: AgentMetadata;
           historyPrimed?: boolean;
           lastUsage?: AgentUsage;
           usageTotals?: AgentUsageTotals;
@@ -4505,7 +4851,15 @@ export class AgentManager {
         }
       | undefined;
   }): ActiveManagedAgent {
-    const { resolvedAgentId, session, config, now, durableTimelineHasRows, options } = params;
+    const {
+      resolvedAgentId,
+      session,
+      config,
+      effectiveOptions,
+      now,
+      durableTimelineHasRows,
+      options,
+    } = params;
     return {
       id: resolvedAgentId,
       provider: config.provider,
@@ -4515,6 +4869,8 @@ export class AgentManager {
       session,
       capabilities: session.capabilities,
       config,
+      // What the session opened with. Provider defaults edited later reach it when it next opens.
+      effectiveOptions,
       runtimeInfo: undefined,
       lifecycle: "initializing",
       createdAt: options?.createdAt ?? now,
@@ -4544,7 +4900,7 @@ export class AgentManager {
       attention: resolveInitialAttention(options?.attention),
       internal: config.internal ?? false,
       background: params.background,
-      labels: options?.labels ?? {},
+      ...agentEntityData(options),
     } as ActiveManagedAgent;
   }
 
@@ -4614,6 +4970,7 @@ export class AgentManager {
       });
     }
   }
+
   private subscribeToSession(agent: ActiveManagedAgent): void {
     if (agent.unsubscribeSession) {
       return;
@@ -4832,7 +5189,7 @@ export class AgentManager {
       agent.pendingPermissions.clear();
     }
 
-    this.syncFeaturesFromSession(agent);
+    this.syncControls(agent);
     await this.refreshRuntimeInfo(agent, options);
   }
 
@@ -5195,6 +5552,35 @@ export class AgentManager {
     );
   }
 
+  private onStreamOptionsChanged(params: {
+    agent: ActiveManagedAgent;
+    patch: ProviderOptionsPatch;
+    flags: StreamEventFlags;
+  }): void {
+    const { agent, patch, flags } = params;
+    this.storeOptionsPatch({ agent, patch });
+    this.updateEffectiveOptions({ agent, sent: {}, reported: patch });
+    flags.shouldDispatchEvent = false;
+    this.emitState(agent);
+  }
+
+  private onStreamModelChanged(
+    agent: ActiveManagedAgent,
+    event: Extract<AgentStreamEvent, { type: "model_changed" }>,
+    flags: StreamEventFlags,
+  ): void {
+    agent.runtimeInfo = event.runtimeInfo;
+    if (!agent.persistence && event.runtimeInfo.sessionId) {
+      agent.persistence = normalizePersistenceForConfig(
+        { provider: agent.provider, sessionId: event.runtimeInfo.sessionId },
+        agent.config,
+      );
+    }
+    this.applyObservedMode(agent, event.runtimeInfo.modeId ?? agent.currentModeId);
+    flags.shouldDispatchEvent = false;
+    this.emitState(agent);
+  }
+
   private dispatchStreamEventByType(params: {
     agent: ActiveManagedAgent;
     event: AgentStreamEvent;
@@ -5206,6 +5592,12 @@ export class AgentManager {
   }): Promise<void> | undefined {
     const { agent, event, options, isForegroundEvent, eventTurnId, terminalDisposition, flags } =
       params;
+    if (event.type === "session_metrics_updated") {
+      agent.sessionMetrics = sanitizeAgentMetrics(event.metrics);
+      flags.shouldDispatchEvent = false;
+      this.emitState(agent);
+      return undefined;
+    }
     switch (event.type) {
       case "thread_started":
         this.onStreamThreadStarted(agent);
@@ -5215,12 +5607,6 @@ export class AgentManager {
         // Remember this turn's running usage so it can be billed even if the
         // turn ends via cancel/fail (no turn_completed). Reset on turn start.
         agent.currentTurnUsage = event.usage;
-        this.emitState(agent);
-        return undefined;
-      case "session_metrics_updated":
-        // Clients read these from the agent snapshot; the event itself is not on the wire.
-        agent.sessionMetrics = sanitizeAgentMetrics(event.metrics);
-        flags.shouldDispatchEvent = false;
         this.emitState(agent);
         return undefined;
       case "mode_changed":
@@ -5233,16 +5619,7 @@ export class AgentManager {
         this.emitState(agent);
         return undefined;
       case "model_changed":
-        agent.runtimeInfo = event.runtimeInfo;
-        if (!agent.persistence && event.runtimeInfo.sessionId) {
-          agent.persistence = normalizePersistenceForConfig(
-            { provider: agent.provider, sessionId: event.runtimeInfo.sessionId },
-            agent.config,
-          );
-        }
-        this.applyObservedMode(agent, event.runtimeInfo.modeId ?? agent.currentModeId);
-        flags.shouldDispatchEvent = false;
-        this.emitState(agent);
+        this.onStreamModelChanged(agent, event, flags);
         return undefined;
       case "thinking_option_changed":
         agent.config.thinkingOptionId = event.thinkingOptionId ?? undefined;
@@ -5254,6 +5631,9 @@ export class AgentManager {
         }
         flags.shouldDispatchEvent = false;
         this.emitState(agent);
+        return undefined;
+      case "options_changed":
+        this.onStreamOptionsChanged({ agent, patch: event.patch, flags });
         return undefined;
       case "timeline":
         return this.onStreamTimelineEvent({ agent, event, options, flags });
@@ -5805,7 +6185,7 @@ export class AgentManager {
       this.enqueueBackgroundPersist(agent);
     }
 
-    this.syncFeaturesFromSession(agent);
+    this.syncControls(agent);
 
     this.logger.trace(
       {
@@ -5827,9 +6207,9 @@ export class AgentManager {
     });
   }
 
-  private syncFeaturesFromSession(agent: ManagedAgent): void {
-    if ("session" in agent && agent.session?.features) {
-      agent.features = agent.session.features;
+  private syncControls(agent: ManagedAgent): void {
+    if ("session" in agent && agent.session?.controls) {
+      agent.controls = agent.session.controls;
     }
   }
 
@@ -6085,7 +6465,7 @@ export class AgentManager {
     config: AgentSessionConfig,
     options: NormalizeConfigOptions = {},
   ): Promise<AgentSessionConfig> {
-    const normalized: AgentSessionConfig = { ...config };
+    const normalized: AgentSessionConfig = { ...this.withConvertedOptions(config) };
 
     // Always resolve cwd to absolute path for consistent history file lookup
     if (normalized.cwd) {
@@ -6157,6 +6537,30 @@ export class AgentManager {
     }
   }
 
+  /** The adapter a provider id runs on: a custom provider is named by the one it extends. */
+  private adapterOf(provider: AgentProvider): AgentProvider {
+    return resolveAdapter({
+      provider,
+      extendsOf: (id) => this.providerDefinitions.get(id)?.derivedFromProviderId,
+    });
+  }
+
+  /**
+   * Options older data carries are converted for the adapter the provider runs on, before
+   * defaults merge and before anything is stored; nothing past the manager sees the old keys.
+   */
+  private convertLegacyOptions<T extends ProviderOptions | undefined>(
+    provider: AgentProvider,
+    options: T,
+  ): T {
+    return convertLegacyOptions({ provider: this.adapterOf(provider), options }) as T;
+  }
+
+  private withConvertedOptions(config: AgentSessionConfig): AgentSessionConfig {
+    const providerOptions = this.convertLegacyOptions(config.provider, config.providerOptions);
+    return providerOptions === config.providerOptions ? config : { ...config, providerOptions };
+  }
+
   private async prepareSessionConfig(
     config: AgentSessionConfig,
     agentId: string,
@@ -6226,6 +6630,7 @@ export class AgentManager {
       title?: string | null;
       background?: boolean;
       labels?: Record<string, string>;
+      metadata?: AgentMetadata;
     },
   ): Promise<AgentLaunchContext> {
     // A plugin changing during this open must still make the resulting session stale.
@@ -6247,6 +6652,7 @@ export class AgentManager {
         env: { ...env },
         title: opening?.title ?? null,
         ...pluginOpeningVisibility(opening),
+        ...agentEntityData(opening),
         tools: [],
         mcpServers: {},
       };
@@ -6445,4 +6851,19 @@ function pluginOpeningVisibility(opening?: {
   background?: boolean;
 }) {
   return { labels: opening?.labels ?? {}, background: opening?.background === true };
+}
+
+function resumeLaunchIdentity(
+  record: StoredAgentRecord | null,
+  config: AgentSessionConfig,
+  options:
+    | { labels?: Record<string, string>; background?: boolean; metadata?: AgentMetadata }
+    | undefined,
+) {
+  return {
+    title: record?.title ?? config.title ?? null,
+    labels: record?.labels ?? options?.labels ?? {},
+    background: options?.background,
+    metadata: (record ?? options)?.metadata,
+  };
 }

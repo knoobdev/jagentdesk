@@ -1,15 +1,19 @@
-import { botsStrings } from "./bots";
+import { sshModuleStrings } from "./ssh-modules";
 import { builtinPluginStrings } from "./builtin-plugins";
-import type { TranslationResources } from "./en";
+import { botsStrings } from "./bots";
+import { type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 import { activityGraphStrings } from "./activity-graph";
-import { sshModuleStrings } from "./ssh-modules";
 
 export const ru: TranslationResources = {
   bots: botsStrings,
   builtinPlugins: builtinPluginStrings,
   ssh: sshModuleStrings,
-  activityGraph: activityGraphStrings,
+  pluginCombobox: {
+    searching: "Поиск…",
+    empty: "Нет результатов",
+    failed: "Не удалось выполнить поиск: {{message}}",
+  },
   paneFind: {
     connectionFailure: "Could not search this chat. Check the host connection and retry.",
     historyChangedFailure: "The chat changed while searching. Search again.",
@@ -93,6 +97,7 @@ export const ru: TranslationResources = {
       placeholder:
         "\u041F\u043E\u0438\u0441\u043A \u0440\u0430\u0431\u043E\u0447\u0438\u0445 \u043F\u0440\u043E\u0441\u0442\u0440\u0430\u043D\u0441\u0442\u0432, \u0444\u0430\u0439\u043B\u043E\u0432 \u0438 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0439...",
       noMatches: "\u041D\u0435\u0442 \u0441\u043E\u0432\u043F\u0430\u0434\u0435\u043D\u0438\u0439",
+      copyBrowserHostName: "Copy browser host name",
       actions: "\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u044F",
       workspaces:
         "\u0420\u0430\u0431\u043E\u0447\u0438\u0435 \u043F\u0440\u043E\u0441\u0442\u0440\u0430\u043D\u0441\u0442\u0432\u0430",
@@ -154,8 +159,11 @@ export const ru: TranslationResources = {
       desktop: "Напишите агенту сообщение, отметьте @files или используйте /commands и /skills.",
       mobile: "Сообщение,@files,/commands",
       fallback: "Сообщение...",
+      terminal: "Prompt",
     },
     input: {
+      fullscreen: "Fullscreen",
+      exitFullscreen: "Exit fullscreen",
       longPressToSendNow: "Long press to send now",
 
       longPressToQueue: "Long press to queue",
@@ -631,6 +639,9 @@ export const ru: TranslationResources = {
       unableToSubscribe: "Невозможно подписаться на терминал",
       restoreRequiresUpdate: "Обновите хост, чтобы просматривать терминалы.",
     },
+    sheet: {
+      openAsTab: "Открыть во вкладке",
+    },
     tabs: {
       loading: "Загрузка...",
       modified: "Несохранённые изменения",
@@ -743,6 +754,7 @@ export const ru: TranslationResources = {
     },
     header: {
       actions: {
+        workspaceActionsUnhealthy: "Действия с рабочим пространством, есть неисправный сервис",
         workspaceActions: "Действия Workspace",
         newAgent: "Новый агент",
         newTerminal: "Новый терминал",
@@ -788,6 +800,8 @@ export const ru: TranslationResources = {
         direct: "Прямой адрес",
       },
       states: {
+        runningCount: "Запущено: {{count}}",
+        running: "Выполняется",
         exitCode: "выйти из{{code}}",
         startFailed: "Не удалось запустить{{scriptName}}",
         stopFailed: "Не удалось остановить{{scriptName}}",
@@ -1299,6 +1313,8 @@ export const ru: TranslationResources = {
       project: "Проект",
       base: "База",
       baseNotApplicable: "Неприменимо",
+      host: "Хост",
+      branch: "Ветка",
     },
     titlePlaceholder: "Название (необязательно)",
     errors: {
@@ -1338,6 +1354,23 @@ export const ru: TranslationResources = {
       inProjectDirectory: "В папке проекта",
       inWorktree: "В worktree",
       title: "Начать с",
+    },
+    launch: {
+      commandPlaceholder:
+        "Введите команду или оставьте поле пустым, чтобы открыть терминал без запуска команды",
+      promptPlaceholder: "Промпт для {{name}}",
+      submit: "Запустить",
+      chat: "Чат",
+      terminal: "Терминал",
+      title: "Что запустить",
+      manageProfiles: "Управление профилями терминала",
+    },
+    tooltips: {
+      project: "Выберите проект",
+      host: "Выберите хост",
+      isolation: "Выберите уровень изоляции",
+      startingRef: "Выберите, с чего начать",
+      launch: "Выберите, что запустить",
     },
   },
   desktop: {
@@ -1601,6 +1634,16 @@ export const ru: TranslationResources = {
     noMatches: "Ни одна модель не соответствует вашему запросу",
     searchPlaceholder: "Поиск моделей...",
     openProviderSettings: "Открыть настройки{{provider}}",
+    editProfilesLabel: "Изменить профили агентов",
+    searchAllPlaceholder: "Поиск по всем моделям...",
+    createProfileFromModel: "Создать профиль из этой модели",
+    editProfileLabel: "Изменить {{name}}",
+    editProfilesCount: "Изменить профили ({{count}})",
+    profiles: "Профили",
+    createProfile: "Создать профиль",
+    noMatchesForQuery: "Нет моделей, соответствующих «{{query}}»",
+    providers: "Провайдеры",
+    model: "Модель",
   },
   providerCatalog: {
     title: "Добавить провайдера",
@@ -1816,6 +1859,7 @@ export const ru: TranslationResources = {
     backdrop: "Фон меню",
   },
   subagents: {
+    title: "Субагенты",
     parent: {
       openParent: "Open parent",
 
@@ -2229,8 +2273,8 @@ export const ru: TranslationResources = {
           claude: "Клод",
           ghostty: "Призрачный",
           pureBlack: "Чистый чёрный",
-          clickup: "ClickUp",
-          clickupDark: "ClickUp Dark",
+          gumloop: "Gumloop",
+          gumloopDark: "Gumloop Dark",
           auto: "Система",
         },
       },
@@ -2605,6 +2649,42 @@ export const ru: TranslationResources = {
           localErrorMessage: "Unable to remove localhost connection",
         },
       },
+      agentProfiles: {
+        featureCountOne: "{{count}} функция",
+        featureCount: "Функции: {{count}}",
+        editProfileTitle: "Изменить профиль агента",
+        addProfileTitle: "Добавить профиль агента",
+        iconLabel: "Значок",
+        nameLabel: "Имя",
+        namePlaceholder: "Работа над UI",
+        providerLabel: "Провайдер",
+        providerPlaceholder: "Выберите провайдера",
+        noProviders: "На этом хосте нет доступных провайдеров",
+        modelLabel: "Модель",
+        noModels: "У этого провайдера нет моделей для выбора",
+        modeLabel: "Режим",
+        noModes: "У этого провайдера нет режимов для выбора",
+        thinkingLabel: "Рассуждения",
+        noThinkingOptions: "У этой модели нет уровней рассуждений",
+        featuresLabel: "Функции",
+        notesLabel: "Когда использовать",
+        notesHint: "Помогает агентам выбрать этот профиль при запуске другого агента.",
+        notesPlaceholder: "Используйте для работы над UI — компоненты, макет и токены дизайна.",
+        saving: "Сохранение...",
+        save: "Сохранить",
+        moveUp: "Переместить вверх",
+        moveDown: "Переместить вниз",
+        editProfile: "Изменить профиль",
+        remove: "Удалить",
+        removeConfirmTitle: "Удалить профиль?",
+        removeConfirmMessage: "Удалить «{{name}}»?",
+        sectionTitle: "Профили агентов",
+        unsupported: "На этом хосте запущен демон, который пока не поддерживает профили агентов",
+        unavailable: "Подключитесь к этому хосту, чтобы управлять профилями агентов",
+        emptyState:
+          "Пока нет профилей. Добавьте один, чтобы запускать агентов с сохранённым провайдером и моделью.",
+        newProfile: "Новый профиль",
+      },
     },
     providers: {
       title: "Провайдеры",
@@ -2841,7 +2921,7 @@ export const ru: TranslationResources = {
       },
     },
   },
-  clickupShell: {
+  gumloopShell: {
     search: "Поиск",
     newWorkspace: "Новый",
     workspaces: "Рабочие пространства",
@@ -3260,6 +3340,7 @@ export const ru: TranslationResources = {
         "\u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435 \u0438 \u043F\u043E\u043F\u0440\u043E\u0431\u0443\u0439\u0442\u0435 \u0441\u043D\u043E\u0432\u0430.",
     },
   },
+  activityGraph: activityGraphStrings,
   providerUsage: {
     checkUsage: "Проверять использование",
     checkUsageHint: "Применяется к {{host}} на всех устройствах",

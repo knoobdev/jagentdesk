@@ -1,7 +1,8 @@
-import type { Agent } from "@/stores/session-store";
-import type { WorkspaceDraftTabSetup } from "@/workspace-tabs/model";
+import { type Agent } from "@/stores/session-store";
+import { type WorkspaceDraftTabSetup } from "@/workspace-tabs/model";
 
 export type ClientSlashCommandKind = "archive-agent" | "replace-agent-with-draft" | "orchestrate";
+
 export type ClientSlashCommandExecution = "immediate" | "insert";
 
 export interface ClientSlashCommand {
@@ -51,6 +52,7 @@ export const CLIENT_SLASH_COMMANDS: readonly ClientSlashCommand[] = [
 ];
 
 const COMMAND_BY_NAME = new Map<string, ClientSlashCommand>();
+
 for (const command of CLIENT_SLASH_COMMANDS) {
   COMMAND_BY_NAME.set(command.name, command);
   for (const alias of command.aliases) {
@@ -86,17 +88,12 @@ export function resolveClientSlashCommand(input: {
 }
 
 export function buildDraftAgentSetup(agent: Agent): WorkspaceDraftTabSetup {
-  const featureValues: Record<string, unknown> = {};
-  for (const feature of agent.features ?? []) {
-    featureValues[feature.id] = feature.value;
-  }
-
   return {
     provider: agent.provider,
     cwd: agent.cwd,
     modeId: agent.currentModeId ?? agent.runtimeInfo?.modeId ?? null,
     model: agent.model ?? agent.runtimeInfo?.model ?? null,
     thinkingOptionId: agent.thinkingOptionId ?? agent.runtimeInfo?.thinkingOptionId ?? null,
-    featureValues,
+    providerOptions: { ...agent.options },
   };
 }

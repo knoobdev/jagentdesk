@@ -1,3 +1,5 @@
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { AppearanceText as Text } from "@/appearance/text";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
   default as React,
@@ -9,7 +11,7 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, View } from "react-native";
 import type {
   PressableProps,
   PressableStateCallbackType,
@@ -79,7 +81,7 @@ const foregroundMutedIconMapping = (theme: Theme) => ({
   iconColor: theme.colors.foregroundMuted,
 });
 const accentForegroundIconMapping = (theme: Theme) => ({
-  iconColor: theme.colors.accentForeground,
+  iconColor: theme.chrome.createForeground,
 });
 const destructiveForegroundIconMapping = (theme: Theme) => ({
   iconColor: theme.colors.destructiveForeground,
@@ -89,6 +91,9 @@ const styles = StyleSheet.create((theme) => {
   const geometry = createControlGeometry(theme);
 
   return {
+    gumloopButton: { borderRadius: 10 },
+    gumloopSmall: { minHeight: 34 },
+    gumloopText: { fontSize: 16, fontWeight: "500" },
     base: {
       flexDirection: "row",
       alignItems: "center",
@@ -111,8 +116,8 @@ const styles = StyleSheet.create((theme) => {
       ...geometry.buttonLg,
     },
     default: {
-      backgroundColor: theme.colors.accent,
-      borderColor: theme.colors.accent,
+      backgroundColor: theme.chrome.createBackground,
+      borderColor: theme.chrome.createBackground,
     },
     secondary: {
       backgroundColor: theme.colors.surface3,
@@ -145,7 +150,7 @@ const styles = StyleSheet.create((theme) => {
       ...geometry.buttonTextXs,
     },
     textDefault: {
-      color: theme.colors.accentForeground,
+      color: theme.chrome.createForeground,
     },
     textDestructive: {
       color: theme.colors.destructiveForeground,
@@ -183,6 +188,7 @@ export function Button({
     loading?: boolean;
   }
 >) {
+  const gumloop = useIsGumloopTheme();
   const [hovered, setHovered] = useState(false);
   const isDisabled = disabled || loading;
 
@@ -219,16 +225,19 @@ export function Button({
       styles.base,
       sizeStyle,
       variantStyle,
+      gumloop && styles.gumloopButton,
+      gumloop && size === "sm" && styles.gumloopSmall,
       pressed ? styles.pressed : null,
       isDisabled ? styles.disabled : null,
       style,
     ],
-    [sizeStyle, variantStyle, isDisabled, style],
+    [gumloop, size, sizeStyle, variantStyle, isDisabled, style],
   );
 
   const resolvedTextStyle = useMemo(
     () => [
       styles.text,
+      gumloop && styles.gumloopText,
       size === "xs" ? styles.textXs : null,
       variant === "default" ? styles.textDefault : null,
       variant === "destructive" ? styles.textDestructive : null,
@@ -236,7 +245,7 @@ export function Button({
       textStyle,
       isGhostHovered ? styles.textGhostHovered : null,
     ],
-    [size, variant, textStyle, isGhostHovered],
+    [gumloop, size, variant, textStyle, isGhostHovered],
   );
 
   const accessibilityState = useMemo(

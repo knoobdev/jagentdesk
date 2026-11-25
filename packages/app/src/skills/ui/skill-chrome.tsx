@@ -8,13 +8,13 @@ import {
   type ViewStyle,
 } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { clickUpChipStyles, clickUpTabStyles } from "@/components/clickup-shell/list-styles";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { gumloopChipStyles, gumloopTabStyles } from "@/components/gumloop-shell/list-styles";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import type { Theme } from "@/styles/theme";
 
 /**
  * Small building blocks of the Skills screen. They mirror the Marketplace
- * screen's tab, chip and pill chrome (same theme tokens, ClickUp-aware) so the
+ * screen's tab, chip and pill chrome (same theme tokens, Gumloop-aware) so the
  * two stores read as one design (spec 22.6 "reuse marketplace tokens").
  */
 
@@ -26,13 +26,13 @@ interface SkillsTabButtonProps {
 }
 
 export function SkillsTabButton({ label, active, onPress, testID }: SkillsTabButtonProps) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const state = useMemo(() => ({ selected: active }), [active]);
   let tabStyle: StyleProp<ViewStyle> = active ? styles.tabActive : styles.tab;
   let textStyle: StyleProp<TextStyle> = active ? styles.tabTextActive : styles.tabText;
-  if (isClickUp) {
-    tabStyle = active ? clickUpTabStyles.tabActive : clickUpTabStyles.tab;
-    textStyle = active ? clickUpTabStyles.textActive : clickUpTabStyles.text;
+  if (isGumloop) {
+    tabStyle = active ? gumloopTabStyles.tabActive : gumloopTabStyles.tab;
+    textStyle = active ? gumloopTabStyles.textActive : gumloopTabStyles.text;
   }
   return (
     <Pressable
@@ -48,8 +48,8 @@ export function SkillsTabButton({ label, active, onPress, testID }: SkillsTabBut
 }
 
 export function SkillsTabRow({ children }: { children: ReactNode }) {
-  const isClickUp = useIsClickUpTheme();
-  return <View style={isClickUp ? clickUpTabStyles.row : styles.tabRow}>{children}</View>;
+  const isGumloop = useIsGumloopTheme();
+  return <View style={isGumloop ? gumloopTabStyles.row : styles.tabRow}>{children}</View>;
 }
 
 interface FilterChipProps<T extends string> {
@@ -67,14 +67,14 @@ export function FilterChip<T extends string>({
   onSelect,
   testID,
 }: FilterChipProps<T>) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const handlePress = useCallback(() => onSelect(value), [onSelect, value]);
   const state = useMemo(() => ({ selected: active }), [active]);
   let chipStyle: StyleProp<ViewStyle> = active ? styles.chipActive : styles.chip;
   let textStyle: StyleProp<TextStyle> = active ? styles.chipTextActive : styles.chipText;
-  if (isClickUp) {
-    chipStyle = active ? clickUpChipStyles.chipActive : clickUpChipStyles.chip;
-    textStyle = active ? clickUpChipStyles.textActive : clickUpChipStyles.text;
+  if (isGumloop) {
+    chipStyle = active ? gumloopChipStyles.chipActive : gumloopChipStyles.chip;
+    textStyle = active ? gumloopChipStyles.textActive : gumloopChipStyles.text;
   }
   return (
     <Pressable

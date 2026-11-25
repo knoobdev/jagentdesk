@@ -1,3 +1,4 @@
+import type { WorkspaceSort } from "./workspace-structure";
 import { useWorkspaceStructure } from "@/stores/session-store-hooks";
 import { type HostProjectListItem } from "@/projects/host-project-model";
 
@@ -20,7 +21,10 @@ export {
   type HostProjectRouteContext,
 } from "@/projects/host-project-model";
 
-export function useHostProjects(serverIds: string[]): HostProjectListItem[] {
-  const workspaceStructure = useWorkspaceStructure(serverIds);
+export function useHostProjects(
+  serverIds: string[],
+  workspaceSort?: WorkspaceSort,
+): HostProjectListItem[] {
+  const workspaceStructure = useWorkspaceStructure(serverIds, workspaceSort);
   return workspaceStructure.projects;
 }

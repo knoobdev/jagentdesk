@@ -15,6 +15,8 @@ function installed(serverId: string, contributionId = "main"): InstalledPlugin {
       throw new Error("Subscriptions are not used here");
     },
     settingsScreens: [],
+    composerItems: [],
+    newWorkspaceItems: [],
     surfaces: [{ id: "surface", Component: () => null }],
     sidebarItems: [
       {

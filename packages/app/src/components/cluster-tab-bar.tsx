@@ -5,8 +5,8 @@ import { X } from "lucide-react-native";
 import { useClusterNavStore } from "@/stores/cluster-nav-store";
 import { useClusterViewStore } from "@/stores/cluster-view-store";
 import type { Theme } from "@/styles/theme";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
-import { clickUpTabStyles } from "@/components/clickup-shell/list-styles";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { gumloopTabStyles } from "@/components/gumloop-shell/list-styles";
 
 const ThemedX = withUnistyles(X);
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
@@ -22,10 +22,10 @@ function Tab({
   onPress: () => void;
   onClose?: () => void;
 }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   return (
-    <Pressable style={tabStyle(isClickUp, active)} onPress={onPress}>
-      <Text style={tabLabelStyle(isClickUp, active)} numberOfLines={1}>
+    <Pressable style={tabStyle(isGumloop, active)} onPress={onPress}>
+      <Text style={tabLabelStyle(isGumloop, active)} numberOfLines={1}>
         {label}
       </Text>
       {onClose ? (
@@ -42,15 +42,15 @@ function Tab({
   );
 }
 
-/** ClickUp swaps the boxed tabs for its underlined text tabs; classic keeps the pill. */
-function tabStyle(isClickUp: boolean, active: boolean) {
-  if (!isClickUp) return [styles.tab, active && styles.tabActive];
-  return [styles.tabClickUp, active ? clickUpTabStyles.tabActive : clickUpTabStyles.tab];
+/** Gumloop swaps the boxed tabs for its underlined text tabs; classic keeps the pill. */
+function tabStyle(isGumloop: boolean, active: boolean) {
+  if (!isGumloop) return [styles.tab, active && styles.tabActive];
+  return [styles.tabGumloop, active ? gumloopTabStyles.tabActive : gumloopTabStyles.tab];
 }
 
-function tabLabelStyle(isClickUp: boolean, active: boolean) {
-  if (!isClickUp) return [styles.tabLabel, active && styles.tabLabelActive];
-  return [styles.tabLabel, active ? clickUpTabStyles.textActive : clickUpTabStyles.text];
+function tabLabelStyle(isGumloop: boolean, active: boolean) {
+  if (!isGumloop) return [styles.tabLabel, active && styles.tabLabelActive];
+  return [styles.tabLabel, active ? gumloopTabStyles.textActive : gumloopTabStyles.text];
 }
 
 /**
@@ -66,7 +66,7 @@ export function ClusterTabBar() {
   const selectedKind = useClusterNavStore((s) => s.selectedKind);
   const showingHelm = useClusterNavStore((s) => s.showingHelm);
 
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
 
   const showList = useCallback(() => setActive(null), [setActive]);
 
@@ -75,11 +75,11 @@ export function ClusterTabBar() {
   const listLabel = showingHelm ? "Releases" : (selectedKind ?? "Resources");
 
   return (
-    <View style={isClickUp ? styles.barClickUp : styles.bar}>
+    <View style={isGumloop ? styles.barGumloop : styles.bar}>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={isClickUp ? styles.barContentClickUp : styles.barContent}
+        contentContainerStyle={isGumloop ? styles.barContentGumloop : styles.barContent}
       >
         <Tab label={listLabel} active={activeTabId === null} onPress={showList} />
         {tabs.map((tab) => (
@@ -128,19 +128,19 @@ const styles = StyleSheet.create((theme: Theme) => ({
     paddingHorizontal: theme.spacing[2],
     paddingVertical: theme.spacing[1.5],
   },
-  barClickUp: {
+  barGumloop: {
     borderBottomWidth: 1,
     borderBottomColor: theme.chrome.cardBorder,
     backgroundColor: theme.chrome.cardBackground,
   },
-  barContentClickUp: {
+  barContentGumloop: {
     flexDirection: "row",
     alignItems: "flex-end",
     gap: theme.spacing[4],
     paddingHorizontal: theme.spacing[4],
     paddingTop: theme.spacing[1.5],
   },
-  tabClickUp: {
+  tabGumloop: {
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[1.5],

@@ -1,7 +1,7 @@
 import type { SshTerminalAppearance } from "@jagentdesk/protocol/ssh/snippets-schemas";
 import {
-  clickupDarkTheme,
-  clickupLightTheme,
+  gumloopDarkTheme,
+  gumloopLightTheme,
   darkClaudeTheme,
   darkGhosttyTheme,
   darkMidnightTheme,
@@ -26,8 +26,8 @@ const THEMES: Record<ThemeName, Theme> = {
   claude: darkClaudeTheme,
   ghostty: darkGhosttyTheme,
   pureBlack: darkPureBlackTheme,
-  clickup: clickupLightTheme,
-  clickupDark: clickupDarkTheme,
+  gumloop: gumloopLightTheme,
+  gumloopDark: gumloopDarkTheme,
 };
 
 export const TERMINAL_THEME_NAMES: readonly ThemeName[] = [
@@ -38,8 +38,8 @@ export const TERMINAL_THEME_NAMES: readonly ThemeName[] = [
   "claude",
   "ghostty",
   "pureBlack",
-  "clickup",
-  "clickupDark",
+  "gumloop",
+  "gumloopDark",
 ];
 
 export function isTerminalThemeName(value: string): value is ThemeName {

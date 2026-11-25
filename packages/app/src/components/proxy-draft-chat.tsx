@@ -1,6 +1,5 @@
 import { createDockWorkspace } from "@/components/dock-workspace";
 import { PROXY_AGENT_LABEL } from "@/utils/dock-agents";
-export { PROXY_AGENT_LABEL } from "@/utils/dock-agents";
 import { useMemo } from "react";
 import { Keyboard, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
@@ -8,13 +7,15 @@ import { Composer } from "@/composer";
 import { useAgentInputDraft } from "@/composer/draft/input-draft";
 import { useDraftAgentCreateFlow } from "@/composer/draft/create-flow";
 import { buildDraftStoreKey, generateDraftId } from "@/stores/draft-keys";
-import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
+import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { encodeImages } from "@/utils/encode-images";
 import { isWeb } from "@/constants/platform";
 import { buildProxySystemPrompt, proxyChatTitle } from "@/components/proxy-ask-agent";
-import type { AgentSnapshotPayload } from "@jagentdesk/protocol/messages";
-import type { CreateAgentRequestOptions } from "@jagentdesk/client/internal/daemon-client";
-import type { Theme } from "@/styles/theme";
+import { type AgentSnapshotPayload } from "@jagentdesk/protocol/messages";
+import { type CreateAgentRequestOptions } from "@jagentdesk/client/internal/daemon-client";
+import { type Theme } from "@/styles/theme";
+
+export { PROXY_AGENT_LABEL } from "@/utils/dock-agents";
 
 function resolveModeId(modeOptionIds: readonly string[], selectedMode: string): string | undefined {
   if (modeOptionIds.length === 0) return undefined;
@@ -71,10 +72,8 @@ export function ProxyDraftChat({
   onCreated: (input: { serverId: string; agentId: string; workspaceId: string | null }) => void;
 }) {
   const client = useHostRuntimeClient(serverId);
-  const isConnected = useHostRuntimeIsConnected(serverId);
   const draftId = useMemo(() => generateDraftId(), []);
   const tabId = `workbench-draft-${serverId}`;
-  const onlineServerIds = useMemo(() => (isConnected ? [serverId] : []), [isConnected, serverId]);
   const draftStoreKey = useMemo(
     () => buildDraftStoreKey({ serverId, agentId: tabId, draftId }),
     [serverId, tabId, draftId],
@@ -85,7 +84,6 @@ export function ProxyDraftChat({
       initialServerId: serverId,
       initialValues: { workingDir: cwd },
       isVisible: true,
-      onlineServerIds,
       lockedWorkingDir: cwd,
     },
   });
@@ -122,7 +120,7 @@ export function ProxyDraftChat({
         ),
         model: composerState?.effectiveModelId || undefined,
         thinkingOptionId: composerState?.effectiveThinkingOptionId || undefined,
-        featureValues: composerState?.featureValues,
+        featureValues: composerState?.providerOptions,
         images: imagesData,
         attachments: Array.isArray(attachments) ? attachments : undefined,
       });
@@ -166,8 +164,9 @@ export function ProxyDraftChat({
         onSubmitMessage={handleCreateFromInput}
         isSubmitLoading={isSubmitting}
         blurOnSubmit
-        value={draftInput.text}
-        onChangeText={draftInput.setText}
+        textSource={draftInput.textSource}
+        textReplacement={draftInput.textReplacement}
+        onChangeText={draftInput.editText}
         attachments={draftInput.attachments}
         onChangeAttachments={draftInput.setAttachments}
         cwd={composerState.workingDir}

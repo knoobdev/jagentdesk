@@ -10,24 +10,25 @@ import {
   type SessionOpenWireRequest,
   type PluginAgentTools,
 } from "../agent-tools.js";
-import type { AgentToolDefinition } from "@jagentdesk/plugin/server";
-import type { AgentStreamEvent } from "../../agent/agent-sdk-types.js";
+import {
+  type AgentToolDefinition,
+  type PluginHookAgent,
+  type PluginHookPayload,
+  type PluginHookContext,
+  type PluginLifecycleRegistration,
+  type PluginHookRequests,
+  type PluginHookWorkspace,
+  type PluginHookEvents,
+} from "@jagentdesk/plugin/server";
+import { type AgentStreamEvent } from "../../agent/agent-sdk-types.js";
 import { z } from "zod";
-import { CreateAgentRequestMessageSchema } from "@jagentdesk/protocol/messages";
-import type {
-  PluginHookAgent,
-  PluginHookPayload,
-  PluginHookContext,
-  PluginLifecycleRegistration,
-} from "@jagentdesk/plugin/server";
+import {
+  CreateAgentRequestMessageSchema,
+  WorkspaceCreateRequestSchema,
+} from "@jagentdesk/protocol/messages";
 import { PARENT_AGENT_ID_LABEL } from "@jagentdesk/protocol/agent-labels";
-import type {
-  PluginHookRequests,
-  PluginHookWorkspace,
-  PluginHookEvents,
-} from "@jagentdesk/plugin/server";
-import { WorkspaceCreateRequestSchema } from "@jagentdesk/protocol/messages";
-import type { PersistedWorkspaceRecord } from "../../workspace-registry.js";
+import { type PersistedWorkspaceRecord } from "../../workspace-registry.js";
+import { type JsonValue } from "@jagentdesk/protocol/agent-types";
 
 export type PluginWireBeforeRequests = Omit<PluginHookRequests, "agent.open.before"> & {
   "agent.open.before": SessionOpenWireRequest;
@@ -45,6 +46,7 @@ const worktreeRequestFields = {
   slug: z.string().refine((value) => validateBranchSlug(value).valid, "Invalid worktree slug"),
   path: z.string().min(1),
 };
+
 const changeRequestFields = {
   headRef: z.string().min(1),
   headRepositoryOwner: z.string().optional(),
@@ -54,6 +56,7 @@ const changeRequestFields = {
   pushRemoteUrl: z.string().optional(),
   trackOriginHead: z.boolean().optional(),
 };
+
 const worktreeRequestSchema = z.discriminatedUnion("kind", [
   z
     .object({ ...worktreeRequestFields, kind: z.literal("branch-off"), baseRef: z.string().min(1) })
@@ -91,6 +94,7 @@ const beforeSchemas = {
   "agent.create.before": CreateAgentRequestMessageSchema.pick({
     config: true,
     env: true,
+    metadata: true,
   }).strict(),
   "agent.open.before": z
     .object({
@@ -104,7 +108,8 @@ const beforeSchemas = {
       // Optional so a plugin that returns its own object keeps working; omitted means unchanged.
       background: z.boolean().optional(),
       labels: z.record(z.string(), z.string()),
-      appendSystemPrompt: z.array(z.string()).optional(),
+      // Optional so a plugin that returns its own object keeps working; omitted means unchanged.
+      metadata: z.record(z.string(), z.custom<JsonValue>()).optional(),
       tools: z.array(agentToolMetadataSchema),
       env: z.record(z.string(), z.string()),
       mcpServers: CreateAgentRequestMessageSchema.shape.config.shape.mcpServers.unwrap(),
@@ -155,6 +160,7 @@ export function describeHookWorkspace(workspace: PersistedWorkspaceRecord): Plug
     cwd: workspace.cwd,
     name: workspace.title,
     archivedAt: workspace.archivedAt,
+    metadata: workspace.metadata,
   };
 }
 
@@ -166,6 +172,7 @@ export function describeHookAgent(agent: {
   title?: string | null;
   background?: boolean;
   labels: Record<string, string>;
+  metadata: Record<string, JsonValue>;
 }): PluginHookAgent {
   return {
     id: agent.id,
@@ -174,7 +181,8 @@ export function describeHookAgent(agent: {
     provider: agent.provider,
     cwd: agent.cwd,
     title: agent.title ?? null,
-    background: agent.background === true,
+    metadata: agent.metadata,
+    background: agent.background ?? false,
   };
 }
 
@@ -225,22 +233,25 @@ export async function validateBeforeResult<Name extends keyof PluginWireBeforeRe
     const next = beforeSchemas["agent.open.before"].parse(result);
     if (
       (next.background !== undefined && previous.background !== next.background) ||
-      previous.agentId !== next.agentId ||
-      previous.workspaceId !== next.workspaceId ||
-      previous.provider !== next.provider ||
-      previous.cwd !== next.cwd ||
-      previous.reason !== next.reason ||
-      previous.purpose !== next.purpose ||
-      previous.title !== next.title ||
-      !isDeepStrictEqual(previous.labels, next.labels)
+      (
+        [
+          "agentId",
+          "workspaceId",
+          "provider",
+          "cwd",
+          "reason",
+          "purpose",
+          "title",
+          "labels",
+        ] as const
+      ).some((key) => !isDeepStrictEqual(previous[key], next[key])) ||
+      (next.metadata !== undefined && !isDeepStrictEqual(previous.metadata, next.metadata))
     ) {
       throw new Error(
         "agent.open.before hooks can only change env, tools, mcpServers, and appendSystemPrompt",
       );
     }
-    if (next.appendSystemPrompt === undefined && previous.appendSystemPrompt !== undefined)
-      return { ...result, appendSystemPrompt: previous.appendSystemPrompt };
-    return { ...result, background: previous.background };
+    return { ...result, metadata: previous.metadata };
   }
   if (name === "agent.create.before") {
     const previous = beforeSchemas["agent.create.before"].parse(input);
@@ -248,6 +259,14 @@ export async function validateBeforeResult<Name extends keyof PluginWireBeforeRe
     if (previous.config.cwd !== next.config.cwd) {
       throw new Error("agent.create.before hooks cannot change the workspace directory");
     }
+    // Omitted means unchanged: the next hook sees what this one was handed.
+    return { ...result, metadata: next.metadata ?? previous.metadata };
+  }
+  if (name === "workspace.create.before") {
+    const previous = beforeSchemas["workspace.create.before"].parse(input);
+    const next = beforeSchemas["workspace.create.before"].parse(result);
+    // Omitted means unchanged; an explicit {} still replaces.
+    return { ...result, metadata: next.metadata ?? previous.metadata };
   }
   if (name === "worktree.create.before") {
     const previous = beforeSchemas["worktree.create.before"].parse(input);

@@ -1,4 +1,4 @@
-import type { SpeechSettingsPatch } from "@jagentdesk/protocol/speech/rpc-schemas";
+import { type SpeechSettingsPatch } from "@jagentdesk/protocol/speech/rpc-schemas";
 import { mergeSpeechSettingsPatch, type SpeechSettingsOwner } from "./speech/speech-settings.js";
 import { BUILTIN_PLUGIN_MANIFESTS } from "@jagentdesk/protocol/builtin-plugins";
 import {
@@ -11,6 +11,13 @@ import {
   MutableDaemonConfigSchema,
   MutableDaemonConfigPatchSchema,
 } from "@jagentdesk/protocol/messages";
+import {
+  convertLegacyOptions,
+  foldProfileFeatureValues,
+  resolveAdapter,
+  withLegacyProfileFeatureValues,
+} from "./agent/option-controls.js";
+import { type AgentProfile } from "@jagentdesk/protocol/agent-profile";
 
 export type { MutableDaemonConfig, MutableDaemonConfigPatch } from "@jagentdesk/protocol/messages";
 
@@ -220,11 +227,27 @@ export class DaemonConfigStore {
     const persisted = loadPersistedConfig(jagentdeskHome, this.logger);
     const builtinPlugins = initial.builtinPlugins ?? persisted.builtinPlugins;
     this.current = MutableDaemonConfigSchema.parse({
-      ...initial,
+      ...foldConfigProfiles({
+        config: {
+          ...initial,
+          agentProfiles: initial.agentProfiles ?? persisted.daemon?.agentProfiles,
+        },
+        providers: initial.providers,
+        source: "stored",
+      }),
       ...options.speech?.read(persisted),
       ...(builtinPlugins ? { builtinPlugins } : {}),
       usage: initial.usage ?? persisted.usage,
     });
+    this.migrateBuiltinPluginFlags(initial, persisted, builtinPlugins);
+    this.migrateConfiguredGoose(initial, persisted, builtinPlugins);
+  }
+
+  private migrateBuiltinPluginFlags(
+    initial: MutableDaemonConfig,
+    persisted: PersistedConfig,
+    builtinPlugins: MutableDaemonConfig["builtinPlugins"],
+  ): void {
     if (!builtinPlugins) {
       const legacy = {
         "browser-tools":
@@ -248,7 +271,6 @@ export class DaemonConfigStore {
       });
       this.logger?.info("Migrated built-in plugin flags to builtinPlugins in config.json");
     }
-    this.migrateConfiguredGoose(initial, persisted, builtinPlugins);
   }
 
   private migrateConfiguredGoose(
@@ -266,11 +288,18 @@ export class DaemonConfigStore {
   }
 
   public get(): MutableDaemonConfig {
-    return this.current;
+    return toWireDaemonConfig(this.current);
   }
 
   public patch(partial: MutableDaemonConfigPatch): MutableDaemonConfig {
-    const parsedPatch = MutableDaemonConfigPatchSchema.parse(partial);
+    const parsedPatch = MutableDaemonConfigPatchSchema.parse(
+      foldConfigProfiles({
+        config: partial,
+        providers: deepMerge(this.current.providers ?? {}, partial.providers ?? {}),
+        source: "client write",
+        held: this.current.agentProfiles,
+      }),
+    );
     const {
       removeProviders = [],
       removePlugins = [],
@@ -465,11 +494,8 @@ function mergeMutableConfigIntoPersistedConfig(params: {
   };
   return {
     ...persisted,
-    // The live plugin map already has removePlugins applied, so it replaces the stored one.
-    ...(mutable.builtinPlugins !== undefined ? { builtinPlugins: mutable.builtinPlugins } : {}),
+    ...persistedPluginConfig(mutable),
     usage: mutable.usage,
-    ...(mutable.pluginsEnabled !== undefined ? { pluginsEnabled: mutable.pluginsEnabled } : {}),
-    ...(mutable.plugins !== undefined ? { plugins: mutable.plugins } : {}),
     daemon: {
       ...persisted.daemon,
       mcp: {
@@ -504,6 +530,7 @@ function mergeMutableConfigIntoPersistedConfig(params: {
       appendSystemPrompt: mutable.appendSystemPrompt,
       operatorContext: mutable.operatorContext,
       orchestration: mutable.orchestration,
+      ...(mutable.agentProfiles !== undefined ? { agentProfiles: mutable.agentProfiles } : {}),
       ...(mutable.terminalProfiles !== undefined
         ? { terminalProfiles: mutable.terminalProfiles }
         : {}),
@@ -561,4 +588,60 @@ function readMetadataGenerationProviders(
       },
     ];
   });
+}
+
+/**
+ * Profiles are held and persisted with `options` only, in the current keys: a profile is old
+ * data entering, so it is converted for the adapter its provider runs on, which `config.json`'s
+ * `providers` section names through `extends`.
+ */
+function foldConfigProfiles<T extends { agentProfiles?: AgentProfile[] }>(input: {
+  config: T;
+  providers: Record<string, ProviderOverride> | undefined;
+  source: "stored" | "client write";
+  held?: AgentProfile[];
+}): T {
+  const { config, providers, source, held = [] } = input;
+  if (!config.agentProfiles) return config;
+  const convert = (provider: string, options: Record<string, unknown> | undefined) =>
+    convertLegacyOptions({
+      provider: resolveAdapter({ provider, extendsOf: (id) => providers?.[id]?.extends }),
+      options,
+    });
+  const identity = (_provider: string, options: Record<string, unknown> | undefined) => options;
+  const foldWith = (profile: AgentProfile, convertWith: typeof convert) =>
+    foldProfileFeatureValues({
+      profile,
+      stored: held.find((candidate) => candidate.id === profile.id),
+      source,
+      convert: convertWith,
+    });
+  return {
+    ...config,
+    agentProfiles: config.agentProfiles.map((profile) => {
+      // A malformed value rejects a client write before anything is committed.
+      if (source === "client write") return foldWith(profile, convert);
+      try {
+        return foldWith(profile, convert);
+      } catch {
+        // A hand-edited `config.json` value that cannot convert must not stop the daemon from
+        // starting; it keeps its keys and is rejected when an agent is created from it.
+        return foldWith(profile, identity);
+      }
+    }),
+  };
+}
+
+/** The config API boundary: the unchanged app reads profile options from `featureValues`. */
+export function toWireDaemonConfig(config: MutableDaemonConfig): MutableDaemonConfig {
+  if (!config.agentProfiles) return config;
+  return { ...config, agentProfiles: config.agentProfiles.map(withLegacyProfileFeatureValues) };
+}
+
+function persistedPluginConfig(mutable: MutableDaemonConfig) {
+  return {
+    ...(mutable.builtinPlugins !== undefined ? { builtinPlugins: mutable.builtinPlugins } : {}),
+    ...(mutable.pluginsEnabled !== undefined ? { pluginsEnabled: mutable.pluginsEnabled } : {}),
+    ...(mutable.plugins !== undefined ? { plugins: mutable.plugins } : {}),
+  };
 }

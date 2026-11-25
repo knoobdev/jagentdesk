@@ -1,12 +1,11 @@
-import type { AgentManager } from "./agent/agent-manager.js";
+import { type AgentManager, type AttentionState } from "./agent/agent-manager.js";
 import { stripInternalJAgentDeskMcpServer } from "./agent/runtime-mcp-config.js";
-import type {
-  AgentPersistenceHandle,
-  AgentProvider,
-  AgentSessionConfig,
+import {
+  type AgentPersistenceHandle,
+  type AgentProvider,
+  type AgentSessionConfig,
 } from "./agent/agent-sdk-types.js";
-import type { AgentStorage, StoredAgentRecord } from "./agent/agent-storage.js";
-import type { AttentionState } from "./agent/agent-manager.js";
+import { type AgentStorage, type StoredAgentRecord } from "./agent/agent-storage.js";
 
 interface LoggerLike {
   child(bindings: Record<string, unknown>): LoggerLike;
@@ -19,6 +18,7 @@ function getLogger(logger: LoggerLike): LoggerLike {
 }
 
 type AgentStoragePersistence = Pick<AgentStorage, "applySnapshot" | "list">;
+
 type AgentManagerStateSource = Pick<AgentManager, "subscribe">;
 
 interface BuildSessionConfigOptions {
@@ -70,8 +70,8 @@ export function buildConfigOverrides(record: StoredAgentRecord): Partial<AgentSe
     modeId: record.lastModeId ?? record.config?.modeId ?? undefined,
     model: record.config?.model ?? undefined,
     thinkingOptionId: record.config?.thinkingOptionId ?? undefined,
-    featureValues: record.config?.featureValues ?? undefined,
-    extra: record.config?.extra ?? undefined,
+    providerOptions: record.config?.providerOptions ?? undefined,
+    toolPolicy: record.config?.toolPolicy ?? undefined,
     systemPrompt: record.config?.systemPrompt ?? undefined,
     mcpServers: record.config?.mcpServers ?? undefined,
   });
@@ -91,8 +91,8 @@ export function buildSessionConfig(
     modeId: overrides.modeId,
     model: overrides.model,
     thinkingOptionId: overrides.thinkingOptionId,
-    featureValues: overrides.featureValues,
-    extra: overrides.extra,
+    providerOptions: overrides.providerOptions,
+    toolPolicy: overrides.toolPolicy,
     systemPrompt: overrides.systemPrompt,
     mcpServers: overrides.mcpServers,
   });
@@ -134,6 +134,7 @@ export function extractTimestamps(record: StoredAgentRecord): {
   updatedAt: Date;
   lastUserMessageAt: Date | null;
   labels?: Record<string, string>;
+  metadata?: StoredAgentRecord["metadata"];
   workspaceId?: string;
   owner?: StoredAgentRecord["owner"];
   background?: boolean;
@@ -143,6 +144,7 @@ export function extractTimestamps(record: StoredAgentRecord): {
     updatedAt: new Date(resolveStoredAgentUpdatedAt(record)),
     lastUserMessageAt: record.lastUserMessageAt ? new Date(record.lastUserMessageAt) : null,
     labels: record.labels,
+    metadata: record.metadata,
     workspaceId: record.workspaceId,
     owner: record.owner,
     background: record.background,

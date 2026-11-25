@@ -5,7 +5,9 @@ import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { Theme } from "@/styles/theme";
 import { TextInput, type TextInput as EditingTextInputHandle } from "react-native";
 
-const ThemedSearch = withUnistyles(Search);
+const ThemedSearch = withUnistyles(Search, (theme: Theme) => ({
+  size: theme.chrome.kind === "gumloop" ? 18 : 14,
+}));
 const ThemedX = withUnistyles(X);
 const ThemedTextInput = withUnistyles(TextInput, (theme: Theme) => ({
   // Placeholders sit at foregroundMuted and no dimmer — see docs/design.md §14.
@@ -53,7 +55,7 @@ export function SearchField({
 
   return (
     <View style={[styles.field, isFocused && styles.fieldFocused]}>
-      <ThemedSearch size={14} uniProps={mutedColorMapping} />
+      <ThemedSearch uniProps={mutedColorMapping} />
       <ThemedTextInput
         testID={testID}
         ref={inputRef}
@@ -93,9 +95,10 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     minWidth: 0,
     maxWidth: SEARCH_FIELD_MAX_WIDTH,
+    minHeight: theme.chrome.searchHeight,
     paddingVertical: theme.spacing[1.5],
     paddingHorizontal: theme.spacing[3],
-    borderRadius: theme.borderRadius.md,
+    borderRadius: theme.chrome.searchRadius,
     backgroundColor: theme.colors.surface1,
     borderWidth: theme.borderWidth[1],
     borderColor: theme.colors.border,

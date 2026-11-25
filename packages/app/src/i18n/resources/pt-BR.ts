@@ -1,15 +1,19 @@
-import { botsStrings } from "./bots";
+import { sshModuleStrings } from "./ssh-modules";
 import { builtinPluginStrings } from "./builtin-plugins";
-import type { TranslationResources } from "./en";
+import { botsStrings } from "./bots";
+import { type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 import { activityGraphStrings } from "./activity-graph";
-import { sshModuleStrings } from "./ssh-modules";
 
 export const ptBR: TranslationResources = {
   bots: botsStrings,
   builtinPlugins: builtinPluginStrings,
   ssh: sshModuleStrings,
-  activityGraph: activityGraphStrings,
+  pluginCombobox: {
+    searching: "Pesquisando…",
+    empty: "Nenhum resultado",
+    failed: "Falha na pesquisa: {{message}}",
+  },
   paneFind: {
     connectionFailure: "Could not search this chat. Check the host connection and retry.",
     historyChangedFailure: "The chat changed while searching. Search again.",
@@ -91,6 +95,7 @@ export const ptBR: TranslationResources = {
     commandCenter: {
       placeholder: "Pesquisar espa\u00E7os de trabalho, arquivos e a\u00E7\u00F5es...",
       noMatches: "Nenhuma correspond\u00EAncia",
+      copyBrowserHostName: "Copy browser host name",
       actions: "A\u00E7\u00F5es",
       workspaces: "Espa\u00E7os de trabalho",
       agents: "Agentes",
@@ -135,8 +140,11 @@ export const ptBR: TranslationResources = {
       desktop: "Envie uma mensagem ao agente, marque @files ou use /commands e /skills",
       mobile: "Mensagem, @files, /commands",
       fallback: "Mensagem...",
+      terminal: "Prompt",
     },
     input: {
+      fullscreen: "Fullscreen",
+      exitFullscreen: "Exit fullscreen",
       longPressToSendNow: "Long press to send now",
 
       longPressToQueue: "Long press to queue",
@@ -606,6 +614,9 @@ export const ptBR: TranslationResources = {
       restoreRequiresUpdate: "Atualize o host para visualizar os terminais.",
       unableToSubscribe: "Não foi possível assinar o terminal",
     },
+    sheet: {
+      openAsTab: "Abrir como aba",
+    },
     tabs: {
       loading: "Carregando...",
       modified: "Alterações não salvas",
@@ -715,6 +726,7 @@ export const ptBR: TranslationResources = {
     },
     header: {
       actions: {
+        workspaceActionsUnhealthy: "Ações do workspace, há um serviço com problema",
         workspaceActions: "Ações do workspace",
         newAgent: "Novo agente",
         newTerminal: "Novo terminal",
@@ -760,6 +772,8 @@ export const ptBR: TranslationResources = {
         direct: "Direta",
       },
       states: {
+        runningCount: "{{count}} em execução",
+        running: "Em execução",
         exitCode: "saída {{code}}",
         startFailed: "Falha ao iniciar {{scriptName}}",
         stopFailed: "Falha ao parar {{scriptName}}",
@@ -1251,6 +1265,8 @@ export const ptBR: TranslationResources = {
       project: "Projeto",
       base: "Base",
       baseNotApplicable: "Não aplicável",
+      host: "Host",
+      branch: "Branch",
     },
     titlePlaceholder: "Título (opcional)",
     errors: {
@@ -1290,6 +1306,22 @@ export const ptBR: TranslationResources = {
       inProjectDirectory: "No diretório do projeto",
       inWorktree: "Em um worktree",
       title: "Começar de",
+    },
+    launch: {
+      commandPlaceholder: "Run a command, or leave empty for a blank terminal",
+      promptPlaceholder: "Prompt {{name}}",
+      submit: "Launch",
+      chat: "Chat",
+      terminal: "Terminal",
+      title: "What to launch",
+      manageProfiles: "Manage profiles",
+    },
+    tooltips: {
+      project: "Choose the project",
+      host: "Choose the host",
+      isolation: "Choose the isolation level",
+      startingRef: "Escolha de onde começar",
+      launch: "Choose what to launch",
     },
   },
   desktop: {
@@ -1545,6 +1577,16 @@ export const ptBR: TranslationResources = {
     noMatches: "Nenhum modelo corresponde à sua busca",
     searchPlaceholder: "Buscar modelos...",
     openProviderSettings: "Abrir configurações de {{provider}}",
+    editProfilesLabel: "Editar perfis de agente",
+    searchAllPlaceholder: "Buscar em todos os modelos...",
+    createProfileFromModel: "Criar perfil a partir deste modelo",
+    editProfileLabel: "Editar {{name}}",
+    editProfilesCount: "Editar perfis ({{count}})",
+    profiles: "Perfis",
+    createProfile: "Criar perfil",
+    noMatchesForQuery: "Nenhum modelo corresponde a «{{query}}»",
+    providers: "Provedores",
+    model: "Modelo",
   },
   providerCatalog: {
     title: "Adicionar provedor",
@@ -1760,6 +1802,7 @@ export const ptBR: TranslationResources = {
     backdrop: "Fundo do menu",
   },
   subagents: {
+    title: "Subagentes",
     parent: {
       openParent: "Open parent",
 
@@ -2167,8 +2210,8 @@ export const ptBR: TranslationResources = {
           claude: "Claude",
           ghostty: "Ghostty",
           pureBlack: "Preto puro",
-          clickup: "ClickUp",
-          clickupDark: "ClickUp Dark",
+          gumloop: "Gumloop",
+          gumloopDark: "Gumloop Dark",
           auto: "Sistema",
         },
       },
@@ -2542,6 +2585,42 @@ export const ptBR: TranslationResources = {
           localErrorMessage: "Não foi possível remover a conexão localhost",
         },
       },
+      agentProfiles: {
+        featureCountOne: "{{count}} recurso",
+        featureCount: "{{count}} recursos",
+        editProfileTitle: "Editar perfil de agente",
+        addProfileTitle: "Adicionar perfil de agente",
+        iconLabel: "Ícone",
+        nameLabel: "Nome",
+        namePlaceholder: "Trabalho de UI",
+        providerLabel: "Provedor",
+        providerPlaceholder: "Selecione um provedor",
+        noProviders: "Nenhum provedor está disponível neste host",
+        modelLabel: "Modelo",
+        noModels: "Este provedor não tem modelos para escolher",
+        modeLabel: "Modo",
+        noModes: "Este provedor não tem modos para escolher",
+        thinkingLabel: "Raciocínio",
+        noThinkingOptions: "Este modelo não tem níveis de raciocínio",
+        featuresLabel: "Recursos",
+        notesLabel: "Quando usar",
+        notesHint: "Ajuda os agentes a escolher este perfil ao iniciar outro agente.",
+        notesPlaceholder: "Use para trabalho de UI — componentes, layout e tokens de design.",
+        saving: "Salvando...",
+        save: "Salvar",
+        moveUp: "Mover para cima",
+        moveDown: "Mover para baixo",
+        editProfile: "Editar perfil",
+        remove: "Remover",
+        removeConfirmTitle: "Remover perfil?",
+        removeConfirmMessage: 'Remover "{{name}}"?',
+        sectionTitle: "Perfis de agente",
+        unsupported: "Este host executa um daemon que ainda não é compatível com perfis de agente",
+        unavailable: "Conecte-se a este host para gerenciar perfis de agente",
+        emptyState:
+          "Nenhum perfil ainda. Adicione um para iniciar agentes a partir de um provedor e modelo salvos.",
+        newProfile: "Novo perfil",
+      },
     },
     providers: {
       title: "Provedores",
@@ -2777,7 +2856,7 @@ export const ptBR: TranslationResources = {
       },
     },
   },
-  clickupShell: {
+  gumloopShell: {
     search: "Buscar",
     newWorkspace: "Novo",
     workspaces: "Workspaces",
@@ -3191,6 +3270,7 @@ export const ptBR: TranslationResources = {
       description: "Verifique sua conex\u00E3o e tente novamente.",
     },
   },
+  activityGraph: activityGraphStrings,
   providerUsage: {
     checkUsage: "Consultar uso",
     checkUsageHint: "Aplica-se a {{host}} em todos os dispositivos",

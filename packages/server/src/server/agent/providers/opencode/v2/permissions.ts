@@ -1,11 +1,10 @@
-import type { FormInfo, FormValue } from "@opencode/client";
-import type { V2Api } from "./api.js";
-
-import type {
-  AgentPermissionRequest,
-  AgentPermissionResponse,
-  AgentSessionConfig,
-  AgentStreamEvent,
+import { type FormInfo, type FormValue } from "@opencode/client";
+import { type V2Api } from "./api.js";
+import {
+  type AgentPermissionRequest,
+  type AgentPermissionResponse,
+  type AgentSessionConfig,
+  type AgentStreamEvent,
 } from "../../../agent-sdk-types.js";
 import { splitMultiSelectAnswer } from "../../question-card-answer.js";
 
@@ -96,7 +95,7 @@ export class SessionPermissions {
       };
       this.pending.set(request.id, pending);
       this.permissionOwners.set(request.id, sessionID);
-      if (!this.config.toolPolicy && this.config.featureValues?.["auto_accept"] === true)
+      if (!this.config.toolPolicy && this.config.providerOptions?.["auto_accept"] === true)
         await this.respondToPermission(request.id, { behavior: "allow" });
       else this.emit({ type: "permission_requested", provider: "opencode", request: pending });
     }
@@ -130,6 +129,7 @@ export class SessionPermissions {
     this.emit({ type: "permission_resolved", provider: "opencode", requestId, resolution });
   }
 }
+
 function permissionReply(response: AgentPermissionResponse): "reject" | "once" | "always" {
   if (response.behavior === "deny") return "reject";
   return response.selectedActionId === "always" ? "always" : "once";

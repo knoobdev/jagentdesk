@@ -24,6 +24,8 @@ function installation(
     },
     cleanup: () => undefined,
     settingsScreens: [],
+    composerItems: [],
+    newWorkspaceItems: [],
     surfaces: surfaces.map((id) => ({ id, Component: () => null })),
     sidebarItems: sidebarItems.map((item) => ({
       ...item,

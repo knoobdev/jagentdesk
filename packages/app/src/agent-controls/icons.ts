@@ -1,4 +1,4 @@
-import type { ComponentType } from "react";
+import { type ComponentType } from "react";
 import {
   Bot,
   Brain,
@@ -13,16 +13,22 @@ import {
   ShieldQuestionMark,
   Zap,
 } from "lucide-react-native";
-import { getModeVisuals, type AgentProviderDefinition } from "@jagentdesk/protocol/provider-manifest";
+import {
+  getModeVisuals,
+  type AgentProviderDefinition,
+} from "@jagentdesk/protocol/provider-manifest";
+import { isLucideIconName, pluginIconComponent } from "@/plugins/icons";
 
 export interface AgentControlIconProps {
   size: number;
+  strokeWidth?: number;
   color: string;
 }
 
 export type AgentControlIcon = ComponentType<AgentControlIconProps>;
 
 export const ThinkingIcon = Brain;
+
 export const PlanModeIcon = ListTodo;
 
 const MODE_ICONS: Record<string, AgentControlIcon> = {
@@ -60,6 +66,9 @@ export function getAgentModeOptionIcon(
   return icon ? MODE_ICONS[icon] : undefined;
 }
 
+/** A built-in control names its icon in kebab case; a plugin provider names a Lucide icon. */
 export function getAgentFeatureIcon(icon?: string): AgentControlIcon {
-  return (icon ? FEATURE_ICONS[icon] : undefined) ?? Settings2;
+  if (!icon) return Settings2;
+  if (FEATURE_ICONS[icon]) return FEATURE_ICONS[icon];
+  return isLucideIconName(icon) ? pluginIconComponent(icon) : Settings2;
 }

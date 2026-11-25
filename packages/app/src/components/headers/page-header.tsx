@@ -1,3 +1,4 @@
+import { useGumloopDesktopShell } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { useMemo, type ReactNode } from "react";
 import { Text, View } from "react-native";
 import type { LucideIcon } from "lucide-react-native";
@@ -35,20 +36,25 @@ export function PageHeader({
   accessory,
   testID,
 }: PageHeaderProps) {
+  const gumloop = useGumloopDesktopShell(true);
   const isCompact = useIsCompactFormFactor();
   const insets = useSafeAreaInsets();
   const ThemedIcon = useMemo(() => withUnistyles(icon), [icon]);
   const containerStyle = useMemo(
-    () => [styles.container, isCompact ? { paddingTop: insets.top + 12 } : null],
-    [insets.top, isCompact],
+    () => [
+      styles.container,
+      gumloop && styles.gumloopContainer,
+      isCompact ? { paddingTop: insets.top + 12 } : null,
+    ],
+    [gumloop, insets.top, isCompact],
   );
   return (
     <View style={containerStyle} testID={testID}>
       <View style={styles.row}>
         <View style={styles.titleGroup}>
           <CompactBackButton />
-          <ThemedIcon size={20} uniProps={iconColorMapping} />
-          <Text style={styles.title} numberOfLines={1}>
+          {gumloop ? null : <ThemedIcon size={20} uniProps={iconColorMapping} />}
+          <Text style={[styles.title, gumloop && styles.gumloopTitle]} numberOfLines={1}>
             {title}
           </Text>
         </View>
@@ -59,12 +65,14 @@ export function PageHeader({
           </View>
         ) : null}
       </View>
-      <Text style={styles.description}>{description}</Text>
+      {description ? <Text style={styles.description}>{description}</Text> : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create((theme: Theme) => ({
+  gumloopContainer: { paddingHorizontal: 82, paddingTop: 72, paddingBottom: 32 },
+  gumloopTitle: { fontSize: 30, fontWeight: "600" },
   container: {
     paddingHorizontal: theme.spacing[4],
     paddingTop: theme.spacing[4],

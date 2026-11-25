@@ -5,11 +5,11 @@ import { Composer } from "@/composer";
 import { useAgentInputDraft } from "@/composer/draft/input-draft";
 import { useDraftAgentCreateFlow } from "@/composer/draft/create-flow";
 import { buildDraftStoreKey, generateDraftId } from "@/stores/draft-keys";
-import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
+import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { encodeImages } from "@/utils/encode-images";
 import { isWeb } from "@/constants/platform";
-import type { AgentSnapshotPayload } from "@jagentdesk/protocol/messages";
-import type { CreateAgentRequestOptions } from "@jagentdesk/client/internal/daemon-client";
+import { type AgentSnapshotPayload } from "@jagentdesk/protocol/messages";
+import { type CreateAgentRequestOptions } from "@jagentdesk/client/internal/daemon-client";
 import {
   buildFigmaAssistantSystemPrompt,
   figmaAssistantScope,
@@ -34,7 +34,7 @@ function composerOverrides(state: ComposerState): Partial<CreateAgentRequestOpti
   }
   if (state.effectiveModelId) overrides.model = state.effectiveModelId;
   if (state.effectiveThinkingOptionId) overrides.thinkingOptionId = state.effectiveThinkingOptionId;
-  if (state.featureValues) overrides.featureValues = state.featureValues;
+  if (state.providerOptions) overrides.featureValues = state.providerOptions;
   return overrides;
 }
 
@@ -50,10 +50,8 @@ export function FigmaAssistantDraft({
   onCreated: (input: { agentId: string; workspaceId: string | null }) => void;
 }) {
   const client = useHostRuntimeClient(serverId);
-  const isConnected = useHostRuntimeIsConnected(serverId);
   const draftId = useMemo(() => generateDraftId(), []);
   const tabId = "figma-assistant-draft";
-  const onlineServerIds = useMemo(() => (isConnected ? [serverId] : []), [isConnected, serverId]);
   const draftStoreKey = useMemo(
     () => buildDraftStoreKey({ serverId, agentId: tabId, draftId }),
     [serverId, draftId],
@@ -64,7 +62,6 @@ export function FigmaAssistantDraft({
       initialServerId: serverId,
       initialValues: { workingDir: cwd },
       isVisible: true,
-      onlineServerIds,
       lockedWorkingDir: cwd,
     },
   });
@@ -129,8 +126,9 @@ export function FigmaAssistantDraft({
         onSubmitMessage={handleCreateFromInput}
         isSubmitLoading={isSubmitting}
         blurOnSubmit
-        value={draftInput.text}
-        onChangeText={draftInput.setText}
+        textSource={draftInput.textSource}
+        textReplacement={draftInput.textReplacement}
+        onChangeText={draftInput.editText}
         attachments={draftInput.attachments}
         onChangeAttachments={draftInput.setAttachments}
         cwd={composerState.workingDir}

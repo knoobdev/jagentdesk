@@ -29,8 +29,8 @@ vi.mock("react-native-unistyles", () => ({
   withUnistyles: <T,>(component: T) => component,
 }));
 
-vi.mock("@/components/clickup-shell/use-clickup-chrome", () => ({
-  useIsClickUpTheme: () => false,
+vi.mock("@/components/gumloop-shell/use-gumloop-chrome", () => ({
+  useIsGumloopTheme: () => false,
 }));
 
 vi.mock("@/components/message", () => ({

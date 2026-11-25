@@ -1,6 +1,7 @@
+import { useContainerWidthBelow } from "@/hooks/use-container-width";
 import { Modal } from "@/components/ui/modal";
-import { clickUpListStyles } from "@/components/clickup-shell/list-styles";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { gumloopListStyles } from "@/components/gumloop-shell/list-styles";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import {
   View,
   Text,
@@ -8,6 +9,8 @@ import {
   RefreshControl,
   FlatList,
   type ListRenderItem,
+  type StyleProp,
+  type ViewStyle,
   type PressableStateCallbackType,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -36,6 +39,7 @@ interface AgentListProps {
   selectedAgentId?: string;
   onAgentSelect?: () => void;
   listFooterComponent?: ReactElement | null;
+  contentContainerStyle?: StyleProp<ViewStyle>;
   showAttentionIndicator?: boolean;
   showHostColumn?: boolean;
 }
@@ -248,17 +252,17 @@ function SessionRow({
   const ProviderIcon = getProviderIcon(agent.provider);
   const pendingPermissionCount = agent.pendingPermissionCount ?? 0;
   const orchestrationRoleBadge = orchestrationRoleBadgeLabel(agent.labels);
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
 
   const pressableStyle = useCallback(
     ({ pressed, hovered = false }: PressableStateCallbackType & { hovered?: boolean }) => [
       styles.row,
-      isClickUp && clickUpListStyles.row,
+      isGumloop && gumloopListStyles.row,
       isSelected && styles.rowSelected,
       Boolean(hovered) && styles.rowHovered,
       pressed && styles.rowPressed,
     ],
-    [isClickUp, isSelected],
+    [isGumloop, isSelected],
   );
 
   const handlePress = useCallback(() => onPress(agent), [onPress, agent]);
@@ -393,6 +397,7 @@ export function AgentList({
   selectedAgentId,
   onAgentSelect,
   listFooterComponent,
+  contentContainerStyle,
   showAttentionIndicator = true,
   showHostColumn = false,
 }: AgentListProps) {
@@ -400,7 +405,10 @@ export function AgentList({
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const [actionAgent, setActionAgent] = useState<AggregatedAgent | null>(null);
-  const isMobile = useIsCompactFormFactor();
+  const compactWindow = useIsCompactFormFactor();
+  const isGumloop = useIsGumloopTheme();
+  const { onLayout: measureList, isBelow: narrowList } = useContainerWidthBelow(600);
+  const isMobile = compactWindow || (isGumloop && narrowList);
   const { archiveAgent } = useArchiveAgent();
 
   const actionClient = useSessionStore((state) =>
@@ -484,15 +492,14 @@ export function AgentList({
     return result;
   }, [agents]);
 
-  const isClickUp = useIsClickUpTheme();
   const renderItem: ListRenderItem<FlatListItem> = useCallback(
     ({ item }) => {
       if (item.type === "header") {
-        if (isClickUp) {
+        if (isGumloop) {
           return (
-            <View style={clickUpListStyles.groupRow}>
-              <View style={clickUpListStyles.groupPill}>
-                <Text style={clickUpListStyles.groupPillText}>
+            <View style={gumloopListStyles.groupRow}>
+              <View style={gumloopListStyles.groupPill}>
+                <Text style={gumloopListStyles.groupPillText}>
                   {formatDateSectionLabel(t, item.section)}
                 </Text>
               </View>
@@ -520,7 +527,7 @@ export function AgentList({
     [
       handleAgentLongPress,
       handleAgentPress,
-      isClickUp,
+      isGumloop,
       isMobile,
       selectedAgentId,
       showAttentionIndicator,
@@ -557,12 +564,17 @@ export function AgentList({
     [onRefresh, isRefreshing, theme.colors.foregroundMuted, refreshColors],
   );
 
+  const listContentStyle = useMemo(
+    () => [styles.listContent, contentContainerStyle],
+    [contentContainerStyle],
+  );
   return (
     <>
       <FlatList
+        onLayout={measureList}
         data={flatItems}
         style={styles.list}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={listContentStyle}
         keyExtractor={keyExtractor}
         renderItem={renderItem}
         showsVerticalScrollIndicator={false}

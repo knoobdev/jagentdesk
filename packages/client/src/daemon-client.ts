@@ -1,4 +1,176 @@
-import type { AgentActiveTurnBehavior } from "@jagentdesk/protocol/messages";
+import {
+  type AgentActiveTurnBehavior,
+  type ProviderInstallationInspectResponseMessage,
+  type ProviderInstallationCheckUpdatesResponseMessage,
+  SessionEventSubscriptionSchema,
+  type SessionEventSubscription,
+  AgentCreateFailedStatusPayloadSchema,
+  AgentCreatedStatusPayloadSchema,
+  AgentRefreshedStatusPayloadSchema,
+  AgentResumedStatusPayloadSchema,
+  CheckoutRenameBranchResponseSchema,
+  parseServerInfoStatusPayload,
+  RenameTerminalResponseSchema,
+  RestartRequestedStatusPayloadSchema,
+  ShutdownRequestedStatusPayloadSchema,
+  DaemonUpdateResponseSchema,
+  SessionInboundMessageSchema,
+  type ServerInfoStatusPayload,
+  type AgentStreamEventPayload,
+  type AgentSnapshotPayload,
+  type ProjectPlacementPayload,
+  type AgentPermissionResolvedMessage,
+  type CreateAgentRequestMessage,
+  type CreateJAgentDeskWorktreeRequest,
+  type FileDownloadTokenResponse,
+  type FileUploadResponse,
+  type FileExplorerResponse,
+  type FileVersion,
+  type FileWriteResult,
+  type FetchAgentTimelineResponseMessage,
+  type AgentForkContextResponseMessage,
+  type GitSetupOptions,
+  type CheckoutStatusResponse,
+  type CheckoutCommit,
+  type CheckoutWorktree,
+  type ParsedDiffFile,
+  type CheckoutCommitResponse,
+  type CheckoutMergeResponse,
+  type CheckoutMergeFromBaseResponse,
+  type CheckoutPullResponse,
+  type CheckoutPushResponse,
+  type CheckoutRefreshResponse,
+  type CheckoutPrCreateResponse,
+  type CheckoutPrMergeResponse,
+  type CheckoutPrMergeMethod,
+  type CheckoutForgeSetAutoMergeResponse,
+  type CheckoutGithubSetAutoMergeResponse,
+  type CheckoutForgeGetCheckDetailsResponse,
+  type CheckoutGithubGetCheckDetailsResponse,
+  type CheckoutPrStatusResponse,
+  type PullRequestTimelineResponse,
+  type CheckoutSwitchBranchResponse,
+  type StashSaveResponse,
+  type StashPopResponse,
+  type StashListResponse,
+  type ValidateBranchResponse,
+  type BranchSuggestionsResponse,
+  type ForgeSearchResponse,
+  type ForgeSearchRequest,
+  type ForgeConnectionListResponse,
+  type ForgeConnectionAddResponse,
+  type ForgeConnectionRemoveResponse,
+  type ForgeRepoListResponse,
+  type ForgeRepoListRequest,
+  type ForgeChangeRequestListResponse,
+  type ForgeChangeRequestListRequest,
+  type ForgeChangeRequestFilesResponse,
+  type ForgeRepoRef,
+  type ForgeBranchListResponse,
+  type ForgeCommitListResponse,
+  type ForgeCommitCompareResponse,
+  type ForgeTreeListResponse,
+  type ForgeFileGetResponse,
+  type ForgeChangeRequestReviewResponse,
+  type ForgeChangeRequestMergeResponse,
+  type ForgePipelineListResponse,
+  type ForgePipelineGetResponse,
+  type ForgeJobLogResponse,
+  type ForgePipelineRerunResponse,
+  type ForgePipelineCancelResponse,
+  type ForgeJobPlayResponse,
+  type ForgeSetAutoMergeResponse,
+  type ForgeArtifactListResponse,
+  type ForgeArtifactDownloadResponse,
+  type ForgeReleaseListResponse,
+  type ForgeTagListResponse,
+  type ForgeIssueListResponse,
+  type ForgeIssueListRequest,
+  type ForgeIssueCreateResponse,
+  type ForgeIssueCommentResponse,
+  type ForgeIssueCloseResponse,
+  type ForgeIssueGetResponse,
+  type ForgeMemberListResponse,
+  type ForgeMemberAddResponse,
+  type ForgeMemberRemoveResponse,
+  type ForgeMemberRole,
+  type ForgeChangeRequestCreateResponse,
+  type ForgeChangeRequestCloseResponse,
+  type ForgeReleaseCreateResponse,
+  type ForgeReleaseGetResponse,
+  type ForgeCliStatusResponse,
+  type ForgeCliInstallResponse,
+  type ForgeCliInstallProgress,
+  type ForgeConnectionLoginResponse,
+  type ForgeConnectionLoginProgress,
+  type ForgeConnectionLoginCancelResponse,
+  type ForgeReviewAction,
+  type ForgeMergeMethod,
+  type GitHubSearchResponse,
+  type GitHubSearchRequest,
+  type DirectorySuggestionsResponse,
+  type JAgentDeskWorktreeListResponse,
+  type JAgentDeskWorktreeArchiveResponse,
+  type ProjectIconSource,
+  type ProjectIconResponse,
+  type ProjectIconGetResponse,
+  type ProjectAddResponse,
+  type ProjectCreateDirectoryResponse,
+  type OpenProjectResponseMessage,
+  type WorkspaceGithubSearchRepositoriesResponse,
+  type ProjectGithubCloneProtocol,
+  type ProjectGithubCloneResponse,
+  type ArchiveWorkspaceResponseMessage,
+  type WorkspaceSetupStatusResponseMessage,
+  type ListCommandsResponse,
+  type ListProviderFeaturesResponseMessage,
+  type ListProviderModelsResponseMessage,
+  type ListProviderModesResponseMessage,
+  type ListAvailableProvidersResponse,
+  type GetProvidersSnapshotResponseMessage,
+  type RefreshProvidersSnapshotResponseMessage,
+  type ProviderDiagnosticResponseMessage,
+  type ProviderUsageListResponseMessage,
+  type DaemonGetStatusResponse,
+  type DaemonGetPairingOfferResponse,
+  type PairingDeviceListResponse,
+  type PairingDeviceRegisterResponse,
+  type PairingDeviceCancelResponse,
+  type PairingDeviceRevokeResponse,
+  type DiagnosticsResponse,
+  type AgentRewindResponseMessage,
+  type ListTerminalsResponse,
+  type CreateTerminalResponse,
+  type SubscribeTerminalResponse,
+  type SubscribeTerminalRequest,
+  type CloseItemsResponse,
+  type KillTerminalResponse,
+  type CaptureTerminalResponse,
+  type TerminalInput,
+  type SessionInboundMessage,
+  type SessionOutboundMessage,
+  type SendAgentMessageRequest,
+  type JAgentDeskConfigRaw,
+  type JAgentDeskConfigRevision,
+  type WorkspaceCreateRequest,
+  type WorkspaceRecoveryState,
+  type PluginListItem,
+  type PluginLogEntry,
+  type PluginUpdateSelection,
+  type PluginUpdateProposal,
+  type PluginUpdatePreview,
+  type PluginUpdateResult,
+  type AutorunState,
+  type SessionShare,
+  type SessionShareCapabilities,
+  type MutableDaemonConfig,
+  type MutableDaemonConfigPatch,
+  type PluginRequirements,
+  type CreationSnapshot,
+  type ProviderControlsListResponseMessage,
+  type AgentConfigApply,
+} from "@jagentdesk/protocol/messages";
+
 import type {
   UsageReportEntry,
   UsageListReportsResponseMessage,
@@ -14,20 +186,12 @@ import type {
   BotsResponseTypeFor,
   BotsPush,
 } from "@jagentdesk/protocol/bots/rpc-schemas";
-type ProviderInstallationInspectPayload = ProviderInstallationInspectResponseMessage["payload"];
-type ProviderInstallationCheckUpdatesPayload =
-  ProviderInstallationCheckUpdatesResponseMessage["payload"];
-type ProviderInstallationUpdatePayload = Extract<
-  SessionOutboundMessage,
-  { type: "provider.installation.update.response" }
->["payload"];
 
-import type {
-  ProviderInstallationInspectResponseMessage,
-  ProviderInstallationCheckUpdatesResponseMessage,
-} from "@jagentdesk/protocol/messages";
-import { mergeBuiltinPluginWireState } from "@jagentdesk/protocol/builtin-plugins";
-import type { BuiltinPluginId, BuiltinPluginListItem } from "@jagentdesk/protocol/builtin-plugins";
+import {
+  mergeBuiltinPluginWireState,
+  type BuiltinPluginId,
+  type BuiltinPluginListItem,
+} from "@jagentdesk/protocol/builtin-plugins";
 import {
   ChunkedTransport,
   ChunkedTransportProtocolError,
@@ -40,332 +204,169 @@ import {
   type HostRouteFrame,
 } from "@jagentdesk/protocol/binary-frames/index";
 import type { HostAdd, HostUpdate, HostDirectory } from "@jagentdesk/protocol/hosts";
-import {
-  SessionEventSubscriptionSchema,
-  type SessionEventSubscription,
-} from "@jagentdesk/protocol/messages";
+
 import { messageTooLargeError } from "./daemon-client-transport-utils.js";
 import { MAX_WEBSOCKET_MESSAGE_BYTES } from "@jagentdesk/protocol/websocket-message-limit";
-import type {
-  ActivityGraphChangedMessage,
-  ActivityGraphGetResponsePayload,
-  ActivityGraphStatusMessage,
-  ActivityGraphView,
-} from "@jagentdesk/protocol/agent-activity-graph";
-import type { HostCapabilities, ToolInstallPlan } from "@jagentdesk/protocol/host-capabilities";
-import type {
-  SpecModeError,
-  SpecModeOptionalPhase,
-  SpecModeState,
-} from "@jagentdesk/protocol/spec-mode";
-import type { z } from "zod";
-import { isRelayClientWebSocketUrl } from "@jagentdesk/protocol/daemon-endpoints";
-import type { LocalSpeechModel } from "@jagentdesk/protocol/speech/rpc-schemas";
-import { CLIENT_CAPS, type ClientCapability } from "@jagentdesk/protocol/client-capabilities";
-import type { DatabaseEngine, DbConnectionConfig } from "@jagentdesk/protocol/database/rpc-schemas";
-import type {
-  DockerAction,
-  DockerActionPayload,
-  DockerCpDirection,
-  DockerCpPayload,
-  DockerExecPayload,
-  DockerFsListPayload,
-  DockerFsOp,
-  DockerFsOpPayload,
-  DockerFsReadPayload,
-  DockerFsWritePayload,
-  DockerImageAction,
-  DockerImageActionPayload,
-  DockerInspectPayload,
-  DockerListPayload,
-  DockerLogChunkPayload,
-  DockerLogsPayload,
-  DockerSnapshotPayload,
-  DockerStatsPayload,
-  DockerVolumeAction,
-  DockerVolumeActionPayload,
-} from "@jagentdesk/protocol/docker/rpc-schemas";
-import type {
-  SimAction,
-  SimActionPayload,
-  SimButton,
-  SimButtonPayload,
-  SimCatalogPayload,
-  SimCreatePayload,
-  SimDescribeUiPayload,
-  SimInputTextPayload,
-  SimInstallAppPayload,
-  SimInstallBatchPayload,
-  SimLaunchAppPayload,
-  SimListPayload,
-  SimLogChunkPayload,
-  SimOpenUrlPayload,
-  SimScreenshotPayload,
-  SimSlimPayload,
-  SimSnapshotPayload,
-  SimSwipePayload,
-  SimTapPayload,
-  SimTerminateAppPayload,
-  SimUnslimPayload,
-  SimCoords,
-  SimPhysicalEnablePayload,
-  SimPhysicalDisablePayload,
-  SimPhysicalPreparePayload,
-  SimPhysicalPrepareProgressPayload,
-  SimScreenSubscribePayload,
-} from "@jagentdesk/protocol/simulator/rpc-schemas";
-import type {
-  SshAuthPrompt,
-  SshConnectionStateEvent,
-  SshGroup,
-  SshHostkeyPrompt,
-  SshIdentity,
-  SshKeyType,
-  SshPromptResolved,
-  SshServer,
-  SshSessionActivity,
-  SshTerminalSize,
-} from "@jagentdesk/protocol/ssh/rpc-schemas";
-import type { RemoteExecJobUpdated } from "@jagentdesk/protocol/remote-exec/rpc-schemas";
-import type {
-  SideloadAuthPrompt,
-  SideloadInstallProgress,
-  SideloadNotice,
-} from "@jagentdesk/protocol/sideload/rpc-schemas";
-import type {
-  ProxyCaExportPayload,
-  ProxyCaptureMode,
-  ProxyCaptureStartPayload,
-  ProxyCaptureStopPayload,
-  ProxyHeader,
-  ProxyHistoryQueryPayload,
-  ProxyIntruderRunPayload,
-  ProxyInterceptHeldPushPayload,
-  ProxyFridaInstallPayload,
-  ProxyFridaStatusPayload,
-  ProxyInterceptSetPayload,
-  ProxyWsMessagePushPayload,
-  ProxyRepeaterSendPayload,
-  ProxyScopeGetPayload,
-  ProxyScopeRule,
-  ProxyTransactionAnnotatePayload,
-  ProxySessionPushPayload,
-  ProxySessionsListPayload,
-  ProxyTransactionGetPayload,
-  ProxyTransactionPushPayload,
-} from "@jagentdesk/protocol/proxy/rpc-schemas";
-import type { AgentAttentionNotificationPayload } from "@jagentdesk/protocol/agent-attention-notification";
-import type {
-  JiraPush,
-  JiraRequestParams,
-  JiraRequestType,
-  JiraResponseFor,
-  JiraResponseTypeFor,
-} from "@jagentdesk/protocol/jira/rpc-schemas";
-import type {
-  FigmaPush,
-  FigmaRequestParams,
-  FigmaRequestType,
-  FigmaResponseFor,
-  FigmaResponseTypeFor,
-} from "@jagentdesk/protocol/figma/rpc-schemas";
 import {
-  AgentCreateFailedStatusPayloadSchema,
-  AgentCreatedStatusPayloadSchema,
-  AgentRefreshedStatusPayloadSchema,
-  AgentResumedStatusPayloadSchema,
-  CheckoutRenameBranchResponseSchema,
-  parseServerInfoStatusPayload,
-  RenameTerminalResponseSchema,
-  RestartRequestedStatusPayloadSchema,
-  ShutdownRequestedStatusPayloadSchema,
-  DaemonUpdateResponseSchema,
-  SessionInboundMessageSchema,
-  type ServerInfoStatusPayload,
-} from "@jagentdesk/protocol/messages";
+  type ActivityGraphChangedMessage,
+  type ActivityGraphGetResponsePayload,
+  type ActivityGraphStatusMessage,
+  type ActivityGraphView,
+} from "@jagentdesk/protocol/agent-activity-graph";
+import {
+  type HostCapabilities,
+  type ToolInstallPlan,
+} from "@jagentdesk/protocol/host-capabilities";
+import {
+  type SpecModeError,
+  type SpecModeOptionalPhase,
+  type SpecModeState,
+} from "@jagentdesk/protocol/spec-mode";
+import { type z } from "zod";
+import { isRelayClientWebSocketUrl } from "@jagentdesk/protocol/daemon-endpoints";
+import { type LocalSpeechModel } from "@jagentdesk/protocol/speech/rpc-schemas";
+import { CLIENT_CAPS, type ClientCapability } from "@jagentdesk/protocol/client-capabilities";
+import {
+  type DatabaseEngine,
+  type DbConnectionConfig,
+} from "@jagentdesk/protocol/database/rpc-schemas";
+import {
+  type DockerAction,
+  type DockerActionPayload,
+  type DockerCpDirection,
+  type DockerCpPayload,
+  type DockerExecPayload,
+  type DockerFsListPayload,
+  type DockerFsOp,
+  type DockerFsOpPayload,
+  type DockerFsReadPayload,
+  type DockerFsWritePayload,
+  type DockerImageAction,
+  type DockerImageActionPayload,
+  type DockerInspectPayload,
+  type DockerListPayload,
+  type DockerLogChunkPayload,
+  type DockerLogsPayload,
+  type DockerSnapshotPayload,
+  type DockerStatsPayload,
+  type DockerVolumeAction,
+  type DockerVolumeActionPayload,
+} from "@jagentdesk/protocol/docker/rpc-schemas";
+import {
+  type SimAction,
+  type SimActionPayload,
+  type SimButton,
+  type SimButtonPayload,
+  type SimCatalogPayload,
+  type SimCreatePayload,
+  type SimDescribeUiPayload,
+  type SimInputTextPayload,
+  type SimInstallAppPayload,
+  type SimInstallBatchPayload,
+  type SimLaunchAppPayload,
+  type SimListPayload,
+  type SimLogChunkPayload,
+  type SimOpenUrlPayload,
+  type SimScreenshotPayload,
+  type SimSlimPayload,
+  type SimSnapshotPayload,
+  type SimSwipePayload,
+  type SimTapPayload,
+  type SimTerminateAppPayload,
+  type SimUnslimPayload,
+  type SimCoords,
+  type SimPhysicalEnablePayload,
+  type SimPhysicalDisablePayload,
+  type SimPhysicalPreparePayload,
+  type SimPhysicalPrepareProgressPayload,
+  type SimScreenSubscribePayload,
+} from "@jagentdesk/protocol/simulator/rpc-schemas";
+import {
+  type SshAuthPrompt,
+  type SshConnectionStateEvent,
+  type SshGroup,
+  type SshHostkeyPrompt,
+  type SshIdentity,
+  type SshKeyType,
+  type SshPromptResolved,
+  type SshServer,
+  type SshSessionActivity,
+  type SshTerminalSize,
+} from "@jagentdesk/protocol/ssh/rpc-schemas";
+import { type RemoteExecJobUpdated } from "@jagentdesk/protocol/remote-exec/rpc-schemas";
+import {
+  type SideloadAuthPrompt,
+  type SideloadInstallProgress,
+  type SideloadNotice,
+} from "@jagentdesk/protocol/sideload/rpc-schemas";
+import {
+  type ProxyCaExportPayload,
+  type ProxyCaptureMode,
+  type ProxyCaptureStartPayload,
+  type ProxyCaptureStopPayload,
+  type ProxyHeader,
+  type ProxyHistoryQueryPayload,
+  type ProxyIntruderRunPayload,
+  type ProxyInterceptHeldPushPayload,
+  type ProxyFridaInstallPayload,
+  type ProxyFridaStatusPayload,
+  type ProxyInterceptSetPayload,
+  type ProxyWsMessagePushPayload,
+  type ProxyRepeaterSendPayload,
+  type ProxyScopeGetPayload,
+  type ProxyScopeRule,
+  type ProxyTransactionAnnotatePayload,
+  type ProxySessionPushPayload,
+  type ProxySessionsListPayload,
+  type ProxyTransactionGetPayload,
+  type ProxyTransactionPushPayload,
+} from "@jagentdesk/protocol/proxy/rpc-schemas";
+import { type AgentAttentionNotificationPayload } from "@jagentdesk/protocol/agent-attention-notification";
+import {
+  type JiraPush,
+  type JiraRequestParams,
+  type JiraRequestType,
+  type JiraResponseFor,
+  type JiraResponseTypeFor,
+} from "@jagentdesk/protocol/jira/rpc-schemas";
+import {
+  type FigmaPush,
+  type FigmaRequestParams,
+  type FigmaRequestType,
+  type FigmaResponseFor,
+  type FigmaResponseTypeFor,
+} from "@jagentdesk/protocol/figma/rpc-schemas";
 import { validateWSOutboundMessage } from "@jagentdesk/protocol/validation/ws-outbound";
-import type {
-  AgentStreamEventPayload,
-  AgentSnapshotPayload,
-  ProjectPlacementPayload,
-  AgentPermissionResolvedMessage,
-  CreateAgentRequestMessage,
-  CreateJAgentDeskWorktreeRequest,
-  FileDownloadTokenResponse,
-  FileUploadResponse,
-  FileExplorerResponse,
-  FileVersion,
-  FileWriteResult,
-  FetchAgentTimelineResponseMessage,
-  AgentForkContextResponseMessage,
-  GitSetupOptions,
-  CheckoutStatusResponse,
-  CheckoutCommit,
-  CheckoutWorktree,
-  ParsedDiffFile,
-  CheckoutCommitResponse,
-  CheckoutMergeResponse,
-  CheckoutMergeFromBaseResponse,
-  CheckoutPullResponse,
-  CheckoutPushResponse,
-  CheckoutRefreshResponse,
-  CheckoutPrCreateResponse,
-  CheckoutPrMergeResponse,
-  CheckoutPrMergeMethod,
-  CheckoutForgeSetAutoMergeResponse,
-  CheckoutGithubSetAutoMergeResponse,
-  CheckoutForgeGetCheckDetailsResponse,
-  CheckoutGithubGetCheckDetailsResponse,
-  CheckoutPrStatusResponse,
-  PullRequestTimelineResponse,
-  CheckoutSwitchBranchResponse,
-  StashSaveResponse,
-  StashPopResponse,
-  StashListResponse,
-  ValidateBranchResponse,
-  BranchSuggestionsResponse,
-  ForgeSearchResponse,
-  ForgeSearchRequest,
-  ForgeConnectionListResponse,
-  ForgeConnectionAddResponse,
-  ForgeConnectionRemoveResponse,
-  ForgeRepoListResponse,
-  ForgeRepoListRequest,
-  ForgeChangeRequestListResponse,
-  ForgeChangeRequestListRequest,
-  ForgeChangeRequestFilesResponse,
-  ForgeRepoRef,
-  ForgeBranchListResponse,
-  ForgeCommitListResponse,
-  ForgeCommitCompareResponse,
-  ForgeTreeListResponse,
-  ForgeFileGetResponse,
-  ForgeChangeRequestReviewResponse,
-  ForgeChangeRequestMergeResponse,
-  ForgePipelineListResponse,
-  ForgePipelineGetResponse,
-  ForgeJobLogResponse,
-  ForgePipelineRerunResponse,
-  ForgePipelineCancelResponse,
-  ForgeJobPlayResponse,
-  ForgeSetAutoMergeResponse,
-  ForgeArtifactListResponse,
-  ForgeArtifactDownloadResponse,
-  ForgeReleaseListResponse,
-  ForgeTagListResponse,
-  ForgeIssueListResponse,
-  ForgeIssueListRequest,
-  ForgeIssueCreateResponse,
-  ForgeIssueCommentResponse,
-  ForgeIssueCloseResponse,
-  ForgeIssueGetResponse,
-  ForgeMemberListResponse,
-  ForgeMemberAddResponse,
-  ForgeMemberRemoveResponse,
-  ForgeMemberRole,
-  ForgeChangeRequestCreateResponse,
-  ForgeChangeRequestCloseResponse,
-  ForgeReleaseCreateResponse,
-  ForgeReleaseGetResponse,
-  ForgeCliStatusResponse,
-  ForgeCliInstallResponse,
-  ForgeCliInstallProgress,
-  ForgeConnectionLoginResponse,
-  ForgeConnectionLoginProgress,
-  ForgeConnectionLoginCancelResponse,
-  ForgeReviewAction,
-  ForgeMergeMethod,
-  GitHubSearchResponse,
-  GitHubSearchRequest,
-  DirectorySuggestionsResponse,
-  JAgentDeskWorktreeListResponse,
-  JAgentDeskWorktreeArchiveResponse,
-  ProjectIconSource,
-  ProjectIconResponse,
-  ProjectIconGetResponse,
-  ProjectAddResponse,
-  ProjectCreateDirectoryResponse,
-  OpenProjectResponseMessage,
-  WorkspaceGithubSearchRepositoriesResponse,
-  ProjectGithubCloneProtocol,
-  ProjectGithubCloneResponse,
-  ArchiveWorkspaceResponseMessage,
-  WorkspaceSetupStatusResponseMessage,
-  ListCommandsResponse,
-  ListProviderFeaturesResponseMessage,
-  ListProviderModelsResponseMessage,
-  ListProviderModesResponseMessage,
-  ListAvailableProvidersResponse,
-  GetProvidersSnapshotResponseMessage,
-  RefreshProvidersSnapshotResponseMessage,
-  ProviderDiagnosticResponseMessage,
-  ProviderUsageListResponseMessage,
-  DaemonGetStatusResponse,
-  DaemonGetPairingOfferResponse,
-  PairingDeviceListResponse,
-  PairingDeviceRegisterResponse,
-  PairingDeviceCancelResponse,
-  PairingDeviceRevokeResponse,
-  DiagnosticsResponse,
-  AgentRewindResponseMessage,
-  ListTerminalsResponse,
-  CreateTerminalResponse,
-  SubscribeTerminalResponse,
-  SubscribeTerminalRequest,
-  CloseItemsResponse,
-  KillTerminalResponse,
-  CaptureTerminalResponse,
-  TerminalInput,
-  SessionInboundMessage,
-  SessionOutboundMessage,
-  SendAgentMessageRequest,
-  JAgentDeskConfigRaw,
-  JAgentDeskConfigRevision,
-  WorkspaceCreateRequest,
-  WorkspaceRecoveryState,
-  PluginListItem,
-  PluginLogEntry,
-  PluginUpdateSelection,
-  PluginUpdateProposal,
-  PluginUpdatePreview,
-  PluginUpdateResult,
-  AutorunState,
-  SessionShare,
-  SessionShareCapabilities,
-} from "@jagentdesk/protocol/messages";
-import type {
-  AgentPermissionRequest,
-  AgentPermissionResponse,
-  AgentPersistenceHandle,
-  AgentProviderNotice,
-  AgentProvider,
-  AgentSessionConfig,
+import {
+  type AgentPermissionRequest,
+  type AgentPermissionResponse,
+  type AgentPersistenceHandle,
+  type AgentProviderNotice,
+  type AgentProvider,
+  type AgentSessionConfig,
+  type JsonValue,
+  type AgentOptionControl,
 } from "@jagentdesk/protocol/agent-types";
-import type {
-  OrchestrationConfig,
-  OrchestrationConfigPatch,
-  OrchestrationTaskBrief,
-  OrchestrationRouteCategory,
+import {
+  type OrchestrationConfig,
+  type OrchestrationConfigPatch,
+  type OrchestrationTaskBrief,
+  type OrchestrationRouteCategory,
 } from "@jagentdesk/protocol/orchestration";
-import type { Skill, SkillMutation } from "@jagentdesk/protocol/skills";
-import type {
-  SkillCatalogItem,
-  SkillCatalogItemRef,
-  SkillEntry,
-  SkillFile,
-  SkillPluginInstallResult,
-  SkillScope,
-  SkillSourceRef,
-  SkillSourceSpec,
-  SkillSourceStatus,
-  SkillWrittenPaths,
+import { type Skill, type SkillMutation } from "@jagentdesk/protocol/skills";
+import {
+  type SkillCatalogItem,
+  type SkillCatalogItemRef,
+  type SkillEntry,
+  type SkillFile,
+  type SkillPluginInstallResult,
+  type SkillScope,
+  type SkillSourceRef,
+  type SkillSourceSpec,
+  type SkillSourceStatus,
+  type SkillWrittenPaths,
 } from "@jagentdesk/protocol/native-skills";
-import type { LifetimeUsage, UsageDayRollup } from "@jagentdesk/protocol/usage-history";
-import type {
-  MutableDaemonConfig,
-  MutableDaemonConfigPatch,
-  PluginRequirements,
-} from "@jagentdesk/protocol/messages";
+import { type LifetimeUsage, type UsageDayRollup } from "@jagentdesk/protocol/usage-history";
 import { terminalSubscriptionKey } from "@jagentdesk/protocol/terminal-subscription-key";
 import {
   asUint8Array,
@@ -403,16 +404,35 @@ import {
   normalizeProvidersSnapshotPayload,
 } from "./compat/normalize-provider-models.js";
 import { TerminalStreamRouter, type TerminalStreamEvent } from "./terminal-stream-router.js";
-import type {
-  BrowserAutomationExecuteRequest,
-  BrowserAutomationExecuteResponse,
-  BrowserScreenshotResponse,
-  BrowserListResponse,
+import {
+  type BrowserAutomationExecuteRequest,
+  type BrowserAutomationExecuteResponse,
+  type BrowserScreenshotResponse,
+  type BrowserListResponse,
 } from "@jagentdesk/protocol/browser-automation/rpc-schemas";
-import type {
-  HostDataBundle,
-  HostDataImportResult,
+import {
+  type HostDataBundle,
+  type HostDataImportResult,
 } from "@jagentdesk/protocol/migration/host-data-bundle";
+import {
+  type SaveApiProvider,
+  type TestApiProvider,
+} from "@jagentdesk/protocol/custom-providers/rpc-schemas";
+import { CreationClient } from "./creation/index.js";
+import {
+  LegacyProviderOptions,
+  usesLegacyProviderOptions,
+} from "./compat/legacy-provider-options.js";
+
+type ProviderInstallationInspectPayload = ProviderInstallationInspectResponseMessage["payload"];
+
+type ProviderInstallationCheckUpdatesPayload =
+  ProviderInstallationCheckUpdatesResponseMessage["payload"];
+
+type ProviderInstallationUpdatePayload = Extract<
+  SessionOutboundMessage,
+  { type: "provider.installation.update.response" }
+>["payload"];
 
 export interface Logger {
   debug(obj: object, msg?: string): void;
@@ -559,7 +579,9 @@ export type DaemonEvent =
   | { type: "error"; message: string };
 
 export type DaemonEventHandler = (event: DaemonEvent) => void;
+
 export type BrowserAutomationExecuteRequestMessage = BrowserAutomationExecuteRequest;
+
 export type BrowserAutomationExecuteResponseMessage = BrowserAutomationExecuteResponse;
 
 /** Endpoint security negotiated on a relay connection. */
@@ -576,6 +598,7 @@ export interface PluginClientBundleStore {
   load(): Promise<PluginClientBundle[]>;
   replace(bundles: PluginClientBundle[]): Promise<void>;
 }
+
 export interface DaemonClientConfig {
   createPluginClientBundleStore?: (serverId: string) => PluginClientBundleStore;
   /** Deliver compact bodies/hash references to a caller-owned snapshot cache.
@@ -690,26 +713,70 @@ export interface AgentAttentionRequiredNotification {
 type AgentConfigOverrides = Partial<Omit<AgentSessionConfig, "provider" | "cwd">>;
 
 export interface CreateAgentRequestOptions extends AgentConfigOverrides {
+  idempotencyKey?: string;
+  agentId?: string;
+
+  onEvent?: (snapshot: CreationSnapshot) => void;
+
   config?: AgentSessionConfig;
+
   provider?: AgentProvider;
+
   cwd?: string;
+
   env?: CreateAgentRequestMessage["env"];
+
   workspaceId?: string;
+
   callerAgentId?: string;
+
   initialPrompt?: string;
+
   clientMessageId?: string;
+
   outputSchema?: Record<string, unknown>;
+
   images?: CreateAgentRequestMessage["images"];
+
   attachments?: CreateAgentRequestMessage["attachments"];
+
   git?: GitSetupOptions;
+
   worktree?: CreateAgentRequestMessage["worktree"];
+
   autoArchive?: CreateAgentRequestMessage["autoArchive"];
+
   background?: CreateAgentRequestMessage["background"];
+
   // COMPAT(createAgentWorktree): low-level old callers may still send the
   // create-agent worktree field. Added in v0.2.0; remove after 2027-01-17.
   worktreeName?: string;
+
   requestId?: string;
+
   labels?: Record<string, string>;
+
+  /** Plugin-owned data stored on the agent. Needs a host with `entityMetadata`. */
+  metadata?: CreateAgentRequestMessage["metadata"];
+}
+
+export interface CreateWorkspaceRequestOptions {
+  source: WorkspaceCreateRequest["source"];
+  title?: string;
+  /** Plugin-owned data stored on the workspace. Needs a host with `entityMetadata`. */
+  metadata?: WorkspaceCreateRequest["metadata"];
+  /** Workspace discovery visibility; contents retain normal durability. */
+  background?: boolean;
+  callerAgentId?: string;
+  idempotencyKey?: string;
+  workspaceId?: string;
+  agent?: Omit<
+    CreateAgentRequestOptions,
+    "workspaceId" | "onEvent" | "worktree" | "git" | "worktreeName" | "idempotencyKey" | "requestId"
+  >;
+  onEvent?: (snapshot: CreationSnapshot) => void;
+  firstAgentContext?: WorkspaceCreateRequest["firstAgentContext"];
+  requestId?: string;
 }
 
 export interface CreateJAgentDeskWorktreeInput extends Pick<
@@ -725,90 +792,162 @@ export interface CreateJAgentDeskWorktreeInput extends Pick<
 > {}
 
 type CheckoutStatusPayload = CheckoutStatusResponse["payload"];
+
 type SubscribeCheckoutDiffPayload = Extract<
   SessionOutboundMessage,
   { type: "subscribe_checkout_diff_response" }
 >["payload"];
+
 type CheckoutDiffPayload = Omit<SubscribeCheckoutDiffPayload, "subscriptionId">;
+
 type CheckoutCommitPayload = CheckoutCommitResponse["payload"];
+
 type CheckoutMergePayload = CheckoutMergeResponse["payload"];
+
 type CheckoutMergeFromBasePayload = CheckoutMergeFromBaseResponse["payload"];
+
 type CheckoutPullPayload = CheckoutPullResponse["payload"];
+
 type CheckoutPushPayload = CheckoutPushResponse["payload"];
+
 type CheckoutRefreshPayload = CheckoutRefreshResponse["payload"];
+
 type CheckoutPrCreatePayload = CheckoutPrCreateResponse["payload"];
+
 type CheckoutPrMergePayload = CheckoutPrMergeResponse["payload"];
+
 type CheckoutForgeSetAutoMergePayload = CheckoutForgeSetAutoMergeResponse["payload"];
+
 type CheckoutGithubSetAutoMergePayload = CheckoutGithubSetAutoMergeResponse["payload"];
+
 type CheckoutForgeGetCheckDetailsPayload = CheckoutForgeGetCheckDetailsResponse["payload"];
+
 type CheckoutGithubGetCheckDetailsPayload = CheckoutGithubGetCheckDetailsResponse["payload"];
+
 type CheckoutPrStatusPayload = CheckoutPrStatusResponse["payload"];
+
 type PullRequestTimelinePayload = PullRequestTimelineResponse["payload"];
+
 type CheckoutSwitchBranchPayload = CheckoutSwitchBranchResponse["payload"];
+
 export type RenameBranchResult = z.infer<typeof CheckoutRenameBranchResponseSchema>["payload"];
+
 type StashSavePayload = StashSaveResponse["payload"];
+
 type StashPopPayload = StashPopResponse["payload"];
+
 type StashListPayload = StashListResponse["payload"];
+
 type ValidateBranchPayload = ValidateBranchResponse["payload"];
+
 type BranchSuggestionsPayload = BranchSuggestionsResponse["payload"];
+
 type ForgeSearchPayload = ForgeSearchResponse["payload"];
+
 // Forge Hub (spec 19) — Milestone A payload aliases
 type ForgeConnectionListPayload = ForgeConnectionListResponse["payload"];
+
 type ForgeConnectionAddPayload = ForgeConnectionAddResponse["payload"];
+
 type ForgeConnectionRemovePayload = ForgeConnectionRemoveResponse["payload"];
+
 type ForgeRepoListPayload = ForgeRepoListResponse["payload"];
+
 type ForgeChangeRequestListPayload = ForgeChangeRequestListResponse["payload"];
+
 type ForgeChangeRequestFilesPayload = ForgeChangeRequestFilesResponse["payload"];
+
 // Milestone B payload aliases
 type ForgeBranchListPayload = ForgeBranchListResponse["payload"];
+
 type ForgeCommitListPayload = ForgeCommitListResponse["payload"];
+
 type ForgeCommitComparePayload = ForgeCommitCompareResponse["payload"];
+
 type ForgeTreeListPayload = ForgeTreeListResponse["payload"];
+
 type ForgeFileGetPayload = ForgeFileGetResponse["payload"];
+
 type ForgeChangeRequestReviewPayload = ForgeChangeRequestReviewResponse["payload"];
+
 type ForgeChangeRequestMergePayload = ForgeChangeRequestMergeResponse["payload"];
+
 type ForgePipelineListPayload = ForgePipelineListResponse["payload"];
+
 type ForgePipelineGetPayload = ForgePipelineGetResponse["payload"];
+
 type ForgeJobLogPayload = ForgeJobLogResponse["payload"];
+
 type ForgePipelineRerunPayload = ForgePipelineRerunResponse["payload"];
+
 type ForgePipelineCancelPayload = ForgePipelineCancelResponse["payload"];
+
 type ForgeJobPlayPayload = ForgeJobPlayResponse["payload"];
+
 // Milestone C payload aliases
 type ForgeSetAutoMergePayload = ForgeSetAutoMergeResponse["payload"];
+
 type ForgeArtifactListPayload = ForgeArtifactListResponse["payload"];
+
 type ForgeArtifactDownloadPayload = ForgeArtifactDownloadResponse["payload"];
+
 type ForgeReleaseListPayload = ForgeReleaseListResponse["payload"];
+
 type ForgeTagListPayload = ForgeTagListResponse["payload"];
+
 type ForgeIssueListPayload = ForgeIssueListResponse["payload"];
+
 type ForgeIssueCreatePayload = ForgeIssueCreateResponse["payload"];
+
 type ForgeIssueCommentPayload = ForgeIssueCommentResponse["payload"];
+
 type ForgeIssueClosePayload = ForgeIssueCloseResponse["payload"];
+
 type ForgeIssueGetPayload = ForgeIssueGetResponse["payload"];
+
 type ForgeMemberListPayload = ForgeMemberListResponse["payload"];
+
 type ForgeMemberAddPayload = ForgeMemberAddResponse["payload"];
+
 type ForgeMemberRemovePayload = ForgeMemberRemoveResponse["payload"];
+
 // Forge Hub (spec 19) — Milestone D payload aliases
 type ForgeChangeRequestCreatePayload = ForgeChangeRequestCreateResponse["payload"];
+
 type ForgeChangeRequestClosePayload = ForgeChangeRequestCloseResponse["payload"];
+
 type ForgeReleaseCreatePayload = ForgeReleaseCreateResponse["payload"];
+
 type ForgeReleaseGetPayload = ForgeReleaseGetResponse["payload"];
+
 type ForgeCliStatusPayload = ForgeCliStatusResponse["payload"];
+
 type ForgeCliInstallPayload = ForgeCliInstallResponse["payload"];
+
 type ForgeConnectionLoginResult = ForgeConnectionLoginResponse["payload"];
+
 type ForgeConnectionLoginCancelResult = ForgeConnectionLoginCancelResponse["payload"];
+
 type GitHubSearchPayload = GitHubSearchResponse["payload"];
+
 type DirectorySuggestionsPayload = DirectorySuggestionsResponse["payload"];
+
 type JAgentDeskWorktreeListPayload = JAgentDeskWorktreeListResponse["payload"];
+
 type JAgentDeskWorktreeArchivePayload = JAgentDeskWorktreeArchiveResponse["payload"];
+
 type CreateJAgentDeskWorktreePayload = Extract<
   SessionOutboundMessage,
   { type: "create_jagentdesk_worktree_response" }
 >["payload"];
+
 type WorkspaceCreatePayload = Extract<
   SessionOutboundMessage,
   { type: "workspace.create.response" }
 >["payload"];
+
 type FileExplorerPayload = FileExplorerResponse["payload"];
+
 export type FileExplorerDirectoryPayload = NonNullable<FileExplorerPayload["directory"]>;
 
 // Sideload (spec 26). Payloads mirror packages/protocol/src/sideload/rpc-schemas.ts.
@@ -816,17 +955,21 @@ type SideloadRequestType = Extract<
   SessionInboundMessage["type"],
   `sideload.${string}.request` | `android.${string}.request`
 >;
+
 type SideloadRequestBody<T extends SideloadRequestType> = Omit<
   Extract<SessionInboundMessage, { type: T }>,
   "type" | "requestId"
 >;
+
 type SideloadResponseType<T extends string> = T extends `${infer Prefix}.request`
   ? `${Prefix}.response`
   : never;
+
 export type SideloadResponsePayload<T extends SideloadRequestType> =
   Extract<SessionOutboundMessage, { type: SideloadResponseType<T> }> extends { payload: infer P }
     ? P
     : never;
+
 export type {
   SideloadAccountSummary,
   SideloadApp,
@@ -849,106 +992,132 @@ export type SshServersListPayload = Extract<
   SessionOutboundMessage,
   { type: "ssh.servers.list.response" }
 >["payload"];
+
 export type SshServersGetPayload = Extract<
   SessionOutboundMessage,
   { type: "ssh.servers.get.response" }
 >["payload"];
+
 export type SshServersSavePayload = Extract<
   SessionOutboundMessage,
   { type: "ssh.servers.save.response" }
 >["payload"];
+
 export type SshServersDeletePayload = Extract<
   SessionOutboundMessage,
   { type: "ssh.servers.delete.response" }
 >["payload"];
+
 export type SshGroupsListPayload = Extract<
   SessionOutboundMessage,
   { type: "ssh.groups.list.response" }
 >["payload"];
+
 export type SshGroupsGetPayload = Extract<
   SessionOutboundMessage,
   { type: "ssh.groups.get.response" }
 >["payload"];
+
 export type SshGroupsSavePayload = Extract<
   SessionOutboundMessage,
   { type: "ssh.groups.save.response" }
 >["payload"];
+
 export type SshGroupsDeletePayload = Extract<
   SessionOutboundMessage,
   { type: "ssh.groups.delete.response" }
 >["payload"];
+
 export type SshIdentitiesListPayload = Extract<
   SessionOutboundMessage,
   { type: "ssh.identities.list.response" }
 >["payload"];
+
 export type SshIdentitiesGetPayload = Extract<
   SessionOutboundMessage,
   { type: "ssh.identities.get.response" }
 >["payload"];
+
 export type SshIdentitiesSavePayload = Extract<
   SessionOutboundMessage,
   { type: "ssh.identities.save.response" }
 >["payload"];
+
 export type SshIdentitiesDeletePayload = Extract<
   SessionOutboundMessage,
   { type: "ssh.identities.delete.response" }
 >["payload"];
+
 export type SshKeysListPayload = Extract<
   SessionOutboundMessage,
   { type: "ssh.keys.list.response" }
 >["payload"];
+
 export type SshKeysGeneratePayload = Extract<
   SessionOutboundMessage,
   { type: "ssh.keys.generate.response" }
 >["payload"];
+
 export type SshKeysImportPayload = Extract<
   SessionOutboundMessage,
   { type: "ssh.keys.import.response" }
 >["payload"];
+
 export type SshKeysDeletePayload = Extract<
   SessionOutboundMessage,
   { type: "ssh.keys.delete.response" }
 >["payload"];
+
 export type SshKeysExportPublicPayload = Extract<
   SessionOutboundMessage,
   { type: "ssh.keys.export_public.response" }
 >["payload"];
+
 export type SshKnownhostsListPayload = Extract<
   SessionOutboundMessage,
   { type: "ssh.knownhosts.list.response" }
 >["payload"];
+
 export type SshKnownhostsDeletePayload = Extract<
   SessionOutboundMessage,
   { type: "ssh.knownhosts.delete.response" }
 >["payload"];
+
 export type SshKnownhostsReplacePayload = Extract<
   SessionOutboundMessage,
   { type: "ssh.knownhosts.replace.response" }
 >["payload"];
+
 export type SshHostkeyRespondPayload = Extract<
   SessionOutboundMessage,
   { type: "ssh.hostkey.respond.response" }
 >["payload"];
+
 export type SshAuthRespondPayload = Extract<
   SessionOutboundMessage,
   { type: "ssh.auth.respond.response" }
 >["payload"];
+
 export type SshSessionCreatePayload = Extract<
   SessionOutboundMessage,
   { type: "ssh.session.create.response" }
 >["payload"];
+
 export type SshSessionReconnectPayload = Extract<
   SessionOutboundMessage,
   { type: "ssh.session.reconnect.response" }
 >["payload"];
+
 export type SshSessionBroadcastPayload = Extract<
   SessionOutboundMessage,
   { type: "ssh.session.broadcast.response" }
 >["payload"];
+
 export type SshSessionTypePasswordPayload = Extract<
   SessionOutboundMessage,
   { type: "ssh.session.type_password.response" }
 >["payload"];
+
 export type {
   SshAuthMethod,
   SshAuthPrompt,
@@ -970,6 +1139,7 @@ export type {
   SshSessionInfo,
   SshTerminalSize,
 } from "@jagentdesk/protocol/ssh/rpc-schemas";
+
 // Remote execution (spec 33 / ADR-0044). Payload types mirror the protocol's correlated
 // responses (packages/protocol/src/remote-exec/rpc-schemas.ts); DTOs are re-exported so app
 // screens never import the protocol remote-exec module directly for types.
@@ -977,26 +1147,32 @@ export type RemoteExecListTargetsPayload = Extract<
   SessionOutboundMessage,
   { type: "remote_exec.list_targets.response" }
 >["payload"];
+
 export type RemoteExecCheckTargetPayload = Extract<
   SessionOutboundMessage,
   { type: "remote_exec.check_target.response" }
 >["payload"];
+
 export type RemoteExecListJobsPayload = Extract<
   SessionOutboundMessage,
   { type: "remote_exec.list_jobs.response" }
 >["payload"];
+
 export type RemoteExecGetJobPayload = Extract<
   SessionOutboundMessage,
   { type: "remote_exec.get_job.response" }
 >["payload"];
+
 export type RemoteExecReadJobOutputPayload = Extract<
   SessionOutboundMessage,
   { type: "remote_exec.read_job_output.response" }
 >["payload"];
+
 export type RemoteExecStopJobPayload = Extract<
   SessionOutboundMessage,
   { type: "remote_exec.stop_job.response" }
 >["payload"];
+
 export type {
   RemoteCheckResult,
   RemoteJob,
@@ -1005,6 +1181,7 @@ export type {
   RemoteSyncSummary,
   RemoteTarget,
 } from "@jagentdesk/protocol/remote-exec/rpc-schemas";
+
 // Custom API providers (spec 34 / ADR-0047). Payload types mirror the protocol's correlated
 // responses (packages/protocol/src/custom-providers/rpc-schemas.ts); DTOs are re-exported so app
 // screens never import the protocol custom-providers module directly for types.
@@ -1012,18 +1189,22 @@ export type CustomProvidersListPayload = Extract<
   SessionOutboundMessage,
   { type: "providers.custom.list.response" }
 >["payload"];
+
 export type CustomProvidersSavePayload = Extract<
   SessionOutboundMessage,
   { type: "providers.custom.save.response" }
 >["payload"];
+
 export type CustomProvidersDeletePayload = Extract<
   SessionOutboundMessage,
   { type: "providers.custom.delete.response" }
 >["payload"];
+
 export type CustomProvidersTestPayload = Extract<
   SessionOutboundMessage,
   { type: "providers.custom.test.response" }
 >["payload"];
+
 export type {
   ApiProtocol,
   ApiProviderModel,
@@ -1035,11 +1216,9 @@ export type {
   SaveApiProvider,
   TestApiProvider,
 } from "@jagentdesk/protocol/custom-providers/rpc-schemas";
-import type {
-  SaveApiProvider,
-  TestApiProvider,
-} from "@jagentdesk/protocol/custom-providers/rpc-schemas";
+
 type LegacyFileExplorerFilePayload = NonNullable<FileExplorerPayload["file"]>;
+
 export interface FileReadResult {
   bytes: Uint8Array;
   mime: string;
@@ -1049,6 +1228,7 @@ export interface FileReadResult {
   modifiedAt: string;
   revision?: string;
 }
+
 export interface FileUploadInput {
   fileName: string;
   mimeType: string;
@@ -1057,289 +1237,387 @@ export interface FileUploadInput {
   requestId?: string;
   chunkSize?: number;
 }
+
 export type FileUploadResult = FileUploadResponse["payload"];
+
 type FileDownloadTokenPayload = FileDownloadTokenResponse["payload"];
+
 type ListProviderFeaturesPayload = ListProviderFeaturesResponseMessage["payload"];
+
+export type ListProviderControlsPayload = ProviderControlsListResponseMessage["payload"];
+
 type ListProviderModelsPayload = ListProviderModelsResponseMessage["payload"];
+
 type ListProviderModesPayload = ListProviderModesResponseMessage["payload"];
+
 type ListAvailableProvidersPayload = ListAvailableProvidersResponse["payload"];
+
 type GetProvidersSnapshotPayload = GetProvidersSnapshotResponseMessage["payload"];
+
 type RefreshProvidersSnapshotPayload = RefreshProvidersSnapshotResponseMessage["payload"];
+
 type ProviderDiagnosticPayload = ProviderDiagnosticResponseMessage["payload"];
+
 type ProviderUsageListPayload = ProviderUsageListResponseMessage["payload"];
+
 type DaemonStatusPayload = DaemonGetStatusResponse["payload"];
+
 type DaemonPairingOfferPayload = DaemonGetPairingOfferResponse["payload"];
+
 type DiagnosticsPayload = DiagnosticsResponse["payload"];
+
 type ReadProjectConfigPayload = Extract<
   SessionOutboundMessage,
   { type: "read_project_config_response" }
 >["payload"];
+
 type WriteProjectConfigPayload = Extract<
   SessionOutboundMessage,
   { type: "write_project_config_response" }
 >["payload"];
 
 type ListCommandsPayload = ListCommandsResponse["payload"];
+
 type ListCommandsDraftConfig = Pick<
   AgentSessionConfig,
-  "provider" | "cwd" | "modeId" | "model" | "thinkingOptionId" | "featureValues"
+  "provider" | "cwd" | "modeId" | "model" | "thinkingOptionId" | "featureValues" | "providerOptions"
 >;
+
 export interface WriteProjectConfigInput {
   repoRoot: string;
   config: JAgentDeskConfigRaw;
   expectedRevision: JAgentDeskConfigRevision | null;
   requestId?: string;
 }
+
 interface ListCommandsOptions {
   agentId: string;
   requestId?: string;
   draftConfig?: ListCommandsDraftConfig;
 }
+
 type LegacyListCommandsOptions = Omit<ListCommandsOptions, "agentId">;
+
 type SetVoiceModePayload = Extract<
   SessionOutboundMessage,
   { type: "set_voice_mode_response" }
 >["payload"];
+
 type DictationFinishAcceptedPayload = Extract<
   SessionOutboundMessage,
   { type: "dictation_stream_finish_accepted" }
 >["payload"];
+
 type AgentPermissionResolvedPayload = AgentPermissionResolvedMessage["payload"];
+
 type ListTerminalsPayload = ListTerminalsResponse["payload"];
+
 type CreateTerminalPayload = CreateTerminalResponse["payload"];
+
 export type RenameTerminalResult = z.infer<typeof RenameTerminalResponseSchema>["payload"];
+
 type SubscribeTerminalPayload = SubscribeTerminalResponse["payload"];
+
 type CloseItemsPayload = CloseItemsResponse["payload"];
+
 type KillTerminalPayload = KillTerminalResponse["payload"];
+
 type CaptureTerminalPayload = CaptureTerminalResponse["payload"];
+
 type ChatCreatePayload = Extract<
   SessionOutboundMessage,
   { type: "chat/create/response" }
 >["payload"];
+
 type ChatListPayload = Extract<SessionOutboundMessage, { type: "chat/list/response" }>["payload"];
+
 type ChatInspectPayload = Extract<
   SessionOutboundMessage,
   { type: "chat/inspect/response" }
 >["payload"];
+
 type ChatDeletePayload = Extract<
   SessionOutboundMessage,
   { type: "chat/delete/response" }
 >["payload"];
+
 type ChatPostPayload = Extract<SessionOutboundMessage, { type: "chat/post/response" }>["payload"];
+
 type ChatReadPayload = Extract<SessionOutboundMessage, { type: "chat/read/response" }>["payload"];
+
 type ChatWaitPayload = Extract<SessionOutboundMessage, { type: "chat/wait/response" }>["payload"];
+
 type LoopRunPayload = Extract<SessionOutboundMessage, { type: "loop/run/response" }>["payload"];
+
 type LoopListPayload = Extract<SessionOutboundMessage, { type: "loop/list/response" }>["payload"];
+
 type LoopInspectPayload = Extract<
   SessionOutboundMessage,
   { type: "loop/inspect/response" }
 >["payload"];
+
 type LoopLogsPayload = Extract<SessionOutboundMessage, { type: "loop/logs/response" }>["payload"];
+
 type LoopStopPayload = Extract<SessionOutboundMessage, { type: "loop/stop/response" }>["payload"];
+
 type ClusterContextsPayload = Extract<
   SessionOutboundMessage,
   { type: "cluster/contexts/response" }
 >["payload"];
+
 type ClusterImportPayload = Extract<
   SessionOutboundMessage,
   { type: "cluster/import/response" }
 >["payload"];
+
 type ClusterListPayload = Extract<
   SessionOutboundMessage,
   { type: "cluster/list/response" }
 >["payload"];
+
 type ClusterConnectPayload = Extract<
   SessionOutboundMessage,
   { type: "cluster/connect/response" }
 >["payload"];
+
 type ClusterDisconnectPayload = Extract<
   SessionOutboundMessage,
   { type: "cluster/disconnect/response" }
 >["payload"];
+
 type ClusterResourcesPayload = Extract<
   SessionOutboundMessage,
   { type: "cluster/resources/response" }
 >["payload"];
+
 type ClusterGetPayload = Extract<
   SessionOutboundMessage,
   { type: "cluster/get/response" }
 >["payload"];
+
 type ClusterLogsPayload = Extract<
   SessionOutboundMessage,
   { type: "cluster/logs/response" }
 >["payload"];
+
 type ClusterWritePayload = Extract<
   SessionOutboundMessage,
   { type: "cluster/write/response" }
 >["payload"];
+
 type ClusterKindsPayload = Extract<
   SessionOutboundMessage,
   { type: "cluster/kinds/response" }
 >["payload"];
+
 type ClusterResourceListPayload = Extract<
   SessionOutboundMessage,
   { type: "cluster/resource/list/response" }
 >["payload"];
+
 type ClusterRevealSecretPayload = Extract<
   SessionOutboundMessage,
   { type: "cluster/reveal-secret/response" }
 >["payload"];
+
 type ClusterNodeOpPayload = Extract<
   SessionOutboundMessage,
   { type: "cluster/node-op/response" }
 >["payload"];
+
 type ClusterCronjobOpPayload = Extract<
   SessionOutboundMessage,
   { type: "cluster/cronjob-op/response" }
 >["payload"];
+
 type ClusterMetricsPayload = Extract<
   SessionOutboundMessage,
   { type: "cluster/metrics/response" }
 >["payload"];
+
 type DatabaseListPayload = Extract<
   SessionOutboundMessage,
   { type: "database/list/response" }
 >["payload"];
+
 type DatabaseAddPayload = Extract<
   SessionOutboundMessage,
   { type: "database/add/response" }
 >["payload"];
+
 type DatabaseConnectPayload = Extract<
   SessionOutboundMessage,
   { type: "database/connect/response" }
 >["payload"];
+
 type DatabaseDisconnectPayload = Extract<
   SessionOutboundMessage,
   { type: "database/disconnect/response" }
 >["payload"];
+
 type DatabaseRemovePayload = Extract<
   SessionOutboundMessage,
   { type: "database/remove/response" }
 >["payload"];
+
 type DatabaseDatabasesPayload = Extract<
   SessionOutboundMessage,
   { type: "database/databases/response" }
 >["payload"];
+
 type DatabaseOpenDatabasePayload = Extract<
   SessionOutboundMessage,
   { type: "database/open-database/response" }
 >["payload"];
+
 type DatabaseSchemasPayload = Extract<
   SessionOutboundMessage,
   { type: "database/schemas/response" }
 >["payload"];
+
 type DatabaseObjectsPayload = Extract<
   SessionOutboundMessage,
   { type: "database/objects/response" }
 >["payload"];
+
 type DatabaseColumnsPayload = Extract<
   SessionOutboundMessage,
   { type: "database/columns/response" }
 >["payload"];
+
 type DatabaseQueryPayload = Extract<
   SessionOutboundMessage,
   { type: "database/query/response" }
 >["payload"];
+
 type DatabaseExecPayload = Extract<
   SessionOutboundMessage,
   { type: "database/exec/response" }
 >["payload"];
+
 type DatabaseForeignKeysPayload = Extract<
   SessionOutboundMessage,
   { type: "database/foreign-keys/response" }
 >["payload"];
+
 type DatabaseIndexesPayload = Extract<
   SessionOutboundMessage,
   { type: "database/indexes/response" }
 >["payload"];
+
 type DatabaseRoutinesPayload = Extract<
   SessionOutboundMessage,
   { type: "database/routines/response" }
 >["payload"];
+
 type DatabaseExplainPayload = Extract<
   SessionOutboundMessage,
   { type: "database/explain/response" }
 >["payload"];
+
 type DatabaseBeginPayload = Extract<
   SessionOutboundMessage,
   { type: "database/begin/response" }
 >["payload"];
+
 type DatabaseCommitPayload = Extract<
   SessionOutboundMessage,
   { type: "database/commit/response" }
 >["payload"];
+
 type DatabaseRollbackPayload = Extract<
   SessionOutboundMessage,
   { type: "database/rollback/response" }
 >["payload"];
+
 type ClusterHelmListPayload = Extract<
   SessionOutboundMessage,
   { type: "cluster/helm/list/response" }
 >["payload"];
+
 type ClusterHelmHistoryPayload = Extract<
   SessionOutboundMessage,
   { type: "cluster/helm/history/response" }
 >["payload"];
+
 type ClusterHelmValuesPayload = Extract<
   SessionOutboundMessage,
   { type: "cluster/helm/values/response" }
 >["payload"];
+
 type ClusterHelmRollbackPayload = Extract<
   SessionOutboundMessage,
   { type: "cluster/helm/rollback/response" }
 >["payload"];
+
 type ClusterHelmUninstallPayload = Extract<
   SessionOutboundMessage,
   { type: "cluster/helm/uninstall/response" }
 >["payload"];
+
 type ScheduleCreatePayload = Extract<
   SessionOutboundMessage,
   { type: "schedule/create/response" }
 >["payload"];
+
 type ScheduleListPayload = Extract<
   SessionOutboundMessage,
   { type: "schedule/list/response" }
 >["payload"];
+
 type ScheduleInspectPayload = Extract<
   SessionOutboundMessage,
   { type: "schedule/inspect/response" }
 >["payload"];
+
 type ScheduleLogsPayload = Extract<
   SessionOutboundMessage,
   { type: "schedule/logs/response" }
 >["payload"];
+
 type SchedulePausePayload = Extract<
   SessionOutboundMessage,
   { type: "schedule/pause/response" }
 >["payload"];
+
 type ScheduleResumePayload = Extract<
   SessionOutboundMessage,
   { type: "schedule/resume/response" }
 >["payload"];
+
 type ScheduleDeletePayload = Extract<
   SessionOutboundMessage,
   { type: "schedule/delete/response" }
 >["payload"];
+
 type ScheduleRunOncePayload = Extract<
   SessionOutboundMessage,
   { type: "schedule/run-once/response" }
 >["payload"];
+
 type ScheduleUpdatePayload = Extract<
   SessionOutboundMessage,
   { type: "schedule/update/response" }
 >["payload"];
+
 export type FetchAgentTimelinePayload = FetchAgentTimelineResponseMessage["payload"];
+
 export type AgentForkContextPayload = AgentForkContextResponseMessage["payload"];
 
 export type FetchAgentTimelineDirection = FetchAgentTimelinePayload["direction"];
+
 export type FetchAgentTimelineProjection = FetchAgentTimelinePayload["projection"];
+
 export type FetchAgentTimelineCursor = NonNullable<FetchAgentTimelinePayload["startCursor"]>;
+
 export interface FetchAgentOptions {
   agentId: string;
   requestId?: string;
   timeout?: number;
 }
+
 type LegacyFetchAgentOptions = Omit<FetchAgentOptions, "agentId">;
+
 export interface FetchAgentTimelineOptions {
   /** Prefer whole-turn pages when supported; older hosts retain item-based paging. */
   wholeTurns?: boolean;
@@ -1372,10 +1650,12 @@ export type ProviderSubagentListPayload = Extract<
   SessionOutboundMessage,
   { type: "agent.provider_subagents.list.response" }
 >["payload"];
+
 export type ProviderSubagentTimelinePayload = Extract<
   SessionOutboundMessage,
   { type: "agent.provider_subagents.timeline.get.response" }
 >["payload"];
+
 export interface FetchProviderSubagentTimelineOptions {
   direction?: ProviderSubagentTimelinePayload["direction"];
   cursor?: FetchAgentTimelineCursor;
@@ -1411,6 +1691,7 @@ function normalizeListCommandsOptions(
   }
   return { agentId: input, ...legacyOptions };
 }
+
 export interface AgentForkContextOptions {
   boundaryCursor?: FetchAgentTimelineCursor;
   boundaryMessageId?: string;
@@ -1418,8 +1699,11 @@ export interface AgentForkContextOptions {
 }
 
 type AgentRefreshedStatusPayload = z.infer<typeof AgentRefreshedStatusPayloadSchema>;
+
 type RestartRequestedStatusPayload = z.infer<typeof RestartRequestedStatusPayloadSchema>;
+
 type ShutdownRequestedStatusPayload = z.infer<typeof ShutdownRequestedStatusPayloadSchema>;
+
 export interface ShutdownServerOptions {
   requestId?: string;
   timeout?: number;
@@ -1427,94 +1711,125 @@ export interface ShutdownServerOptions {
   // `features.terminalsSurviveRestart` honor it; check before sending.
   keepTerminals?: boolean;
 }
+
 export interface DaemonStatusOptions {
   requestId?: string;
   timeout?: number;
 }
+
 export interface DaemonPairingOfferOptions {
   requestId?: string;
   timeout?: number;
   forceRefresh?: boolean;
 }
+
 type DaemonUpdateResponse = z.infer<typeof DaemonUpdateResponseSchema>;
+
 type FetchAgentsPayload = Extract<
   SessionOutboundMessage,
   { type: "fetch_agents_response" }
 >["payload"];
+
 type FetchAgentsRequest = Extract<SessionInboundMessage, { type: "fetch_agents_request" }>;
+
 export type FetchAgentsOptions = Omit<FetchAgentsRequest, "type" | "requestId"> & {
   requestId?: string;
   timeout?: number;
 };
+
 export type FetchAgentsEntry = FetchAgentsPayload["entries"][number];
+
 export type FetchAgentsPageInfo = FetchAgentsPayload["pageInfo"];
+
 type FetchAgentHistoryPayload = Extract<
   SessionOutboundMessage,
   { type: "fetch_agent_history_response" }
 >["payload"];
+
 type FetchAgentHistoryRequest = Extract<
   SessionInboundMessage,
   { type: "fetch_agent_history_request" }
 >;
+
 export type FetchAgentHistoryOptions = Omit<FetchAgentHistoryRequest, "type" | "requestId"> & {
   requestId?: string;
 };
+
 export type FetchAgentHistoryEntry = FetchAgentHistoryPayload["entries"][number];
+
 export type FetchAgentHistoryPageInfo = FetchAgentHistoryPayload["pageInfo"];
+
 type FetchRecentProviderSessionsPayload = Extract<
   SessionOutboundMessage,
   { type: "fetch_recent_provider_sessions_response" }
 >["payload"];
+
 type FetchRecentProviderSessionsRequest = Extract<
   SessionInboundMessage,
   { type: "fetch_recent_provider_sessions_request" }
 >;
+
 export type FetchRecentProviderSessionsOptions = Omit<
   FetchRecentProviderSessionsRequest,
   "type" | "requestId"
 > & {
   requestId?: string;
 };
+
 export type FetchRecentProviderSessionEntry = FetchRecentProviderSessionsPayload["entries"][number];
+
 type FetchWorkspacesPayload = Extract<
   SessionOutboundMessage,
   { type: "fetch_workspaces_response" }
 >["payload"];
+
 type FetchWorkspacesRequest = Extract<SessionInboundMessage, { type: "fetch_workspaces_request" }>;
+
 export type FetchWorkspacesOptions = Omit<FetchWorkspacesRequest, "type" | "requestId"> & {
   requestId?: string;
 };
+
 export type FetchWorkspacesEntry = FetchWorkspacesPayload["entries"][number];
+
 export type FetchWorkspacesPageInfo = FetchWorkspacesPayload["pageInfo"];
+
 export type ProjectSuggestionsPayload = Extract<
   SessionOutboundMessage,
   { type: "project.suggestions.response" }
 >["payload"];
+
 export type ProjectSuggestionsOptions = Omit<
   Extract<SessionInboundMessage, { type: "project.suggestions.request" }>,
   "type" | "requestId"
 > & { requestId?: string };
+
 export type ProjectListPayload = Extract<
   SessionOutboundMessage,
   { type: "project.list.response" }
 >["payload"];
+
 type ProjectListRequest = Extract<SessionInboundMessage, { type: "project.list.request" }>;
+
 export type ProjectListOptions = Omit<ProjectListRequest, "type" | "requestId"> & {
   requestId?: string;
 };
+
 export interface CreateChatRoomOptions {
   name: string;
   purpose?: string | null;
   requestId?: string;
 }
+
 export interface InspectChatRoomOptions {
   room: string;
   requestId?: string;
 }
+
 export interface DeleteChatRoomOptions {
   room: string;
   requestId?: string;
 }
+
 export interface PostChatMessageOptions {
   room: string;
   body: string;
@@ -1522,6 +1837,7 @@ export interface PostChatMessageOptions {
   replyToMessageId?: string | null;
   requestId?: string;
 }
+
 export interface ReadChatMessagesOptions {
   room: string;
   limit?: number;
@@ -1530,12 +1846,14 @@ export interface ReadChatMessagesOptions {
   requestId?: string;
   timeout?: number;
 }
+
 export interface WaitForChatMessagesOptions {
   room: string;
   afterMessageId?: string | null;
   timeoutMs?: number;
   requestId?: string;
 }
+
 export interface RunLoopOptions {
   prompt: string;
   cwd: string;
@@ -1553,19 +1871,23 @@ export interface RunLoopOptions {
   maxTimeMs?: number;
   requestId?: string;
 }
+
 export interface InspectLoopOptions {
   id: string;
   requestId?: string;
 }
+
 export interface LoopLogsOptions {
   id: string;
   afterSeq?: number;
   requestId?: string;
 }
+
 export interface StopLoopOptions {
   id: string;
   requestId?: string;
 }
+
 export interface CreateScheduleOptions {
   prompt: string;
   name?: string | null;
@@ -1608,10 +1930,12 @@ export interface CreateScheduleOptions {
   runOnCreate?: boolean;
   requestId?: string;
 }
+
 export interface InspectScheduleOptions {
   id: string;
   requestId?: string;
 }
+
 export interface UpdateScheduleNewAgentConfig {
   provider?: string;
   model?: string | null;
@@ -1621,6 +1945,7 @@ export interface UpdateScheduleNewAgentConfig {
   isolation?: "local" | "worktree";
   cwd?: string;
 }
+
 export interface UpdateScheduleOptions {
   id: string;
   name?: string | null;
@@ -1635,23 +1960,32 @@ export interface UpdateScheduleOptions {
   expiresAt?: string | null;
   requestId?: string;
 }
+
 export interface RenameBranchInput {
   cwd: string;
   branch: string;
   requestId?: string;
 }
+
 export interface RenameTerminalInput {
   terminalId: string;
   title: string;
   requestId?: string;
 }
+
 type OpenProjectPayload = OpenProjectResponseMessage["payload"];
+
 type ProjectAddPayload = ProjectAddResponse["payload"];
+
 export type ProjectCreateDirectoryPayload = ProjectCreateDirectoryResponse["payload"];
+
 export type WorkspaceGithubSearchRepositoriesPayload =
   WorkspaceGithubSearchRepositoriesResponse["payload"];
+
 type ProjectGithubClonePayload = ProjectGithubCloneResponse["payload"];
+
 type ArchiveWorkspacePayload = ArchiveWorkspaceResponseMessage["payload"];
+
 type WorkspaceSetupStatusPayload = WorkspaceSetupStatusResponseMessage["payload"];
 
 export interface FetchAgentResult {
@@ -1710,41 +2044,52 @@ interface BinaryFileTransferState extends PendingBinaryFileRead {
 }
 
 type RpcWaitResult<T> = { kind: "ok"; value: T } | { kind: "error"; error: DaemonRpcError };
+
 type GetDaemonConfigResponse = Extract<
   SessionOutboundMessage,
   { type: "get_daemon_config_response" }
 >;
+
 type SetDaemonConfigResponse = Extract<
   SessionOutboundMessage,
   { type: "set_daemon_config_response" }
 >;
+
 type CorrelatedResponseMessage =
   | Extract<SessionOutboundMessage, { payload: { requestId: string } }>
   | GetDaemonConfigResponse
   | SetDaemonConfigResponse;
+
 type CorrelatedResponseType = CorrelatedResponseMessage["type"];
+
 type SshModuleParams<T extends SessionInboundMessage["type"]> = Omit<
   Extract<SessionInboundMessage, { type: T }>,
   "type" | "requestId"
 >;
+
 type CorrelatedResponsePayload<TType extends CorrelatedResponseType> = Extract<
   CorrelatedResponseMessage,
   { type: TType }
 >["payload"];
+
 export type AgentBackgroundWorkListPayload =
   CorrelatedResponsePayload<"agent.background_work.list.response">;
+
 export type AgentBackgroundWorkItem = AgentBackgroundWorkListPayload["items"][number];
 
 // Argo CD (spec 30.5): one typed entry point for every `argocd.*.request`; the response type is
 // the request type with `.response`, its payload carries `error` + `errorCode`.
 export type ArgoCdRequestType = Extract<SessionInboundMessage["type"], `argocd.${string}.request`>;
+
 export type ArgoCdRequestParams<T extends ArgoCdRequestType> = Omit<
   Extract<SessionInboundMessage, { type: T }>,
   "type" | "requestId"
 >;
+
 type ArgoCdResponseTypeOf<T extends ArgoCdRequestType> = T extends `${infer Prefix}.request`
   ? Extract<CorrelatedResponseType, `${Prefix}.response`>
   : never;
+
 export type ArgoCdResponsePayload<T extends ArgoCdRequestType> = CorrelatedResponsePayload<
   ArgoCdResponseTypeOf<T>
 >;
@@ -1824,24 +2169,38 @@ function toTimeoutError(error: unknown, label: string, timeoutMs: number): Error
 }
 
 const DEFAULT_RECONNECT_BASE_DELAY_MS = 1500;
+
 const DEFAULT_RECONNECT_MAX_DELAY_MS = 30000;
+
 const DEFAULT_SESSION_RPC_TIMEOUT_MS = 60_000;
+
 // Migration bundles carry serialized records + provider history blobs and can be
 // large; allow more headroom than a normal RPC.
 const HOST_DATA_MIGRATION_TIMEOUT_MS = 300_000;
+
 const DEFAULT_CONNECT_TIMEOUT_MS = 15_000;
+
 const DEFAULT_LIVENESS_TIMEOUT_MS = 5000;
+
 export const CHALLENGE_WAIT_FALLBACK_MS = 10_000;
+
 const LIVENESS_HEARTBEAT_INTERVAL_MS = 10_000;
+
 const LIVENESS_HEARTBEAT_TIMEOUT_MS = 15_000;
+
 const FOREGROUND_LIVENESS_TIMEOUT_MS = 5_000;
+
 const SUSPENDED_WINDOW_SLACK_MS = 2_000;
+
 const LIVENESS_FAILURE_RECONNECT_THRESHOLD = 2;
 
 /** Default timeout for waiting for connection before sending queued messages */
 const DEFAULT_SEND_QUEUE_TIMEOUT_MS = DEFAULT_SESSION_RPC_TIMEOUT_MS;
+
 const DEFAULT_DICTATION_FINISH_ACCEPT_TIMEOUT_MS = DEFAULT_SESSION_RPC_TIMEOUT_MS;
+
 const DEFAULT_DICTATION_FINISH_FALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
+
 const DEFAULT_DICTATION_FINISH_TIMEOUT_GRACE_MS = 5000;
 
 function isWaiterTimeoutError(error: unknown): boolean {
@@ -2042,10 +2401,15 @@ export class DaemonClient {
     string,
     { clientBundleHash: string; clientBundle: string }
   >();
+
   private pluginClientBundleStore: PluginClientBundleStore | undefined;
+
   private pluginClientBundlesLoaded: Promise<void> | undefined;
+
   private pluginClientBundlesWrite: PluginClientBundle[] | undefined;
+
   private pluginClientBundlesWriting = false;
+
   private readonly eventObservations = new Set<{
     events: Set<SessionEventSubscription>;
     subscription: OwnedSubscription<unknown>;
@@ -2061,6 +2425,7 @@ export class DaemonClient {
   }
 
   private readonly automaticEvents = new Map<string, OwnedSubscription<unknown>>();
+
   private syncEventDemand(type: string): void {
     if (
       this.config.capabilities?.[CLIENT_CAPS.explicitEventSubscriptions] === false ||
@@ -2092,31 +2457,51 @@ export class DaemonClient {
   });
 
   private transport: DaemonTransport | null = null;
+
   private chunkedTransport: ChunkedTransport | null = null;
+
   private transportCleanup: Array<() => void> = [];
+
   private rawMessageListeners: Set<(message: SessionOutboundMessage) => void> = new Set();
+
   private messageHandlers: Map<
     SessionOutboundMessage["type"],
     Set<(message: SessionOutboundMessage) => void>
   > = new Map();
+
   private eventListeners: Set<DaemonEventHandler> = new Set();
+
   private waiters: Set<Waiter<unknown>> = new Set();
+
   private checkoutStatusInFlight: Map<string, Promise<CheckoutStatusPayload>> = new Map();
+
   private connectionListeners: Set<(status: ConnectionState) => void> = new Set();
+
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+
   private connectTimeout: ReturnType<typeof setTimeout> | null = null;
+
   private pendingGenericTransportErrorTimeout: ReturnType<typeof setTimeout> | null = null;
+
   private challengeWaitTimeout: ReturnType<typeof setTimeout> | null = null;
+
   private registeredThisConnection = false;
+
   private reconnectAttempt = 0;
+
   private shouldReconnect = true;
+
   private connectPromise: Promise<void> | null = null;
+
   private connectResolve: (() => void) | null = null;
+
   private connectReject: ((error: Error) => void) | null = null;
+
   private lastErrorValue: string | null = null;
   private destinationServerId: string | undefined;
   private connectionFailure: Error | undefined;
   private connectionState: ConnectionState = { status: "idle" };
+
   private checkoutDiffSubscriptions = new Map<
     string,
     {
@@ -2128,11 +2513,14 @@ export class DaemonClient {
       };
     }
   >();
+
   private terminalDirectorySubscriptions = new Map<string, { cwd: string; workspaceId?: string }>();
+
   private fileSubscriptions = new Map<
     string,
     { cwd: string; path: string; onUpdate: (version: FileVersion) => void }
   >();
+
   private logSubscriptions = new Map<
     string,
     {
@@ -2143,33 +2531,55 @@ export class DaemonClient {
       onChunk: (chunk: string) => void;
     }
   >();
+
   private execCallbacks = new Map<string, (data: string) => void>();
+
   private pfCallbacks = new Map<string, (data: string) => void>();
+
   private readonly terminalStreams = new TerminalStreamRouter();
+
   // Spec 27.5: live device screens arrive as binary frames keyed by subscriptionId.
   private readonly screenFrameHandlers = new Map<string, (frame: ScreenFrame) => void>();
+
   private pendingBinaryFileReads = new Map<string, PendingBinaryFileRead>();
+
   private activeBinaryFileTransfers = new Map<string, BinaryFileTransferState>();
+
   private completedBinaryFileReads = new Map<string, FileReadResult>();
+
   private logger: Logger;
+
   private pendingSendQueue: PendingSend[] = [];
+
   private readonly logConnectionPath: "direct" | "relay";
+
   /**
    * Lowest relay endpoint security this client accepts on its next attempt.
    * Starts at the configured floor; once a connection negotiates `protected`
    * the floor ratchets up, so an attacker cannot downgrade later attempts.
    */
   private relaySecurityFloorValue: RelaySecurityMode | undefined;
+
   private readonly logServerId: string | null;
+
   private readonly logClientIdHash: string;
+
   private readonly logGeneration: number | null;
+
   private lastServerInfoMessage: ServerInfoStatusPayload | null = null;
+
   private runtimeMetricsInterval: ReturnType<typeof setInterval> | null = null;
+
   private runtimeMetrics: DaemonClientRuntimeMetrics | null = null;
+
   private pingProbe: PingProbe | null = null;
+
   private readonly pongWaiters = new Set<PongWaiter>();
+
   private livenessHeartbeatTimer: ReturnType<typeof setTimeout> | null = null;
+
   private lastLivenessRttMs: number | null = null;
+
   private consecutiveLivenessFailures = 0;
 
   constructor(private config: DaemonClientConfig) {
@@ -2495,6 +2905,8 @@ export class DaemonClient {
     this.resetConnectTimeout();
     this.disposeTransport(1000, "Client closed");
     this.clearWaiters(new Error("Daemon client closed"));
+    await this.owned.close();
+    this.creations.close();
     this.rejectPendingSendQueue(new Error("Daemon client closed"));
     this.rejectPingProbe(new Error("Daemon client closed"));
     this.rejectPongWaiters(new Error("Daemon client closed"));
@@ -2822,48 +3234,6 @@ export class DaemonClient {
     };
   }
 
-  on<TType extends SessionOutboundMessage["type"]>(
-    type: TType,
-    handler: (message: Extract<SessionOutboundMessage, { type: TType }>) => void,
-  ): () => void;
-  on(handler: DaemonEventHandler): () => void;
-  on(
-    arg1: SessionOutboundMessage["type"] | DaemonEventHandler,
-    arg2?: (message: SessionOutboundMessage) => void,
-  ): () => void {
-    if (typeof arg1 === "function") {
-      return this.subscribe(arg1);
-    }
-
-    const type = arg1;
-    const handler = arg2!;
-
-    if (!this.messageHandlers.has(type)) {
-      this.messageHandlers.set(type, new Set());
-    }
-    this.messageHandlers.get(type)!.add(handler);
-    this.syncEventDemand(type);
-
-    const release = () => {
-      const handlers = this.messageHandlers.get(type);
-      if (!handlers) {
-        return;
-      }
-      handlers.delete(handler);
-      if (handlers.size === 0) {
-        this.messageHandlers.delete(type);
-        const observation = this.automaticEvents.get(type);
-        this.automaticEvents.delete(type);
-        void observation
-          ?.release()
-          .catch((error) => this.logger.warn({ err: error }, "Event subscription release failed"));
-      }
-    };
-    return Object.assign(release, {
-      ready: this.automaticEvents.get(type)?.ready ?? Promise.resolve(),
-    });
-  }
-
   onAgentAttentionRequired(
     handler: (notification: AgentAttentionRequiredNotification) => void,
   ): () => void {
@@ -2914,7 +3284,9 @@ export class DaemonClient {
       }
       throw new Error(`Transport not connected (status: ${this.connectionState.status})`);
     }
-    const payload = SessionInboundMessageSchema.parse(message);
+    const payload = SessionInboundMessageSchema.parse(
+      this.legacyProviderOptions()?.prepare(message) ?? message,
+    );
     try {
       void this.sendSessionPayload(payload).catch((error) => {
         if (!this.config.suppressSendErrors)
@@ -2964,7 +3336,9 @@ export class DaemonClient {
    */
   private sendSessionMessageOrThrow(message: SessionInboundMessage): Promise<void> {
     return this.sendWhenConnected(() => {
-      const payload = SessionInboundMessageSchema.parse(message);
+      const payload = SessionInboundMessageSchema.parse(
+        this.legacyProviderOptions()?.prepare(message) ?? message,
+      );
       return this.sendSessionPayload(payload);
     });
   }
@@ -3180,7 +3554,9 @@ export class DaemonClient {
     if (!this.transport || this.connectionState.status !== "connected") {
       throw this.unavailableError();
     }
-    const payload = SessionInboundMessageSchema.parse(message);
+    const payload = SessionInboundMessageSchema.parse(
+      this.legacyProviderOptions()?.prepare(message) ?? message,
+    );
     try {
       return this.sendSessionPayload(payload);
     } catch (error) {
@@ -3776,45 +4152,57 @@ export class DaemonClient {
     });
   }
 
-  async fetchAgent(options: FetchAgentOptions): Promise<FetchAgentResult | null>;
-  async fetchAgent(agentId: string, requestId?: string): Promise<FetchAgentResult | null>;
-  async fetchAgent(
-    agentId: string,
-    options?: LegacyFetchAgentOptions,
-  ): Promise<FetchAgentResult | null>;
-  async fetchAgent(
-    input: FetchAgentOptions | string,
-    legacyOptions?: LegacyFetchAgentOptions | string,
-  ): Promise<FetchAgentResult | null> {
-    const options = normalizeFetchAgentOptions(input, legacyOptions);
-    const resolvedRequestId = this.createRequestId(options.requestId);
-    const message = SessionInboundMessageSchema.parse({
-      type: "fetch_agent_request",
-      requestId: resolvedRequestId,
-      agentId: options.agentId,
-    });
-    const payload = await this.sendRequest({
-      requestId: resolvedRequestId,
-      message,
-      timeout: options.timeout,
-      options: { skipQueue: true },
-      select: (msg) => {
-        if (msg.type !== "fetch_agent_response") {
-          return null;
-        }
-        if (msg.payload.requestId !== resolvedRequestId) {
-          return null;
-        }
-        return msg.payload;
-      },
-    });
-    if (payload.error) {
-      throw new Error(payload.error);
+  // ============================================================================
+  // Agent Lifecycle
+  // ============================================================================
+
+  private readonly creations = new CreationClient({
+    supports: (feature) => {
+      return this.lastServerInfoMessage?.features?.[feature] === true;
+    },
+    requestId: () => this.createRequestId(),
+    request: (kind, input) =>
+      kind === "workspace"
+        ? this.sendCorrelatedSessionRequest({
+            requestId: input.requestId as string | undefined,
+            message: { ...input, type: "workspace.create.request" },
+            responseType: "workspace.create.response",
+            timeout: 0,
+          })
+        : this.sendCorrelatedSessionRequest({
+            requestId: input.requestId as string | undefined,
+            message: { ...input, type: "agent.create.request" },
+            responseType: "agent.create.response",
+            timeout: 0,
+          }),
+    observe: (kind, idempotencyKey, next, error) => {
+      const observation = this.owned.observe(() =>
+        this.sendCorrelatedSessionRequest({
+          message: { type: "creation.subscribe.request", kind, idempotencyKey },
+          responseType: "creation.subscribe.response",
+        }),
+      );
+      observation.subscribe({
+        snapshot: (result) => next(result.snapshot),
+        update: (message) => {
+          if (message.type === "workspace.create.update" || message.type === "agent.create.update")
+            next(message.payload);
+        },
+        error,
+      });
+      return () => {
+        void observation.release().catch(error);
+      };
+    },
+    legacyAgent: (input) => this.createLegacyAgent(input),
+    legacyWorkspace: (input) => this.createLegacyWorkspace(input, input.requestId),
+  });
+
+  // Entity metadata is gated once at the transport boundary.
+  private requireEntityMetadata(): void {
+    if (this.lastServerInfoMessage?.features?.entityMetadata !== true) {
+      throw new Error("Update the host to use metadata.");
     }
-    if (!payload.agent) {
-      return null;
-    }
-    return { agent: payload.agent, project: payload.project ?? null };
   }
 
   private resubscribeCheckoutDiffSubscriptions(): void {
@@ -3880,20 +4268,28 @@ export class DaemonClient {
     }
   }
 
-  // ============================================================================
-  // Agent Lifecycle
-  // ============================================================================
-
-  private requireBackgroundAgentCreation(options: CreateAgentRequestOptions): void {
-    if (
-      options.background !== undefined &&
-      this.lastServerInfoMessage?.features?.backgroundAgents !== true
-    )
-      throw new Error("Update the host to use background agents.");
+  async createAgent(options: CreateAgentRequestOptions): Promise<AgentSnapshotPayload> {
+    if (options.git !== undefined || options.worktreeName !== undefined) {
+      throw new Error(
+        "Legacy git/worktreeName agent placement was removed. Use createWorkspace({ source, agent, idempotencyKey }) or create a workspace first and pass workspaceId.",
+      );
+    }
+    if (options.background !== undefined) this.requireBackgroundCreation(options);
+    if (options.metadata !== undefined) this.requireEntityMetadata();
+    const config = resolveAgentConfig(options);
+    const result = await this.creations.createAgent({
+      ...options,
+      config: this.carriesLegacyOptions(config)
+        ? await this.routeLegacyCreateConfig(config)
+        : config,
+    });
+    if (result.error || !result.agent) throw new Error(result.error ?? "Agent creation failed");
+    return result.agent;
   }
 
-  async createAgent(options: CreateAgentRequestOptions): Promise<AgentSnapshotPayload> {
-    this.requireBackgroundAgentCreation(options);
+  private async createLegacyAgent(
+    options: CreateAgentRequestOptions,
+  ): Promise<AgentSnapshotPayload> {
     const requestId = this.createRequestId(options.requestId);
     const config = resolveAgentConfig(options);
 
@@ -3903,9 +4299,9 @@ export class DaemonClient {
       config,
       ...(options.env ? { env: options.env } : {}),
       ...(options.workspaceId !== undefined ? { workspaceId: options.workspaceId } : {}),
-      background: options.background,
       ...(options.callerAgentId !== undefined ? { callerAgentId: options.callerAgentId } : {}),
       ...(options.initialPrompt ? { initialPrompt: options.initialPrompt } : {}),
+      idempotencyKey: options.idempotencyKey,
       ...(options.clientMessageId ? { clientMessageId: options.clientMessageId } : {}),
       ...(options.outputSchema ? { outputSchema: options.outputSchema } : {}),
       ...(options.images && options.images.length > 0 ? { images: options.images } : {}),
@@ -3915,6 +4311,7 @@ export class DaemonClient {
       ...(options.git ? { git: options.git } : {}),
       ...(options.worktree ? { worktree: options.worktree } : {}),
       ...(options.autoArchive !== undefined ? { autoArchive: options.autoArchive } : {}),
+      ...(options.background !== undefined ? { background: options.background } : {}),
       ...(options.worktreeName ? { worktreeName: options.worktreeName } : {}),
       ...(options.labels && Object.keys(options.labels).length > 0
         ? { labels: options.labels }
@@ -3945,6 +4342,33 @@ export class DaemonClient {
     }
 
     return status.agent;
+  }
+
+  /**
+   * A legacy daemon reads control options as `featureValues`, and which options are controls
+   * depends on the config (Claude's differ by model), so a create that carries options first lists
+   * the controls for its own config. Callers never prime anything.
+   */
+  private carriesLegacyOptions(config: AgentSessionConfig): boolean {
+    return (
+      this.legacyProviderOptions() !== null && Object.keys(config.providerOptions ?? {}).length > 0
+    );
+  }
+
+  private async routeLegacyCreateConfig(config: AgentSessionConfig): Promise<AgentSessionConfig> {
+    const payload = await this.listProviderFeatures({
+      provider: config.provider,
+      cwd: config.cwd || "~",
+      ...(config.modeId ? { modeId: config.modeId } : {}),
+      ...(config.model ? { model: config.model } : {}),
+      ...(config.thinkingOptionId ? { thinkingOptionId: config.thinkingOptionId } : {}),
+      featureValues: config.providerOptions,
+    });
+    if (payload.error) throw new Error(payload.error);
+    return this.legacyOptions.routeCreateConfig(
+      config,
+      new Set((payload.features ?? []).map((feature) => feature.id)),
+    );
   }
 
   async deleteAgent(agentId: string): Promise<void> {
@@ -4086,6 +4510,42 @@ export class DaemonClient {
       throw new Error(payload.error ?? "removeProject rejected");
     }
     return { removedWorkspaceIds: payload.removedWorkspaceIds };
+  }
+
+  /** Top-level keys replace; `null` removes the key. Resolves to the agent's metadata afterwards. */
+  async setAgentMetadata(
+    agentId: string,
+    patch: Record<string, JsonValue>,
+    requestId?: string,
+  ): Promise<Record<string, JsonValue>> {
+    this.requireEntityMetadata();
+    const payload =
+      await this.sendNamespacedCorrelatedSessionRequest<"agent.metadata.update.response">({
+        requestId,
+        message: { type: "agent.metadata.update.request", agentId, patch },
+      });
+    if (!payload.accepted || !payload.metadata) {
+      throw new Error(payload.error ?? "setAgentMetadata rejected");
+    }
+    return payload.metadata;
+  }
+
+  /** Top-level keys replace; `null` removes the key. Resolves to the workspace's metadata afterwards. */
+  async setWorkspaceMetadata(
+    workspaceId: string,
+    patch: Record<string, JsonValue>,
+    requestId?: string,
+  ): Promise<Record<string, JsonValue>> {
+    this.requireEntityMetadata();
+    const payload =
+      await this.sendNamespacedCorrelatedSessionRequest<"workspace.metadata.update.response">({
+        requestId,
+        message: { type: "workspace.metadata.update.request", workspaceId, patch },
+      });
+    if (!payload.accepted || !payload.metadata) {
+      throw new Error(payload.error ?? "setWorkspaceMetadata rejected");
+    }
+    return payload.metadata;
   }
 
   async setWorkspaceTitle(
@@ -4844,6 +5304,41 @@ export class DaemonClient {
     }
   }
 
+  /**
+   * Changes the agent's own provider options: top-level keys replace, `null` removes the key.
+   * A daemon without `providerOptionControls` takes each key as a feature write.
+   */
+  async setAgentOptions(
+    agentId: string,
+    patch: Record<string, unknown>,
+  ): Promise<AgentProviderNotice | null> {
+    const legacy = this.legacyProviderOptions();
+    if (legacy) {
+      // COMPAT(providerOptionControls): added in v0.15.0, remove after 2027-05-01.
+      const pending = this.legacyResetControls(agentId, patch);
+      const controls = pending ? await pending : [];
+      for (const [featureId, value] of legacy.featureWrites(patch, controls)) {
+        await this.setAgentFeature(agentId, featureId, value);
+      }
+      return null;
+    }
+    return this.applyAgentConfig(agentId, { options: patch });
+  }
+
+  /**
+   * COMPAT(providerOptionControls): added in v0.15.0, remove after 2027-05-01.
+   * A reset (`null`) on a daemon without `providerOptionControls` is written as the value its
+   * control resets to, which takes the agent's controls. Without a reset nothing is fetched, so
+   * the write is not delayed.
+   */
+  private legacyResetControls(
+    agentId: string,
+    patch: Record<string, unknown>,
+  ): Promise<AgentOptionControl[]> | null {
+    if (!Object.values(patch).includes(null)) return null;
+    return this.fetchAgent(agentId).then((result) => result?.agent.controls ?? []);
+  }
+
   async setAgentThinkingOption(
     agentId: string,
     thinkingOptionId: string | null,
@@ -4871,6 +5366,51 @@ export class DaemonClient {
     });
     if (!payload.accepted) {
       throw new Error(payload.error ?? "setAgentThinkingOption rejected");
+    }
+    return payload.notice ?? null;
+  }
+
+  /**
+   * Applies a whole agent-config bundle in one request. Use this instead of
+   * chaining the single-field setters when the values belong together so client
+   * interruption and other mutations cannot interleave between steps. A
+   * provider rejection can still leave earlier steps applied.
+   * Gated on `server_info.features.agentConfigApply`.
+   */
+  async applyAgentConfig(
+    agentId: string,
+    config: AgentConfigApply,
+  ): Promise<AgentProviderNotice | null> {
+    let wireConfig = config;
+    const legacy = this.legacyProviderOptions();
+    if (legacy && config.options) {
+      // COMPAT(providerOptionControls): added in v0.15.0, remove after 2027-05-01.
+      const pending = this.legacyResetControls(agentId, config.options);
+      wireConfig = legacy.featureValuesConfig(config, pending ? await pending : []);
+    }
+    const requestId = this.createRequestId();
+    const message = SessionInboundMessageSchema.parse({
+      type: "agent.config.apply.request",
+      agentId,
+      config: wireConfig,
+      requestId,
+    });
+    const payload = await this.sendRequest({
+      requestId,
+      message,
+      options: { skipQueue: true },
+      select: (msg) => {
+        if (msg.type !== "agent.config.apply.response") {
+          return null;
+        }
+        if (msg.payload.requestId !== requestId) {
+          return null;
+        }
+        return msg.payload;
+      },
+    });
+    if (!payload.accepted) {
+      throw new Error(payload.error ?? "applyAgentConfig rejected");
     }
     return payload.notice ?? null;
   }
@@ -5822,34 +6362,50 @@ export class DaemonClient {
   }
 
   async createWorkspace(
-    input: {
-      idempotencyKey?: string;
-      source: WorkspaceCreateRequest["source"];
-      title?: string;
-      background?: boolean;
-      callerAgentId?: string;
-      firstAgentContext?: WorkspaceCreateRequest["firstAgentContext"];
-    },
+    input: CreateWorkspaceRequestOptions,
     requestId?: string,
   ): Promise<WorkspaceCreatePayload> {
-    // COMPAT(workspaceRequestReceipts): added in v0.9.59, remove after 2027-05-24.
-    if (
-      input.idempotencyKey &&
-      this.lastServerInfoMessage?.features?.workspaceRequestReceipts !== true
-    ) {
-      throw new Error("Update the host to retry workspace creation safely");
+    const resolvedRequestId = this.createRequestId(requestId ?? input.requestId);
+    if (input.background !== undefined || input.callerAgentId) this.requireBackgroundWorkspaces();
+    if (input.agent?.background !== undefined)
+      throw new Error("Configure background on the workspace, not its initial agent.");
+    if (input.metadata !== undefined || input.agent?.metadata !== undefined)
+      this.requireEntityMetadata();
+    let agentConfig = input.agent ? resolveAgentConfig(input.agent) : undefined;
+    if (agentConfig && this.carriesLegacyOptions(agentConfig)) {
+      agentConfig = await this.routeLegacyCreateConfig(agentConfig);
     }
-    if (input.background !== undefined || input.callerAgentId)
-      this.assertBackgroundWorkspacesSupported();
+    const result = await this.creations.createWorkspace({
+      ...input,
+      requestId: resolvedRequestId,
+      ...(input.agent && agentConfig ? { agent: { ...input.agent, config: agentConfig } } : {}),
+    });
+    return {
+      ...result,
+      workspace: result.workspace ?? null,
+      agent: result.agent ?? undefined,
+      setupTerminalId: result.setupTerminalId ?? null,
+      requestId: result.requestId ?? resolvedRequestId,
+    };
+  }
+
+  private async createLegacyWorkspace(
+    input: CreateWorkspaceRequestOptions,
+    requestId?: string,
+  ): Promise<WorkspaceCreatePayload> {
     return this.sendCorrelatedSessionRequest({
       requestId,
       message: {
         type: "workspace.create.request",
-        ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
         source: input.source,
+        // COMPAT(workspaceRequestReceipts): added in v0.8.0; remove after 2027-03-15 once the daemon floor supports workspace receipts.
+        ...(this.lastServerInfoMessage?.features?.workspaceRequestReceipts &&
+        input.idempotencyKey !== undefined
+          ? { idempotencyKey: input.idempotencyKey }
+          : {}),
+        ...(input.title !== undefined ? { title: input.title } : {}),
         ...(input.background !== undefined ? { background: input.background } : {}),
         ...(input.callerAgentId ? { callerAgentId: input.callerAgentId } : {}),
-        ...(input.title !== undefined ? { title: input.title } : {}),
         ...(input.firstAgentContext !== undefined
           ? { firstAgentContext: input.firstAgentContext }
           : {}),
@@ -6949,6 +7505,35 @@ export class DaemonClient {
     });
   }
 
+  /**
+   * The controls a draft agent would show and the options it would run with: `config.json`
+   * defaults merged with the draft's own `providerOptions`, resolved by the daemon.
+   */
+  async listProviderControls(
+    draftConfig: ListCommandsDraftConfig,
+    options?: { requestId?: string },
+  ): Promise<ListProviderControlsPayload> {
+    const legacy = this.legacyProviderOptions();
+    if (legacy) {
+      const { providerOptions, ...rest } = draftConfig;
+      const payload = await this.listProviderFeatures(
+        {
+          ...rest,
+          // A legacy daemon reads the options it exposes as features, whatever the others are.
+          ...(providerOptions ? { featureValues: providerOptions } : {}),
+        },
+        options,
+      );
+      return legacy.controlsResponse(payload);
+    }
+    return this.sendCorrelatedSessionRequest({
+      requestId: options?.requestId,
+      message: { type: "provider.controls.list.request", draftConfig },
+      responseType: "provider.controls.list.response",
+      timeout: 90000,
+    });
+  }
+
   async listProviderFeatures(
     draftConfig: ListCommandsDraftConfig,
     options?: { requestId?: string },
@@ -7181,6 +7766,26 @@ export class DaemonClient {
   }
 
   /** One subscription to a plugin subscription handler; events arrive as updates and binary. */
+  observeWorkspaceSetup(
+    workspaceId: string,
+    options?: { signal?: AbortSignal },
+  ): OwnedSubscription<CorrelatedResponsePayload<"workspace.setup.subscribe.response">> {
+    return this.owned.observe(async (accept) => {
+      if (this.lastServerInfoMessage?.features?.workspaceSetupObservation !== true)
+        throw new Error("Update the host to observe workspace setup");
+      const requestId = this.createRequestId();
+      return this.sendCorrelatedSessionRequest({
+        requestId,
+        message: { type: "workspace.setup.subscribe.request", requestId, workspaceId },
+        responseType: "workspace.setup.subscribe.response",
+        selectPayload: (payload) => {
+          accept(payload);
+          return payload;
+        },
+      });
+    }, options?.signal);
+  }
+
   observePluginRpc(
     pluginId: string,
     method: string,
@@ -8036,28 +8641,6 @@ export class DaemonClient {
       message: {
         type: "provider.usage.list.request",
       },
-    });
-  }
-
-  async listCommands(options: ListCommandsOptions): Promise<ListCommandsPayload>;
-  async listCommands(agentId: string, requestId?: string): Promise<ListCommandsPayload>;
-  async listCommands(
-    agentId: string,
-    options?: LegacyListCommandsOptions,
-  ): Promise<ListCommandsPayload>;
-  async listCommands(
-    input: ListCommandsOptions | string,
-    legacyOptions?: LegacyListCommandsOptions | string,
-  ): Promise<ListCommandsPayload> {
-    const options = normalizeListCommandsOptions(input, legacyOptions);
-    return this.sendCorrelatedSessionRequest({
-      requestId: options.requestId,
-      message: {
-        type: "list_commands_request",
-        agentId: options.agentId,
-        ...(options.draftConfig ? { draftConfig: options.draftConfig } : {}),
-      },
-      responseType: "list_commands_response",
     });
   }
 
@@ -9451,6 +10034,7 @@ export class DaemonClient {
       message: { type: "ssh.session.reconnect.request", terminalId: options.terminalId },
     });
   }
+
   // ── SSH modules S6–S8 (logs, import, install key, environment, Docker on the server) ──
 
   async sshLogsList(
@@ -11700,6 +12284,14 @@ export class DaemonClient {
     return requestId ?? crypto.randomUUID();
   }
 
+  private readonly legacyOptions = new LegacyProviderOptions();
+
+  /** The translation for a daemon without `providerOptionControls`; null for a current one. */
+  private legacyProviderOptions(): LegacyProviderOptions | null {
+    const info = this.lastServerInfoMessage;
+    return info && usesLegacyProviderOptions(info) ? this.legacyOptions : null;
+  }
+
   getLastServerInfoMessage(): ServerInfoStatusPayload | null {
     return this.lastServerInfoMessage;
   }
@@ -12493,16 +13085,28 @@ export class DaemonClient {
     return false;
   }
 
+  private updateChunkedTransport(serverInfo: ServerInfoStatusPayload): void {
+    if (this.chunkedTransport)
+      this.chunkedTransport.enabled =
+        serverInfo.features?.binaryChunkingV1 === true &&
+        this.config.capabilities?.[CLIENT_CAPS.binaryChunkingV1] !== false;
+  }
+
+  private receiveCreationProgress(message: SessionOutboundMessage): void {
+    if (message.type === "workspace.create.update" || message.type === "agent.create.update") {
+      if (!message.payload.subscriptionId) this.creations.receive(message.payload);
+    }
+  }
+
   private handleSessionMessage(msg: SessionOutboundMessage): void {
+    msg = this.legacyProviderOptions()?.normalize(msg) ?? msg;
     const consumerMessage = normalizeProviderSnapshotUpdateMessage(msg);
+    this.receiveCreationProgress(consumerMessage);
 
     if (consumerMessage.type === "status") {
       const serverInfo = parseServerInfoStatusPayload(consumerMessage.payload);
       if (serverInfo) {
-        if (this.chunkedTransport)
-          this.chunkedTransport.enabled =
-            serverInfo.features?.binaryChunkingV1 === true &&
-            this.config.capabilities?.[CLIENT_CAPS.binaryChunkingV1] !== false;
+        this.updateChunkedTransport(serverInfo);
         this.lastServerInfoMessage = serverInfo;
         this.destinationServerId = serverInfo.serverId;
         this.connectionFailure = undefined;
@@ -12511,6 +13115,7 @@ export class DaemonClient {
           this.reconnectAttempt = 0;
           this.updateConnectionState({ status: "connected" }, { event: "HELLO_SERVER_INFO" });
           this.owned.restore();
+          this.creations.reconnect();
           for (const type of this.messageHandlers.keys()) this.syncEventDemand(type);
           this.startLivenessHeartbeat();
           this.resubscribeCheckoutDiffSubscriptions();
@@ -12746,6 +13351,137 @@ export class DaemonClient {
 
     return { promise, cancel };
   }
+
+  // Background on a request that creates its workspace predates background agents: older hosts
+  // apply it to the new workspace. Placing a background agent in an existing workspace, or
+  // under a caller, needs a host that knows background agents.
+  private requireBackgroundCreation(options: CreateAgentRequestOptions): void {
+    if (options.workspaceId === undefined && options.callerAgentId === undefined) {
+      this.requireBackgroundWorkspaces();
+    } else if (this.lastServerInfoMessage?.features?.backgroundAgents !== true) {
+      throw new Error("Update the host to use background agents.");
+    }
+  }
+
+  // Background workspaces are gated once at the transport boundary.
+  private requireBackgroundWorkspaces(): void {
+    if (this.lastServerInfoMessage?.features?.backgroundWorkspaces !== true) {
+      throw new Error("Update the host to use background workspaces.");
+    }
+  }
+
+  on<TType extends SessionOutboundMessage["type"]>(
+    type: TType,
+    handler: (message: Extract<SessionOutboundMessage, { type: TType }>) => void,
+  ): () => void;
+
+  on(handler: DaemonEventHandler): () => void;
+
+  on(
+    arg1: SessionOutboundMessage["type"] | DaemonEventHandler,
+    arg2?: (message: SessionOutboundMessage) => void,
+  ): () => void {
+    if (typeof arg1 === "function") {
+      return this.subscribe(arg1);
+    }
+
+    const type = arg1;
+    const handler = arg2!;
+
+    if (!this.messageHandlers.has(type)) {
+      this.messageHandlers.set(type, new Set());
+    }
+    this.messageHandlers.get(type)!.add(handler);
+    this.syncEventDemand(type);
+
+    const release = () => {
+      const handlers = this.messageHandlers.get(type);
+      if (!handlers) {
+        return;
+      }
+      handlers.delete(handler);
+      if (handlers.size === 0) {
+        this.messageHandlers.delete(type);
+        const observation = this.automaticEvents.get(type);
+        this.automaticEvents.delete(type);
+        void observation
+          ?.release()
+          .catch((error) => this.logger.warn({ err: error }, "Event subscription release failed"));
+      }
+    };
+    return Object.assign(release, {
+      ready: this.automaticEvents.get(type)?.ready ?? Promise.resolve(),
+    });
+  }
+
+  async fetchAgent(options: FetchAgentOptions): Promise<FetchAgentResult | null>;
+
+  async fetchAgent(agentId: string, requestId?: string): Promise<FetchAgentResult | null>;
+
+  async fetchAgent(
+    agentId: string,
+    options?: LegacyFetchAgentOptions,
+  ): Promise<FetchAgentResult | null>;
+
+  async fetchAgent(
+    input: FetchAgentOptions | string,
+    legacyOptions?: LegacyFetchAgentOptions | string,
+  ): Promise<FetchAgentResult | null> {
+    const options = normalizeFetchAgentOptions(input, legacyOptions);
+    const resolvedRequestId = this.createRequestId(options.requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "fetch_agent_request",
+      requestId: resolvedRequestId,
+      agentId: options.agentId,
+    });
+    const payload = await this.sendRequest({
+      requestId: resolvedRequestId,
+      message,
+      timeout: options.timeout,
+      options: { skipQueue: true },
+      select: (msg) => {
+        if (msg.type !== "fetch_agent_response") {
+          return null;
+        }
+        if (msg.payload.requestId !== resolvedRequestId) {
+          return null;
+        }
+        return msg.payload;
+      },
+    });
+    if (payload.error) {
+      throw new Error(payload.error);
+    }
+    if (!payload.agent) {
+      return null;
+    }
+    return { agent: payload.agent, project: payload.project ?? null };
+  }
+
+  async listCommands(options: ListCommandsOptions): Promise<ListCommandsPayload>;
+
+  async listCommands(agentId: string, requestId?: string): Promise<ListCommandsPayload>;
+
+  async listCommands(
+    agentId: string,
+    options?: LegacyListCommandsOptions,
+  ): Promise<ListCommandsPayload>;
+
+  async listCommands(
+    input: ListCommandsOptions | string,
+    legacyOptions?: LegacyListCommandsOptions | string,
+  ): Promise<ListCommandsPayload> {
+    const options = normalizeListCommandsOptions(input, legacyOptions);
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "list_commands_request",
+        agentId: options.agentId,
+        ...(options.draftConfig ? { draftConfig: options.draftConfig } : {}),
+      },
+      responseType: "list_commands_response",
+    });
+  }
 }
 
 function resolveAgentConfig(options: CreateAgentRequestOptions): AgentSessionConfig {
@@ -12753,6 +13489,15 @@ function resolveAgentConfig(options: CreateAgentRequestOptions): AgentSessionCon
     config,
     provider,
     cwd,
+    agentId: _agentId,
+    onEvent: _onEvent,
+    idempotencyKey: _idempotencyKey,
+    clientMessageId: _clientMessageId,
+    callerAgentId: _callerAgentId,
+    outputSchema: _outputSchema,
+    attachments: _attachments,
+    worktree: _worktree,
+    autoArchive: _autoArchive,
     env: _env,
     workspaceId: _workspaceId,
     initialPrompt: _initialPrompt,
@@ -12761,6 +13506,7 @@ function resolveAgentConfig(options: CreateAgentRequestOptions): AgentSessionCon
     worktreeName: _worktreeName,
     requestId: _requestId,
     labels: _labels,
+    metadata: _metadata,
     ...overrides
   } = options;
 

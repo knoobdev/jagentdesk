@@ -1,3 +1,4 @@
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { useMemo, type ReactNode } from "react";
 import type { LayoutChangeEvent } from "react-native";
 import { View, type StyleProp, type ViewStyle } from "react-native";
@@ -13,6 +14,8 @@ import { WindowChromeSafeArea } from "@/utils/desktop-window";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 
 interface ScreenHeaderProps {
+  center?: ReactNode;
+  desktopHeight?: number;
   left?: ReactNode;
   right?: ReactNode;
   leftStyle?: StyleProp<ViewStyle>;
@@ -28,6 +31,8 @@ interface ScreenHeaderProps {
 export function ScreenHeader({
   left,
   right,
+  center,
+  desktopHeight,
   leftStyle,
   rightStyle,
   borderless,
@@ -36,6 +41,7 @@ export function ScreenHeader({
   const { theme } = useUnistyles();
   const insets = useSafeAreaInsets();
   const isMobile = useIsCompactFormFactor();
+  const gumloop = useIsGumloopTheme();
   // Only add extra padding on mobile for better touch targets; on desktop, only use safe area insets
   const topPadding = isMobile ? HEADER_TOP_PADDING_MOBILE : 0;
   const baseHorizontalPadding = isMobile ? theme.spacing[2] : theme.spacing[3];
@@ -44,10 +50,18 @@ export function ScreenHeader({
     () => [styles.inner, { paddingTop: insets.top + topPadding }],
     [insets.top, topPadding],
   );
-  const rowStyle = useMemo(() => [styles.row, borderless && styles.borderless], [borderless]);
+  const rowStyle = useMemo(
+    () => [
+      styles.row,
+      !isMobile && desktopHeight ? { height: desktopHeight } : null,
+      borderless && styles.borderless,
+    ],
+    [borderless, desktopHeight, isMobile],
+  );
   const leftCombinedStyle = useMemo(() => [styles.left, leftStyle], [leftStyle]);
   const rightCombinedStyle = useMemo(() => [styles.right, rightStyle], [rightStyle]);
 
+  if (gumloop && isMobile) return null;
   return (
     <View style={styles.header}>
       <View style={innerStyle}>
@@ -60,6 +74,11 @@ export function ScreenHeader({
           <TitlebarDragRegion />
           <View style={leftCombinedStyle}>{left}</View>
           <View style={rightCombinedStyle}>{right}</View>
+          {center ? (
+            <View style={styles.center} pointerEvents="none">
+              {center}
+            </View>
+          ) : null}
         </WindowChromeSafeArea>
       </View>
     </View>
@@ -67,6 +86,13 @@ export function ScreenHeader({
 }
 
 const styles = StyleSheet.create((theme) => ({
+  center: {
+    position: "absolute",
+    inset: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 100,
+  },
   header: {
     backgroundColor: theme.colors.surface0,
   },

@@ -83,6 +83,10 @@ function deriveGithubMergeCapability(github: GithubMergeFacts): MergeCapability 
 export const githubForgeLogic = {
   id: "github",
   urlGrammar: {
+    referencePaths: [
+      { kind: "change_request", infix: "/pull/", sigil: "#" },
+      { kind: "issue", infix: "/issues/", sigil: "#" },
+    ],
     treeInfix: "/tree/",
     blobInfix: "/blob/",
     lineAnchor: GITHUB_LINE_ANCHOR,

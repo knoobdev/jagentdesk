@@ -7,7 +7,7 @@ import { AgentControlTrigger } from "@/composer/agent-controls/control";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useHostFeature } from "@/runtime/host-features";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import type {
   SessionShare,
@@ -427,11 +427,11 @@ const ShareCard = memo(function ShareCard({
     [onToggleCapability, share.shareId],
   );
 
-  const isClickUp = useIsClickUpTheme();
-  // ClickUp drops the small uppercase eyebrow labels for sentence-case ink section titles.
-  const cardTitleStyle = isClickUp ? styles.sectionLabelClickUp : styles.cardTitle;
-  const sectionLabelStyle = isClickUp
-    ? [styles.sectionLabelClickUp, styles.sectionLabelGap]
+  const isGumloop = useIsGumloopTheme();
+  // Gumloop drops the small uppercase eyebrow labels for sentence-case ink section titles.
+  const cardTitleStyle = isGumloop ? styles.sectionLabelGumloop : styles.cardTitle;
+  const sectionLabelStyle = isGumloop
+    ? [styles.sectionLabelGumloop, styles.sectionLabelGap]
     : styles.sectionLabel;
   const pending = share.pendingRequests.filter((r) => r.status === "pending");
   const approved = share.pendingRequests.filter((r) => r.status === "approved");
@@ -701,7 +701,7 @@ const styles = StyleSheet.create((theme) => ({
     letterSpacing: 0.5,
     marginTop: theme.spacing[2],
   },
-  sectionLabelClickUp: {
+  sectionLabelGumloop: {
     color: theme.colors.foreground,
     fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.semibold,

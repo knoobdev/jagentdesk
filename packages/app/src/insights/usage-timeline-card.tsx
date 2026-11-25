@@ -6,8 +6,8 @@ import type { UsageDayRollup } from "@jagentdesk/protocol/usage-history";
 import { formatTokenCount } from "@/components/context-window-meter.utils";
 import { useUsageHistory } from "@/insights/use-usage-history";
 import type { Theme } from "@/styles/theme";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
-import { clickUpTabStyles } from "@/components/clickup-shell/list-styles";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { gumloopTabStyles } from "@/components/gumloop-shell/list-styles";
 
 type Period = "day" | "month" | "year";
 const PERIODS: readonly Period[] = ["day", "month", "year"] as const;
@@ -97,7 +97,7 @@ export function UsageTimelineCard({ serverId }: { serverId: string }) {
   );
 
   const onLayout = useCallback((e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width), []);
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
 
   let chartContent: ReactNode = null;
   if (buckets.length === 0) {
@@ -111,7 +111,7 @@ export function UsageTimelineCard({ serverId }: { serverId: string }) {
   }
 
   return (
-    <View style={isClickUp ? styles.cardClickUp : styles.card}>
+    <View style={isGumloop ? styles.cardGumloop : styles.card}>
       <View style={styles.head}>
         <View>
           <Text style={styles.title}>Usage over time</Text>
@@ -119,14 +119,14 @@ export function UsageTimelineCard({ serverId }: { serverId: string }) {
             {formatTokenCount(totals.tokens)} tokens · {formatUsd(totals.cost)}
           </Text>
         </View>
-        <View style={isClickUp ? clickUpTabStyles.row : styles.toggle}>
+        <View style={isGumloop ? gumloopTabStyles.row : styles.toggle}>
           {PERIODS.map((p) => (
             <PeriodButton
               key={p}
               period={p}
               active={p === period}
               onSelect={setPeriod}
-              isClickUp={isClickUp}
+              isGumloop={isGumloop}
             />
           ))}
         </View>
@@ -143,33 +143,33 @@ function PeriodButton({
   period,
   active,
   onSelect,
-  isClickUp,
+  isGumloop,
 }: {
   period: Period;
   active: boolean;
   onSelect: (period: Period) => void;
-  isClickUp: boolean;
+  isGumloop: boolean;
 }) {
   const handlePress = useCallback(() => onSelect(period), [onSelect, period]);
   return (
     <Pressable
       onPress={handlePress}
-      style={periodButtonStyle(isClickUp, active)}
+      style={periodButtonStyle(isGumloop, active)}
       testID={`usage-period-${period}`}
     >
-      <Text style={periodButtonTextStyle(isClickUp, active)}>{PERIOD_LABEL[period]}</Text>
+      <Text style={periodButtonTextStyle(isGumloop, active)}>{PERIOD_LABEL[period]}</Text>
     </Pressable>
   );
 }
 
-// ClickUp swaps the boxed segmented toggle for its underlined text tabs.
-function periodButtonStyle(isClickUp: boolean, active: boolean) {
-  if (isClickUp) return active ? clickUpTabStyles.tabActive : clickUpTabStyles.tab;
+// Gumloop swaps the boxed segmented toggle for its underlined text tabs.
+function periodButtonStyle(isGumloop: boolean, active: boolean) {
+  if (isGumloop) return active ? gumloopTabStyles.tabActive : gumloopTabStyles.tab;
   return [styles.toggleItem, active ? styles.toggleItemActive : null];
 }
 
-function periodButtonTextStyle(isClickUp: boolean, active: boolean) {
-  if (isClickUp) return active ? clickUpTabStyles.textActive : clickUpTabStyles.text;
+function periodButtonTextStyle(isGumloop: boolean, active: boolean) {
+  if (isGumloop) return active ? gumloopTabStyles.textActive : gumloopTabStyles.text;
   return [styles.toggleText, active ? styles.toggleTextActive : null];
 }
 
@@ -251,7 +251,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     padding: 14,
     gap: 12,
   },
-  cardClickUp: {
+  cardGumloop: {
     backgroundColor: theme.chrome.cardBackground,
     borderColor: theme.chrome.cardBorder,
     borderWidth: 1,

@@ -626,6 +626,7 @@ export function resolveKnownHostRoute(input: {
 }
 
 export const SETTINGS_SECTION_SLUGS = [
+  "sidebar",
   "general",
   "connection",
   "appearance",

@@ -55,17 +55,27 @@ export function useUsageSummary(): readonly PinnedUsageSource[] {
  * while no summary window has data, since the footer's Usage icon already opens Usage.
  * Pressing it opens the Usage modal.
  */
-export function UsageSidebarItem({ sources }: { sources: readonly PinnedUsageSource[] }) {
+export function UsageSidebarItem({
+  sources,
+  onNavigate,
+}: {
+  sources: readonly PinnedUsageSource[];
+  onNavigate?: () => void;
+}) {
   const { t } = useTranslation();
   const label = "Usage";
   const openUsage = useOpenSidebarUsage();
+  const handlePress = useCallback(() => {
+    onNavigate?.();
+    openUsage();
+  }, [onNavigate, openUsage]);
   if (sources.length === 0) return null;
   return (
     <PinnedUsageTrigger
       label={label}
       sources={sources}
       errorLabel={t("providerUsage.refreshFailed")}
-      onPress={openUsage}
+      onPress={handlePress}
     />
   );
 }
@@ -259,7 +269,7 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     overflow: "hidden",
     // Same row geometry and leading rail as Add project and the footer icons.
-    minHeight: 28,
+    minHeight: { xs: 44, md: 28 },
     paddingVertical: theme.spacing[1],
     paddingHorizontal: theme.spacing[2],
     borderRadius: theme.borderRadius.lg,

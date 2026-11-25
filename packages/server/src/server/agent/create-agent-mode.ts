@@ -1,10 +1,10 @@
-import type {
-  AgentCreateConfigParent,
-  AgentCreateConfigUnattendedInput,
-  AgentMode,
-  AgentProvider,
-  ResolveAgentCreateConfigInput,
-  ResolveAgentCreateConfigResult,
+import {
+  type AgentCreateConfigParent,
+  type AgentCreateConfigUnattendedInput,
+  type AgentMode,
+  type AgentProvider,
+  type ResolveAgentCreateConfigInput,
+  type ResolveAgentCreateConfigResult,
 } from "./agent-sdk-types.js";
 
 export interface ResolveCreateAgentModeInput {
@@ -94,7 +94,7 @@ export function resolveDefaultAgentCreateConfig(
       availableModes: availableModeIds,
       targetUnattendedMode: input.availableModes?.find(isUnattendedMode)?.id,
     }),
-    featureValues: input.featureValues,
+    providerOptions: input.providerOptions,
   };
 }
 

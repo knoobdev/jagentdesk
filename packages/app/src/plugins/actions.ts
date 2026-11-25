@@ -1,3 +1,4 @@
+import { pluginComposersSource } from "./composer-items/source";
 import { callPluginRpc } from "@jagentdesk/plugin/client/host";
 import type {
   PluginOpenScreenInput,
@@ -31,6 +32,7 @@ export function createPluginCapabilities(
 ): PluginCommandCapabilities {
   return {
     jagentdesk: runtime.jagentdesk,
+    composers: (selector) => pluginComposersSource(plugin).resolve(selector),
     rpc: (contract, input) => callPluginRpc(contract, runtime.invoke, input),
     openScreen(input) {
       if (!plugin.surfaces.some((surface) => surface.id === input.screenId))

@@ -12,13 +12,10 @@ class FakeAgentConfigOperations implements AgentConfigOperations {
   readonly loadedAgentIds: string[] = [];
   readonly modeCalls: Array<{ agentId: string; modeId: string }> = [];
   readonly modelCalls: Array<{ agentId: string; modelId: string | null }> = [];
-  readonly switchProviderCalls: Array<{
-    agentId: string;
-    provider: string;
-    modelId: string | null;
-  }> = [];
-  readonly featureCalls: Array<{ agentId: string; featureId: string; value: unknown }> = [];
+  readonly optionsCalls: Array<{ agentId: string; patch: Record<string, unknown> }> = [];
   readonly thinkingCalls: Array<{ agentId: string; thinkingOptionId: string | null }> = [];
+  /** Cross-operation ordering, which the per-operation arrays above cannot show. */
+  readonly callLog: string[] = [];
   modeNotice: AgentProviderNotice | null = null;
   thinkingNotice: AgentProviderNotice | null = null;
   loadFailure: Error | null = null;
@@ -31,22 +28,20 @@ class FakeAgentConfigOperations implements AgentConfigOperations {
 
   async setMode(agentId: string, modeId: string): Promise<AgentProviderNotice | null> {
     this.modeCalls.push({ agentId, modeId });
+    this.callLog.push("mode");
     if (this.failWith) throw this.failWith;
     return this.modeNotice;
   }
 
   async setModel(agentId: string, modelId: string | null): Promise<void> {
     this.modelCalls.push({ agentId, modelId });
+    this.callLog.push("model");
     if (this.failWith) throw this.failWith;
   }
 
-  async switchProvider(agentId: string, provider: string, modelId: string | null): Promise<void> {
-    this.switchProviderCalls.push({ agentId, provider, modelId });
-    if (this.failWith) throw this.failWith;
-  }
-
-  async setFeature(agentId: string, featureId: string, value: unknown): Promise<void> {
-    this.featureCalls.push({ agentId, featureId, value });
+  async setOptions(agentId: string, patch: Record<string, unknown>): Promise<void> {
+    this.optionsCalls.push({ agentId, patch });
+    this.callLog.push("options");
     if (this.failWith) throw this.failWith;
   }
 
@@ -55,6 +50,7 @@ class FakeAgentConfigOperations implements AgentConfigOperations {
     thinkingOptionId: string | null,
   ): Promise<AgentProviderNotice | null> {
     this.thinkingCalls.push({ agentId, thinkingOptionId });
+    this.callLog.push("thinking");
     if (this.failWith) throw this.failWith;
     return this.thinkingNotice;
   }
@@ -210,64 +206,7 @@ describe("AgentConfigSession", () => {
     });
   });
 
-  test("switch provider: forwards provider + model and emits an accepted response", async () => {
-    const { subsystem, emitted, operations } = makeSubsystem();
-
-    await subsystem.handleSwitchAgentProviderRequest({
-      type: "switch_agent_provider_request",
-      agentId: "agent-1",
-      provider: "codex",
-      modelId: "gpt-5.6-luna",
-      requestId: "req-1",
-    });
-
-    expect(operations.switchProviderCalls).toEqual([
-      { agentId: "agent-1", provider: "codex", modelId: "gpt-5.6-luna" },
-    ]);
-    expect(emitted).toEqual([
-      {
-        type: "switch_agent_provider_response",
-        payload: { requestId: "req-1", agentId: "agent-1", accepted: true, error: null },
-      },
-    ]);
-  });
-
-  test("switch provider: a null model forwards null (provider default)", async () => {
-    const { subsystem, operations } = makeSubsystem();
-
-    await subsystem.handleSwitchAgentProviderRequest({
-      type: "switch_agent_provider_request",
-      agentId: "agent-1",
-      provider: "claude",
-      modelId: null,
-      requestId: "req-2",
-    });
-
-    expect(operations.switchProviderCalls).toEqual([
-      { agentId: "agent-1", provider: "claude", modelId: null },
-    ]);
-  });
-
-  test("switch provider: a failed switch reports the provider-switch failure text", async () => {
-    const { subsystem, emitted, operations } = makeSubsystem();
-    operations.failWith = new Error("switch boom");
-
-    await subsystem.handleSwitchAgentProviderRequest({
-      type: "switch_agent_provider_request",
-      agentId: "agent-1",
-      provider: "codex",
-      modelId: null,
-      requestId: "req-1",
-    });
-
-    expect(emitted.map((m) => m.type)).toEqual(["activity_log", "switch_agent_provider_response"]);
-    expect(emitted[1]).toEqual({
-      type: "switch_agent_provider_response",
-      payload: { requestId: "req-1", agentId: "agent-1", accepted: false, error: "switch boom" },
-    });
-  });
-
-  test("set feature: forwards the feature value and emits an accepted response with no notice", async () => {
+  test("set feature: maps the feature value to a one-key options patch and emits an accepted response with no notice", async () => {
     const { subsystem, emitted, operations } = makeSubsystem();
 
     await subsystem.handleSetAgentFeatureRequest({
@@ -278,9 +217,7 @@ describe("AgentConfigSession", () => {
       requestId: "req-1",
     });
 
-    expect(operations.featureCalls).toEqual([
-      { agentId: "agent-1", featureId: "web_search", value: true },
-    ]);
+    expect(operations.optionsCalls).toEqual([{ agentId: "agent-1", patch: { web_search: true } }]);
     expect(emitted).toEqual([
       {
         type: "set_agent_feature_response",
@@ -367,6 +304,156 @@ describe("AgentConfigSession", () => {
     expect(emitted[1]).toEqual({
       type: "set_agent_thinking_response",
       payload: { requestId: "req-1", agentId: "agent-1", accepted: false, error: "thinking boom" },
+    });
+  });
+
+  test("apply: sets model before thinking and options last, in one accepted response", async () => {
+    const { subsystem, emitted, operations } = makeSubsystem();
+
+    await subsystem.handleAgentConfigApplyRequest({
+      type: "agent.config.apply.request",
+      agentId: "agent-1",
+      config: {
+        modelId: "opus-5",
+        modeId: "plan",
+        thinkingOptionId: "high",
+        options: { webSearch: true },
+      },
+      requestId: "req-1",
+    });
+
+    expect(operations.callLog).toEqual(["model", "mode", "thinking", "options"]);
+    expect(operations.modelCalls).toEqual([{ agentId: "agent-1", modelId: "opus-5" }]);
+    expect(operations.modeCalls).toEqual([{ agentId: "agent-1", modeId: "plan" }]);
+    expect(operations.thinkingCalls).toEqual([{ agentId: "agent-1", thinkingOptionId: "high" }]);
+    expect(operations.optionsCalls).toEqual([{ agentId: "agent-1", patch: { webSearch: true } }]);
+    expect(operations.loadedAgentIds).toEqual(["agent-1"]);
+    expect(emitted).toEqual([
+      {
+        type: "agent.config.apply.response",
+        payload: {
+          requestId: "req-1",
+          agentId: "agent-1",
+          accepted: true,
+          error: null,
+          notice: null,
+        },
+      },
+    ]);
+  });
+
+  test("apply: passes an options patch through, null included, in one call", async () => {
+    const { subsystem, operations } = makeSubsystem();
+
+    await subsystem.handleAgentConfigApplyRequest({
+      type: "agent.config.apply.request",
+      agentId: "agent-1",
+      config: { options: { fast_mode: true, service_tier: null } },
+      requestId: "req-1",
+    });
+
+    expect(operations.optionsCalls).toEqual([
+      { agentId: "agent-1", patch: { fast_mode: true, service_tier: null } },
+    ]);
+  });
+
+  test("apply: folds legacy featureValues into the options patch, options winning", async () => {
+    const { subsystem, operations } = makeSubsystem();
+
+    await subsystem.handleAgentConfigApplyRequest({
+      type: "agent.config.apply.request",
+      agentId: "agent-1",
+      config: {
+        featureValues: { fast_mode: true, service_tier: "fast" },
+        options: { fast_mode: false },
+      },
+      requestId: "req-1",
+    });
+
+    expect(operations.optionsCalls).toEqual([
+      { agentId: "agent-1", patch: { fast_mode: false, service_tier: "fast" } },
+    ]);
+  });
+
+  test("apply: leaves omitted fields alone", async () => {
+    const { subsystem, operations } = makeSubsystem();
+
+    await subsystem.handleAgentConfigApplyRequest({
+      type: "agent.config.apply.request",
+      agentId: "agent-1",
+      config: { modelId: "haiku-4.5" },
+      requestId: "req-1",
+    });
+
+    expect(operations.callLog).toEqual(["model"]);
+  });
+
+  test("apply: clears model and thinking when they are explicitly null", async () => {
+    const { subsystem, operations } = makeSubsystem();
+
+    await subsystem.handleAgentConfigApplyRequest({
+      type: "agent.config.apply.request",
+      agentId: "agent-1",
+      config: { modelId: null, thinkingOptionId: null },
+      requestId: "req-1",
+    });
+
+    expect(operations.modelCalls).toEqual([{ agentId: "agent-1", modelId: null }]);
+    expect(operations.thinkingCalls).toEqual([{ agentId: "agent-1", thinkingOptionId: null }]);
+  });
+
+  test("apply: reports the first notice and still runs the rest of the bundle", async () => {
+    const { subsystem, emitted, operations } = makeSubsystem();
+    operations.modeNotice = { type: "info", message: "Switched to plan mode" };
+    operations.thinkingNotice = { type: "warning", message: "Thinking budget reduced" };
+
+    await subsystem.handleAgentConfigApplyRequest({
+      type: "agent.config.apply.request",
+      agentId: "agent-1",
+      config: { modeId: "plan", thinkingOptionId: "high", options: { webSearch: true } },
+      requestId: "req-1",
+    });
+
+    expect(operations.callLog).toEqual(["mode", "thinking", "options"]);
+    expect(emitted).toEqual([
+      {
+        type: "agent.config.apply.response",
+        payload: {
+          requestId: "req-1",
+          agentId: "agent-1",
+          accepted: true,
+          error: null,
+          notice: { type: "info", message: "Switched to plan mode" },
+        },
+      },
+    ]);
+  });
+
+  test("apply: a mid-bundle failure rejects and leaves the earlier steps applied", async () => {
+    const { subsystem, emitted, operations } = makeSubsystem();
+    operations.failWith = new Error("apply boom");
+
+    await subsystem.handleAgentConfigApplyRequest({
+      type: "agent.config.apply.request",
+      agentId: "agent-1",
+      config: { modelId: "opus-5", modeId: "plan" },
+      requestId: "req-1",
+    });
+
+    expect(operations.callLog).toEqual(["model"]);
+    expect(emitted.map((m) => m.type)).toEqual(["activity_log", "agent.config.apply.response"]);
+    expect(emitted[0]).toEqual({
+      type: "activity_log",
+      payload: {
+        id: expect.any(String),
+        timestamp: expect.any(Date),
+        type: "error",
+        content: "Failed to apply agent config: apply boom",
+      },
+    });
+    expect(emitted[1]).toEqual({
+      type: "agent.config.apply.response",
+      payload: { requestId: "req-1", agentId: "agent-1", accepted: false, error: "apply boom" },
     });
   });
 });

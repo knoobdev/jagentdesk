@@ -3,14 +3,12 @@ import {
   systemProviderRefreshTimers,
   type ProviderRefreshTimers,
 } from "./provider-refresh-schedule.js";
-import type { ProviderRegistration } from "@jagentdesk/plugin/server/provider";
+import { type ProviderRegistration } from "@jagentdesk/plugin/server/provider";
 import { PluginAgentClientRegistry } from "./plugin-provider.js";
 import { EventEmitter } from "node:events";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-
-import type { Logger } from "pino";
-
+import { type Logger } from "pino";
 import { expandTilde } from "../../utils/path.js";
 import { withTimeout } from "../../utils/promise-timeout.js";
 import {
@@ -27,13 +25,13 @@ import {
   raceProviderRefreshAbort,
   runProviderRefreshWithDeadline,
 } from "./provider-refresh-deadline.js";
-import type { ManagedAgent } from "./agent-manager.js";
-import type { WorkspaceGitService } from "../workspace-git-service.js";
-import type { ManagedProcessRegistry } from "../managed-processes/managed-processes.js";
-import type { OpenCodeBridge } from "./providers/opencode/bridge.js";
-import type {
-  AgentProviderRuntimeSettingsMap,
-  ProviderOverride,
+import { type ManagedAgent } from "./agent-manager.js";
+import { type WorkspaceGitService } from "../workspace-git-service.js";
+import { type ManagedProcessRegistry } from "../managed-processes/managed-processes.js";
+import { type OpenCodeBridge } from "./providers/opencode/bridge.js";
+import {
+  type AgentProviderRuntimeSettingsMap,
+  type ProviderOverride,
 } from "./provider-launch-config.js";
 import {
   buildProviderRegistry,
@@ -43,25 +41,32 @@ import {
   type ProviderDefinition,
 } from "./provider-registry.js";
 import { BUILTIN_PROVIDER_IDS } from "@jagentdesk/protocol/provider-manifest";
-import { applyMutableProviderConfigToOverrides } from "../daemon-config-store.js";
+import {
+  applyMutableProviderConfigToOverrides,
+  type MutableDaemonConfig,
+} from "../daemon-config-store.js";
 import {
   formatProviderDiagnostic,
   formatProviderDiagnosticError,
 } from "./providers/diagnostic-utils.js";
-import type { MutableDaemonConfig } from "../daemon-config-store.js";
-import type { HubExecutionAgentValidationIssue } from "@jagentdesk/protocol/messages";
+import { type HubExecutionAgentValidationIssue } from "@jagentdesk/protocol/messages";
 import {
   type AgentConfigurationValidationInput,
   validateAgentConfigurationAgainstProvider,
 } from "./agent-configuration-validator.js";
 import { ProviderInstallations } from "./provider-installation/provider-installations.js";
+import { type ProviderOptions } from "@jagentdesk/protocol/agent-types";
 
 const USAGE_PROVIDER_ACTIVITY_TIMEOUT_MS = 5_000;
 const USAGE_PROVIDER_ACTIVITY_TTL_MS = 300_000;
 const DEFAULT_REFRESH_TIMEOUT_MS = 120_000;
+
 const MAX_REFRESH_TIMEOUT_MS = 2_147_483_647;
+
 const DEFAULT_DIAGNOSTIC_TIMEOUT_MS = 120_000;
+
 const PROVIDER_REFRESH_DEADLINE_ENV = "JAGENTDESK_PROVIDER_REFRESH_TIMEOUT_MS";
+
 export const GLOBAL_PROVIDER_SNAPSHOT_KEY = "jagentdesk:global";
 
 function validRefreshDeadline(value: unknown): number | undefined {
@@ -156,14 +161,14 @@ export interface ResolveProviderCreateConfigOptions {
   cwd?: string | null;
   provider: AgentProvider;
   requestedMode: string | undefined;
-  featureValues: Record<string, unknown> | undefined;
+  providerOptions: ProviderOptions | undefined;
   parent: ManagedAgent | null;
   unattended: boolean;
 }
 
 export interface ResolvedProviderCreateConfig {
   modeId: string | undefined;
-  featureValues: Record<string, unknown> | undefined;
+  providerOptions: ProviderOptions | undefined;
 }
 
 interface ResolveDefaultModelOptions {
@@ -194,6 +199,7 @@ interface ProviderLoadOptions {
   catalogScope: ProviderCatalogScope;
   force: boolean;
 }
+
 interface ProviderLoad {
   promise: Promise<void>;
 }
@@ -229,29 +235,53 @@ function normalizeModelCatalog(models: AgentModelDefinition[]): AgentModelDefini
 export class ProviderSnapshotManager {
   private readonly usageActivityCache = new Map<AgentProvider, { at: number; active: boolean }>();
   private readonly snapshots = new Map<string, Map<AgentProvider, ProviderSnapshotEntry>>();
+
   private readonly providerLoads = new Map<string, Map<AgentProvider, ProviderLoad>>();
+
   private readonly events = new EventEmitter();
+
   private destroyed = false;
+
   private readonly stopped = new AbortController();
+
   private readonly refreshSchedule: ProviderRefreshSchedule | null;
+
   private refreshTimeoutMs: number;
+
   private diagnosticTimeoutMs: number;
+
   private readonly logger: Logger;
+
   private readonly workspaceGitService?: Pick<WorkspaceGitService, "resolveRepoRoot">;
+
   private readonly managedProcesses?: ManagedProcessRegistry;
+
   private readonly openCodeBridge?: OpenCodeBridge;
+
   private readonly openCodeProviderInjection?: OpenCodeProviderInjectionResolver;
+
   private readonly claudeSpawnEnv?: ClaudeSpawnEnvResolver;
+
   private readonly isDev: boolean;
+
   private readonly pluginProviders: PluginAgentClientRegistry;
+
   private readonly extraClients: Partial<Record<AgentProvider, AgentClient>>;
+
   private runtimeSettings: AgentProviderRuntimeSettingsMap | undefined;
+
   private providerOverrides: Record<string, ProviderOverride> | undefined;
+
   private baseProviderOverrides: Record<string, ProviderOverride> | undefined;
+
   private providerRegistry: Record<AgentProvider, ProviderDefinition>;
+
   private providerClients: Record<AgentProvider, AgentClient>;
+
   private readonly ownedClients = new Set<AgentClient>();
+
   readonly installations: ProviderInstallations;
+
   private pluginProvidersSettled = false;
 
   constructor(options: ProviderSnapshotManagerOptions) {
@@ -620,7 +650,7 @@ export class ProviderSnapshotManager {
     return this.requireProvider(provider).isCreateConfigUnattended({
       modeId,
       config: { provider, cwd, modeId },
-      features: [],
+      controls: [],
       availableModes: entry.modes ?? [],
     });
   }
@@ -638,7 +668,7 @@ export class ProviderSnapshotManager {
     return definition.resolveCreateConfig({
       provider: input.provider,
       requestedMode: input.requestedMode,
-      featureValues: input.featureValues,
+      providerOptions: input.providerOptions,
       parent,
       unattended: input.unattended || parent?.isUnattended === true,
       availableModes: entry.modes ?? [],
@@ -868,8 +898,13 @@ export class ProviderSnapshotManager {
       modeId: parent.currentModeId,
       isUnattended: definition.isCreateConfigUnattended({
         modeId: parent.currentModeId,
-        config: parent.config,
-        features: parent.features,
+        // Provider defaults from `config.json` apply to the parent too, so classify on the
+        // effective options while the stored overrides stay as they are.
+        config: {
+          ...parent.config,
+          providerOptions: parent.effectiveOptions ?? parent.config.providerOptions,
+        },
+        controls: parent.controls,
         availableModes: parent.availableModes ?? definition.modes ?? [],
       }),
     };

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  CLICKUP_DARK_CHROME,
-  CLICKUP_LIGHT_CHROME,
-  clickupDarkTheme,
-  clickupLightTheme,
+  GUMLOOP_DARK_CHROME,
+  GUMLOOP_LIGHT_CHROME,
+  gumloopDarkTheme,
+  gumloopLightTheme,
   darkClaudeTheme,
   darkGhosttyTheme,
   darkMidnightTheme,
@@ -22,11 +22,11 @@ const themes = {
   claude: darkClaudeTheme,
   ghostty: darkGhosttyTheme,
   pureBlack: darkPureBlackTheme,
-  clickupLight: clickupLightTheme,
-  clickupDark: clickupDarkTheme,
+  gumloopLight: gumloopLightTheme,
+  gumloopDark: gumloopDarkTheme,
 };
 
-const TOKEN_KEYS = Object.keys(CLICKUP_LIGHT_CHROME).filter(
+const TOKEN_KEYS = Object.keys(GUMLOOP_LIGHT_CHROME).filter(
   (key) => key !== "kind",
 ) as (keyof ShellChrome)[];
 const COLOR = /^(#|rgba?\(|transparent$)/;
@@ -50,19 +50,19 @@ describe("theme shell chrome", () => {
     }
   });
 
-  it("only the ClickUp theme brings the ClickUp shell", () => {
-    expect(clickupLightTheme.chrome.kind).toBe("clickup");
-    expect(clickupDarkTheme.chrome.kind).toBe("clickup");
+  it("only the Gumloop theme brings the Gumloop shell", () => {
+    expect(gumloopLightTheme.chrome.kind).toBe("gumloop");
+    expect(gumloopDarkTheme.chrome.kind).toBe("gumloop");
     for (const theme of [lightTheme, darkTheme, darkZincTheme, darkPureBlackTheme]) {
       expect(theme.chrome.kind).toBe("classic");
     }
   });
 
-  it("uses the measured ClickUp shell values", () => {
-    expect(CLICKUP_LIGHT_CHROME.railGradient).toEqual(["#5741d2", "#4332a2", "#2e2371"]);
-    expect(CLICKUP_LIGHT_CHROME.createBackground).toBe("#6149e7");
-    expect(CLICKUP_DARK_CHROME.railGradient).toEqual(["#191919"]);
-    expect(CLICKUP_DARK_CHROME.createBackground).toBe("#ededed");
-    expect(CLICKUP_LIGHT_CHROME.sendGradient).toEqual(["#912eff", "#ec02f7"]);
+  it("uses Gumloop's primary action and horizontal composer border", () => {
+    expect(GUMLOOP_LIGHT_CHROME.createBackground).toBe("#1D1D1D");
+    expect(GUMLOOP_DARK_CHROME.createBackground).toBe("#F5F5F5");
+    expect(GUMLOOP_LIGHT_CHROME.composerGradient).toEqual(["#F7B27A", "#F4A6CF", "#9FD4F7"]);
+    expect(GUMLOOP_LIGHT_CHROME.controlRadius).toBe(10);
+    expect(GUMLOOP_LIGHT_CHROME.cardRadius).toBe(14);
   });
 });

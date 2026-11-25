@@ -37,7 +37,7 @@ const VALID_THEMES = new Set<string>([
 // Bumped when the default theme changes. A settings file written before the bump that still has
 // the old default ("auto" = follow the system with the built-in themes) moves to the new
 // default once; any theme the user picked on purpose is kept, and so is a later choice of auto.
-const DEFAULT_THEME_VERSION = 1;
+const DEFAULT_THEME_VERSION = 2;
 const VALID_SERVICE_URL_BEHAVIORS = new Set<ServiceUrlBehavior>(["ask", "in-app", "external"]);
 const VALID_WORKSPACE_TITLE_SOURCES = new Set<WorkspaceTitleSource>(["title", "branch"]);
 const VALID_TOOL_CALL_DETAIL_LEVELS = new Set<ToolCallDetailLevel>(["overview", "detailed"]);
@@ -163,7 +163,15 @@ export async function loadAppSettingsFromStorage(deps: SettingsDeps): Promise<Ap
   try {
     const stored = await deps.storage.getItem(APP_SETTINGS_KEY);
     if (stored) {
-      return normalizeAppSettings(JSON.parse(stored));
+      const parsed = JSON.parse(stored);
+      const normalized = normalizeAppSettings(parsed);
+      if (
+        parsed.defaultThemeVersion !== DEFAULT_THEME_VERSION ||
+        parsed.theme !== normalized.theme
+      ) {
+        await deps.storage.setItem(APP_SETTINGS_KEY, JSON.stringify(normalized));
+      }
+      return normalized;
     }
 
     const legacyStored = await deps.storage.getItem(LEGACY_SETTINGS_KEY);
@@ -224,6 +232,10 @@ export function normalizeAppSettings(value: unknown): AppSettings {
   ) {
     settings.theme = DEFAULT_THEME;
   }
+  // COMPAT(gumloopTheme): added in v0.9.59, remove after 2027-06-01.
+  const legacyTheme: unknown = stored.theme;
+  if (legacyTheme === "clickup") settings.theme = "gumloop";
+  if (legacyTheme === "clickupDark") settings.theme = "gumloopDark";
   settings.usage = UsagePreferencesSchema.parse(stored.usage ?? DEFAULT_USAGE_PREFERENCES);
   settings.usageInSidebar = stored.usageInSidebar !== false;
 

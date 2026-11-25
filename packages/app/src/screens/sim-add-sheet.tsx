@@ -13,8 +13,8 @@ import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { SimDeviceType, SimRuntime } from "@jagentdesk/protocol/simulator/rpc-schemas";
 import type { Theme } from "@/styles/theme";
 import { uniqueNames } from "@/screens/sim-names";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
-import { clickUpChipStyles, clickUpListStyles } from "@/components/clickup-shell/list-styles";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { gumloopChipStyles, gumloopListStyles } from "@/components/gumloop-shell/list-styles";
 
 const SELECTED = { selected: true } as const;
 const UNSELECTED = { selected: false } as const;
@@ -107,8 +107,8 @@ export function SimAddSheet({
   const [pending, setPending] = useState<"create" | "boot" | null>(null);
   const [done, setDone] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const isClickUp = useIsClickUpTheme();
-  const labelStyle = [styles.label, isClickUp && clickUpListStyles.columnHeader];
+  const isGumloop = useIsGumloopTheme();
+  const labelStyle = [styles.label, isGumloop && gumloopListStyles.columnHeader];
 
   useEffect(() => {
     if (!visible || !client) return;
@@ -326,15 +326,15 @@ function Chip<T extends string>({
   onPick: (value: T) => void;
 }) {
   const onPress = useCallback(() => onPick(value), [onPick, value]);
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   return (
     <Pressable
       onPress={onPress}
-      style={chipStyle(isClickUp, active)}
+      style={chipStyle(isGumloop, active)}
       accessibilityRole="button"
       accessibilityState={active ? SELECTED : UNSELECTED}
     >
-      <Text style={chipTextStyle(isClickUp, active)}>{label}</Text>
+      <Text style={chipTextStyle(isGumloop, active)}>{label}</Text>
     </Pressable>
   );
 }
@@ -349,38 +349,38 @@ function TypeRow({
   onPick: (identifier: string) => void;
 }) {
   const onPress = useCallback(() => onPick(type.identifier), [onPick, type.identifier]);
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   return (
     <Pressable
       onPress={onPress}
-      style={typeRowStyle(isClickUp, active)}
+      style={typeRowStyle(isGumloop, active)}
       accessibilityRole="button"
       accessibilityState={active ? SELECTED : UNSELECTED}
     >
-      <Text style={typeTextStyle(isClickUp, active)}>{type.name}</Text>
+      <Text style={typeTextStyle(isGumloop, active)}>{type.name}</Text>
     </Pressable>
   );
 }
 
-// ClickUp: white bordered filter chips, the picked one lavender with violet text.
-function chipStyle(isClickUp: boolean, active: boolean) {
-  if (isClickUp) return active ? clickUpChipStyles.chipActive : clickUpChipStyles.chip;
+// Gumloop: white bordered filter chips, the picked one lavender with violet text.
+function chipStyle(isGumloop: boolean, active: boolean) {
+  if (isGumloop) return active ? gumloopChipStyles.chipActive : gumloopChipStyles.chip;
   return [styles.chip, active ? styles.chipActive : null];
 }
 
-function chipTextStyle(isClickUp: boolean, active: boolean) {
-  if (isClickUp) return active ? clickUpChipStyles.textActive : clickUpChipStyles.text;
+function chipTextStyle(isGumloop: boolean, active: boolean) {
+  if (isGumloop) return active ? gumloopChipStyles.textActive : gumloopChipStyles.text;
   return [styles.chipText, active ? styles.chipTextActive : null];
 }
 
-// ClickUp highlights the picked device type with the same lavender selection as its chips.
-function typeRowStyle(isClickUp: boolean, active: boolean) {
-  if (isClickUp && active) return [styles.typeRow, styles.typeRowActiveClickUp];
+// Gumloop highlights the picked device type with the same lavender selection as its chips.
+function typeRowStyle(isGumloop: boolean, active: boolean) {
+  if (isGumloop && active) return [styles.typeRow, styles.typeRowActiveGumloop];
   return [styles.typeRow, active ? styles.typeRowActive : null];
 }
 
-function typeTextStyle(isClickUp: boolean, active: boolean) {
-  if (isClickUp && active) return [styles.typeText, clickUpChipStyles.textActive];
+function typeTextStyle(isGumloop: boolean, active: boolean) {
+  if (isGumloop && active) return [styles.typeText, gumloopChipStyles.textActive];
   return [styles.typeText, active ? styles.chipTextActive : null];
 }
 
@@ -418,7 +418,7 @@ const styles = StyleSheet.create((theme) => ({
     borderBottomColor: theme.colors.border,
   },
   typeRowActive: { backgroundColor: theme.colors.surface2 },
-  typeRowActiveClickUp: { backgroundColor: theme.chrome.chipActiveBackground },
+  typeRowActiveGumloop: { backgroundColor: theme.chrome.chipActiveBackground },
   typeText: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
   input: {
     backgroundColor: theme.colors.surface0,

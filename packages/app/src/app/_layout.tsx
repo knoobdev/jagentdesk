@@ -1,3 +1,21 @@
+import { GUMLOOP_INSPECTOR_HOST } from "@/components/gumloop-shell/sidebar-state";
+import { useSettingsSidebarPresentation } from "@/navigation/settings-presentation";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  WindowLayoutProvider,
+  WindowLayoutActionsHost,
+  WindowLayoutSurface,
+  WindowLayoutDivisionGap,
+  useWindowLayout,
+  resolveDesktopDivisionLayout,
+} from "@/window-layout";
+import { WorkspaceLayoutModePublisher } from "@/workspace-tabs/layout-mode-publisher";
+import { FloatingHeaderLayout } from "@/components/floating-header";
+import { StreamTopOverlayProvider, supportsStreamTopOverlay } from "@/agent-stream/top-overlay";
+import { GumloopCompactHeader } from "@/components/gumloop-shell/compact-header";
+import { GumloopDrawer } from "@/components/gumloop-shell/drawer";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { useGumloopSidebarShortcut } from "@/components/gumloop-shell/use-sidebar-shortcut";
 import { NotificationOpenRouter } from "@/notification-open/react";
 
 import { WindowLayoutProvider } from "@/window-layout";
@@ -9,7 +27,7 @@ import { UsageSidebarRoot } from "@/usage/sidebar-item";
 import { HostConfirmationSheet } from "@/hosts/host-confirmation-sheet";
 import "@/styles/unistyles";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
-import { PortalProvider } from "@gorhom/portal";
+import { PortalProvider, PortalHost } from "@gorhom/portal";
 import * as Linking from "expo-linking";
 import { Stack, useNavigationContainerRef, usePathname, useRouter, type Href } from "expo-router";
 import {
@@ -18,6 +36,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
   useSyncExternalStore,
@@ -130,15 +149,13 @@ import type { ThemeName } from "@/styles/theme";
 import { installWebScrollbarStyles } from "@/styles/install-web-scrollbar-styles";
 import type { HostProfile } from "@/types/host-connection";
 import { toggleDesktopSidebarsWithCheckoutIntent } from "@/utils/desktop-sidebar-toggle";
-import { ClickUpMobileTabBar } from "@/components/clickup-shell/clickup-mobile-tab-bar";
-import { ClickUpRail } from "@/components/clickup-shell/clickup-rail";
-import { ClickUpTopBar } from "@/components/clickup-shell/clickup-top-bar";
-import { useClickUpDesktopShell } from "@/components/clickup-shell/use-clickup-chrome";
+import { GumloopSidebar } from "@/components/gumloop-shell/sidebar";
+
+import { useGumloopDesktopShell } from "@/components/gumloop-shell/use-gumloop-chrome";
 import {
   useHasWindowChromeObstruction,
   WindowChromeProvider,
   WindowChromeRegion,
-  WindowChromeRootRegion,
   WindowChromeSafeArea,
 } from "@/utils/desktop-window";
 import {
@@ -356,8 +373,8 @@ interface AppContainerProps {
 }
 
 const THEME_CYCLE_ORDER: ThemeName[] = [
-  "clickup",
-  "clickupDark",
+  "gumloop",
+  "gumloopDark",
   "dark",
   "zinc",
   "midnight",
@@ -426,12 +443,27 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
   const pathname = usePathname();
   // Forge Hub renders its own thin icon-rail (forge-hub-screen.tsx), so on that
   // route the wide app rail is hidden and Forge fills the full window width.
-  const onForge = !!pathname && pathname.endsWith("/forge");
+
   const isWorkspaceRoute = parseHostWorkspaceRouteFromPathname(pathname) !== null;
   const isWorkspaceFocusModeEnabled = isWorkspaceRoute && isFocusModeEnabled;
   const chromeEnabled = chromeEnabledOverride ?? daemons.length > 0;
-  const clickUpShell = useClickUpDesktopShell(chromeEnabled);
-  const hasMountedDesktopSidebar = useLatchedBoolean(chromeEnabled);
+  const gumloopShell = useGumloopDesktopShell(chromeEnabled);
+  const gumloopTheme = useIsGumloopTheme();
+  useGumloopSidebarShortcut(gumloopShell);
+  const onForge = !gumloopShell && pathname.endsWith("/forge");
+  const sidebarEnabled = useMemo(
+    () => chromeEnabled || gumloopShell || (gumloopTheme && pathname.startsWith("/settings")),
+    [chromeEnabled, gumloopShell, gumloopTheme, pathname],
+  );
+  const settingsSidebar = useSettingsSidebarPresentation({
+    presentation: isCompactLayout ? "overlay" : "dock",
+    visible: sidebarEnabled,
+  });
+  const applyPanelLayout = usePanelStore((state) => state.applyPanelLayout);
+  useLayoutEffect(() => {
+    applyPanelLayout({ isCompact: isCompactLayout, leftSidebar: settingsSidebar.presentation });
+  }, [applyPanelLayout, isCompactLayout, settingsSidebar.presentation]);
+  const hasMountedDesktopSidebar = useLatchedBoolean(sidebarEnabled);
   const toggleAgentList = isCompactLayout ? toggleMobileAgentList : toggleDesktopAgentList;
   const toggleDesktopSidebars = useCallback(() => {
     const { desktop } = usePanelStore.getState();
@@ -475,55 +507,64 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
   });
   const desktopSidebarMounted = hasMountedDesktopSidebar && !isWorkspaceFocusModeEnabled;
   const desktopSidebarVisible = resolveDesktopSidebarVisibility({
-    chromeEnabled,
+    chromeEnabled: sidebarEnabled,
     isCompactLayout,
     isMounted: desktopSidebarMounted,
     isOpen: isDesktopAgentListOpen,
-    canShare: canDesktopAppSidebarShare({
-      contentMinimumWidth: appContentMinimumWidth,
-      requestedSidebarWidth: sidebarWidth,
-      viewportWidth,
-    }),
+    canShare:
+      gumloopShell ||
+      canDesktopAppSidebarShare({
+        contentMinimumWidth: appContentMinimumWidth,
+        requestedSidebarWidth: sidebarWidth,
+        viewportWidth,
+      }),
   });
   const hasTopLeftWindowControls = useHasWindowChromeObstruction("top-left");
-  const appChromeLayout = resolveDesktopAppChromeLayout({
-    desktopSidebarRendered: desktopSidebarVisible,
-    hasTopLeftWindowControls,
-    sidebarControlsEnabled: chromeEnabled && !isWorkspaceFocusModeEnabled,
-  });
-  const sidebarChrome = (
-    <SidebarChrome
-      mounted={isCompactLayout ? chromeEnabled : desktopSidebarMounted}
-      visible={isCompactLayout ? chromeEnabled : desktopSidebarVisible}
-      keyboardShortcutsEnabled={keyboardShortcutsEnabled}
-    />
+  const appChromeLayout = useMemo(
+    () =>
+      resolveDesktopAppChromeLayout({
+        desktopSidebarRendered: desktopSidebarVisible,
+        hasTopLeftWindowControls,
+        sidebarControlsEnabled: chromeEnabled && !isWorkspaceFocusModeEnabled,
+      }),
+    [desktopSidebarVisible, hasTopLeftWindowControls, chromeEnabled, isWorkspaceFocusModeEnabled],
   );
-  const workspaceChrome = (
-    <View style={rowStyle}>
-      {!isCompactLayout && !onForge ? (
-        <WindowChromeRegion corners={appChromeLayout.sidebarCorners}>
-          {sidebarChrome}
-        </WindowChromeRegion>
-      ) : null}
-      {isCompactLayout ? (
-        <CompactExplorerSidebarHost enabled={chromeEnabled}>
-          <WindowChromeRegion corners={chromeEnabled ? "both" : appChromeLayout.contentCorners}>
-            <View style={flexStyle}>{children}</View>
-          </WindowChromeRegion>
-        </CompactExplorerSidebarHost>
-      ) : (
-        // With the wide rail hidden on Forge, the content sits against the left
-        // window edge, so it must own both corners to keep the window rounded.
-        <WindowChromeRegion corners={onForge ? "both" : appChromeLayout.contentCorners}>
-          <View style={flexStyle}>{children}</View>
-        </WindowChromeRegion>
-      )}
-    </View>
+  const sidebarChrome = useMemo(
+    () => (
+      <SidebarChrome
+        mounted={isCompactLayout ? sidebarEnabled : desktopSidebarMounted}
+        visible={isCompactLayout ? sidebarEnabled : desktopSidebarVisible}
+        keyboardShortcutsEnabled={keyboardShortcutsEnabled}
+      />
+    ),
+    [
+      isCompactLayout,
+      sidebarEnabled,
+      desktopSidebarMounted,
+      desktopSidebarVisible,
+      keyboardShortcutsEnabled,
+    ],
+  );
+  const workspaceChrome = useMemo(
+    () => (
+      <AppWorkspaceChrome
+        isCompactLayout={isCompactLayout}
+        onForge={onForge}
+        sidebarChrome={sidebarChrome}
+        chromeEnabled={chromeEnabled}
+        layout={appChromeLayout}
+      >
+        {children}
+      </AppWorkspaceChrome>
+    ),
+    [isCompactLayout, onForge, sidebarChrome, chromeEnabled, appChromeLayout, children],
   );
 
   const overlays = (
     <>
       <FloatingPanelPortalHost />
+      <WindowLayoutActionsHost />
+      <PortalHost name={GUMLOOP_INSPECTOR_HOST} />
       {isCompactLayout ? sidebarChrome : null}
       <DownloadToast />
       <RosettaCalloutSource />
@@ -547,41 +588,98 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
     </>
   );
 
-  // The ClickUp theme brings ClickUp's desktop shell: a global top bar, a vertical icon rail and
-  // the sidebar plus content inside one rounded, bordered panel. Other themes keep the classic shell.
-  const surface = clickUpShell ? (
-    <View style={layoutStyles.clickUpCanvas}>
-      <ClickUpTopBar />
-      <WindowChromeRootRegion corners="none">
-        <View style={rowStyle}>
-          <ClickUpRail />
-          <View style={layoutStyles.clickUpPanel}>{workspaceChrome}</View>
-        </View>
-      </WindowChromeRootRegion>
-      {overlays}
-    </View>
-  ) : (
+  const compactHeader = useMemo(
+    () => <GumloopCompactHeader enabled={sidebarEnabled} />,
+    [sidebarEnabled],
+  );
+  const renderChrome = useCallback(
+    (inset: number) => (
+      <StreamTopOverlayProvider value={inset}>{workspaceChrome}</StreamTopOverlayProvider>
+    ),
+    [workspaceChrome],
+  );
+  const surface = (
     <View style={layoutStyles.surfaceFill}>
-      {workspaceChrome}
-      <ClickUpMobileTabBar chromeEnabled={chromeEnabled} />
+      <FloatingHeaderLayout
+        header={compactHeader}
+        floating={gumloopTheme && isCompactLayout && isWorkspaceRoute && supportsStreamTopOverlay}
+      >
+        {renderChrome}
+      </FloatingHeaderLayout>
       <WindowSidebarToggleSlot
-        visible={!isCompactLayout && appChromeLayout.sidebarToggleOwner === "window"}
+        visible={
+          !isCompactLayout &&
+          (gumloopShell ? !isDesktopAgentListOpen : appChromeLayout.sidebarToggleOwner === "window")
+        }
       />
       {overlays}
     </View>
   );
 
   const content = isCompactLayout ? (
-    <MobileGestureWrapper chromeEnabled={chromeEnabled}>{surface}</MobileGestureWrapper>
+    <MobileGestureWrapper chromeEnabled={sidebarEnabled}>{surface}</MobileGestureWrapper>
   ) : (
     surface
   );
 
   return (
     <CommandCenterProvider>
+      <WorkspaceLayoutModePublisher />
       <WorkspaceArchiveShortcutHandler />
       {content}
     </CommandCenterProvider>
+  );
+}
+
+interface AppWorkspaceChromeProps {
+  isCompactLayout: boolean;
+  onForge: boolean;
+  sidebarChrome: ReactNode;
+  chromeEnabled: boolean;
+  layout: ReturnType<typeof resolveDesktopAppChromeLayout>;
+  children: ReactNode;
+}
+function AppWorkspaceChrome({
+  isCompactLayout,
+  onForge,
+  sidebarChrome,
+  chromeEnabled,
+  layout,
+  children,
+}: AppWorkspaceChromeProps) {
+  const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
+  const divisionLayout = resolveDesktopDivisionLayout({
+    geometry: useWindowLayout(),
+    windowWidth: width,
+    windowHeight: height,
+    leftInset: insets.left,
+    rightInset: insets.right,
+  });
+  return (
+    <WindowLayoutSurface compact={isCompactLayout} style={rowStyle}>
+      {!isCompactLayout && !onForge ? (
+        <WindowChromeRegion corners={layout.sidebarCorners}>{sidebarChrome}</WindowChromeRegion>
+      ) : null}
+      <WindowLayoutDivisionGap
+        layout={divisionLayout}
+        sidebarVisible={layout.sidebarToggleOwner !== "window"}
+        compact={isCompactLayout}
+      />
+      {isCompactLayout ? (
+        <CompactExplorerSidebarHost enabled={chromeEnabled}>
+          <WindowChromeRegion corners={chromeEnabled ? "both" : layout.contentCorners}>
+            <View style={flexStyle}>{children}</View>
+          </WindowChromeRegion>
+        </CompactExplorerSidebarHost>
+      ) : (
+        // With the wide rail hidden on Forge, the content sits against the left
+        // window edge, so it must own both corners to keep the window rounded.
+        <WindowChromeRegion corners={onForge ? "both" : layout.contentCorners}>
+          <View style={flexStyle}>{children}</View>
+        </WindowChromeRegion>
+      )}
+    </WindowLayoutSurface>
   );
 }
 
@@ -612,17 +710,27 @@ function SidebarChrome({
   keyboardShortcutsEnabled: boolean;
 }) {
   const isCompactLayout = useIsCompactFormFactor();
+  const gumloopShell = useGumloopDesktopShell(true);
+  const gumloopTheme = useIsGumloopTheme();
   const isOpen = usePanelStore((state) =>
     selectIsAgentListOpen(state, { isCompact: isCompactLayout }),
   );
-  const active = visible && isOpen;
+  const presentation = useSettingsSidebarPresentation({
+    presentation: isCompactLayout ? "overlay" : "dock",
+    visible,
+  });
+  const active = presentation.visible && isOpen;
   const hardwareKeyboardPresent = useHardwareKeyboardPresent();
   return (
     <SidebarModelProvider
       active={active}
       keyboardNavigationActive={keyboardShortcutsEnabled && hardwareKeyboardPresent}
     >
-      {mounted ? <LeftSidebar active={active} /> : null}
+      {mounted && gumloopTheme && isCompactLayout ? (
+        <GumloopDrawer active={active} presentationEnabled={presentation.visible} />
+      ) : null}
+      {mounted && gumloopShell ? <GumloopSidebar active={active} /> : null}
+      {mounted && !gumloopTheme ? <LeftSidebar active={active} /> : null}
       <WorkspaceShortcutTargetsSubscriber enabled={keyboardShortcutsEnabled} />
     </SidebarModelProvider>
   );
@@ -646,6 +754,12 @@ function MobileGestureWrapper({
   );
 }
 
+// PortalProvider must stay inside normal app-wide context providers.
+// `@gorhom/portal` renders portaled children at the host's location in the
+// tree, so any context a portaled sheet might consume (QueryClient, theme,
+// auth, settings, ...) must wrap PortalProvider, not be wrapped by it.
+// BottomSheetModalProvider is the exception: Gorhom modals consume portal
+// context and need one shared provider for sibling sheets to stack.
 function ProvidersWrapper({ children }: { children: ReactNode }) {
   const { settings, isLoading: settingsLoading } = useAppSettings();
 
@@ -695,14 +809,18 @@ function ProvidersWrapper({ children }: { children: ReactNode }) {
 
   return (
     <VoiceProvider>
-      <AppearanceSystemBars />
-      <DesktopWindowControlsSync enabled={!settingsLoading} />
-      <OfferLinkListener />
-      <HostConfirmationSheet />
-      <HostSessionManager />
-      <ConnectionNotifications />
-      <FaviconStatusSync />
-      {children}
+      <PortalProvider>
+        <BottomSheetModalProvider>
+          <AppearanceSystemBars />
+          <DesktopWindowControlsSync enabled={!settingsLoading} />
+          <OfferLinkListener />
+          <HostConfirmationSheet />
+          <HostSessionManager />
+          <ConnectionNotifications />
+          <FaviconStatusSync />
+          {children}
+        </BottomSheetModalProvider>
+      </PortalProvider>
     </VoiceProvider>
   );
 }
@@ -1134,22 +1252,12 @@ function TailscaleHealthMonitor() {
   return null;
 }
 
-// PortalProvider must stay inside normal app-wide context providers.
-// `@gorhom/portal` renders portaled children at the host's location in the
-// tree, so any context a portaled sheet might consume (QueryClient, theme,
-// auth, settings, ...) must wrap PortalProvider, not be wrapped by it.
-// BottomSheetModalProvider is the exception: Gorhom modals consume portal
-// context and need one shared provider for sibling sheets to stack.
 function RootProviders({ children }: { children: ReactNode }) {
   return (
     <WindowLayoutProvider>
       <WindowChromeProvider>
         <KeyboardProvider>
-          <KeyboardShiftProvider>
-            <PortalProvider>
-              <BottomSheetModalProvider>{children}</BottomSheetModalProvider>
-            </PortalProvider>
-          </KeyboardShiftProvider>
+          <KeyboardShiftProvider>{children}</KeyboardShiftProvider>
         </KeyboardProvider>
       </WindowChromeProvider>
     </WindowLayoutProvider>
@@ -1189,11 +1297,11 @@ const layoutStyles = StyleSheet.create((theme) => ({
     flex: 1,
     backgroundColor: theme.colors.surface0,
   },
-  clickUpCanvas: {
+  gumloopCanvas: {
     flex: 1,
     backgroundColor: theme.chrome.canvas,
   },
-  clickUpPanel: {
+  gumloopPanel: {
     flex: 1,
     borderColor: theme.chrome.panelBorder,
     marginLeft: theme.spacing[2],

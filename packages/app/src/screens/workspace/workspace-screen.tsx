@@ -1,10 +1,27 @@
+import {
+  useWindowLayout,
+  resolveWorkspaceActionPlacement,
+  WindowLayoutActions,
+} from "@/window-layout";
+import { Button } from "@/components/ui/button";
+import { CompactWorkspaceActions } from "./compact-workspace-actions";
+import { ensurePanelsRegistered } from "@/panels/register-panels";
+import { revealWorkspaceTab } from "@/workspace-tabs/navigation";
+import { SheetTabs } from "./sheet-tabs";
+import { SheetPaneHostProvider, type SheetPaneHost } from "./sheet-pane";
+import type { PaneHost } from "@/panels/panel-manifest";
 import { usePendingWorkspaceOpen } from "@/stores/workspace-layout-store";
+import { SessionShareControl } from "@/composer/agent-controls/session-share-control";
+import { BuiltinPluginGate } from "@/plugins/builtin/gate";
 import { PluginHeaderButtons, usePluginWorkspaceMenu } from "@/plugins/buttons/view";
 import { useActiveWorkspaceArchive } from "@/hooks/use-active-workspace-archive";
 import { usePrPaneData } from "@/git/pull-request-panel";
 import { COMPACT_CONTENT_WIDTH } from "@/constants/layout";
 import { findPaneById, collectAllPanes } from "@/stores/workspace-layout-store";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import {
+  useGumloopDesktopShell,
+  useIsGumloopTheme,
+} from "@/components/gumloop-shell/use-gumloop-chrome";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
   memo,
@@ -269,6 +286,10 @@ function buildWorkspaceFileLocation(
   return { path: fields.path, lineStart: fields.lineStart, lineEnd: fields.lineEnd };
 }
 
+function canFocusPaneUnderSheet(routeFocused: boolean, sheetOpen: boolean): boolean {
+  return routeFocused && !sheetOpen;
+}
+
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
 const ThemedEllipsis = withUnistyles(Ellipsis);
 const ThemedEllipsisVertical = withUnistyles(EllipsisVertical);
@@ -453,6 +474,10 @@ function getFallbackTabOptionDescription(
 }
 
 interface MobileWorkspaceTabSwitcherProps {
+  onCreateDraftTab: () => void;
+  onCreateTerminal: () => void;
+  createTerminalDisabled: boolean;
+  trailingContent: ReactNode;
   tabs: WorkspaceTabDescriptor[];
   activeTabKey: string;
   activeTab: WorkspaceTabDescriptor | null;
@@ -763,6 +788,10 @@ function MobileWorkspaceTabOption({
 }
 
 const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitcher({
+  onCreateDraftTab,
+  onCreateTerminal,
+  createTerminalDisabled,
+  trailingContent,
   tabs,
   activeTabKey,
   activeTab,
@@ -797,6 +826,43 @@ const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitcher({
     Keyboard.dismiss();
     setIsOpen(true);
   }, []);
+
+  const handleNewAgent = useCallback(() => {
+    setIsOpen(false);
+    onCreateDraftTab();
+  }, [onCreateDraftTab]);
+
+  const handleNewTerminal = useCallback(() => {
+    setIsOpen(false);
+    onCreateTerminal();
+  }, [onCreateTerminal]);
+
+  const footer = useMemo(
+    () => (
+      <View style={styles.tabSwitcherFooter}>
+        <Button
+          testID="workspace-tab-switcher-new-agent"
+          style={styles.tabSwitcherFooterButton}
+          variant="secondary"
+          leftIcon={SquarePen}
+          onPress={handleNewAgent}
+        >
+          {t("workspace.header.actions.newAgent")}
+        </Button>
+        <Button
+          testID="workspace-tab-switcher-new-terminal"
+          style={styles.tabSwitcherFooterButton}
+          variant="secondary"
+          leftIcon={SquareTerminal}
+          disabled={createTerminalDisabled}
+          onPress={handleNewTerminal}
+        >
+          {t("workspace.header.actions.newTerminal")}
+        </Button>
+      </View>
+    ),
+    [createTerminalDisabled, handleNewAgent, handleNewTerminal, t],
+  );
 
   const renderTabOption = useCallback(
     ({
@@ -880,6 +946,7 @@ const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitcher({
         <ThemedChevronDown size={14} uniProps={mutedColorMapping} />
       </Pressable>
 
+      {trailingContent}
       <Combobox
         options={tabSwitcherOptions}
         value={activeTabKey}
@@ -891,6 +958,7 @@ const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitcher({
         onOpenChange={setIsOpen}
         anchorRef={anchorRef}
         renderOption={renderTabOption}
+        footer={footer}
       />
     </View>
   );
@@ -1297,6 +1365,44 @@ interface WorkspaceHeaderTitleBarProps {
   onOpenUrlInBrowserTab: (url: string) => void;
 }
 
+function WorkspaceScreenHeader(props: ComponentProps<typeof ScreenHeader>) {
+  const gumloop = useGumloopDesktopShell(true);
+  return <ScreenHeader {...props} desktopHeight={gumloop ? 64 : undefined} />;
+}
+
+function GumloopHeaderShare({ serverId }: { serverId: string }) {
+  const gumloop = useGumloopDesktopShell(true);
+  const agentId = useSessionStore((state) => state.sessions[serverId]?.focusedAgentId);
+  if (!gumloop || !agentId) return null;
+  return (
+    <BuiltinPluginGate serverId={serverId} id="session-share">
+      <SessionShareControl serverId={serverId} agentId={agentId} />
+    </BuiltinPluginGate>
+  );
+}
+
+function GumloopChatTitle({
+  serverId,
+  fallback,
+  enabled,
+}: {
+  serverId: string;
+  fallback: string;
+  enabled: boolean;
+}) {
+  const title = useSessionStore((state) => {
+    const session = state.sessions[serverId];
+    if (!session?.focusedAgentId) return fallback;
+    return session.agents.get(session.focusedAgentId)?.title ?? fallback;
+  });
+  if (!enabled) return null;
+  return (
+    <Text numberOfLines={1} style={styles.gumloopChatTitle}>
+      {title}
+    </Text>
+  );
+}
+
 function WorkspaceHeaderTitleBar({
   isLoading,
   title,
@@ -1332,7 +1438,8 @@ function WorkspaceHeaderTitleBar({
   onOpenUrlInBrowserTab,
 }: WorkspaceHeaderTitleBarProps) {
   // The breadcrumb needs desktop width; phones keep the single-line title.
-  const isClickUp = useIsClickUpTheme() && !isMobile;
+  const isGumloop = useIsGumloopTheme() && !isMobile;
+  if (isGumloop) return <View style={styles.headerTitleContainer} />;
   return (
     <View style={styles.headerTitleContainer}>
       {isLoading ? (
@@ -1340,30 +1447,30 @@ function WorkspaceHeaderTitleBar({
           <View style={styles.headerTitleSkeleton} />
         </View>
       ) : null}
-      {!isLoading && isClickUp ? (
-        // ClickUp breadcrumb: [space icon] Project / Title.
+      {!isLoading && isGumloop ? (
+        // Gumloop breadcrumb: [space icon] Project / Title.
         <View style={styles.headerTitleTextGroup}>
           {showSubtitle ? (
             <>
-              <View style={styles.clickUpCrumbIcon}>
-                <Text style={styles.clickUpCrumbIconText}>
+              <View style={styles.gumloopCrumbIcon}>
+                <Text style={styles.gumloopCrumbIconText}>
                   {subtitle.trim().charAt(0).toUpperCase()}
                 </Text>
               </View>
               <Text
                 testID="workspace-header-subtitle"
-                style={styles.clickUpCrumbProject}
+                style={styles.gumloopCrumbProject}
                 numberOfLines={1}
               >
                 {subtitle}
               </Text>
-              <Text style={styles.clickUpCrumbSeparator}>/</Text>
+              <Text style={styles.gumloopCrumbSeparator}>/</Text>
             </>
           ) : null}
           <ScreenTitle testID="workspace-header-title">{title}</ScreenTitle>
         </View>
       ) : null}
-      {isLoading || isClickUp ? null : (
+      {isLoading || isGumloop ? null : (
         <View style={styles.headerTitleTextGroup}>
           <ScreenTitle testID="workspace-header-title">{title}</ScreenTitle>
           {showSubtitle ? (
@@ -2103,6 +2210,7 @@ function WorkspaceScreenContent({
   const _insets = useSafeAreaInsets();
   const toast = useToast();
   const isMobile = useIsCompactFormFactor();
+  const gumloopDesktop = useGumloopDesktopShell(true);
   const isFocusModeEnabled = usePanelStore((state) => state.desktop.focusModeEnabled);
   const toggleFocusMode = usePanelStore((state) => state.toggleFocusMode);
 
@@ -2379,7 +2487,6 @@ function WorkspaceScreenContent({
   const openWorkspaceTabInBackground = useWorkspaceLayoutStore(
     (state) => state.openTabInBackground,
   );
-  const focusWorkspaceTab = useWorkspaceLayoutStore((state) => state.focusTab);
   const closeWorkspaceTab = useWorkspaceLayoutStore((state) => state.closeTab);
   const unpinWorkspaceAgent = useWorkspaceLayoutStore((state) => state.unpinAgent);
   const hideWorkspaceAgent = useWorkspaceLayoutStore((state) => state.hideAgent);
@@ -2419,6 +2526,7 @@ function WorkspaceScreenContent({
       tabId: string;
       target?: WorkspaceTabTarget | null;
     }) {
+      ensurePanelsRegistered();
       const normalizedTabId = trimNonEmpty(input.tabId);
       if (!normalizedTabId || !persistenceKey) {
         return;
@@ -2600,9 +2708,9 @@ function WorkspaceScreenContent({
       if (!tabId || !persistenceKey) {
         return;
       }
-      focusWorkspaceTab(persistenceKey, tabId);
+      revealWorkspaceTab(persistenceKey, tabId);
     },
-    [focusWorkspaceTab, persistenceKey],
+    [persistenceKey],
   );
   const handleImportedAgent = useCallback(
     (agentId: string) => {
@@ -3134,6 +3242,16 @@ function WorkspaceScreenContent({
 
   const handleCloseTabById = useCallback(
     async (tabId: string) => {
+      if (
+        persistenceKey &&
+        useWorkspaceLayoutStore
+          .getState()
+          .sheetsByWorkspace[persistenceKey]?.some((sheet) => sheet.tab.tabId === tabId)
+      ) {
+        if (await confirmDiscardModifiedTab(tabId))
+          useWorkspaceLayoutStore.getState().closeSheet(persistenceKey, tabId);
+        return;
+      }
       const tab = allTabDescriptorsById.get(tabId);
       if (!tab) {
         return;
@@ -3152,6 +3270,7 @@ function WorkspaceScreenContent({
       handleClosePassiveTab({ tabId, target: tab.target });
     },
     [
+      persistenceKey,
       allTabDescriptorsById,
       confirmDiscardModifiedTab,
       handleCloseAgentTab,
@@ -3654,14 +3773,19 @@ function WorkspaceScreenContent({
     }
     document.title = "Workspace";
   }, [activeTabDescriptor, isRouteFocused]);
+  const sheetOpen = useWorkspaceLayoutStore((state) =>
+    persistenceKey ? (state.sheetsByWorkspace[persistenceKey]?.length ?? 0) > 0 : false,
+  );
   const buildPaneContentModel = useCallback(
     (input: {
       tab: WorkspaceTabDescriptor;
       paneId?: string | null;
       focusPaneBeforeOpen?: boolean;
+      host?: PaneHost;
     }) =>
       buildWorkspacePaneContentModel({
         tab: input.tab,
+        host: input.host,
         normalizedServerId,
         normalizedWorkspaceId,
         fileNavigationRevision: fileNavigationRevisionByTabId[input.tab.tabId] ?? 0,
@@ -3750,7 +3874,7 @@ function WorkspaceScreenContent({
     hasHydratedAgents,
     mountedFocusedPaneTabIds,
     focusedPaneTabDescriptorMap,
-    isRouteFocused,
+    isRouteFocused: canFocusPaneUnderSheet(isRouteFocused, sheetOpen),
     focusedPaneId,
     buildMobilePaneContentModel,
   });
@@ -3880,14 +4004,18 @@ function WorkspaceScreenContent({
     normalizedServerId,
     normalizedWorkspaceId,
   );
+  const windowLayout = useWindowLayout();
+  const actionsInVerticalBar = resolveWorkspaceActionPlacement(windowLayout) === "vertical-bar";
   const headerRight = useMemo(
     () => (
-      <View style={styles.headerRight}>
+      <View style={[styles.headerRight, actionsInVerticalBar && styles.verticalHeaderRight]}>
+        <GumloopHeaderShare serverId={normalizedServerId} />
         <WorkspaceOrchestrationPanel
           serverId={normalizedServerId}
           workspaceId={normalizedWorkspaceId}
           cwd={workspaceDirectory}
           openOnMount={isRouteFocused && orchestrationRequested}
+          hideLabel={gumloopDesktop}
         />
         {!isMobile &&
         !compactHeader &&
@@ -3919,7 +4047,7 @@ function WorkspaceScreenContent({
               <WorkspaceActions
                 serverId={normalizedServerId}
                 cwd={workspaceDirectory}
-                hideLabels={showCompactButtonLabels}
+                hideLabels={gumloopDesktop || showCompactButtonLabels}
               />
             ) : null}
             {isGitCheckout ? (
@@ -3939,7 +4067,7 @@ function WorkspaceScreenContent({
                       return (
                         <>
                           <ThemedSourceControlPanelIcon size={16} uniProps={colorMapping} />
-                          {workspaceDescriptor?.diffStat ? (
+                          {!gumloopDesktop && workspaceDescriptor?.diffStat ? (
                             <DiffStat
                               additions={workspaceDescriptor.diffStat.additions}
                               deletions={workspaceDescriptor.diffStat.deletions}
@@ -4018,6 +4146,7 @@ function WorkspaceScreenContent({
       </View>
     ),
     [
+      gumloopDesktop,
       isMobile,
       workspaceDescriptor,
       normalizedServerId,
@@ -4030,6 +4159,7 @@ function WorkspaceScreenContent({
       handleOpenUrlInBrowserTab,
       showCompactButtonLabels,
       compactHeader,
+      actionsInVerticalBar,
       isGitCheckout,
       handleToggleExplorer,
       isExplorerOpen,
@@ -4187,11 +4317,81 @@ function WorkspaceScreenContent({
   });
   const desktopContent = <DesktopPaneContent paneProps={desktopPaneProps} fallback={content} />;
 
+  const buildSheetContent = useCallback(
+    (tab: WorkspaceTabDescriptor, closeCurrentTab: () => void) => {
+      const model = buildPaneContentModel({ tab, paneId: null, host: "sheet" });
+      return { ...model, paneContextValue: { ...model.paneContextValue, closeCurrentTab } };
+    },
+    [buildPaneContentModel],
+  );
+  const sheetHost = useMemo<SheetPaneHost | null>(
+    () =>
+      persistenceKey
+        ? {
+            workspaceKey: persistenceKey,
+            serverId: normalizedServerId,
+            workspaceId: normalizedWorkspaceId,
+            isWorkspaceFocused: isRouteFocused,
+            buildContent: buildSheetContent,
+          }
+        : null,
+    [persistenceKey, normalizedServerId, normalizedWorkspaceId, isRouteFocused, buildSheetContent],
+  );
+  const compactWorkspaceActions = useMemo(
+    () => (
+      <CompactWorkspaceActions
+        serverId={normalizedServerId}
+        workspaceId={normalizedWorkspaceId}
+        scripts={workspaceScripts}
+        liveTerminalIds={liveTerminalIds}
+        onScriptTerminalStarted={handleScriptTerminalStarted}
+        onViewTerminal={handleViewScriptTerminal}
+        onOpenUrlInBrowserTab={handleOpenUrlInBrowserTab}
+        onImport={openImportSheet}
+        importDisabled={!canOpenImportSheet}
+        onCopyPath={handleCopyWorkspacePath}
+        copyPathDisabled={!workspaceDirectory}
+      />
+    ),
+    [
+      normalizedServerId,
+      normalizedWorkspaceId,
+      workspaceScripts,
+      liveTerminalIds,
+      handleScriptTerminalStarted,
+      handleViewScriptTerminal,
+      handleOpenUrlInBrowserTab,
+      openImportSheet,
+      canOpenImportSheet,
+      handleCopyWorkspacePath,
+      workspaceDirectory,
+    ],
+  );
+  const gumloopHeaderTitle = useMemo(
+    () => (
+      <GumloopChatTitle
+        enabled={gumloopDesktop}
+        serverId={normalizedServerId}
+        fallback={workspaceHeaderTitle}
+      />
+    ),
+    [gumloopDesktop, normalizedServerId, workspaceHeaderTitle],
+  );
+  const inlineHeaderRight = useMemo(
+    () => (actionsInVerticalBar ? null : headerRight),
+    [actionsInVerticalBar, headerRight],
+  );
+  const verticalActionsActive = useMemo(
+    () => isRouteFocused && !isMobile,
+    [isRouteFocused, isMobile],
+  );
   const workspaceCenterColumn = (
     <View style={styles.centerColumn}>
+      <WindowLayoutActions active={verticalActionsActive}>{headerRight}</WindowLayoutActions>
       {showScreenHeader && (
-        <ScreenHeader
+        <WorkspaceScreenHeader
           onRowLayout={onHeaderLayout}
+          center={gumloopHeaderTitle}
           left={
             <>
               <SidebarMenuToggle />
@@ -4231,7 +4431,7 @@ function WorkspaceScreenContent({
               />
             </>
           }
-          right={headerRight}
+          right={inlineHeaderRight}
         />
       )}
 
@@ -4245,6 +4445,10 @@ function WorkspaceScreenContent({
             />
           ) : null}
           <MobileWorkspaceTabSwitcher
+            onCreateDraftTab={handleCreateDraftTab}
+            onCreateTerminal={handleCreateTerminal}
+            createTerminalDisabled={createTerminalDisabled}
+            trailingContent={compactWorkspaceActions}
             tabs={tabs}
             activeTabKey={activeTabKey}
             activeTab={activeTabDescriptor}
@@ -4313,52 +4517,62 @@ function WorkspaceScreenContent({
 
   return (
     gatedWorkspaceScreen ?? (
-      <WorkspaceFocusProvider workspaceKey={persistenceKey}>
-        <RenderProfile id="WorkspaceScreenContent">
-          <View style={containerStyle}>
-            <WorkspaceDocumentTitleEffectSlot
-              tab={activeTabDescriptor}
-              serverId={normalizedServerId}
-              workspaceId={normalizedWorkspaceId}
-              isRouteFocused={isRouteFocused}
-            />
-            <DesktopWorkspaceChrome
-              paneProps={desktopPaneProps}
-              explorerPane={explorerPane}
-              portalHostName={workspaceFloatingPanelPortalHostName}
-              showExplorerSidebar={showExplorerSidebar}
-              explorerOpen={isExplorerOpen}
-              serverId={normalizedServerId}
-              workspaceId={normalizedWorkspaceId}
-              workspaceRoot={workspaceDirectory}
-              isGit={isGitCheckout}
-              onOpenFile={handleOpenFileFromExplorer}
-              leftDock={orchestrationLeftDock}
-            >
-              {workspaceCenterColumn}
-            </DesktopWorkspaceChrome>
-            <ImportSessionSheet
-              visible={importSheetVisible}
-              client={client}
-              serverId={normalizedServerId}
-              cwd={workspaceDirectory}
-              workspaceId={normalizedWorkspaceId}
-              onClose={closeImportSheet}
-              onImportedAgent={handleImportedAgent}
-            />
-            <WorkspaceTabRenameModal
-              renamingTab={renameModalTab}
-              onSubmit={handleRenameModalSubmit}
-              onClose={handleRenameModalClose}
-            />
-          </View>
-        </RenderProfile>
-      </WorkspaceFocusProvider>
+      <SheetPaneHostProvider value={sheetHost}>
+        <WorkspaceFocusProvider workspaceKey={persistenceKey}>
+          <RenderProfile id="WorkspaceScreenContent">
+            <View style={containerStyle}>
+              <WorkspaceDocumentTitleEffectSlot
+                tab={activeTabDescriptor}
+                serverId={normalizedServerId}
+                workspaceId={normalizedWorkspaceId}
+                isRouteFocused={isRouteFocused}
+              />
+              <DesktopWorkspaceChrome
+                paneProps={desktopPaneProps}
+                explorerPane={explorerPane}
+                portalHostName={workspaceFloatingPanelPortalHostName}
+                showExplorerSidebar={showExplorerSidebar}
+                explorerOpen={isExplorerOpen}
+                serverId={normalizedServerId}
+                workspaceId={normalizedWorkspaceId}
+                workspaceRoot={workspaceDirectory}
+                isGit={isGitCheckout}
+                onOpenFile={handleOpenFileFromExplorer}
+                leftDock={orchestrationLeftDock}
+              >
+                {workspaceCenterColumn}
+              </DesktopWorkspaceChrome>
+              <SheetTabs onCloseTab={handleCloseTabById} />
+              <ImportSessionSheet
+                visible={importSheetVisible}
+                client={client}
+                serverId={normalizedServerId}
+                cwd={workspaceDirectory}
+                workspaceId={normalizedWorkspaceId}
+                onClose={closeImportSheet}
+                onImportedAgent={handleImportedAgent}
+              />
+              <WorkspaceTabRenameModal
+                renamingTab={renameModalTab}
+                onSubmit={handleRenameModalSubmit}
+                onClose={handleRenameModalClose}
+              />
+            </View>
+          </RenderProfile>
+        </WorkspaceFocusProvider>
+      </SheetPaneHostProvider>
     )
   );
 }
 
 const styles = StyleSheet.create((theme) => ({
+  tabSwitcherFooter: {
+    flexDirection: "row",
+    gap: theme.spacing[3],
+    paddingHorizontal: theme.spacing[6],
+    paddingVertical: theme.spacing[3],
+  },
+  tabSwitcherFooterButton: { flex: 1 },
   container: {
     flex: 1,
     backgroundColor: theme.colors.surface0,
@@ -4385,6 +4599,7 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foreground,
     flexShrink: 1,
   },
+  gumloopChatTitle: { fontSize: 18, fontWeight: "500", color: theme.colors.foreground },
   headerTitleContainer: {
     flex: 1,
     flexShrink: 1,
@@ -4419,7 +4634,7 @@ const styles = StyleSheet.create((theme) => ({
       md: theme.spacing[2],
     },
   },
-  clickUpCrumbIcon: {
+  gumloopCrumbIcon: {
     width: 18,
     height: 18,
     borderRadius: theme.borderRadius.base,
@@ -4427,18 +4642,18 @@ const styles = StyleSheet.create((theme) => ({
     justifyContent: "center",
     backgroundColor: theme.chrome.createBackground,
   },
-  clickUpCrumbIconText: {
+  gumloopCrumbIconText: {
     fontSize: 10,
     fontWeight: theme.fontWeight.bold,
     color: theme.chrome.createForeground,
   },
-  clickUpCrumbProject: {
+  gumloopCrumbProject: {
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,
     flexShrink: 1,
     maxWidth: "40%",
   },
-  clickUpCrumbSeparator: {
+  gumloopCrumbSeparator: {
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundExtraMuted,
   },
@@ -4460,6 +4675,7 @@ const styles = StyleSheet.create((theme) => ({
     backgroundColor: theme.colors.surface3,
     opacity: 0.25,
   },
+  verticalHeaderRight: { flexDirection: "column" },
   headerRight: {
     flexDirection: "row",
     alignItems: "center",
@@ -4553,6 +4769,7 @@ const styles = StyleSheet.create((theme) => ({
   },
   explorerTooltipShortcut: {},
   mobileTabsRow: {
+    minHeight: 44,
     backgroundColor: theme.colors.surface0,
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,

@@ -1,5 +1,5 @@
-import { clickUpChipStyles } from "@/components/clickup-shell/list-styles";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { gumloopChipStyles } from "@/components/gumloop-shell/list-styles";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { useCallback, useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
@@ -22,36 +22,36 @@ interface ChipProps {
   onToggle: (value: string) => void;
 }
 
-// ClickUp chips (lavender when selected) replace both the category chips and the sort pills.
-function chipStyle(isClickUp: boolean, active: boolean) {
-  if (isClickUp) return active ? clickUpChipStyles.chipActive : clickUpChipStyles.chip;
+// Gumloop chips (lavender when selected) replace both the category chips and the sort pills.
+function chipStyle(isGumloop: boolean, active: boolean) {
+  if (isGumloop) return active ? gumloopChipStyles.chipActive : gumloopChipStyles.chip;
   return active ? styles.chipActiveWrap : styles.chip;
 }
-function chipTextStyle(isClickUp: boolean, active: boolean) {
-  if (isClickUp) return active ? clickUpChipStyles.textActive : clickUpChipStyles.text;
+function chipTextStyle(isGumloop: boolean, active: boolean) {
+  if (isGumloop) return active ? gumloopChipStyles.textActive : gumloopChipStyles.text;
   return active ? styles.chipTextActive : styles.chipText;
 }
-function sortStyle(isClickUp: boolean, active: boolean) {
-  if (isClickUp) return active ? clickUpChipStyles.chipActive : clickUpChipStyles.chip;
+function sortStyle(isGumloop: boolean, active: boolean) {
+  if (isGumloop) return active ? gumloopChipStyles.chipActive : gumloopChipStyles.chip;
   return active ? styles.sortTabActiveWrap : styles.sortTab;
 }
-function sortTextStyle(isClickUp: boolean, active: boolean) {
-  if (isClickUp) return active ? clickUpChipStyles.textActive : clickUpChipStyles.text;
+function sortTextStyle(isGumloop: boolean, active: boolean) {
+  if (isGumloop) return active ? gumloopChipStyles.textActive : gumloopChipStyles.text;
   return active ? styles.sortTabTextActive : styles.sortTabText;
 }
 
 function FilterChip({ value, label, active, onToggle }: ChipProps) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const handlePress = useCallback(() => onToggle(value), [onToggle, value]);
   const state = useMemo(() => ({ selected: active }), [active]);
   return (
     <Pressable
       onPress={handlePress}
-      style={chipStyle(isClickUp, active)}
+      style={chipStyle(isGumloop, active)}
       accessibilityRole="button"
       accessibilityState={state}
     >
-      <Text style={chipTextStyle(isClickUp, active)}>{label}</Text>
+      <Text style={chipTextStyle(isGumloop, active)}>{label}</Text>
     </Pressable>
   );
 }
@@ -64,17 +64,17 @@ interface SortOptionProps {
 }
 
 function SortOption({ value, label, active, onSelect }: SortOptionProps) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const handlePress = useCallback(() => onSelect(value), [onSelect, value]);
   const state = useMemo(() => ({ selected: active }), [active]);
   return (
     <Pressable
       onPress={handlePress}
-      style={sortStyle(isClickUp, active)}
+      style={sortStyle(isGumloop, active)}
       accessibilityRole="button"
       accessibilityState={state}
     >
-      <Text style={sortTextStyle(isClickUp, active)}>{label}</Text>
+      <Text style={sortTextStyle(isGumloop, active)}>{label}</Text>
     </Pressable>
   );
 }

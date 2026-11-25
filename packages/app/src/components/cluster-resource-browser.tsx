@@ -18,8 +18,8 @@ import { useClusterViewStore } from "@/stores/cluster-view-store";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { Skeleton, useSkeletonPulse } from "@/components/ui/skeleton";
 import type { Theme } from "@/styles/theme";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
-import { clickUpListStyles } from "@/components/clickup-shell/list-styles";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { gumloopListStyles } from "@/components/gumloop-shell/list-styles";
 
 interface KindInfo {
   kind: string;
@@ -134,10 +134,10 @@ function ResourceRow({
   metrics: MetricsEntry | undefined;
   onPress: () => void;
 }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const sub = isPod && item.phase ? `${item.namespace} · ${item.phase}` : item.namespace;
   return (
-    <Pressable style={[styles.row, isClickUp && clickUpListStyles.row]} onPress={onPress}>
+    <Pressable style={[styles.row, isGumloop && gumloopListStyles.row]} onPress={onPress}>
       <View style={styles.cellName}>
         {isPod && item.phase ? (
           <PodStatusDot phase={item.phase} statusReason={item.phase} />
@@ -170,13 +170,13 @@ function ResourceRow({
 }
 
 /** Friendly message for a failed list — flags RBAC/permission errors clearly. */
-/** Column header: classic keeps its uppercase caption, ClickUp reads sentence-case gray. */
-function columnHeaderStyle<T>(isClickUp: boolean, base: T) {
-  return isClickUp ? [base, clickUpListStyles.columnHeader] : base;
+/** Column header: classic keeps its uppercase caption, Gumloop reads sentence-case gray. */
+function columnHeaderStyle<T>(isGumloop: boolean, base: T) {
+  return isGumloop ? [base, gumloopListStyles.columnHeader] : base;
 }
 
-function toolbarTitleStyle(isClickUp: boolean) {
-  return isClickUp ? [styles.toolbarTitle, styles.toolbarTitleClickUp] : styles.toolbarTitle;
+function toolbarTitleStyle(isGumloop: boolean) {
+  return isGumloop ? [styles.toolbarTitle, styles.toolbarTitleGumloop] : styles.toolbarTitle;
 }
 
 function describeClusterListError(kind: string, raw: string): string {
@@ -204,7 +204,7 @@ export function ClusterResourceBrowser({
   const showingOverview = useClusterNavStore((s) => s.showingOverview);
   const selectedNamespace = useClusterNavStore((s) => s.selectedNamespace);
   const isCompact = useIsCompactFormFactor();
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
 
   const [kinds, setKinds] = useState<KindInfo[]>([]);
   const [items, setItems] = useState<ResourceItem[]>([]);
@@ -432,7 +432,7 @@ export function ClusterResourceBrowser({
     content = (
       <>
         <View style={styles.toolbar}>
-          <Text style={toolbarTitleStyle(isClickUp)}>{selectedKind}</Text>
+          <Text style={toolbarTitleStyle(isGumloop)}>{selectedKind}</Text>
           <Text style={styles.toolbarCount}>
             {query ? `${visibleItems.length}/${items.length}` : items.length}
           </Text>
@@ -454,32 +454,32 @@ export function ClusterResourceBrowser({
         </View>
         <View style={styles.header}>
           <Pressable style={styles.headerNameBtn} onPress={sortByName}>
-            <Text style={columnHeaderStyle(isClickUp, styles.headerName)}>
+            <Text style={columnHeaderStyle(isGumloop, styles.headerName)}>
               Name{sortArrow("name")}
             </Text>
           </Pressable>
           {isCompact ? null : (
-            <Text style={columnHeaderStyle(isClickUp, styles.headerNs)}>Namespace</Text>
+            <Text style={columnHeaderStyle(isGumloop, styles.headerNs)}>Namespace</Text>
           )}
           {isPodKind ? (
             <>
-              <Text style={columnHeaderStyle(isClickUp, styles.headerNarrow)}>Ready</Text>
+              <Text style={columnHeaderStyle(isGumloop, styles.headerNarrow)}>Ready</Text>
               {isCompact ? null : (
                 <>
-                  <Text style={columnHeaderStyle(isClickUp, styles.headerNarrow)}>Restarts</Text>
-                  <Text style={columnHeaderStyle(isClickUp, styles.headerStatus)}>Status</Text>
+                  <Text style={columnHeaderStyle(isGumloop, styles.headerNarrow)}>Restarts</Text>
+                  <Text style={columnHeaderStyle(isGumloop, styles.headerStatus)}>Status</Text>
                 </>
               )}
             </>
           ) : null}
           {!isCompact && isNodeOrPodKind && hasMetrics ? (
             <>
-              <Text style={columnHeaderStyle(isClickUp, styles.headerMetric)}>CPU</Text>
-              <Text style={columnHeaderStyle(isClickUp, styles.headerMetric)}>Mem</Text>
+              <Text style={columnHeaderStyle(isGumloop, styles.headerMetric)}>CPU</Text>
+              <Text style={columnHeaderStyle(isGumloop, styles.headerMetric)}>Mem</Text>
             </>
           ) : null}
           <Pressable onPress={sortByAge}>
-            <Text style={columnHeaderStyle(isClickUp, styles.headerAge)}>
+            <Text style={columnHeaderStyle(isGumloop, styles.headerAge)}>
               Age{sortArrow("age")}
             </Text>
           </Pressable>
@@ -539,22 +539,22 @@ const RESOURCE_SKELETON_KEYS = Array.from({ length: 10 }, (_, i) => `cluster-res
 /** Table placeholder shown while a resource kind's list is loading. */
 function ResourceListSkeleton({ kind, isCompact }: { kind: string | null; isCompact: boolean }) {
   const pulse = useSkeletonPulse();
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   return (
     <>
       <View style={styles.toolbar}>
-        <Text style={toolbarTitleStyle(isClickUp)}>{kind ?? ""}</Text>
+        <Text style={toolbarTitleStyle(isGumloop)}>{kind ?? ""}</Text>
         <Skeleton pulse={pulse} width={28} height={12} />
       </View>
       <View style={styles.header}>
-        <Text style={columnHeaderStyle(isClickUp, styles.headerName)}>Name</Text>
+        <Text style={columnHeaderStyle(isGumloop, styles.headerName)}>Name</Text>
         {isCompact ? null : (
-          <Text style={columnHeaderStyle(isClickUp, styles.headerNs)}>Namespace</Text>
+          <Text style={columnHeaderStyle(isGumloop, styles.headerNs)}>Namespace</Text>
         )}
-        <Text style={columnHeaderStyle(isClickUp, styles.headerAge)}>Age</Text>
+        <Text style={columnHeaderStyle(isGumloop, styles.headerAge)}>Age</Text>
       </View>
       {RESOURCE_SKELETON_KEYS.map((key) => (
-        <View key={key} style={[styles.row, isClickUp && clickUpListStyles.row]}>
+        <View key={key} style={[styles.row, isGumloop && gumloopListStyles.row]}>
           <View style={styles.cellName}>
             <Skeleton pulse={pulse} width={8} height={8} radius={4} />
             <View style={styles.cellNameInner}>
@@ -629,7 +629,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontWeight: theme.fontWeight.medium,
     color: theme.colors.foreground,
   },
-  toolbarTitleClickUp: { fontWeight: theme.fontWeight.semibold },
+  toolbarTitleGumloop: { fontWeight: theme.fontWeight.semibold },
   toolbarCount: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
   toolbarSpacer: { flex: 1 },
   toolbarNs: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },

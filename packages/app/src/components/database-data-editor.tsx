@@ -34,8 +34,8 @@ import { isNative, isWeb } from "@/constants/platform";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { buildDelete, buildInsert, buildUpdate, type Cell, type Dml } from "@/utils/sql-dml";
 import type { Theme } from "@/styles/theme";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
-import { clickUpListStyles } from "@/components/clickup-shell/list-styles";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { gumloopListStyles } from "@/components/gumloop-shell/list-styles";
 
 const PAGE_SIZE = 100;
 const GUTTER_W = 52;
@@ -1594,7 +1594,7 @@ function HeaderCell({
 }) {
   const press = useCallback(() => onSort(column.name), [onSort, column.name]);
   const agg = useCallback(() => onAggregate(column.name), [onAggregate, column.name]);
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   let arrow = "";
   if (sortDir === "asc") arrow = " ↑";
   else if (sortDir === "desc") arrow = " ↓";
@@ -1602,7 +1602,7 @@ function HeaderCell({
     <View style={[styles.headerCell, { width }]}>
       <Pressable style={styles.headerMain} onPress={press}>
         <Text
-          style={[styles.headerText, isClickUp && clickUpListStyles.columnHeader]}
+          style={[styles.headerText, isGumloop && gumloopListStyles.columnHeader]}
           numberOfLines={1}
         >
           {column.name}
@@ -1628,9 +1628,9 @@ function editHint(canEdit: boolean, touch: boolean): string {
     : " · click to select, double-click to edit";
 }
 
-/** Classic zebra-stripes the grid; ClickUp separates rows with its hairline divider only. */
-function rowStripeStyle(isClickUp: boolean, rowIndex: number) {
-  if (isClickUp) return clickUpListStyles.row;
+/** Classic zebra-stripes the grid; Gumloop separates rows with its hairline divider only. */
+function rowStripeStyle(isGumloop: boolean, rowIndex: number) {
+  if (isGumloop) return gumloopListStyles.row;
   return rowIndex % 2 === 1 && styles.bodyRowAlt;
 }
 
@@ -1696,7 +1696,7 @@ function ExistingRow({
   );
   const handleLongPress = useCallback(() => onRowLongPress(rowIndex), [onRowLongPress, rowIndex]);
   const handleRecord = useCallback(() => onOpenRecord(rowIndex), [onOpenRecord, rowIndex]);
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const gutterCtx = isWeb
     ? {
         onContextMenu: (e: { preventDefault?: () => void; clientX?: number; clientY?: number }) => {
@@ -1712,7 +1712,7 @@ function ExistingRow({
       style={[
         styles.bodyRow,
         { width: rowWidth },
-        rowStripeStyle(isClickUp, rowIndex),
+        rowStripeStyle(isGumloop, rowIndex),
         selected && styles.selectedRow,
         selected && isAnchor && styles.anchorRow,
         deleted && styles.deletedRow,

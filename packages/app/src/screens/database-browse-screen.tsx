@@ -20,8 +20,8 @@ import { useDatabaseViewStore } from "@/stores/database-view-store";
 import { useDatabaseChatStore } from "@/stores/database-chat-store";
 import { usePanelStore } from "@/stores/panel-store";
 import type { Theme } from "@/styles/theme";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
-import { clickUpListStyles, clickUpTabStyles } from "@/components/clickup-shell/list-styles";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { gumloopListStyles, gumloopTabStyles } from "@/components/gumloop-shell/list-styles";
 
 const ThemedPanelLeft = withUnistyles(PanelLeft);
 const ThemedX = withUnistyles(X);
@@ -39,26 +39,26 @@ type DbTab =
     }
   | { kind: "console" | "er" | "search"; id: string; label: string };
 
-/** Open-tab chip: ClickUp's underlined text tab replaces the boxed editor tab. */
-function dbTabStyle(isClickUp: boolean, active: boolean) {
-  if (!isClickUp) return [styles.tab, active && styles.tabActive];
-  return [styles.tabClickUp, active ? clickUpTabStyles.tabActive : clickUpTabStyles.tab];
+/** Open-tab chip: Gumloop's underlined text tab replaces the boxed editor tab. */
+function dbTabStyle(isGumloop: boolean, active: boolean) {
+  if (!isGumloop) return [styles.tab, active && styles.tabActive];
+  return [styles.tabGumloop, active ? gumloopTabStyles.tabActive : gumloopTabStyles.tab];
 }
 
-function dbTabLabelStyle(isClickUp: boolean, active: boolean) {
-  if (!isClickUp) return [styles.tabLabel, active && styles.tabLabelActive];
-  return [styles.tabLabelClickUp, active ? clickUpTabStyles.textActive : clickUpTabStyles.text];
+function dbTabLabelStyle(isGumloop: boolean, active: boolean) {
+  if (!isGumloop) return [styles.tabLabel, active && styles.tabLabelActive];
+  return [styles.tabLabelGumloop, active ? gumloopTabStyles.textActive : gumloopTabStyles.text];
 }
 
-/** Data / Structure switch: pill segments in classic, underlined text tabs in ClickUp. */
-function switchBtnStyle(isClickUp: boolean, active: boolean) {
-  if (!isClickUp) return [styles.switchBtn, active && styles.switchBtnActive];
-  return active ? clickUpTabStyles.tabActive : clickUpTabStyles.tab;
+/** Data / Structure switch: pill segments in classic, underlined text tabs in Gumloop. */
+function switchBtnStyle(isGumloop: boolean, active: boolean) {
+  if (!isGumloop) return [styles.switchBtn, active && styles.switchBtnActive];
+  return active ? gumloopTabStyles.tabActive : gumloopTabStyles.tab;
 }
 
-function switchTextStyle(isClickUp: boolean, active: boolean) {
-  if (!isClickUp) return [styles.switchText, active && styles.switchTextActive];
-  return active ? clickUpTabStyles.textActive : clickUpTabStyles.text;
+function switchTextStyle(isGumloop: boolean, active: boolean) {
+  if (!isGumloop) return [styles.switchText, active && styles.switchTextActive];
+  return active ? gumloopTabStyles.textActive : gumloopTabStyles.text;
 }
 
 /** One tab chip; own component so the press/close handlers stay stable. */
@@ -75,10 +75,10 @@ function DbTabChip({
 }) {
   const activate = useCallback(() => onActivate(tab), [onActivate, tab]);
   const close = useCallback(() => onClose(tab.id), [onClose, tab.id]);
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   return (
-    <Pressable style={dbTabStyle(isClickUp, active)} onPress={activate}>
-      <Text style={dbTabLabelStyle(isClickUp, active)} numberOfLines={1}>
+    <Pressable style={dbTabStyle(isGumloop, active)} onPress={activate}>
+      <Text style={dbTabLabelStyle(isGumloop, active)} numberOfLines={1}>
         {tab.label}
       </Text>
       <Pressable onPress={close} hitSlop={6} style={styles.tabClose} accessibilityLabel="Close tab">
@@ -100,12 +100,12 @@ function DbTabStrip({
   onActivate: (tab: DbTab) => void;
   onClose: (id: string) => void;
 }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   return (
     <ScrollView
       horizontal
-      style={isClickUp ? styles.tabBarClickUp : styles.tabBar}
-      contentContainerStyle={isClickUp ? styles.tabBarContentClickUp : styles.tabBarContent}
+      style={isGumloop ? styles.tabBarGumloop : styles.tabBar}
+      contentContainerStyle={isGumloop ? styles.tabBarContentGumloop : styles.tabBarContent}
       showsHorizontalScrollIndicator={false}
     >
       {tabs.map((t) => (
@@ -145,7 +145,7 @@ export function DatabaseBrowseScreen({
   const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
   const router = useRouter();
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
 
   const selectedObject = useDatabaseNavStore((s) => s.selectedObject);
   const showingConsole = useDatabaseNavStore((s) => s.showingConsole);
@@ -389,18 +389,18 @@ export function DatabaseBrowseScreen({
       );
     content = (
       <View style={styles.leftColumn}>
-        <View style={isClickUp ? styles.viewSwitchClickUp : styles.viewSwitch}>
+        <View style={isGumloop ? styles.viewSwitchGumloop : styles.viewSwitch}>
           <Pressable
-            style={switchBtnStyle(isClickUp, objectView === "data")}
+            style={switchBtnStyle(isGumloop, objectView === "data")}
             onPress={showDataView}
           >
-            <Text style={switchTextStyle(isClickUp, objectView === "data")}>Data</Text>
+            <Text style={switchTextStyle(isGumloop, objectView === "data")}>Data</Text>
           </Pressable>
           <Pressable
-            style={switchBtnStyle(isClickUp, objectView === "structure")}
+            style={switchBtnStyle(isGumloop, objectView === "structure")}
             onPress={showStructureView}
           >
-            <Text style={switchTextStyle(isClickUp, objectView === "structure")}>Structure</Text>
+            <Text style={switchTextStyle(isGumloop, objectView === "structure")}>Structure</Text>
           </Pressable>
         </View>
         {inner}
@@ -467,10 +467,10 @@ export function DatabaseBrowseScreen({
 }
 
 function Meta({ label, value }: { label: string; value: string }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   return (
     <View style={styles.meta}>
-      <Text style={[styles.metaLabel, isClickUp && clickUpListStyles.columnHeader]}>{label}</Text>
+      <Text style={[styles.metaLabel, isGumloop && gumloopListStyles.columnHeader]}>{label}</Text>
       <Text style={styles.metaValue} numberOfLines={1}>
         {value}
       </Text>
@@ -508,26 +508,26 @@ const styles = StyleSheet.create((theme: Theme) => ({
   tabBarContent: {
     alignItems: "stretch",
   },
-  tabBarClickUp: {
+  tabBarGumloop: {
     flexGrow: 0,
     flexShrink: 0,
     borderBottomWidth: 1,
     borderBottomColor: theme.chrome.cardBorder,
     backgroundColor: theme.chrome.cardBackground,
   },
-  tabBarContentClickUp: {
+  tabBarContentGumloop: {
     alignItems: "flex-end",
     gap: theme.spacing[4],
     paddingHorizontal: theme.spacing[4],
     paddingTop: theme.spacing[1.5],
   },
-  tabClickUp: {
+  tabGumloop: {
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[1.5],
     maxWidth: 220,
   },
-  tabLabelClickUp: {
+  tabLabelGumloop: {
     flexShrink: 1,
   },
   tab: {
@@ -585,7 +585,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
   },
-  viewSwitchClickUp: {
+  viewSwitchGumloop: {
     flexDirection: "row",
     alignItems: "flex-end",
     gap: theme.spacing[6],

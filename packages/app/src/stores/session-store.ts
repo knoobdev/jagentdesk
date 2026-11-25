@@ -1,10 +1,15 @@
+import type {
+  AgentOptionControl,
+  JsonValue,
+  ProviderOptions,
+} from "@jagentdesk/protocol/agent-types";
 import { isWorkspaceArchivePending } from "@/contexts/session-workspace-upserts";
 import equal from "fast-deep-equal";
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
-import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
-import type { ViewedTimelineUiBridge } from "@/timeline/viewed-timeline-sync";
-import type { AgentDirectoryEntry } from "@/types/agent-directory";
+import { type DaemonClient } from "@jagentdesk/client/internal/daemon-client";
+import { type ViewedTimelineUiBridge } from "@/timeline/viewed-timeline-sync";
+import { type AgentDirectoryEntry } from "@/types/agent-directory";
 import {
   appendSubmittedUserMessage,
   handoffCreatedAgentUserMessageToStream,
@@ -26,7 +31,6 @@ import type { ComposerAttachment } from "@/attachments/types";
 import type { AgentLifecycleStatus } from "@jagentdesk/protocol/agent-lifecycle";
 import type {
   AgentPermissionRequest,
-  AgentFeature,
   AgentProvider,
   AgentMode,
   AgentCapabilityFlags,
@@ -35,13 +39,13 @@ import type {
   AgentMetric,
   AgentPersistenceHandle,
 } from "@jagentdesk/protocol/agent-types";
-import type {
-  AgentBackgroundWorkSummary,
-  ServerInfoStatusPayload,
-  ProjectPlacementPayload,
-  ServerCapabilities,
-  WorkspaceDescriptorPayload,
-  WorkspaceProjectDescriptorPayload,
+import {
+  type AgentBackgroundWorkSummary,
+  type ServerInfoStatusPayload,
+  type ProjectPlacementPayload,
+  type ServerCapabilities,
+  type WorkspaceDescriptorPayload,
+  type WorkspaceProjectDescriptorPayload,
 } from "@jagentdesk/protocol/messages";
 import {
   normalizeWorkspaceOpaqueId,
@@ -119,45 +123,83 @@ export interface AgentRuntimeInfo {
 
 export interface Agent {
   serverId: string;
+
   id: string;
+
   provider: AgentProvider;
+
   status: AgentLifecycleStatus;
+
   backgroundWork?: AgentBackgroundWorkSummary;
+
   activeTurn: { turnId: string | null; startedAt: Date | null } | null;
+
   createdAt: Date;
+
   updatedAt: Date;
+
   lastUserMessageAt: Date | null;
+
   lastActivityAt: Date;
+
   capabilities: AgentCapabilityFlags;
+
   currentModeId: string | null;
+
   availableModes: AgentMode[];
+
   pendingPermissions: AgentPermissionRequest[];
+
   persistence: AgentPersistenceHandle | null;
+
   runtimeInfo?: AgentRuntimeInfo;
+
   lastUsage?: AgentUsage;
+
   usageTotals?: AgentUsageTotals;
   usageScopeKey?: string;
   /** What the provider reports about the session, as label and value rows. */
   sessionMetrics?: AgentMetric[];
   lastError?: string | null;
+
   title: string | null;
+
   cwd: string;
+
   workspaceId?: string;
+
   model: string | null;
-  features?: AgentFeature[];
+
+  options?: ProviderOptions;
+
+  controls?: AgentOptionControl[];
+
   thinkingOptionId?: string | null;
+
   requiresAttention?: boolean;
+
   attentionReason?: "finished" | "error" | "permission" | null;
+
   attentionTimestamp?: Date | null;
+
   archivedAt?: Date | null;
+
   /** Background agents stay out of tabs, the subagent track and agent lists. Open them by id. */
   background?: boolean;
+
   parentAgentId: string | null;
+
   labels: Record<string, string>;
+
+  metadata?: Record<string, JsonValue>;
+
   projectPlacement?: ProjectPlacementPayload | null;
 }
 
 export interface WorkspaceDescriptor {
+  createdAt?: string;
+  lastUserMessageAt?: string | null;
+  activityAt?: string | null;
   id: string;
   projectId: string;
   projectDisplayName: string;
@@ -193,6 +235,9 @@ export function normalizeWorkspaceDescriptor(
       ? new Date(statusEnteredAtRaw)
       : null;
   return {
+    createdAt: payload.createdAt,
+    lastUserMessageAt: payload.lastUserMessageAt,
+    activityAt: payload.activityAt,
     id: normalizeWorkspaceOpaqueId(payload.id) ?? payload.id,
     projectId: payload.projectId,
     projectDisplayName: payload.projectDisplayName,
@@ -294,7 +339,9 @@ function projectMapsEqual(
 }
 
 export type ExplorerEntryKind = "file" | "directory";
+
 export type ExplorerFileKind = "text" | "image" | "binary";
+
 export type ExplorerEncoding = "utf-8" | "base64" | "none";
 
 export interface ExplorerEntry {

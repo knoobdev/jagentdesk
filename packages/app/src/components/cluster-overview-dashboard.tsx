@@ -4,8 +4,8 @@ import { StyleSheet } from "react-native-unistyles";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useClusterViewStore } from "@/stores/cluster-view-store";
 import type { Theme } from "@/styles/theme";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
-import { clickUpListStyles } from "@/components/clickup-shell/list-styles";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { gumloopListStyles } from "@/components/gumloop-shell/list-styles";
 
 /**
  * k8s-Lens-style cluster Overview: the default view when a cluster opens.
@@ -70,7 +70,7 @@ export function ClusterOverviewDashboard({
   clusterName?: string;
 }) {
   const client = useHostRuntimeClient(serverId);
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<OverviewData | null>(null);
@@ -180,19 +180,19 @@ export function ClusterOverviewDashboard({
 
       {data && data.nodes.length > 0 ? (
         <View style={styles.section}>
-          {isClickUp ? (
-            <View style={styles.groupRowClickUp}>
-              <View style={clickUpListStyles.groupPill}>
-                <Text style={clickUpListStyles.groupPillText}>Nodes</Text>
+          {isGumloop ? (
+            <View style={styles.groupRowGumloop}>
+              <View style={gumloopListStyles.groupPill}>
+                <Text style={gumloopListStyles.groupPillText}>Nodes</Text>
               </View>
-              <Text style={clickUpListStyles.groupCount}>{data.nodes.length}</Text>
+              <Text style={gumloopListStyles.groupCount}>{data.nodes.length}</Text>
             </View>
           ) : (
             <Text style={styles.sectionTitle}>Nodes</Text>
           )}
-          <View style={isClickUp ? styles.listClickUp : styles.list}>
+          <View style={isGumloop ? styles.listGumloop : styles.list}>
             {data.nodes.map((n) => (
-              <View key={nameOf(n)} style={[styles.listRow, isClickUp && clickUpListStyles.row]}>
+              <View key={nameOf(n)} style={[styles.listRow, isGumloop && gumloopListStyles.row]}>
                 <View style={styles.dotRun} />
                 <Text style={styles.listName} numberOfLines={1}>
                   {nameOf(n)}
@@ -209,10 +209,10 @@ export function ClusterOverviewDashboard({
 function PodHealthBar({ podStats }: { podStats: PodStats }) {
   const total = podStats.total || 1;
   const seg = (n: number) => `${(n / total) * 100}%` as const;
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   return (
     <View style={styles.section}>
-      <Text style={isClickUp ? styles.sectionTitleClickUp : styles.sectionTitle}>Pod health</Text>
+      <Text style={isGumloop ? styles.sectionTitleGumloop : styles.sectionTitle}>Pod health</Text>
       <View style={styles.bar}>
         {podStats.running > 0 ? (
           <View style={[styles.barRun, { width: seg(podStats.running) }]} />
@@ -250,11 +250,11 @@ function Kpi({
   sub?: string;
   tone?: "default" | "warn";
 }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   return (
-    <View style={isClickUp ? styles.kpiClickUp : styles.kpi}>
+    <View style={isGumloop ? styles.kpiGumloop : styles.kpi}>
       <Text style={tone === "warn" ? styles.kpiValueWarn : styles.kpiValue}>{value}</Text>
-      <Text style={[styles.kpiLabel, isClickUp && clickUpListStyles.columnHeader]}>{label}</Text>
+      <Text style={[styles.kpiLabel, isGumloop && gumloopListStyles.columnHeader]}>{label}</Text>
       {sub ? <Text style={styles.kpiSub}>{sub}</Text> : null}
     </View>
   );
@@ -295,7 +295,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderRadius: theme.borderRadius.lg,
     backgroundColor: theme.colors.surface1,
   },
-  kpiClickUp: {
+  kpiGumloop: {
     minWidth: 120,
     flexGrow: 1,
     flexBasis: 120,
@@ -331,12 +331,12 @@ const styles = StyleSheet.create((theme: Theme) => ({
     textTransform: "uppercase" as const,
     letterSpacing: 0.5,
   },
-  sectionTitleClickUp: {
+  sectionTitleGumloop: {
     fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.semibold,
     color: theme.chrome.sectionTitleColor,
   },
-  groupRowClickUp: {
+  groupRowGumloop: {
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
@@ -380,7 +380,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderRadius: theme.borderRadius.lg,
     overflow: "hidden",
   },
-  listClickUp: {
+  listGumloop: {
     borderWidth: 1,
     borderColor: theme.chrome.cardBorder,
     borderRadius: theme.chrome.cardRadius,

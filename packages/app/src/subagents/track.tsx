@@ -1,3 +1,7 @@
+import { usePaneContext } from "@/panels/pane-context";
+import { useSubagentSheetTab } from "./sheet-tab";
+import { useSheetPanePage } from "@/screens/workspace/sheet-pane";
+import { ComposerTrackPill, ComposerTrackRow } from "@/composer/tracks";
 import { iconButtonChromeStyle } from "@/components/ui/icon-button-chrome";
 import { useAgentFactsLine } from "@/panels/agent-facts-line";
 import type { AgentAddress } from "@jagentdesk/protocol/addresses";
@@ -67,6 +71,7 @@ export function SubagentsTrack({
   onDetachSubagent,
 }: SubagentsTrackProps): ReactElement | null {
   const { t } = useTranslation();
+  const compact = useIsCompactFormFactor();
   const [expanded, setExpanded] = useState(false);
 
   const toggleExpanded = useCallback(() => {
@@ -97,6 +102,18 @@ export function SubagentsTrack({
   const headerLabel = formatHeaderLabel(rows);
   const finishedCount = countFinishedSubagents(rows);
 
+  if (compact)
+    return (
+      <CompactSubagentsTrack
+        serverId={serverId}
+        rows={rows}
+        onOpenSubagent={onOpenSubagent}
+        onOpenProviderSubagent={onOpenProviderSubagent}
+        onArchiveSubagent={onArchiveSubagent}
+        onArchiveFinished={onArchiveFinished}
+        onDetachSubagent={onDetachSubagent}
+      />
+    );
   return (
     <View style={styles.outer} testID="subagents-track" dataSet={CHAT_COLUMN_RAIL_DATASET}>
       <View style={styles.track}>
@@ -154,6 +171,88 @@ export function SubagentsTrack({
         </View>
       </View>
     </View>
+  );
+}
+
+function CompactSubagentsTrack(props: SubagentsTrackProps) {
+  const { t } = useTranslation();
+  const pane = usePaneContext();
+  const sheetFor = useSubagentSheetTab(`${pane.serverId}:${pane.workspaceId}`, pane.tabId);
+  const page = useSheetPanePage();
+  const sheets = useMemo(
+    () =>
+      props.rows.map((row) =>
+        row.kind === "jagentdesk" && row.address.serverId !== props.serverId ? null : sheetFor(row),
+      ),
+    [props.rows, props.serverId, sheetFor],
+  );
+  const pages = useMemo(
+    () => sheets.flatMap((sheet) => (sheet ? [page(sheet)] : [])),
+    [page, sheets],
+  );
+  const segments = useMemo(
+    () => [{ bucket: null, text: `${props.rows.length} ${t("subagents.title")}` }],
+    [props.rows.length, t],
+  );
+  return (
+    <ComposerTrackPill
+      testID="subagents-track-header"
+      segments={segments}
+      panelTitle={t("subagents.title")}
+      pages={pages}
+    >
+      {props.onArchiveFinished && countFinishedSubagents(props.rows) > 0 ? (
+        <CompactArchiveFinished onPress={props.onArchiveFinished} />
+      ) : null}
+      {props.rows.map((row, index) => (
+        <CompactSubagentRow
+          key={row.kind === "jagentdesk" ? `${row.address.serverId}:${row.id}` : row.id}
+          row={row}
+          pageId={sheets[index]?.tab.tabId}
+          onOpenSubagent={props.onOpenSubagent}
+          onOpenProviderSubagent={props.onOpenProviderSubagent}
+        />
+      ))}
+    </ComposerTrackPill>
+  );
+}
+function CompactArchiveFinished({ onPress }: { onPress: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <ComposerTrackRow onPress={onPress} accessibilityLabel={t("subagents.archiveFinishedAction")}>
+      <Text style={styles.rowLabel}>{t("subagents.archiveFinishedAction")}</Text>
+    </ComposerTrackRow>
+  );
+}
+function CompactSubagentRow({
+  row,
+  pageId,
+  onOpenSubagent,
+  onOpenProviderSubagent,
+}: {
+  row: SubagentRow;
+  pageId?: string;
+  onOpenSubagent: SubagentsTrackProps["onOpenSubagent"];
+  onOpenProviderSubagent: SubagentsTrackProps["onOpenProviderSubagent"];
+}) {
+  const presentation = useMemo(() => buildRowPresentation(row), [row]);
+  const open = useCallback(() => {
+    if (row.kind === "provider") onOpenProviderSubagent(row.parentAgentId, row.id);
+    else onOpenSubagent(row.address);
+  }, [onOpenProviderSubagent, onOpenSubagent, row]);
+  return (
+    <ComposerTrackRow
+      onPress={open}
+      opensPage={pageId}
+      closeOnSelect={!pageId}
+      accessibilityLabel={presentation.label}
+      testID={`subagents-track-row-${row.id}`}
+    >
+      <WorkspaceTabIcon presentation={presentation} />
+      <Text style={styles.rowLabel} numberOfLines={2}>
+        {presentation.label}
+      </Text>
+    </ComposerTrackRow>
   );
 }
 

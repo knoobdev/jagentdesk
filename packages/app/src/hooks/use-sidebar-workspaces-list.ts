@@ -134,7 +134,8 @@ export function useSidebarWorkspacesList(options?: {
 
   const hydratedServerIds = useHydratedWorkspaceServerIds(serverIds);
 
-  const hostProjects = useHostProjects(hydratedServerIds);
+  const workspaceSort = useSidebarViewStore((state) => state.workspaceSort);
+  const hostProjects = useHostProjects(hydratedServerIds, workspaceSort);
   const showBackground = useSidebarViewStore((state) => state.showBackground);
   const workspaceMaps = useSessionStore(
     useShallow((state) =>

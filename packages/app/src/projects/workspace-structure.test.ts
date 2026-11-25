@@ -174,3 +174,35 @@ describe("buildWorkspaceStructureProjects", () => {
     );
   });
 });
+
+describe("workspace sorting", () => {
+  const older = {
+    ...workspace("old", "p", "/repo"),
+    name: "Zulu",
+    createdAt: "2026-01-01T00:00:00Z",
+    lastUserMessageAt: "2026-11-25T00:00:00Z",
+  };
+  const newer = {
+    ...workspace("new", "p", "/repo"),
+    name: "Alpha",
+    createdAt: "2026-11-01T00:00:00Z",
+    lastUserMessageAt: null,
+  };
+  const sessions = [
+    {
+      serverId: "host",
+      projects: [project({ id: "p", key: null, root: "/repo" })],
+      workspaces: [older, newer],
+    },
+  ];
+  test("Created orders by creation time, regardless of name or recent activity", () => {
+    expect(
+      buildWorkspaceStructureProjects({ sessions, workspaceSort: "created" })[0]?.workspaceKeys,
+    ).toEqual(["host:new", "host:old"]);
+  });
+  test("Last prompt uses the latest human prompt and creation time for unprompted workspaces", () => {
+    expect(
+      buildWorkspaceStructureProjects({ sessions, workspaceSort: "lastPrompt" })[0]?.workspaceKeys,
+    ).toEqual(["host:old", "host:new"]);
+  });
+});

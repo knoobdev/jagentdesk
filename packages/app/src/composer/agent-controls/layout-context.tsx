@@ -1,19 +1,18 @@
 import { createContext, useContext, type ReactNode } from "react";
-import type { ComposerControlPresentation } from "@/composer/agent-controls/layout";
+import {
+  type ComposerControlPresentation,
+  resolveComposerControlPresentation,
+} from "@/composer/agent-controls/layout";
+import { toolbarGlyphsFor, type ToolbarGlyphs } from "@/components/ui/control-geometry";
 
 interface ComposerControlLayoutValue {
-  glyphSize: number;
+  glyphs: ToolbarGlyphs;
   presentation: ComposerControlPresentation;
 }
 
 const DEFAULT_LAYOUT: ComposerControlLayoutValue = {
-  glyphSize: 16,
-  presentation: {
-    showCarets: true,
-    showThinkingLabel: true,
-    showModeLabel: true,
-    aggregateFeatures: false,
-  },
+  glyphs: toolbarGlyphsFor("pointer"),
+  presentation: resolveComposerControlPresentation("full"),
 };
 
 const ComposerControlLayoutContext = createContext(DEFAULT_LAYOUT);

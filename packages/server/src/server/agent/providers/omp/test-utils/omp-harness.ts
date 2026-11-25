@@ -3,27 +3,26 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setImmediate as waitForImmediate } from "node:timers/promises";
 import pino from "pino";
-
-import type {
-  AgentPersistenceHandle,
-  AgentPermissionResponse,
-  AgentSessionConfig,
-  AgentStreamEvent,
-  AgentTimelineItem,
+import {
+  type AgentPersistenceHandle,
+  type AgentPermissionResponse,
+  type AgentSessionConfig,
+  type AgentStreamEvent,
+  type AgentTimelineItem,
 } from "../../../agent-sdk-types.js";
-import type { JAgentDeskToolCatalog } from "../../../tools/types.js";
+import { type JAgentDeskToolCatalog } from "../../../tools/types.js";
 import {
   OmpAgentClient,
   OmpAgentSession,
   type OmpNoTurnScheduler,
   type OmpProviderIdleScheduler,
 } from "../agent.js";
-import type { OmpUsagePollScheduler } from "../usage-poller.js";
-import type {
-  OmpAgentMessage,
-  OmpRpcSlashCommand,
-  OmpRuntimeEvent,
-  OmpSessionStats,
+import { type OmpUsagePollScheduler } from "../usage-poller.js";
+import {
+  type OmpAgentMessage,
+  type OmpRpcSlashCommand,
+  type OmpRuntimeEvent,
+  type OmpSessionStats,
 } from "../rpc-types.js";
 import { FakeOmp } from "./fake-omp.js";
 
@@ -67,8 +66,11 @@ async function writeOmpHistory(history: OmpResumeHistory): Promise<string> {
 
 export class OmpHarness {
   private readonly omp = new FakeOmp();
+
   private readonly client: OmpAgentClient;
+
   private readonly events: AgentStreamEvent[] = [];
+
   private session: OmpAgentSession | null = null;
 
   constructor(
@@ -465,6 +467,16 @@ export class OmpHarness {
 
   eventTypes(): AgentStreamEvent["type"][] {
     return this.events.map((event) => event.type);
+  }
+
+  acceptFastOnNextRuntime(): void {
+    this.omp.queueSessionSetup((runtime) => {
+      runtime.fastModeResult = { enabled: true, active: true };
+    });
+  }
+
+  optionsChanges(): Record<string, unknown>[] {
+    return this.events.flatMap((event) => (event.type === "options_changed" ? [event.patch] : []));
   }
 
   async history(): Promise<AgentTimelineItem[]> {

@@ -23,7 +23,7 @@ export type ThemeTarget =
     };
 
 /**
- * Which Unistyles theme the app shows for a preference. Scheme-following themes (ClickUp) pick
+ * Which Unistyles theme the app shows for a preference. Scheme-following themes (Gumloop) pick
  * their light or dark half from the system appearance; a plugin theme whose plugin is gone falls
  * back to the default theme instead of leaving the app on a stale slot.
  */

@@ -53,3 +53,7 @@ export function useIsCompactFormFactor(): boolean {
 export function supportsDesktopPaneSplits(): boolean {
   return isWeb;
 }
+
+export function isCompactBreakpoint(breakpoint: string | undefined): boolean {
+  return breakpoint === "xs" || breakpoint === "sm";
+}

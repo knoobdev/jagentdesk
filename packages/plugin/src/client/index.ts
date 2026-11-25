@@ -1,3 +1,7 @@
+import { type SettingsDefinition } from "../settings.js";
+import { type SettingsState } from "./contracts.js";
+import { type ZodType } from "zod";
+
 export type {
   PluginHostProps,
   PluginWorkspaceRowBadgeItemProps,
@@ -17,6 +21,8 @@ export type {
   PluginOpenScreenInput,
   PluginScreenContribution,
   PluginSidebarItemProps,
+  PluginSidebarViewProps,
+  PluginSidebarViewContribution,
   PluginSidebarItemContribution,
   PluginPopoverProps,
   PluginSurfaceProps,
@@ -44,6 +50,7 @@ export type {
   PluginClientSlashCommandContribution,
   SettingsState,
 } from "./contracts.js";
+
 export type {
   PluginButton,
   PluginButtonBehavior,
@@ -56,17 +63,34 @@ export type {
   PluginComposerPillContribution,
   PluginHeaderButtonContribution,
 } from "./buttons.js";
+
 export { useJAgentDesk } from "./jagentdesk-context.js";
+
 export { useAgent, useWorkspace } from "./client-state.js";
+
+export type {
+  PluginComposer,
+  PluginComposerAttachment,
+  PluginComposerFocusOptions,
+  PluginComposerItemContribution,
+  PluginComposerItemProps,
+  PluginComposerSelector,
+} from "./composer.js";
+
+export type {
+  PluginNewWorkspace,
+  PluginNewWorkspaceItemContribution,
+  PluginNewWorkspaceItemProps,
+} from "./new-workspace.js";
+
 export { useRpc, useSubscription, type PluginSubscriptionState } from "./rpc-context.js";
+
 export type {
   PluginSubscribeOptions,
   PluginSubscriptionClosed,
   PluginSubscriptionHandle,
 } from "../rpc.js";
-import type { SettingsDefinition } from "../settings.js";
-import type { SettingsState } from "./contracts.js";
-import type { ZodType } from "zod";
+
 export declare function useSettings<Schema extends ZodType>(
   definition: SettingsDefinition<Schema>,
 ): SettingsState<Schema>;
@@ -77,12 +101,15 @@ export interface PluginHostSummary {
   readonly label: string;
   readonly status: "idle" | "connecting" | "online" | "offline" | "error";
 }
+
 /** Live configured hosts. Supplied by the app's client bundle loader. */
 export declare function useHosts(): readonly PluginHostSummary[];
+
 /** Borrow an online host's API under this installation's lifetime. */
 export declare function getJAgentDeskClient(
   serverId: string,
 ): import("@jagentdesk/client").JAgentDeskApi;
+
 /** Open an absolute HTTP(S) URL using the client platform’s external opener. */
 export declare function openExternalUrl(url: string): Promise<void>;
 
@@ -90,6 +117,12 @@ export * from "./file.js";
 
 export { useTabState } from "./tab.js";
 
-export { defineTranslations, useTranslation } from "./translations.js";
 export type { PluginI18n } from "./translations.js";
+
 export type { PluginText, PluginMessage, PluginTranslations } from "../text.js";
+
+export type { WorkspaceRef, AgentRef, ProjectRef, TerminalRef } from "../refs.js";
+export { defineTranslations, useTranslation } from "./translations.js";
+
+export { useComposer, useComposers } from "./composer.js";
+export { useNewWorkspace } from "./new-workspace.js";

@@ -74,7 +74,8 @@ export function normalizeAgentSnapshot(snapshot: AgentSnapshotPayload, serverId:
     cwd: snapshot.cwd,
     workspaceId: snapshot.workspaceId,
     model: snapshot.model ?? null,
-    features: snapshot.features,
+    options: snapshot.options,
+    controls: snapshot.controls,
     thinkingOptionId: snapshot.thinkingOptionId ?? null,
     requiresAttention: snapshot.requiresAttention ?? false,
     attentionReason: snapshot.attentionReason ?? null,
@@ -83,5 +84,6 @@ export function normalizeAgentSnapshot(snapshot: AgentSnapshotPayload, serverId:
     background: snapshot.background === true,
     parentAgentId,
     labels: snapshot.labels,
+    metadata: snapshot.metadata,
   };
 }

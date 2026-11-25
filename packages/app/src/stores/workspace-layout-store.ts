@@ -1,3 +1,14 @@
+import {
+  openTargetInSheet,
+  revealSheet,
+  withoutSheet,
+  dismissSheets,
+  findSheet,
+  withSheetTab,
+  type SheetTab,
+  type WorkspaceLayoutMode,
+} from "@/workspace-tabs/sheets";
+export type { SheetTab, WorkspaceLayoutMode } from "@/workspace-tabs/sheets";
 import { z } from "zod";
 import type { JsonValue } from "@jagentdesk/protocol/agent-types";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -27,6 +38,7 @@ import {
   normalizeLayout,
   openTabInLayoutBackground,
   openTabInLayoutFocused,
+  promoteExistingTabInLayout,
   reconcileWorkspaceTabs,
   removePaneFromTree,
   removeTabFromTree,
@@ -77,6 +89,12 @@ export interface OpenWorkspaceTabInput {
 }
 
 interface WorkspaceLayoutStore {
+  layoutMode: WorkspaceLayoutMode;
+  sheetsByWorkspace: Record<string, readonly SheetTab[]>;
+  setLayoutMode(mode: WorkspaceLayoutMode): void;
+  closeSheet(workspaceKey: string, tabId: string): void;
+  openSheetAsTab(workspaceKey: string, tabId: string): string | null;
+
   panelStateByWorkspace: Record<string, Record<string, JsonValue>>;
   panelRevisionByWorkspace: Record<string, Record<string, number>>;
   setTabState(workspaceKey: string, tabId: string, value: JsonValue): void;
@@ -325,9 +343,44 @@ export function createWorkspaceLayoutStore(
   return create<WorkspaceLayoutStore>()(
     persist(
       (set, get) => ({
+        layoutMode: "single-pane",
+        sheetsByWorkspace: {},
+        setLayoutMode: (layoutMode) => {
+          if (get().layoutMode === layoutMode) return;
+          if (layoutMode !== "compact") {
+            for (const [key, sheets] of Object.entries(get().sheetsByWorkspace)) {
+              for (const sheet of sheets) get().openSheetAsTab(key, sheet.tab.tabId);
+            }
+          }
+          set({ layoutMode });
+        },
+        closeSheet: (workspaceKey, tabId) =>
+          set((state) => withoutSheet(state, workspaceKey, tabId)),
+        openSheetAsTab: (workspaceKey, tabId) => {
+          const sheet = findSheet(get(), workspaceKey, tabId);
+          if (!sheet) return null;
+          const layout = promoteExistingTabInLayout(
+            getWorkspaceLayout(get().layoutByWorkspace, workspaceKey),
+            sheet.tab,
+          );
+          if (!layout) return null;
+          set((state) => ({
+            ...withoutSheet(state, workspaceKey, tabId),
+            layoutByWorkspace: { ...state.layoutByWorkspace, [workspaceKey]: layout },
+          }));
+          return sheet.tab.tabId;
+        },
         panelStateByWorkspace: {},
         panelRevisionByWorkspace: {},
         setTabState: (workspaceKey, tabId, value) => {
+          if (findSheet(get(), workspaceKey, tabId)) {
+            set((state) =>
+              withSheetTab(state, workspaceKey, tabId, (sheet) => ({
+                ...sheet,
+                tab: { ...sheet.tab, state: value },
+              })),
+            );
+          }
           const layout = get().layoutByWorkspace[workspaceKey];
           if (!layout || !collectAllTabs(layout.root).some((tab) => tab.tabId === tabId)) return;
           set((state) => ({
@@ -376,6 +429,17 @@ export function createWorkspaceLayoutStore(
             return null;
           }
 
+          const sheet = openTargetInSheet(
+            get(),
+            normalizedWorkspaceKey,
+            normalizedTarget,
+            undefined,
+          );
+          if (sheet) {
+            set((state) => revealSheet(state, normalizedWorkspaceKey, sheet));
+            return sheet.tab.tabId;
+          }
+          set((state) => dismissSheets(state, normalizedWorkspaceKey));
           const result = openTabInLayoutFocused({
             layout: getWorkspaceLayout(get().layoutByWorkspace, normalizedWorkspaceKey),
             target: normalizedTarget,
@@ -422,6 +486,17 @@ export function createWorkspaceLayoutStore(
             return null;
           }
 
+          const sheet = openTargetInSheet(
+            get(),
+            normalizedWorkspaceKey,
+            normalizedTarget,
+            parentTabId,
+          );
+          if (sheet) {
+            set((state) => revealSheet(state, normalizedWorkspaceKey, sheet));
+            return sheet.tab.tabId;
+          }
+          set((state) => dismissSheets(state, normalizedWorkspaceKey));
           const result = openTabInLayoutFocused({
             layout: getWorkspaceLayout(get().layoutByWorkspace, normalizedWorkspaceKey),
             target: normalizedTarget,
@@ -614,6 +689,10 @@ export function createWorkspaceLayoutStore(
             return;
           }
 
+          if (findSheet(get(), normalizedWorkspaceKey, normalizedTabId)) {
+            set((state) => withoutSheet(state, normalizedWorkspaceKey, normalizedTabId));
+            return;
+          }
           set((state) => {
             const nextLayout = closeTabInLayout({
               layout: getWorkspaceLayout(state.layoutByWorkspace, normalizedWorkspaceKey),
@@ -639,6 +718,12 @@ export function createWorkspaceLayoutStore(
             return;
           }
 
+          const sheet = findSheet(get(), normalizedWorkspaceKey, normalizedTabId);
+          if (sheet) {
+            set((state) => revealSheet(state, normalizedWorkspaceKey, sheet));
+            return;
+          }
+          set((state) => dismissSheets(state, normalizedWorkspaceKey));
           set((state) => {
             const nextLayout = focusTabInLayout({
               layout: getWorkspaceLayout(state.layoutByWorkspace, normalizedWorkspaceKey),
@@ -667,6 +752,15 @@ export function createWorkspaceLayoutStore(
             return null;
           }
 
+          if (findSheet(get(), normalizedWorkspaceKey, normalizedTabId)) {
+            set((state) =>
+              withSheetTab(state, normalizedWorkspaceKey, normalizedTabId, (sheet) => ({
+                ...sheet,
+                tab: { ...sheet.tab, target: normalizedTarget },
+              })),
+            );
+            return normalizedTabId;
+          }
           const result = retargetTabInLayout({
             layout: getWorkspaceLayout(get().layoutByWorkspace, normalizedWorkspaceKey),
             tabId: normalizedTabId,
@@ -1370,6 +1464,8 @@ export function createWorkspaceLayoutStore(
           if (
             previousProjection &&
             previousProjection.source.layoutByWorkspace === state.layoutByWorkspace &&
+            previousProjection.source.pinnedAgentIdsByWorkspace ===
+              state.pinnedAgentIdsByWorkspace &&
             previousProjection.source.panelStateByWorkspace === state.panelStateByWorkspace &&
             previousProjection.source.pinnedAgentIdsByWorkspace ===
               state.pinnedAgentIdsByWorkspace &&
@@ -1462,4 +1558,20 @@ export function usePendingWorkspaceOpen({
     }
   }, [workspaceKey, workspaceReady, layoutHydrated, pending]);
   return pending ? pending.target : null;
+}
+
+export function selectPaneFocusSuspended(
+  state: Pick<WorkspaceLayoutStore, "focusRestorationByWorkspace" | "sheetsByWorkspace">,
+  workspaceKey: string,
+): boolean {
+  return (
+    Boolean(state.focusRestorationByWorkspace[workspaceKey]?.restorePaneId) ||
+    (state.sheetsByWorkspace[workspaceKey]?.length ?? 0) > 0
+  );
+}
+export function selectSheetTab(
+  state: Pick<WorkspaceLayoutStore, "layoutMode" | "layoutByWorkspace" | "sheetsByWorkspace">,
+  input: { workspaceKey: string; target: WorkspaceTabTarget; parentTabId?: string },
+): SheetTab | null {
+  return openTargetInSheet(state, input.workspaceKey, input.target, input.parentTabId);
 }

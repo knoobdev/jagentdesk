@@ -13,6 +13,9 @@ import { resolveSafeAreaInsets, resolveTopBand, type WindowLayout } from "./mode
 export { useWindowLayout } from "./context";
 export { useTopBand } from "./context";
 export { WindowSafeArea } from "./window-safe-area";
+
+export { WindowLayoutActions, WindowLayoutActionsHost } from "./actions";
+export { WindowLayoutSurface, WindowLayoutDivisionGap } from "./surface";
 export {
   resolveDesktopDivisionLayout,
   resolveWorkspaceActionPlacement,

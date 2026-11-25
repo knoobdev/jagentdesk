@@ -1,13 +1,18 @@
-import { botsStrings } from "./bots";
+import { sshModuleStrings } from "./ssh-modules";
 import { builtinPluginStrings } from "./builtin-plugins";
+import { botsStrings } from "./bots";
 import { pluginSettings } from "./plugin-settings";
 import { activityGraphStrings } from "./activity-graph";
-import { sshModuleStrings } from "./ssh-modules";
 
 export const en = {
   bots: botsStrings,
   builtinPlugins: builtinPluginStrings,
   ssh: sshModuleStrings,
+  pluginCombobox: {
+    searching: "Searching…",
+    empty: "No results",
+    failed: "Search failed: {{message}}",
+  },
   paneFind: {
     connectionFailure: "Could not search this chat. Check the host connection and retry.",
     historyChangedFailure: "The chat changed while searching. Search again.",
@@ -128,8 +133,11 @@ export const en = {
       desktop: "Message the agent, tag @files, or use /commands and /skills",
       mobile: "Message, @files, /commands",
       fallback: "Message...",
+      terminal: "Prompt",
     },
     input: {
+      fullscreen: "Fullscreen",
+      exitFullscreen: "Exit fullscreen",
       longPressToSendNow: "Long press to send now",
 
       longPressToQueue: "Long press to queue",
@@ -596,6 +604,9 @@ export const en = {
       restoreRequiresUpdate: "Update the host to view terminals.",
       unableToSubscribe: "Unable to subscribe to terminal",
     },
+    sheet: {
+      openAsTab: "Open as tab",
+    },
     tabs: {
       loading: "Loading...",
       modified: "Unsaved changes",
@@ -704,6 +715,7 @@ export const en = {
     },
     header: {
       actions: {
+        workspaceActionsUnhealthy: "Workspace actions, a service is unhealthy",
         workspaceActions: "Workspace actions",
         newAgent: "New agent",
         newTerminal: "New terminal",
@@ -749,6 +761,8 @@ export const en = {
         direct: "Direct",
       },
       states: {
+        runningCount: "{{count}} running",
+        running: "Running",
         exitCode: "exit {{code}}",
         startFailed: "Failed to start {{scriptName}}",
         stopFailed: "Failed to stop {{scriptName}}",
@@ -1247,6 +1261,8 @@ export const en = {
       project: "Project",
       base: "Base",
       baseNotApplicable: "Not applicable",
+      host: "Host",
+      branch: "Branch",
     },
     titlePlaceholder: "Title (optional)",
     errors: {
@@ -1286,6 +1302,22 @@ export const en = {
       inProjectDirectory: "In project directory",
       inWorktree: "In a worktree",
       title: "Start from",
+    },
+    launch: {
+      commandPlaceholder: "Run a command, or leave empty for a blank terminal",
+      promptPlaceholder: "Prompt {{name}}",
+      submit: "Launch",
+      chat: "Chat",
+      terminal: "Terminal",
+      title: "What to launch",
+      manageProfiles: "Manage profiles",
+    },
+    tooltips: {
+      project: "Choose the project",
+      host: "Choose the host",
+      isolation: "Choose the isolation level",
+      startingRef: "Choose where to start from",
+      launch: "Choose what to launch",
     },
   },
   desktop: {
@@ -1581,6 +1613,16 @@ export const en = {
     noMatches: "No models match your search",
     searchPlaceholder: "Search models...",
     openProviderSettings: "Open {{provider}} settings",
+    editProfilesLabel: "Edit agent profiles",
+    searchAllPlaceholder: "Search all models...",
+    createProfileFromModel: "Create profile from this model",
+    editProfileLabel: "Edit {{name}}",
+    editProfilesCount: "Edit profiles ({{count}})",
+    profiles: "Profiles",
+    createProfile: "Create profile",
+    noMatchesForQuery: 'No models match "{{query}}"',
+    providers: "Providers",
+    model: "Model",
   },
   providerCatalog: {
     title: "Add provider",
@@ -1794,6 +1836,7 @@ export const en = {
     backdrop: "Menu backdrop",
   },
   subagents: {
+    title: "Subagents",
     parent: {
       openParent: "Open parent",
 
@@ -2194,8 +2237,8 @@ export const en = {
           claude: "Claude",
           ghostty: "Ghostty",
           pureBlack: "Pure black",
-          clickup: "ClickUp",
-          clickupDark: "ClickUp Dark",
+          gumloop: "Gumloop",
+          gumloopDark: "Gumloop Dark",
           auto: "System",
         },
       },
@@ -2565,6 +2608,41 @@ export const en = {
           localErrorMessage: "Unable to remove localhost connection",
         },
       },
+      agentProfiles: {
+        featureCountOne: "{{count}} feature",
+        featureCount: "{{count}} features",
+        editProfileTitle: "Edit agent profile",
+        addProfileTitle: "Add agent profile",
+        iconLabel: "Icon",
+        nameLabel: "Name",
+        namePlaceholder: "UI work",
+        providerLabel: "Provider",
+        providerPlaceholder: "Select a provider",
+        noProviders: "No providers are available on this host",
+        modelLabel: "Model",
+        noModels: "This provider has no models to choose from",
+        modeLabel: "Mode",
+        noModes: "This provider has no modes to choose from",
+        thinkingLabel: "Thinking",
+        noThinkingOptions: "This model has no thinking levels",
+        featuresLabel: "Features",
+        notesLabel: "When to use",
+        notesHint: "Helps agents choose this profile when starting another agent.",
+        notesPlaceholder: "Use for UI work — components, layout and design tokens.",
+        saving: "Saving...",
+        save: "Save",
+        moveUp: "Move up",
+        moveDown: "Move down",
+        editProfile: "Edit profile",
+        remove: "Remove",
+        removeConfirmTitle: "Remove profile?",
+        removeConfirmMessage: 'Remove "{{name}}"?',
+        sectionTitle: "Agent profiles",
+        unsupported: "This host runs a daemon that does not support agent profiles yet",
+        unavailable: "Connect to this host to manage agent profiles",
+        emptyState: "No profiles yet. Add one to start agents from a saved provider and model.",
+        newProfile: "New profile",
+      },
     },
     providers: {
       title: "Providers",
@@ -2799,7 +2877,7 @@ export const en = {
       },
     },
   },
-  clickupShell: {
+  gumloopShell: {
     search: "Search",
     newWorkspace: "New",
     workspaces: "Workspaces",

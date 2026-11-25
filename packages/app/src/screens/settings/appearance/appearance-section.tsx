@@ -1,8 +1,10 @@
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { AppearanceText as Text } from "@/appearance/text";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
-import { Text, TextInput, View, type PressableStateCallbackType } from "react-native";
+import { TextInput, View, type PressableStateCallbackType } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { ChevronDown, Monitor, Moon, Sun } from "lucide-react-native";
 import {
@@ -64,8 +66,8 @@ type BuiltInTheme = Exclude<AppSettings["theme"], "plugin">;
 
 function getThemeLabel(t: TFunction, value: BuiltInTheme): string {
   const labelKeys: Record<BuiltInTheme, string> = {
-    clickup: "settings.appearance.theme.options.clickup",
-    clickupDark: "settings.appearance.theme.options.clickupDark",
+    gumloop: "settings.appearance.theme.options.gumloop",
+    gumloopDark: "settings.appearance.theme.options.gumloopDark",
     light: "settings.appearance.theme.options.light",
     dark: "settings.appearance.theme.options.dark",
     zinc: "settings.appearance.theme.options.zinc",
@@ -78,9 +80,9 @@ function getThemeLabel(t: TFunction, value: BuiltInTheme): string {
   return t(labelKeys[value]);
 }
 
-const PRIMARY_THEMES: readonly BuiltInTheme[] = ["clickup", "light", "dark", "auto"];
+const PRIMARY_THEMES: readonly BuiltInTheme[] = ["gumloop", "light", "dark", "auto"];
 const DARK_VARIANT_THEMES: readonly BuiltInTheme[] = [
-  "clickupDark",
+  "gumloopDark",
   "zinc",
   "midnight",
   "claude",
@@ -197,11 +199,11 @@ function ThemeRow({
       : null;
   const selectedLabel =
     value === "plugin"
-      ? (selectedPlugin?.name ?? getThemeLabel(t, "clickup"))
+      ? (selectedPlugin?.name ?? getThemeLabel(t, "gumloop"))
       : getThemeLabel(t, value);
   const leading =
     value === "plugin" ? (
-      <ThemeSwatch color={selectedPlugin?.swatch ?? THEME_SWATCHES.clickup} />
+      <ThemeSwatch color={selectedPlugin?.swatch ?? THEME_SWATCHES.gumloop} />
     ) : (
       <ThemeLeading themeValue={value} />
     );
@@ -538,8 +540,18 @@ interface SyntaxRowProps {
 }
 
 function SyntaxRow({ value, onChange }: SyntaxRowProps) {
+  const gumloop = useIsGumloopTheme();
   const { t } = useTranslation();
   const selectedLabel = syntaxLabelForId(value);
+  if (gumloop)
+    return (
+      <View style={settingsStyles.row}>
+        <Text style={settingsStyles.rowTitle}>
+          {t("settings.appearance.syntax.highlightTheme")}
+        </Text>
+        <Text style={styles.triggerText}>Gumloop</Text>
+      </View>
+    );
   return (
     <View style={settingsStyles.row}>
       <View style={settingsStyles.rowContent}>

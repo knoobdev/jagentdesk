@@ -1,3 +1,6 @@
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { getSidebarRowBackdrop } from "@/components/sidebar/sidebar-row-backdrop";
+import { useCompactTimeAgo } from "@/hooks/use-time-ago";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
   View,
@@ -9,8 +12,7 @@ import {
   type StyleProp,
   type ViewStyle,
 } from "react-native";
-import { useMutation } from "@tanstack/react-query";
-import { AdaptiveRenameModal } from "@/components/rename-modal";
+import { useSidebarWorkspaceRename } from "@/workspace-rename";
 import {
   memo,
   useCallback,
@@ -19,6 +21,7 @@ import {
   useEffect,
   useRef,
   type ReactElement,
+  type ReactNode,
   type MutableRefObject,
   type Ref,
   type ComponentProps,
@@ -35,7 +38,6 @@ import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { Theme } from "@/styles/theme";
 import { type GestureType } from "react-native-gesture-handler";
 import * as Clipboard from "expo-clipboard";
-import { DiffStat } from "@/components/diff-stat";
 import {
   ExternalLink,
   GitBranch,
@@ -228,6 +230,7 @@ function selectionForSelectedWorkspace(
 }
 
 interface SidebarWorkspaceListProps {
+  navigationHeaderComponent?: ReactElement | null;
   statusGroups: StatusGroup[];
   pinnedGroups: PinnedSidebarGroups;
   projects: SidebarProjectEntry[];
@@ -294,6 +297,7 @@ interface WorkspaceRowInnerProps {
   onCopyBranchName?: () => void;
   onCopyPath?: () => void;
   onRename?: () => void;
+  titleEditor?: ReactNode;
   onMarkAsRead?: () => void;
   archiveShortcutKeys?: ShortcutKey[][] | null;
   isPinned?: boolean;
@@ -382,9 +386,9 @@ function getProjectWorkspaceRowStyle({
 }) {
   return [
     styles.workspaceRow,
-    isDragging && styles.workspaceRowDragging,
-    selected && styles.sidebarRowSelected,
     isHovered && styles.workspaceRowHovered,
+    selected && styles.sidebarRowSelected,
+    isDragging && styles.workspaceRowDragging,
   ];
 }
 
@@ -670,6 +674,9 @@ function WorkspaceRowRightGroup({
   isPinned?: boolean;
   onTogglePin?: () => void;
 }) {
+  const activityAt = workspace.activityAt ?? workspace.createdAt;
+  const activityDate = useMemo(() => (activityAt ? new Date(activityAt) : null), [activityAt]);
+  const activityLabel = useCompactTimeAgo(activityDate);
   const workspacePath = workspace.workspaceDirectory ?? workspace.projectRootPath;
   const { t } = useTranslation();
   const showShortcut = showShortcutBadge && shortcutNumber !== null;
@@ -679,14 +686,14 @@ function WorkspaceRowRightGroup({
     showArchiveButton,
     showScrim,
   } = resolveTrailingActionVisibility({
-    hasDiffStat: Boolean(workspace.diffStat),
+    hasDiffStat: Boolean(activityLabel),
     hasArchiveAction: Boolean(onArchive),
     isHovered,
     isTouchPlatform,
     showShortcut,
   });
   const kebab = useOpenKebabMenuVisibility(showKebabInSlot);
-  const shouldRenderActionSlot = Boolean(onArchive || workspace.diffStat);
+  const shouldRenderActionSlot = Boolean(onArchive || activityLabel);
 
   return (
     <>
@@ -696,12 +703,12 @@ function WorkspaceRowRightGroup({
       {shouldRenderActionSlot ? (
         <SidebarWorkspaceTrailingActionSlot>
           <SidebarWorkspaceTrailingActionBase visible={showDiffStat}>
-            {workspace.diffStat ? (
-              <DiffStat
-                additions={workspace.diffStat.additions}
-                deletions={workspace.diffStat.deletions}
-              />
-            ) : null}
+            <Text
+              style={styles.workspaceActivity}
+              testID={`sidebar-workspace-activity-${workspace.workspaceKey}`}
+            >
+              {activityLabel}
+            </Text>
           </SidebarWorkspaceTrailingActionBase>
           <SidebarWorkspaceTrailingActionOverlay
             visible={kebab.showKebab}
@@ -900,6 +907,7 @@ function ProjectHeaderRow({
   removeProjectStatus = "idle",
   dragHandleProps,
 }: ProjectHeaderRowProps) {
+  const gumloop = useIsGumloopTheme();
   const [isHovered, setIsHovered] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const isMobileBreakpoint = useIsCompactFormFactor();
@@ -966,27 +974,29 @@ function ProjectHeaderRow({
 
   const projectRowStyle = useCallback(
     ({ pressed }: PressableStateCallbackType) => [
-      styles.projectRow,
+      styles.projectRow(gumloop),
       isDragging && styles.projectRowDragging,
       selected && styles.sidebarRowSelected,
       isHovered && styles.projectRowHovered,
       pressed && styles.projectRowPressed,
     ],
-    [isDragging, selected, isHovered],
+    [gumloop, isDragging, selected, isHovered],
   );
 
   const rowChildren = (
     <>
-      <View style={styles.projectRowLeft}>
-        <ProjectLeadingVisual
-          displayName={displayName}
-          iconDataUri={iconDataUri}
-          statusBucket={statusBucket}
-          projectViewKey={project.viewKey}
-          chevron={chevron}
-          showChevron={isHovered && chevron !== null}
-          isArchiving={isArchiving}
-        />
+      <View style={styles.projectRowLeft(gumloop)}>
+        <View style={styles.projectLeadingVisual(gumloop)}>
+          <ProjectLeadingVisual
+            displayName={displayName}
+            iconDataUri={iconDataUri}
+            statusBucket={statusBucket}
+            projectViewKey={project.viewKey}
+            chevron={chevron}
+            showChevron={isHovered && chevron !== null}
+            isArchiving={isArchiving}
+          />
+        </View>
 
         <View style={styles.projectTitleGroup}>
           <Text style={styles.projectTitle} numberOfLines={1}>
@@ -1103,12 +1113,14 @@ function WorkspaceRowInner({
   onCopyBranchName,
   onCopyPath,
   onRename,
+  titleEditor = null,
   archiveShortcutKeys,
   isPinned,
   onTogglePin,
   reserveIdleStatusIndicatorSpace = true,
 }: WorkspaceRowInnerProps) {
   const _isCompact = useIsCompactFormFactor();
+  const isEditingTitle = titleEditor !== null;
   const isTouchPlatform = platformIsNative;
   const interaction = useLongPressDragInteraction({
     drag,
@@ -1140,7 +1152,11 @@ function WorkspaceRowInner({
   const accessibilityState = useMemo(() => ({ selected }), [selected]);
 
   return (
-    <SidebarWorkspaceRowFrame workspace={workspace} isDragging={isDragging}>
+    <SidebarWorkspaceRowFrame
+      workspace={workspace}
+      isDragging={isDragging}
+      isEditingTitle={isEditingTitle}
+    >
       {({ isHovered, contextMenuOpen, onContextMenuOpenChange, hoverHandlers }) => {
         const isDesktop = !isTouchPlatform;
         const showScriptsIcon = isDesktop && workspace.hasRunningScripts;
@@ -1159,7 +1175,7 @@ function WorkspaceRowInner({
         return (
           <View
             {...dragAttributes}
-            {...dragHandleProps?.listeners}
+            {...(isEditingTitle ? null : dragHandleProps?.listeners)}
             ref={dragHandleProps?.setActivatorNodeRef as unknown as Ref<View>}
             style={styles.workspaceRowContainer}
             {...hoverHandlers}
@@ -1184,17 +1200,20 @@ function WorkspaceRowInner({
               onOpenOrchestration={handleOpenOrchestration}
               openInFileManagerPath={workspace.workspaceDirectory}
               disabled={isArchiving}
+              enabled={!isEditingTitle}
               aria-selected={selected}
               accessibilityRole="button"
               accessibilityState={accessibilityState}
               style={workspaceRowStyle}
-              onPressIn={interaction.handlePressIn}
-              onTouchMove={interaction.handleTouchMove}
-              onPressOut={interaction.handlePressOut}
-              onPress={handlePress}
+              onPressIn={isEditingTitle ? undefined : interaction.handlePressIn}
+              onTouchMove={isEditingTitle ? undefined : interaction.handleTouchMove}
+              onPressOut={isEditingTitle ? undefined : interaction.handlePressOut}
+              onPress={isEditingTitle ? undefined : handlePress}
               testID={`sidebar-workspace-row-${workspace.workspaceKey}`}
             >
               <SidebarWorkspaceRowContent
+                backdrop={getSidebarRowBackdrop({ isDragging, selected, isHovered })}
+                titleEditor={titleEditor}
                 workspace={workspace}
                 hostBadge={hostBadge}
                 leadingProjectName={leadingProjectName}
@@ -1273,7 +1292,7 @@ function WorkspaceRowWithMenu({
   const { t } = useTranslation();
   const toast = useToast();
   const [isHidingWorkspace, setIsHidingWorkspace] = useState(false);
-  const [isRenameOpen, setIsRenameOpen] = useState(false);
+  const rename = useSidebarWorkspaceRename(workspace);
   const isArchiving = workspace.archivingAt !== null || isHidingWorkspace;
   const redirectAfterArchive = useCallback(() => {
     redirectIfArchivingActiveWorkspace({
@@ -1328,31 +1347,6 @@ function WorkspaceRowWithMenu({
     toast.copied(t("sidebar.workspace.toasts.branchNameCopied"));
   }, [t, toast, workspace.currentBranch]);
 
-  const renameMutation = useMutation({
-    mutationFn: async (title: string) => {
-      const client = getHostRuntimeStore().getClient(workspace.serverId);
-      if (!client) {
-        throw new Error(t("sidebar.workspace.toasts.hostDisconnected"));
-      }
-      await client.setWorkspaceTitle(workspace.workspaceId, title.length === 0 ? null : title);
-    },
-  });
-
-  const handleOpenRename = useCallback(() => {
-    setIsRenameOpen(true);
-  }, []);
-
-  const handleCloseRename = useCallback(() => {
-    setIsRenameOpen(false);
-  }, []);
-
-  const handleSubmitRename = useCallback(
-    async (value: string) => {
-      await renameMutation.mutateAsync(value.trim());
-    },
-    [renameMutation],
-  );
-
   const isPinned = workspace.pinnedAt != null;
   const handleTogglePin = useCallback(() => {
     onToggleWorkspacePin(workspace);
@@ -1393,23 +1387,15 @@ function WorkspaceRowWithMenu({
         onArchive={handleArchive}
         onCopyBranchName={canCopyBranchName ? handleCopyBranchName : undefined}
         onCopyPath={handleCopyPath}
-        onRename={handleOpenRename}
+        onRename={rename.begin}
+        titleEditor={rename.titleEditor}
         onMarkAsRead={hasClearableAttention ? handleMarkAsRead : undefined}
         archiveShortcutKeys={selected ? archiveShortcutKeys : null}
         isPinned={isPinned}
         onTogglePin={onTogglePin}
         reserveIdleStatusIndicatorSpace={reserveIdleStatusIndicatorSpace}
       />
-      <AdaptiveRenameModal
-        visible={isRenameOpen}
-        title={t("sidebar.workspace.rename.title")}
-        initialValue={workspace.title ?? workspace.name}
-        placeholder={workspace.name}
-        submitLabel={t("sidebar.workspace.rename.submit")}
-        onClose={handleCloseRename}
-        onSubmit={handleSubmitRename}
-        testID={`sidebar-workspace-rename-modal-${workspace.workspaceKey}`}
-      />
+      {rename.modal}
     </>
   );
 }
@@ -1746,6 +1732,7 @@ function ProjectBlock({
 
   const handleWorkspaceDragEnd = useCallback(
     (workspaces: SidebarWorkspacePlacement[]) => {
+      useSidebarViewStore.getState().setWorkspaceSort("manual");
       onWorkspaceReorder(project.viewKey, workspaces);
     },
     [onWorkspaceReorder, project.viewKey],
@@ -1958,6 +1945,7 @@ export function SidebarWorkspaceList({
   onAddProject,
   listFooterComponent,
   listHeaderComponent,
+  navigationHeaderComponent,
   parentGestureRef,
   dragGestureHostPresented,
 }: SidebarWorkspaceListProps) {
@@ -2006,6 +1994,7 @@ export function SidebarWorkspaceList({
       />
     ) : (
       <ProjectModeList
+        navigationHeaderComponent={navigationHeaderComponent}
         projects={projects}
         pinnedGroups={pinnedGroups}
         workspaceEntriesByKey={workspaceEntriesByKey}
@@ -2084,6 +2073,7 @@ function ProjectModeList({
   onAddProject,
   listFooterComponent,
   listHeaderComponent,
+  navigationHeaderComponent,
   parentGestureRef,
   dragGestureHostPresented,
   pathname,
@@ -2390,6 +2380,7 @@ function ProjectModeList({
 
   const content = (
     <>
+      {navigationHeaderComponent}
       {pinnedChats.length > 0 ? (
         <View style={styles.pinnedSection} testID="sidebar-pinned-section">
           <PinnedSectionHeader collapsed={pinnedCollapsed} onToggle={togglePinnedCollapsed} />
@@ -2554,11 +2545,12 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.sm,
     textAlign: "center",
   },
-  projectRow: {
+  projectRow: (gumloop: boolean) => ({
     position: "relative",
-    minHeight: 36,
-    paddingVertical: theme.spacing[2],
-    paddingHorizontal: theme.spacing[2],
+    minHeight: gumloop ? 34 : 36,
+    paddingVertical: gumloop ? 0 : theme.spacing[2],
+    paddingHorizontal: gumloop ? 10 : theme.spacing[2],
+    marginHorizontal: gumloop ? 2 : 0,
     borderRadius: theme.borderRadius.lg,
     marginBottom: theme.spacing[1],
     flexDirection: "row",
@@ -2566,7 +2558,7 @@ const styles = StyleSheet.create((theme) => ({
     justifyContent: "space-between",
     gap: theme.spacing[2],
     userSelect: "none",
-  },
+  }),
   projectRowHovered: {
     backgroundColor: theme.colors.surfaceSidebarHover,
   },
@@ -2581,13 +2573,19 @@ const styles = StyleSheet.create((theme) => ({
     zIndex: 3,
     ...theme.shadow.md,
   },
-  projectRowLeft: {
+  projectLeadingVisual: (gumloop: boolean) => ({
+    width: gumloop ? 18 : 16,
+    height: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  }),
+  projectRowLeft: (gumloop: boolean) => ({
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[2],
+    gap: gumloop ? 12 : theme.spacing[2],
     flex: 1,
     minWidth: 0,
-  },
+  }),
   projectTitleGroup: {
     flexDirection: "row",
     alignItems: "center",
@@ -2724,7 +2722,7 @@ const styles = StyleSheet.create((theme) => ({
     ...theme.shadow.md,
   },
   sidebarRowSelected: {
-    backgroundColor: theme.colors.surfaceSidebarHover,
+    backgroundColor: theme.chrome.selectedRow,
   },
   workspaceRowContainer: {
     position: "relative",
@@ -2774,6 +2772,7 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[2],
     paddingLeft: WORKSPACE_STATUS_DOT_WIDTH + theme.spacing[2],
   },
+  workspaceActivity: { fontSize: 12, color: theme.colors.foregroundExtraMuted },
   workspaceCreatingText: {
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.xs,

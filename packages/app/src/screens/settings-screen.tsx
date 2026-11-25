@@ -1,3 +1,11 @@
+import { useSettingsContentPresented } from "@/navigation/settings-presentation";
+import { GumloopRow } from "@/components/gumloop-shell/sidebar";
+import { PageHeader } from "@/components/headers/page-header";
+import { SidebarViewPicker } from "@/plugins/sidebar-view/picker";
+import { AppearanceText as Text } from "@/appearance/text";
+import { Portal } from "@gorhom/portal";
+import { GUMLOOP_PANEL_HOST } from "@/components/gumloop-shell/sidebar-state";
+import { useGumloopDesktopShell } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { usePluginDisplayName } from "@/plugins/plugin-list";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { SPACING } from "@/styles/theme";
@@ -16,12 +24,12 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  Text,
   TextInput,
   View,
   type PressableStateCallbackType,
 } from "react-native";
 import { useRouter } from "expo-router";
+import { useIsFocused } from "expo-router/react-navigation";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
@@ -52,7 +60,6 @@ import {
 import { DropdownTrigger } from "@/components/ui/dropdown-trigger";
 import { ComboboxTrigger } from "@/components/ui/combobox-trigger";
 import { SidebarHeaderRow } from "@/components/sidebar/sidebar-header-row";
-import { SidebarSeparator } from "@/components/sidebar/sidebar-separator";
 import { HostPicker as SharedHostPicker } from "@/components/hosts/host-picker";
 import { HostStatusDot } from "@/components/host-status-dot";
 import { ScreenTitle } from "@/components/headers/screen-title";
@@ -126,6 +133,7 @@ import {
   useIsCompactFormFactor,
 } from "@/constants/layout";
 import { isNative } from "@/constants/platform";
+import { densityIconBox, densityIconSize } from "@/styles/density";
 import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
 import {
   type EnableBuiltInDaemonOption,
@@ -142,6 +150,11 @@ import { navigateToLastWorkspace } from "@/stores/navigation-active-workspace-st
 // ---------------------------------------------------------------------------
 // View model
 // ---------------------------------------------------------------------------
+
+function SettingsDesktopHeader({ title, children }: { title: string; children: ReactNode }) {
+  const gumloop = useGumloopDesktopShell(true);
+  return gumloop ? <PageHeader icon={Settings} title={title} description="" /> : children;
+}
 
 export type SettingsView =
   | { kind: "root" }
@@ -161,6 +174,7 @@ interface SidebarSectionItem {
 }
 
 const SIDEBAR_SECTION_ITEMS: SidebarSectionItem[] = [
+  { id: "sidebar", labelKey: "Sidebar", icon: FolderGit2 },
   { id: "general", labelKey: "settings.sections.general", icon: Settings },
   { id: "appearance", labelKey: "settings.sections.appearance", icon: Palette },
   { id: "editor", labelKey: "settings.sections.editor", icon: Code2 },
@@ -606,7 +620,8 @@ function SidebarSectionButton({
   isSelected,
   onSelect,
 }: SidebarSectionButtonProps) {
-  const { theme } = useUnistyles();
+  const { theme, rt } = useUnistyles();
+  const gumloop = useGumloopDesktopShell(true);
   const handlePress = useCallback(() => {
     onSelect(itemId);
   }, [onSelect, itemId]);
@@ -615,6 +630,10 @@ function SidebarSectionButton({
     () => [sidebarStyles.label, isSelected && { color: theme.colors.foreground }],
     [isSelected, theme.colors.foreground],
   );
+  if (gumloop)
+    return (
+      <GumloopRow icon={IconComponent} label={label} selected={isSelected} onPress={handlePress} />
+    );
   return (
     <Pressable
       accessibilityRole="button"
@@ -623,7 +642,7 @@ function SidebarSectionButton({
       style={isSelected ? selectedSidebarItemStyle : sidebarItemStyle}
     >
       <IconComponent
-        size={theme.iconSize.md}
+        size={densityIconSize(rt, "md")}
         color={isSelected ? theme.colors.foreground : theme.colors.foregroundMuted}
       />
       <Text style={labelStyle} numberOfLines={1}>
@@ -648,7 +667,8 @@ function SidebarHostSectionButton({
   isSelected,
   onSelect,
 }: SidebarHostSectionButtonProps) {
-  const { theme } = useUnistyles();
+  const { theme, rt } = useUnistyles();
+  const gumloop = useGumloopDesktopShell(true);
   const handlePress = useCallback(() => {
     onSelect(itemId);
   }, [onSelect, itemId]);
@@ -657,6 +677,10 @@ function SidebarHostSectionButton({
     () => [sidebarStyles.label, isSelected && { color: theme.colors.foreground }],
     [isSelected, theme.colors.foreground],
   );
+  if (gumloop)
+    return (
+      <GumloopRow icon={IconComponent} label={label} selected={isSelected} onPress={handlePress} />
+    );
   return (
     <Pressable
       accessibilityRole="button"
@@ -666,7 +690,7 @@ function SidebarHostSectionButton({
       style={isSelected ? selectedSidebarItemStyle : sidebarItemStyle}
     >
       <IconComponent
-        size={theme.iconSize.md}
+        size={densityIconSize(rt, "md")}
         color={isSelected ? theme.colors.foreground : theme.colors.foregroundMuted}
       />
       <Text style={labelStyle} numberOfLines={1}>
@@ -759,6 +783,17 @@ function HostPicker({
   );
 }
 
+/** A labelled group of sidebar rows. On compact layouts the rows sit together in one island. */
+function SidebarGroup({ label, children }: { label?: string; children: ReactNode }) {
+  const gumloop = useGumloopDesktopShell(true);
+  return (
+    <View style={[sidebarStyles.group, gumloop && sidebarStyles.gumloopList]}>
+      {label ? <Text style={sidebarStyles.groupLabel}>{label}</Text> : null}
+      <View style={[sidebarStyles.island, gumloop && sidebarStyles.gumloopIsland]}>{children}</View>
+    </View>
+  );
+}
+
 interface SettingsSidebarProps {
   view: SettingsView;
   onSelectSection: (section: SettingsSectionSlug) => void;
@@ -780,7 +815,7 @@ function SettingsSidebar({
   activeHostServerId,
   layout,
 }: SettingsSidebarProps) {
-  const { theme } = useUnistyles();
+  const { theme, rt } = useUnistyles();
   const { t } = useTranslation();
   const hosts = useHosts();
   const localServerId = useLocalDaemonServerId();
@@ -797,10 +832,14 @@ function SettingsSidebar({
   );
   const insets = useSafeAreaInsets();
   const isDesktop = layout === "desktop";
+  const gumloop = useGumloopDesktopShell(true);
   const sidebarScroll = useSettingsSidebarScroll(isDesktop);
   const outerContainerStyle = useMemo(
-    () => [isDesktop ? sidebarStyles.desktopContainer : sidebarStyles.mobileContainer],
-    [isDesktop],
+    () => [
+      isDesktop ? sidebarStyles.desktopContainer : sidebarStyles.mobileContainer,
+      gumloop && sidebarStyles.gumloopContainer,
+    ],
+    [isDesktop, gumloop],
   );
   const innerContainerStyle = useMemo(
     () => [{ flex: 1 }, isDesktop ? { paddingTop: insets.top } : null],
@@ -814,8 +853,7 @@ function SettingsSidebar({
 
   const sidebarBody = (
     <>
-      <View style={sidebarStyles.list}>
-        <Text style={sidebarStyles.groupLabel}>{t("settings.groups.app")}</Text>
+      <SidebarGroup label={t("settings.groups.app")}>
         {items.map((item) => (
           <SidebarSectionButton
             key={item.id}
@@ -826,11 +864,9 @@ function SettingsSidebar({
             onSelect={onSelectSection}
           />
         ))}
-      </View>
-      <SidebarSeparator />
+      </SidebarGroup>
       {hasHosts ? (
-        <View style={sidebarStyles.list}>
-          <Text style={sidebarStyles.groupLabel}>{t("settings.groups.host")}</Text>
+        <SidebarGroup label={t("settings.groups.host")}>
           <HostPicker
             activeServerId={activeHostServerId}
             sortedHosts={sortedHosts}
@@ -848,9 +884,9 @@ function SettingsSidebar({
               onSelect={onSelectHostSection}
             />
           ))}
-        </View>
+        </SidebarGroup>
       ) : (
-        <View style={sidebarStyles.list}>
+        <SidebarGroup>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={t("settings.addHost")}
@@ -858,7 +894,7 @@ function SettingsSidebar({
             testID="settings-add-host"
             style={sidebarItemStyle}
           >
-            <Plus size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
+            <Plus size={densityIconSize(rt, "md")} color={theme.colors.foregroundMuted} />
             <Text style={sidebarStyles.label} numberOfLines={1}>
               {t("settings.addHost")}
             </Text>
@@ -871,13 +907,13 @@ function SettingsSidebar({
               testID="settings-enable-built-in-daemon"
               style={sidebarItemStyle}
             >
-              <Server size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
+              <Server size={densityIconSize(rt, "md")} color={theme.colors.foregroundMuted} />
               <Text style={sidebarStyles.label} numberOfLines={1}>
                 {t("settings.enableBuiltInDaemon")}
               </Text>
             </Pressable>
           ) : null}
-        </View>
+        </SidebarGroup>
       )}
     </>
   );
@@ -927,7 +963,12 @@ export interface SettingsScreenProps {
 }
 
 export default function SettingsScreen({ view, openAddHostIntent = null }: SettingsScreenProps) {
+  const contentPresented = useSettingsContentPresented();
+  useEffect(() => {
+    contentPresented();
+  }, [contentPresented]);
   const router = useRouter();
+  const isRouteFocused = useIsFocused();
   const { theme } = useUnistyles();
   const { t } = useTranslation();
   const voiceAudioEngine = useVoiceAudioEngineOptional();
@@ -941,6 +982,7 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   const lastOpenedAddHostIntentRef = useRef<string | null>(null);
   const isDesktopApp = isElectronRuntime();
   const isCompactLayout = useIsCompactFormFactor();
+  const gumloopDesktop = useGumloopDesktopShell(true);
   const insets = useSafeAreaInsets();
   const insetBottomStyle = useMemo(() => ({ paddingBottom: insets.bottom }), [insets.bottom]);
   const hosts = useHosts();
@@ -1259,6 +1301,8 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
               {isDesktopApp ? <BrowserDataSection /> : null}
             </>
           );
+        case "sidebar":
+          return <SidebarViewPicker />;
         case "appearance":
           return <AppearanceSection />;
         case "editor":
@@ -1375,38 +1419,59 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
     );
   }
 
-  // Desktop split view — mirrors AppContainer: sidebar owns the titlebar drag
-  // region + traffic-light padding; detail pane renders whatever header the
-  // selected section provides.
+  const settingsSidebar = (
+    <SettingsSidebar
+      view={view}
+      onSelectSection={handleSelectSection}
+      onSelectHostSection={handleSelectHostSection}
+      onSelectHost={handleSelectHost}
+      onAddHost={handleAddHost}
+      onBackToWorkspace={handleBackToWorkspace}
+      activeHostServerId={activeHostServerId}
+      layout="desktop"
+    />
+  );
   return (
     <View style={styles.container}>
       <View style={desktopStyles.row}>
-        <WindowChromeRegion corners="top-left">
-          <SettingsSidebar
-            view={view}
-            onSelectSection={handleSelectSection}
-            onSelectHostSection={handleSelectHostSection}
-            onSelectHost={handleSelectHost}
-            onAddHost={handleAddHost}
-            onBackToWorkspace={handleBackToWorkspace}
-            activeHostServerId={activeHostServerId}
-            layout="desktop"
-          />
-        </WindowChromeRegion>
+        {gumloopDesktop ? (
+          <Portal hostName={GUMLOOP_PANEL_HOST}>
+            {isRouteFocused ? (
+              <ScrollView style={sidebarStyles.scrollBody} testID="gumloop-settings-panel">
+                <SettingsSidebar
+                  view={view}
+                  onSelectSection={handleSelectSection}
+                  onSelectHostSection={handleSelectHostSection}
+                  onSelectHost={handleSelectHost}
+                  onAddHost={handleAddHost}
+                  onBackToWorkspace={handleBackToWorkspace}
+                  activeHostServerId={activeHostServerId}
+                  layout="mobile"
+                />
+              </ScrollView>
+            ) : null}
+          </Portal>
+        ) : (
+          <WindowChromeRegion corners="top-left">{settingsSidebar}</WindowChromeRegion>
+        )}
         <WindowChromeRegion corners="top-right">
           <View style={desktopStyles.contentPane} testID="settings-detail-pane">
-            <ScreenHeader
-              borderless={!detailHeader}
-              left={desktopDetailHeaderLeft}
-              leftStyle={desktopStyles.detailLeft}
-            />
+            <SettingsDesktopHeader title={detailHeader?.title ?? "Settings"}>
+              <ScreenHeader
+                borderless={!detailHeader}
+                left={desktopDetailHeaderLeft}
+                leftStyle={desktopStyles.detailLeft}
+              />
+            </SettingsDesktopHeader>
             <SettingsScrollView
               {...settingsScrollProps}
               style={styles.scrollView}
               contentContainerStyle={insetBottomStyle}
               testID="settings-detail-scroll-body"
             >
-              <View style={styles.content}>{content}</View>
+              <View style={[styles.content, gumloopDesktop && styles.gumloopContent]}>
+                {content}
+              </View>
             </SettingsScrollView>
           </View>
         </WindowChromeRegion>
@@ -1439,6 +1504,7 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     backgroundColor: theme.chrome.pageCanvas,
   },
+  gumloopContent: { maxWidth: 1134, paddingHorizontal: 82, paddingTop: 0, alignSelf: "stretch" },
   content: {
     padding: theme.spacing[4],
     paddingTop: theme.spacing[6],
@@ -1500,6 +1566,9 @@ const desktopStyles = StyleSheet.create((theme) => ({
 }));
 
 const sidebarStyles = StyleSheet.create((theme) => ({
+  gumloopContainer: { paddingHorizontal: 10, paddingBottom: 16 },
+  gumloopIsland: { gap: 3 },
+  gumloopList: { paddingHorizontal: 0, gap: 3 },
   desktopContainer: {
     width: SETTINGS_DESKTOP_SIDEBAR_WIDTH,
     flexShrink: 1,
@@ -1517,26 +1586,33 @@ const sidebarStyles = StyleSheet.create((theme) => ({
     paddingVertical: theme.spacing[2],
     paddingHorizontal: theme.spacing[2],
   },
-  list: {
+  // Compact values draw each group as an island of tiles; desktop keeps a plain list.
+  group: {
     paddingVertical: theme.spacing[2],
     paddingHorizontal: theme.spacing[2],
-    gap: theme.spacing[1],
+    gap: { xs: theme.spacing[1], md: theme.spacing[0.5] },
   },
   groupLabel: {
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.medium,
-    color: theme.colors.foregroundMuted,
-    paddingHorizontal: theme.spacing[2],
+    fontSize: theme.fontSize.base,
+    fontWeight: theme.fontWeight.normal,
+    color: theme.colors.foregroundExtraMuted,
+    paddingHorizontal: { xs: theme.spacing[4], md: theme.spacing[2] },
     paddingVertical: theme.spacing[1],
+  },
+  island: {
+    gap: { xs: 2, md: theme.spacing[0.5] },
+    borderRadius: { xs: theme.borderRadius["2xl"], md: 0 },
+    overflow: "hidden",
   },
   item: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[2],
-    minHeight: 36,
-    paddingVertical: theme.spacing[2],
-    paddingHorizontal: theme.spacing[2],
-    borderRadius: theme.borderRadius.lg,
+    gap: { xs: theme.spacing[3], md: theme.spacing[2] },
+    minHeight: { xs: 52, md: 36 },
+    paddingVertical: theme.spacing[1],
+    paddingHorizontal: { xs: theme.spacing[4], md: theme.spacing[2] },
+    borderRadius: { xs: 0, md: theme.borderRadius.lg },
+    backgroundColor: { xs: theme.colors.surface1, md: "transparent" },
   },
   itemHovered: {
     backgroundColor: theme.colors.surfaceSidebarHover,
@@ -1549,7 +1625,7 @@ const sidebarStyles = StyleSheet.create((theme) => ({
     backgroundColor: theme.colors.surface2,
   },
   label: {
-    fontSize: theme.fontSize.base,
+    fontSize: { xs: theme.fontSize.lg, md: theme.fontSize.base },
     color: theme.colors.foregroundMuted,
     fontWeight: theme.fontWeight.normal,
     flex: 1,
@@ -1557,11 +1633,12 @@ const sidebarStyles = StyleSheet.create((theme) => ({
   pickerTrigger: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[2],
-    minHeight: 36,
-    paddingVertical: theme.spacing[2],
-    paddingHorizontal: theme.spacing[2],
-    borderRadius: theme.borderRadius.lg,
+    gap: { xs: theme.spacing[3], md: theme.spacing[2] },
+    minHeight: { xs: 52, md: 36 },
+    paddingVertical: theme.spacing[1],
+    paddingHorizontal: { xs: theme.spacing[4], md: theme.spacing[2] },
+    borderRadius: { xs: 0, md: theme.borderRadius.lg },
+    backgroundColor: { xs: theme.colors.surface1, md: "transparent" },
   },
   pickerTriggerHovered: {
     backgroundColor: theme.colors.surfaceSidebarHover,
@@ -1569,14 +1646,14 @@ const sidebarStyles = StyleSheet.create((theme) => ({
   pickerTriggerLabel: {
     flex: 1,
     minWidth: 0,
-    fontSize: theme.fontSize.base,
+    fontSize: { xs: theme.fontSize.lg, md: theme.fontSize.base },
     color: theme.colors.foreground,
     fontWeight: theme.fontWeight.normal,
   },
   // Match the setting items' icon footprint so the host label aligns with them.
   pickerTriggerDot: {
-    width: theme.iconSize.md,
-    height: theme.iconSize.md,
+    width: densityIconBox("md"),
+    height: densityIconBox("md"),
     alignItems: "center",
     justifyContent: "center",
   },

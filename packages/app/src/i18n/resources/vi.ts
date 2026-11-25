@@ -23,6 +23,7 @@ export const vi = {
   },
   bots: botsStrings,
   subagents: {
+    title: "Các tác tử con",
     parent: {
       openParent: "Open parent",
 
@@ -157,8 +158,11 @@ export const vi = {
       desktop: "Nhắn cho agent, gắn @tệp, hoặc dùng /lệnh và /skills",
       mobile: "Tin nhắn, @tệp, /lệnh",
       fallback: "Tin nhắn...",
+      terminal: "Prompt",
     },
     input: {
+      fullscreen: "Fullscreen",
+      exitFullscreen: "Exit fullscreen",
       longPressToSendNow: "Long press to send now",
 
       longPressToQueue: "Long press to queue",
@@ -310,6 +314,8 @@ export const vi = {
       project: "Dự án",
       base: "Nhánh gốc",
       baseNotApplicable: "Không áp dụng",
+      host: "Host",
+      branch: "Branch",
     },
     titlePlaceholder: "Tiêu đề (không bắt buộc)",
     errors: {
@@ -324,6 +330,22 @@ export const vi = {
       noMatchingRefs: "Không có ref phù hợp.",
       searchPlaceholder: "Tìm nhánh và PR",
       title: "Bắt đầu từ",
+    },
+    launch: {
+      commandPlaceholder: "Run a command, or leave empty for a blank terminal",
+      promptPlaceholder: "Prompt {{name}}",
+      submit: "Launch",
+      chat: "Chat",
+      terminal: "Terminal",
+      title: "What to launch",
+      manageProfiles: "Manage profiles",
+    },
+    tooltips: {
+      project: "Choose the project",
+      host: "Choose the host",
+      isolation: "Choose the isolation level",
+      startingRef: "Choose where to start from",
+      launch: "Choose what to launch",
     },
   },
   settings: {
@@ -341,6 +363,41 @@ export const vi = {
           hint: "Giải phóng bộ nhớ sau một giờ không hoạt động.",
           info: "Dừng tiến trình agent và giữ lại cuộc hội thoại. Gửi tin nhắn để tiếp tục.\n\nCông việc đang chạy, thông báo đang chờ và kiểm tra an toàn của nhà cung cấp ngăn việc giải phóng.",
         },
+      },
+      agentProfiles: {
+        featureCountOne: "{{count}} feature",
+        featureCount: "{{count}} features",
+        editProfileTitle: "Edit agent profile",
+        addProfileTitle: "Add agent profile",
+        iconLabel: "Icon",
+        nameLabel: "Name",
+        namePlaceholder: "UI work",
+        providerLabel: "Provider",
+        providerPlaceholder: "Select a provider",
+        noProviders: "No providers are available on this host",
+        modelLabel: "Model",
+        noModels: "This provider has no models to choose from",
+        modeLabel: "Mode",
+        noModes: "This provider has no modes to choose from",
+        thinkingLabel: "Thinking",
+        noThinkingOptions: "This model has no thinking levels",
+        featuresLabel: "Features",
+        notesLabel: "When to use",
+        notesHint: "Helps agents choose this profile when starting another agent.",
+        notesPlaceholder: "Use for UI work — components, layout and design tokens.",
+        saving: "Saving...",
+        save: "Save",
+        moveUp: "Move up",
+        moveDown: "Move down",
+        editProfile: "Edit profile",
+        remove: "Remove",
+        removeConfirmTitle: "Remove profile?",
+        removeConfirmMessage: 'Remove "{{name}}"?',
+        sectionTitle: "Agent profiles",
+        unsupported: "This host runs a daemon that does not support agent profiles yet",
+        unavailable: "Connect to this host to manage agent profiles",
+        emptyState: "No profiles yet. Add one to start agents from a saved provider and model.",
+        newProfile: "New profile",
       },
     },
     hostSections: {
@@ -454,14 +511,14 @@ export const vi = {
           claude: "Claude",
           ghostty: "Ghostty",
           pureBlack: "Đen tuyền",
-          clickup: "ClickUp",
-          clickupDark: "ClickUp Dark",
+          gumloop: "Gumloop",
+          gumloopDark: "Gumloop Dark",
           auto: "Theo hệ thống",
         },
       },
     },
   },
-  clickupShell: {
+  gumloopShell: {
     search: "Tìm kiếm",
     newWorkspace: "Mới",
     workspaces: "Workspace",
@@ -889,6 +946,12 @@ export const vi = {
   },
   message: { turnFooter: { workedFor: "Worked for {{duration}}" } },
   workspace: {
+    header: {
+      actions: {
+        workspaceActionsUnhealthy: "Hành động không gian làm việc, một dịch vụ không ổn định",
+      },
+    },
+    scripts: { states: { running: "Đang chạy", runningCount: "{{count}} đang chạy" } },
     git: {
       pr: {
         checksOverview: {
@@ -940,6 +1003,7 @@ export const vi = {
         thread: { resolved: "Resolved", outdated: "Outdated" },
       },
     },
+    sheet: { openAsTab: "Mở thành thẻ" },
     tabs: {
       actions: {
         newTab: "New tab",
@@ -977,5 +1041,17 @@ export const vi = {
       emptyTitle: "No pull request yet",
       emptyDescription: "Create a pull request for this checkout to see its details here.",
     },
+  },
+  modelSelector: {
+    editProfilesLabel: "Edit agent profiles",
+    searchAllPlaceholder: "Search all models...",
+    createProfileFromModel: "Create profile from this model",
+    editProfileLabel: "Edit {{name}}",
+    editProfilesCount: "Edit profiles ({{count}})",
+    profiles: "Profiles",
+    createProfile: "Create profile",
+    noMatchesForQuery: 'No models match "{{query}}"',
+    providers: "Providers",
+    model: "Model",
   },
 } as const;

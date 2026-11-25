@@ -8,7 +8,7 @@ import {
   type SegmentedControlSize,
 } from "@/components/ui/control-geometry";
 import type { Theme } from "@/styles/theme";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 
 type SegmentedControlIconRenderer = (props: { color: string; size: number }) => ReactNode;
 
@@ -70,8 +70,8 @@ export function SegmentedControl<T extends string>({
   const labelSizeStyle = sizeStyles.label;
   const iconSize = segmentedIconSize[size];
 
-  // ClickUp shows these choices as underlined text tabs (To Do / Done / Delegated).
-  const underline = useIsClickUpTheme();
+  // Gumloop shows these choices as underlined text tabs (To Do / Done / Delegated).
+  const underline = useIsGumloopTheme();
   const containerStyle = useMemo(
     () => [styles.container, containerSizeStyle, underline && styles.containerUnderline, style],
     [containerSizeStyle, style, underline],
@@ -251,23 +251,26 @@ const styles = StyleSheet.create((theme) => {
     labelSelected: {
       color: theme.colors.surface0,
     },
-    // ClickUp underline tabs: no pill, an ink bar under the selected label.
+    // Gumloop underline tabs: no pill, an ink bar under the selected label.
     containerUnderline: {
-      gap: theme.spacing[4],
       paddingHorizontal: 0,
       paddingVertical: 0,
-      backgroundColor: "transparent",
+      backgroundColor: theme.colors.surface2,
+      borderRadius: 12,
+      padding: 4,
+      gap: 4,
       borderWidth: 0,
     },
     segmentUnderline: {
-      paddingHorizontal: 0,
-      borderRadius: 0,
+      paddingHorizontal: 12,
+      borderRadius: 8,
       backgroundColor: "transparent",
       borderBottomWidth: 2,
       borderBottomColor: "transparent",
     },
     segmentUnderlineSelected: {
-      borderBottomColor: theme.colors.foreground,
+      backgroundColor: theme.colors.surface1,
+      ...theme.shadow.sm,
     },
     segmentUnderlineHover: {
       borderBottomColor: theme.colors.border,

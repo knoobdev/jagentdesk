@@ -61,8 +61,8 @@ import { HostPicker } from "@/components/hosts/host-picker";
 import { MobileNavGrid } from "@/components/sidebar/mobile-nav-grid";
 import { SidebarHeaderRow } from "@/components/sidebar/sidebar-header-row";
 import { useAppNavTargets, useNewWorkspaceNavigate } from "@/components/sidebar/use-app-nav";
-import { ClickUpSidebarHeader } from "@/components/clickup-shell/clickup-sidebar-header";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { GumloopSidebarHeader } from "@/components/gumloop-shell/gumloop-sidebar-header";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { PluginSidebarItems } from "@/plugins";
 import { SidebarDisplayPreferencesMenu } from "@/components/sidebar/sidebar-display-preferences-menu";
 import { SidebarToastRegion } from "@/components/sidebar/sidebar-toast-region";
@@ -128,7 +128,7 @@ type SectionRoute =
   | { section: "servers" | "jira" | "figma" | "bots"; serverId: string }
   | { section: "argocd"; serverId: string; instanceId: string | null };
 
-function resolveSectionRoute(pathname: string): SectionRoute | null {
+export function resolveSectionRoute(pathname: string): SectionRoute | null {
   const plugin = /^\/h\/([^/]+)\/plugin\/([^/]+)/.exec(pathname);
   if (plugin)
     return {
@@ -160,7 +160,7 @@ export { shouldShowAddProject, shouldShowSidebarFooter } from "./sidebar-add-pro
  * rendered directly (not passed as a prop) so the two sidebar variants avoid a
  * nested ternary without tripping the prop-identity perf rules.
  */
-function resolveSidebarNavBody(
+export function resolveSidebarNavBody(
   clusterRoute: { serverId: string; clusterId: string } | null,
   databaseRoute: { serverId: string; databaseId: string } | null,
   fallback: ReactNode,
@@ -899,7 +899,7 @@ function SidebarFooter({
   const usageSummary = useUsageSummary();
   const newAgentKeys = useShortcutKeys("new-agent");
   const settingsKeys = useShortcutKeys("toggle-settings");
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const localServerId = useLocalDaemonServerId();
   const openPairDeviceModal = usePairDeviceModalStore((state) => state.open);
   const handleOpenPairDevice = useCallback(() => {
@@ -926,8 +926,8 @@ function SidebarFooter({
           theme={theme}
         />
       ) : null}
-      {/* The ClickUp shell moves hosts, help, pairing and settings to the top bar and rail. */}
-      <View style={isClickUp ? styles.footerIconRowHidden : styles.footerIconRow}>
+      {/* The Gumloop shell moves hosts, help, pairing and settings to the top bar and rail. */}
+      <View style={isGumloop ? styles.footerIconRowHidden : styles.footerIconRow}>
         <SidebarHostPicker
           theme={theme}
           label={labels.hosts}
@@ -1006,7 +1006,7 @@ function MobileSidebar({
       }
     : null;
   const { gesture: closeGesture, gestureRef: closeGestureRef } = useCloseAgentListGesture();
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const dragGestureHostPresented = useIsMobilePanelPresented("agent-list");
 
   const handleWorkspacePress = useCallback(() => {
@@ -1047,7 +1047,7 @@ function MobileSidebar({
 
   const mobileNavRows = (
     <View style={styles.sidebarHeaderGroup}>
-      {isClickUp ? null : (
+      {isGumloop ? null : (
         <SidebarNewWorkspaceHeaderRow
           label={labels.newWorkspace}
           testID="sidebar-global-new-workspace"
@@ -1090,8 +1090,8 @@ function MobileSidebar({
     >
       <View style={styles.sidebarContent} pointerEvents="auto">
         <WindowChromeSafeArea placement="below" />
-        {isClickUp ? (
-          <ClickUpSidebarHeader onBeforeNavigate={closeSidebar} reserveCloseButton />
+        {isGumloop ? (
+          <GumloopSidebarHeader onBeforeNavigate={closeSidebar} reserveCloseButton />
         ) : null}
         {clusterRoute || databaseRoute ? null : mobileNavigation}
         <WindowChromeSafeArea placement="inline" style={styles.mobileCloseButtonRow}>
@@ -1184,7 +1184,7 @@ function DesktopSidebar({
     if (builtinTargets.botsRoute) router.push(builtinTargets.botsRoute);
   }, [builtinTargets.botsRoute]);
   const ownsTopLeft = useOwnsWindowChromeCorner("top-left");
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const pathname = usePathname();
   const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
   const isSessionsActive = pathname.includes("/sessions");
@@ -1313,9 +1313,9 @@ function DesktopSidebar({
               <TitlebarDragRegion />
             </View>
           )}
-          {isClickUp && !sectionRoute ? <ClickUpSidebarHeader /> : null}
+          {isGumloop && !sectionRoute ? <GumloopSidebarHeader /> : null}
         </View>
-        {clusterRoute || databaseRoute || sectionRoute || isClickUp ? null : (
+        {clusterRoute || databaseRoute || sectionRoute || isGumloop ? null : (
           <ScrollView
             dataSet={WINDOW_CONTENT_DATASET}
             style={styles.navScroll}
@@ -1514,7 +1514,7 @@ function DesktopSidebar({
 
 function WorkspacesSectionHeader() {
   const { theme } = useUnistyles();
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const setCommandCenterOpen = useKeyboardShortcutsStore((state) => state.setCommandCenterOpen);
   const commandCenterKeys = useShortcutKeys("toggle-command-center");
   const handleSearchPress = useCallback(() => setCommandCenterOpen(true), [setCommandCenterOpen]);
@@ -1528,7 +1528,7 @@ function WorkspacesSectionHeader() {
 
   return (
     <View style={styles.workspacesSectionHeader}>
-      <Text style={styles.workspacesSectionTitle}>{isClickUp ? "Projects" : "Workspaces"}</Text>
+      <Text style={styles.workspacesSectionTitle}>{isGumloop ? "Projects" : "Workspaces"}</Text>
       <View style={styles.workspacesSectionActions}>
         <Tooltip delayDuration={300}>
           <TooltipTrigger asChild>

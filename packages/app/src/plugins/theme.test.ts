@@ -1,6 +1,7 @@
 import { QueryClient } from "@tanstack/react-query";
 import type { PluginThemeContribution } from "@jagentdesk/plugin";
 import { describe, expect, it } from "vitest";
+import { contrastRatio } from "@/utils/color";
 import { darkTheme, lightTheme } from "@/styles/theme";
 import { collectPluginThemes, rememberPluginThemeHost } from "./themes";
 import { toPluginTheme } from "./theme";
@@ -57,6 +58,8 @@ function installed(serverId: string, themes: PluginThemeContribution[]): Install
     settingsScreens: [],
     surfaces: [],
     sidebarItems: [],
+    composerItems: [],
+    newWorkspaceItems: [],
     workspacePanels: [],
     commandCenterItems: [],
     clientSlashCommands: [],
@@ -126,6 +129,30 @@ describe("plugin theme palettes", () => {
     expect(theme.colors.accentBright).toBe("#cdd6f4");
   });
 
+  it("keeps derived selected rows and passive text readable and permits explicit overrides", () => {
+    const theme = collectPluginThemes([installed("host-a", [LATTE])], new Set(["host-a"]))[0].theme;
+    expect(
+      contrastRatio(theme.colors.surfaceSidebarSelected, theme.colors.foreground),
+    ).toBeGreaterThan(4.5);
+    expect(contrastRatio(theme.colors.surface0, theme.colors.foregroundExtraMuted)).toBeGreaterThan(
+      2.5,
+    );
+    const override: PluginThemeContribution = {
+      ...LATTE,
+      colors: {
+        ...LATTE.colors,
+        sidebar: "#FAFAFA",
+        surfaceSidebarHover: "#F5F5F5",
+        surfaceSidebarSelected: "#F0F0F0",
+      },
+    };
+    const selected = collectPluginThemes([installed("host-a", [override])], new Set(["host-a"]))[0]
+      .theme;
+    expect(selected.colors.surfaceSidebar).toBe("#FAFAFA");
+    expect(selected.colors.surfaceSidebarHover).toBe("#F5F5F5");
+    expect(selected.chrome.selectedRow).toBe("#F0F0F0");
+  });
+
   it("keeps the status and syntax tokens the built-in dark themes use", () => {
     const theme = collectPluginThemes([installed("host-a", [MOCHA])], new Set(["host-a"]))[0].theme;
 
@@ -141,7 +168,7 @@ describe("plugin theme palettes", () => {
       surface0: "#eff1f5",
       surface1: "#e6e9ef",
       surface2: "#dce0e8",
-      surfaceSidebar: "#dce0e8",
+      surfaceSidebar: "#eff1f5",
       foreground: "#4c4f69",
       border: "#ccd0da",
       accent: "#8839ef",

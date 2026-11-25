@@ -33,6 +33,7 @@ const agent: PluginAgentSnapshot = {
   workspaceId: workspace.id,
   provider: "codex",
   status: "running",
+  metadata: {},
   backgroundWork: { count: 0 },
   background: false,
   createdAt: "2026-08-16T10:00:00.000Z",
@@ -71,6 +72,8 @@ function plugin(onAgentSelect: AgentCommandItem["onSelect"]): InstalledPlugin {
     settingsScreens: [],
     surfaces: [{ id: "main", Component: () => null }],
     sidebarItems: [],
+    composerItems: [],
+    newWorkspaceItems: [],
     workspacePanels: [
       {
         id: "details",

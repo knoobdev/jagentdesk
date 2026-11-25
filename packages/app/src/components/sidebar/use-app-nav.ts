@@ -68,7 +68,7 @@ import {
   buildSkillsRoute,
 } from "@/utils/host-routes";
 
-/** Routes behind the app's primary navigation, shared by the sidebar list and the ClickUp rail. */
+/** Routes behind the app's primary navigation, shared by the sidebar list and the Gumloop rail. */
 export interface AppNavTargets {
   botsRoute: Href | null;
   sharedSessionsRoute: Href | null;
@@ -204,7 +204,7 @@ interface AppNavItemBase {
   key: string;
   icon: LucideIcon;
   label: string;
-  /** Short label for the ClickUp rail, where the text sits under the icon. */
+  /** Short label for the Gumloop rail, where the text sits under the icon. */
   shortLabel: string;
   isActive: boolean;
   testID: string;

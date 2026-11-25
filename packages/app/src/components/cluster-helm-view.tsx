@@ -4,8 +4,8 @@ import { StyleSheet } from "react-native-unistyles";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { AdaptiveModalSheet } from "@/components/adaptive-modal-sheet";
 import type { Theme } from "@/styles/theme";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
-import { clickUpListStyles, clickUpTabStyles } from "@/components/clickup-shell/list-styles";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { gumloopListStyles, gumloopTabStyles } from "@/components/gumloop-shell/list-styles";
 
 // ── Types ──
 
@@ -82,7 +82,7 @@ interface ClusterHelmViewProps {
 
 export function ClusterHelmView({ serverId, clusterId }: ClusterHelmViewProps) {
   const client = useHostRuntimeClient(serverId);
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const [releases, setReleases] = useState<HelmRelease[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -190,22 +190,22 @@ export function ClusterHelmView({ serverId, clusterId }: ClusterHelmViewProps) {
   return (
     <View style={styles.container}>
       <View style={styles.tableHeader}>
-        <Text style={[styles.tableHeaderName, isClickUp && clickUpListStyles.columnHeader]}>
+        <Text style={[styles.tableHeaderName, isGumloop && gumloopListStyles.columnHeader]}>
           Name
         </Text>
-        <Text style={[styles.tableHeaderNamespace, isClickUp && clickUpListStyles.columnHeader]}>
+        <Text style={[styles.tableHeaderNamespace, isGumloop && gumloopListStyles.columnHeader]}>
           Namespace
         </Text>
-        <Text style={[styles.tableHeaderChart, isClickUp && clickUpListStyles.columnHeader]}>
+        <Text style={[styles.tableHeaderChart, isGumloop && gumloopListStyles.columnHeader]}>
           Chart
         </Text>
-        <Text style={[styles.tableHeaderRev, isClickUp && clickUpListStyles.columnHeader]}>
+        <Text style={[styles.tableHeaderRev, isGumloop && gumloopListStyles.columnHeader]}>
           Rev
         </Text>
-        <Text style={[styles.tableHeaderStatus, isClickUp && clickUpListStyles.columnHeader]}>
+        <Text style={[styles.tableHeaderStatus, isGumloop && gumloopListStyles.columnHeader]}>
           Status
         </Text>
-        <Text style={[styles.tableHeaderUpdated, isClickUp && clickUpListStyles.columnHeader]}>
+        <Text style={[styles.tableHeaderUpdated, isGumloop && gumloopListStyles.columnHeader]}>
           Updated
         </Text>
       </View>
@@ -241,11 +241,11 @@ const HelmReleaseRow = React.memo(function HelmReleaseRow({
   onSelectRelease,
 }: HelmReleaseRowProps) {
   const handlePress = useCallback(() => onSelectRelease(release), [onSelectRelease, release]);
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
 
   return (
     <Pressable
-      style={[styles.releaseRow, isClickUp && clickUpListStyles.row]}
+      style={[styles.releaseRow, isGumloop && gumloopListStyles.row]}
       onPress={handlePress}
     >
       <Text style={styles.releaseName} numberOfLines={1}>
@@ -268,15 +268,15 @@ const HelmReleaseRow = React.memo(function HelmReleaseRow({
 
 // ── Detail Modal ──
 
-/** Values / History: boxed buttons in classic, ClickUp's underlined text tabs otherwise. */
-function tabItemStyle(isClickUp: boolean, active: boolean) {
-  if (!isClickUp) return [styles.tabItem, active && styles.tabItemActive];
-  return active ? clickUpTabStyles.tabActive : clickUpTabStyles.tab;
+/** Values / History: boxed buttons in classic, Gumloop's underlined text tabs otherwise. */
+function tabItemStyle(isGumloop: boolean, active: boolean) {
+  if (!isGumloop) return [styles.tabItem, active && styles.tabItemActive];
+  return active ? gumloopTabStyles.tabActive : gumloopTabStyles.tab;
 }
 
-function tabItemTextStyle(isClickUp: boolean, active: boolean) {
-  if (!isClickUp) return [styles.tabItemText, active && styles.tabItemTextActive];
-  return active ? clickUpTabStyles.textActive : clickUpTabStyles.text;
+function tabItemTextStyle(isGumloop: boolean, active: boolean) {
+  if (!isGumloop) return [styles.tabItemText, active && styles.tabItemTextActive];
+  return active ? gumloopTabStyles.textActive : gumloopTabStyles.text;
 }
 
 type HelmDetailTab = "values" | "history";
@@ -354,16 +354,16 @@ function ClusterHelmDetail({
 
   const handleTabValues = useCallback(() => setTab("values"), []);
   const handleTabHistory = useCallback(() => setTab("history"), []);
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
 
   return (
     <AdaptiveModalSheet header={header} visible onClose={onClose} scrollable={false}>
-      <View style={isClickUp ? styles.tabBarClickUp : styles.tabBar}>
-        <Pressable style={tabItemStyle(isClickUp, tab === "values")} onPress={handleTabValues}>
-          <Text style={tabItemTextStyle(isClickUp, tab === "values")}>Values</Text>
+      <View style={isGumloop ? styles.tabBarGumloop : styles.tabBar}>
+        <Pressable style={tabItemStyle(isGumloop, tab === "values")} onPress={handleTabValues}>
+          <Text style={tabItemTextStyle(isGumloop, tab === "values")}>Values</Text>
         </Pressable>
-        <Pressable style={tabItemStyle(isClickUp, tab === "history")} onPress={handleTabHistory}>
-          <Text style={tabItemTextStyle(isClickUp, tab === "history")}>History</Text>
+        <Pressable style={tabItemStyle(isGumloop, tab === "history")} onPress={handleTabHistory}>
+          <Text style={tabItemTextStyle(isGumloop, tab === "history")}>History</Text>
         </Pressable>
       </View>
 
@@ -500,10 +500,10 @@ function HelmRevisionRow({ revision, rollbackRev, rollingBack, onRollback }: Hel
     [onRollback, revision.revision],
   );
 
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
 
   return (
-    <View style={[styles.historyRow, isClickUp && clickUpListStyles.row]}>
+    <View style={[styles.historyRow, isGumloop && gumloopListStyles.row]}>
       <Text style={styles.historyRev}>{revision.revision}</Text>
       <Text style={styles.historyStatus} numberOfLines={1}>
         {revision.status}
@@ -541,7 +541,7 @@ function HelmHistoryContent({ client, clusterId, namespace, name }: HelmHistoryC
   const [rollingBack, setRollingBack] = useState(false);
   const [rollbackError, setRollbackError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
 
   const loadHistory = useCallback(() => {
     if (!client) {
@@ -634,13 +634,13 @@ function HelmHistoryContent({ client, clusterId, namespace, name }: HelmHistoryC
       ) : null}
       <View style={styles.historyTable}>
         <View style={styles.historyHeader}>
-          <Text style={[styles.historyHeaderRev, isClickUp && clickUpListStyles.columnHeader]}>
+          <Text style={[styles.historyHeaderRev, isGumloop && gumloopListStyles.columnHeader]}>
             Rev
           </Text>
-          <Text style={[styles.historyHeaderStatus, isClickUp && clickUpListStyles.columnHeader]}>
+          <Text style={[styles.historyHeaderStatus, isGumloop && gumloopListStyles.columnHeader]}>
             Status
           </Text>
-          <Text style={[styles.historyHeaderUpdated, isClickUp && clickUpListStyles.columnHeader]}>
+          <Text style={[styles.historyHeaderUpdated, isGumloop && gumloopListStyles.columnHeader]}>
             Updated
           </Text>
           <View style={styles.historyHeaderAction} />
@@ -819,7 +819,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderBottomColor: theme.colors.border,
     marginBottom: theme.spacing[3],
   },
-  tabBarClickUp: {
+  tabBarGumloop: {
     flexDirection: "row",
     alignItems: "flex-end",
     gap: theme.spacing[6],

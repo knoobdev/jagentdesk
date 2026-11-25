@@ -1,3 +1,4 @@
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { useMemo, type ReactNode } from "react";
 import { View, Text } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
@@ -12,22 +13,30 @@ interface StatusBadgeProps {
 }
 
 export function StatusBadge({ label, variant = "muted", leading, size = "sm" }: StatusBadgeProps) {
+  const gumloop = useIsGumloopTheme();
   const pillStyle = useMemo(
     () => [
       styles.pill,
+      gumloop && styles.gumloopPill,
+
       size === "xs" && styles.pillXs,
       variant === "success" && styles.pillSuccess,
       variant === "error" && styles.pillError,
+      gumloop && variant === "success" && styles.gumloopSuccess,
+      gumloop && variant === "error" && styles.gumloopError,
     ],
-    [size, variant],
+    [gumloop, size, variant],
   );
   const textStyle = useMemo(
     () => [
       styles.pillText,
+      gumloop && styles.gumloopText,
       variant === "success" && styles.pillTextSuccess,
       variant === "error" && styles.pillTextError,
+      gumloop && variant === "success" && styles.gumloopSuccessText,
+      gumloop && variant === "error" && styles.gumloopErrorText,
     ],
-    [variant],
+    [gumloop, variant],
   );
 
   return (
@@ -39,6 +48,12 @@ export function StatusBadge({ label, variant = "muted", leading, size = "sm" }: 
 }
 
 const styles = StyleSheet.create((theme) => ({
+  gumloopPill: { borderRadius: 4, paddingVertical: 2, borderWidth: 0 },
+  gumloopText: { fontSize: 14, fontWeight: "500" },
+  gumloopSuccess: { backgroundColor: theme.colors.statusSuccessBackground },
+  gumloopError: { backgroundColor: theme.colors.statusDangerBackground },
+  gumloopSuccessText: { color: theme.colors.statusSuccess },
+  gumloopErrorText: { color: theme.colors.statusDanger },
   pill: {
     flexDirection: "row",
     gap: 6,

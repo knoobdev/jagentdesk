@@ -1,5 +1,12 @@
-import type { AgentMessage } from "./agent-message.js";
-import type { AgentAttachment } from "./messages.js";
+import { type AgentMessage } from "./agent-message.js";
+import {
+  type AgentAttachment,
+  type AgentOptionChoiceSchema,
+  type AgentOptionControlSchema,
+  type AgentOptionSelectControlSchema,
+  type AgentOptionToggleControlSchema,
+} from "./messages.js";
+import { type z } from "zod";
 
 export type AgentProvider = string;
 
@@ -73,6 +80,8 @@ export interface AgentMode {
 export type ProviderStatus = "ready" | "loading" | "error" | "unavailable";
 
 export interface AgentModelDefinition {
+  aliases?: string[];
+  isSelectable?: boolean;
   provider: AgentProvider;
   id: string;
   label: string;
@@ -142,6 +151,20 @@ export interface AgentFeatureSelect {
 }
 
 export type AgentFeature = AgentFeatureToggle | AgentFeatureSelect;
+
+export type AgentOptionChoice = z.infer<typeof AgentOptionChoiceSchema>;
+
+/** `key` is the top-level provider option key the control reads and writes. */
+export type AgentOptionToggleControl = z.infer<typeof AgentOptionToggleControlSchema>;
+
+/** `defaultValue` is the choice an unset option stands for. */
+export type AgentOptionSelectControl = z.infer<typeof AgentOptionSelectControlSchema>;
+
+/**
+ * A provider's description of a composer control over one top-level option key.
+ * The control carries no value: it is read from the agent's effective options.
+ */
+export type AgentOptionControl = z.infer<typeof AgentOptionControlSchema>;
 
 export interface AgentCapabilityFlags {
   [capability: string]: boolean | undefined;

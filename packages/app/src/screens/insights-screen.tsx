@@ -24,8 +24,8 @@ import { useUsageHistory, usageHistoryQueryKey } from "@/insights/use-usage-hist
 import { UsageTimelineCard } from "@/insights/usage-timeline-card";
 import type { LifetimeUsage } from "@jagentdesk/protocol/usage-history";
 import type { Theme } from "@/styles/theme";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
-import { clickUpListStyles } from "@/components/clickup-shell/list-styles";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { gumloopListStyles } from "@/components/gumloop-shell/list-styles";
 
 const ThemedCoins = withUnistyles(Coins);
 const ThemedCpu = withUnistyles(Cpu);
@@ -74,19 +74,19 @@ function KpiTile({
   label,
   value,
   sub,
-  isClickUp,
+  isGumloop,
 }: {
   Icon: KpiIcon;
   label: string;
   value: string;
   sub: string;
-  isClickUp: boolean;
+  isGumloop: boolean;
 }) {
   return (
     <View style={styles.kpi}>
       <View style={styles.kpiHead}>
         <Icon size={13} uniProps={mutedColor} />
-        <Text style={[styles.kpiLabel, isClickUp && clickUpListStyles.columnHeader]}>{label}</Text>
+        <Text style={[styles.kpiLabel, isGumloop && gumloopListStyles.columnHeader]}>{label}</Text>
       </View>
       <Text style={styles.kpiValue} numberOfLines={1}>
         {value}
@@ -249,7 +249,7 @@ export function InsightsScreen() {
   // sessions[hosts[0].serverId] is empty → the whole dashboard reads zeros.
   const serverId = useHostRouteServerId() ?? "";
   const isCompact = useIsCompactFormFactor();
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const insights = useUsageInsights(serverId);
   // Headline TOKENS/COST/by-model come from the daemon-persisted LIFETIME total
   // (baseline + every recorded day), NOT the live per-agent sum — so they include
@@ -388,7 +388,7 @@ export function InsightsScreen() {
             Icon={ThemedCpu}
             label="TOKENS"
             value={formatTokenCount(lifetimeTokens)}
-            isClickUp={isClickUp}
+            isGumloop={isGumloop}
             sub={`${formatTokenCount(lifetime.inputTokens)} in · ${formatTokenCount(lifetime.outputTokens)} out · ${formatTokenCount(lifetime.cachedInputTokens)} cache`}
           />
           <KpiTile
@@ -396,21 +396,21 @@ export function InsightsScreen() {
             label="COST"
             value={lifetimeHasCost ? formatUsd(lifetime.totalCostUsd) : "—"}
             sub={lifetimeHasCost ? "reported by provider" : "not reported"}
-            isClickUp={isClickUp}
+            isGumloop={isGumloop}
           />
           <KpiTile
             Icon={ThemedUsers}
             label="AGENTS"
             value={String(insights.agentsWithUsage)}
             sub={`of ${insights.agentCount} on host`}
-            isClickUp={isClickUp}
+            isGumloop={isGumloop}
           />
           <KpiTile
             Icon={ThemedCpu}
             label="AVG / AGENT"
             value={formatTokenCount(insights.avgTokensPerAgent)}
             sub="tokens per agent"
-            isClickUp={isClickUp}
+            isGumloop={isGumloop}
           />
         </View>
 
@@ -562,7 +562,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
   kpiSub: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
   // Card grid
   cardsRow: { flexDirection: "row", flexWrap: "wrap", gap: theme.spacing[4] },
-  // chrome card tokens: classic themes carry surface1 / border / lg, ClickUp white / #ececec / 10.
+  // chrome card tokens: classic themes carry surface1 / border / lg, Gumloop white / #ececec / 10.
   card: {
     backgroundColor: theme.chrome.cardBackground,
     borderWidth: theme.borderWidth[1],

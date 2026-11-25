@@ -1,7 +1,15 @@
 import { type KeyboardInputEvent, useOverlayRegistration } from "@/keyboard";
-
-import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode, Ref } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type ComponentProps,
+  type Ref,
+} from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -13,21 +21,26 @@ import {
   TextInput,
   View,
   type DimensionValue,
+  type StyleProp,
+  type TextInputProps,
+  type ViewStyle,
+  type ViewProps,
 } from "react-native";
-import type { StyleProp, TextInputProps, ViewStyle } from "react-native";
 import { StyleSheet, useUnistyles, withUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { getOverlayRoot, OverlayLayerProvider, useGlobalOverlayLayer } from "../lib/overlay-root";
 import {
   BottomSheetBackdrop,
+  BottomSheetHandle,
+  useBottomSheetGestureHandlers,
   BottomSheetScrollView,
   BottomSheetTextInput,
   useBottomSheetInternal,
   type BottomSheetBackgroundProps,
 } from "@gorhom/bottom-sheet";
 import Animated, { useAnimatedStyle } from "react-native-reanimated";
-import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { ArrowLeft, Search, X } from "lucide-react-native";
+import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
+import { ArrowLeft, Search, X, type LucideIcon } from "lucide-react-native";
 import {
   IsolatedBottomSheetModal,
   type ContextBridge,
@@ -36,7 +49,8 @@ import {
 import { getCompactSheetSafeAreaPadding } from "@/components/adaptive-modal-sheet-layout";
 import { createControlGeometry } from "@/components/ui/control-geometry";
 import { isNative, isWeb } from "@/constants/platform";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaInsetsContext, useSafeAreaInsets } from "react-native-safe-area-context";
+import { useDismissibleOverlay } from "@/components/ui/overlay-dismissal";
 
 // Horizontal indent token shared by the sheet header (title, back arrow,
 // leading icon, search input icon) and any row primitive rendered inside the
@@ -90,9 +104,10 @@ const styles = StyleSheet.create((theme) => ({
     flexShrink: 1,
     minHeight: 0,
     backgroundColor: theme.colors.surface1,
-    borderRadius: theme.borderRadius.xl,
+    borderRadius: theme.chrome.modalRadius,
     borderWidth: 1,
-    borderColor: theme.colors.surface2,
+    borderColor: theme.colors.border,
+    ...theme.shadow.lg,
   },
   headerContainer: {
     borderBottomWidth: 1,
@@ -229,7 +244,7 @@ const styles = StyleSheet.create((theme) => ({
 
 const WEB_EXIT_DURATION_MS = 160;
 
-function SheetBackground({ style }: BottomSheetBackgroundProps) {
+export function SheetBackground({ style }: BottomSheetBackgroundProps) {
   const { theme } = useUnistyles();
   const combinedStyle = useMemo(
     () => [
@@ -571,6 +586,7 @@ export function AdaptiveModalSheet({
   const { theme } = useUnistyles();
   const { t } = useTranslation();
   const isMobile = useIsCompactFormFactor();
+  useDismissibleOverlay(visible && !isMobile, onClose);
   const insets = useSafeAreaInsets();
   const resolvedSnapPoints = useMemo(() => snapPoints ?? ["65%", "90%"], [snapPoints]);
   const compactSafeAreaPadding = useMemo(
@@ -819,5 +835,89 @@ export function AdaptiveModalSheet({
         {desktopContent}
       </GestureHandlerRootView>
     </Modal>
+  );
+}
+
+export const FULL_SHEET_SNAP_POINTS = ["92%"];
+const ThemedBottomSheetHandle = withUnistyles(BottomSheetHandle, (theme) => ({
+  indicatorStyle: { backgroundColor: theme.colors.palette.zinc[600] },
+}));
+
+/** The compact sheet's drag handle: Gorhom's `handleComponent` for every bottom sheet. */
+export function SheetHandle({
+  // Gorhom passes `indicatorStyle={undefined}`, which would override the themed indicator.
+  indicatorStyle: _indicatorStyle,
+  ...props
+}: ComponentProps<typeof BottomSheetHandle>) {
+  return <ThemedBottomSheetHandle {...props} />;
+}
+
+/**
+ * Content that drags the sheet the way its handle does. A sheet whose body scrolls on its own
+ * turns content panning off and wraps its header in this, so the header still pulls it down.
+ * Render it inside the sheet's content.
+ */
+export function SheetDragArea({ children }: { children: ReactNode }) {
+  const { handlePanGestureHandler } = useBottomSheetGestureHandlers();
+  const gesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .shouldCancelWhenOutside(false)
+        .runOnJS(false)
+        .onStart(handlePanGestureHandler.handleOnStart)
+        .onChange(handlePanGestureHandler.handleOnChange)
+        .onEnd(handlePanGestureHandler.handleOnEnd)
+        .onFinalize(handlePanGestureHandler.handleOnFinalize),
+    [handlePanGestureHandler],
+  );
+  return (
+    <GestureDetector gesture={gesture}>
+      <View>{children}</View>
+    </GestureDetector>
+  );
+}
+
+/**
+ * A compact sheet's content area that reaches the bottom of the screen. It owns the system
+ * navigation inset: it pads it once and tells its content none is left, so content that pads the
+ * inset itself, like the composer dock, sits the same in a sheet as in a tab.
+ */
+export function SheetBottomInset({ style, children, ...props }: ViewProps) {
+  const insets = useSafeAreaInsets();
+  const contentInsets = useMemo(() => ({ ...insets, bottom: 0 }), [insets]);
+  const insetStyle = useMemo(() => [style, { paddingBottom: insets.bottom }], [style, insets]);
+  return (
+    <View {...props} style={insetStyle}>
+      <SafeAreaInsetsContext.Provider value={contentInsets}>
+        {children}
+      </SafeAreaInsetsContext.Provider>
+    </View>
+  );
+}
+
+export function SheetHeaderIconButton({
+  icon: Icon,
+  accessibilityLabel,
+  onPress,
+  testID,
+}: {
+  icon: LucideIcon;
+  accessibilityLabel: string;
+  onPress: () => void;
+  testID?: string;
+}) {
+  const { theme } = useUnistyles();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      style={styles.closeButton}
+      onPress={onPress}
+      testID={testID}
+    >
+      {({ pressed }) => (
+        <Icon size={16} color={pressed ? theme.colors.foreground : theme.colors.foregroundMuted} />
+      )}
+    </Pressable>
   );
 }

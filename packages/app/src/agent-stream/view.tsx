@@ -5,9 +5,9 @@ import { createStreamPresentation } from "./presentation";
 import { useInstalledTimelineTransform, PluginTimelineItemView } from "@/plugins/timeline";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
 import { renderStreamRow, type RenderStreamItem } from "./stream-row";
-import { ClickUpAgentHeader } from "@/components/clickup-shell/chat-headers";
-import { CLICKUP_MESSAGE_INDENT } from "@/components/clickup-shell/chat-layout";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { GumloopAgentHeader } from "@/components/gumloop-shell/chat-headers";
+import { GUMLOOP_MESSAGE_INDENT } from "@/components/gumloop-shell/chat-layout";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import React, {
   forwardRef,
@@ -58,14 +58,14 @@ import type {
   AgentPermissionAction,
   AgentPermissionResponse,
 } from "@jagentdesk/protocol/agent-types";
-import type { AgentScreenAgent } from "@/hooks/use-agent-screen-state-machine";
+import { type AgentScreenAgent } from "@/hooks/use-agent-screen-state-machine";
 import { useSessionStore } from "@/stores/session-store";
 import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
 import { useLoadOlderAgentHistory } from "@/hooks/use-load-older-agent-history";
 import { useSettings, resolveContentMaxWidth } from "@/hooks/use-settings";
-import type { ToastApi } from "@/components/toast-host";
+import { type ToastApi } from "@/components/toast-host";
 import { returnToTimelineTail } from "./timeline-tail-navigation";
-import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
+import { type DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import { ToolCallDetailsContent } from "@/components/tool-call-details";
 import { QuestionFormCard } from "@/components/question-form-card";
 import {
@@ -84,7 +84,7 @@ import { ChatOutlineRail } from "@/agent-stream/chat-outline/rail";
 import { useChatOutline } from "@/agent-stream/chat-outline/use-chat-outline";
 import { flashTimelineRow } from "@/agent-stream/flash-row";
 import { resolveNodeAction, type ActivityNodeAction } from "@/activity-graph/activity-graph-target";
-import type { ActivityGraphNodeRef } from "@jagentdesk/protocol/agent-activity-graph";
+import { type ActivityGraphNodeRef } from "@jagentdesk/protocol/agent-activity-graph";
 import { ChatFind } from "@/agent-stream/chat-find";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { planTimelineTailFetch } from "@/timeline/timeline-sync-plan";
@@ -118,7 +118,7 @@ import {
 } from "./use-stream-history-window";
 import { useForkAgent } from "@/hooks/use-fork-agent";
 import { isWeb } from "@/constants/platform";
-import type { Theme } from "@/styles/theme";
+import { type Theme } from "@/styles/theme";
 import { recordRenderProfileReasons } from "@/utils/render-profiler";
 import { useRetainedPanelActive } from "@/components/retained-panel";
 
@@ -241,10 +241,10 @@ export interface AgentStreamViewHandle {
 }
 
 /**
- * ClickUp chat: an agent turn opens with an avatar + provider + model header, and its items sit
+ * Gumloop chat: an agent turn opens with an avatar + provider + model header, and its items sit
  * indented under the name. A turn starts at the first non-user item after a user message.
  */
-function wrapClickUpAgentItem(input: {
+function wrapGumloopAgentItem(input: {
   layoutItem: StreamLayoutItem;
   content: ReactNode;
   provider?: string;
@@ -254,13 +254,13 @@ function wrapClickUpAgentItem(input: {
   if (item.kind === "user_message") return input.content;
   const startsTurn = aboveItem === null || aboveItem.kind === "user_message";
   return (
-    <View style={clickUpStreamStyles.agentItem}>
+    <View style={gumloopStreamStyles.agentItem}>
       {startsTurn ? (
-        <View style={clickUpStreamStyles.agentHeader}>
-          <ClickUpAgentHeader provider={input.provider} model={input.model} />
+        <View style={gumloopStreamStyles.agentHeader}>
+          <GumloopAgentHeader provider={input.provider} model={input.model} />
         </View>
       ) : null}
-      <View style={clickUpStreamStyles.agentBody}>{input.content}</View>
+      <View style={gumloopStreamStyles.agentBody}>{input.content}</View>
     </View>
   );
 }
@@ -270,11 +270,15 @@ function agentModelLabel(agent: AgentScreenAgent): string | null {
   return agent.runtimeInfo?.model ?? agent.model ?? null;
 }
 
-const clickUpStreamStyles = StyleSheet.create((theme) => ({
+const gumloopStreamStyles = StyleSheet.create((theme) => ({
   agentItem: { width: "100%" },
   agentHeader: { marginTop: theme.spacing[3] },
-  agentBody: { paddingLeft: CLICKUP_MESSAGE_INDENT },
+  agentBody: { paddingLeft: GUMLOOP_MESSAGE_INDENT },
 }));
+
+function canShowChatOutline(historyReady: boolean, supported: boolean, enabled: boolean): boolean {
+  return historyReady && supported && enabled;
+}
 
 export interface AgentStreamViewProps {
   agentId: string;
@@ -326,7 +330,9 @@ const AGENT_CAPABILITY_FLAG_KEYS: (keyof AgentCapabilityFlags)[] = [
 ];
 
 const EMPTY_STREAM_HEAD: StreamItem[] = [];
+
 const EMPTY_PENDING_MESSAGE_SUBMISSIONS: readonly PendingMessageSubmission[] = [];
+
 const GROUPED_TOOL_CALL_DETAIL_MAX_HEIGHT = 200;
 
 const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamViewProps>(
@@ -983,7 +989,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       ],
     );
 
-    const isClickUp = useIsClickUpTheme();
+    const isGumloop = useIsGumloopTheme();
     const renderStreamItemContent = useCallback(
       (layoutItem: StreamLayoutItem) => {
         const item = layoutItem.item;
@@ -1059,8 +1065,8 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         const layoutItem =
           originalLayoutItem.item === item ? originalLayoutItem : { ...originalLayoutItem, item };
         const rawContent = renderStreamItemContent(layoutItem);
-        const content = isClickUp
-          ? wrapClickUpAgentItem({
+        const content = isGumloop
+          ? wrapGumloopAgentItem({
               layoutItem,
               content: rawContent,
               provider: context.provider,
@@ -1080,7 +1086,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         context,
         getTurnIndent,
         handleForkAssistantTurn,
-        isClickUp,
+        isGumloop,
         readOnly,
         renderStreamItemContent,
         streamRenderStrategy,
@@ -1364,7 +1370,8 @@ function collectAgentSetupDiffs(left: AgentScreenAgent, right: AgentScreenAgent)
   if (left.runtimeInfo?.thinkingOptionId !== right.runtimeInfo?.thinkingOptionId) {
     reasons.push("agent.runtimeInfo.thinkingOptionId");
   }
-  if (left.features !== right.features) reasons.push("agent.features");
+  if (left.options !== right.options) reasons.push("agent.options");
+  if (left.controls !== right.controls) reasons.push("agent.controls");
   return reasons;
 }
 
@@ -1441,6 +1448,7 @@ function agentStreamViewPropsEqual(
 }
 
 export const AgentStreamView = memo(AgentStreamViewComponent, agentStreamViewPropsEqual);
+
 AgentStreamView.displayName = "AgentStreamView";
 
 interface ToolCallSlotProps extends Omit<
@@ -1505,12 +1513,15 @@ function ToolCallSlot({
 }
 
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
+
 const ThemedCheckIcon = withUnistyles(Check);
+
 const ThemedXIcon = withUnistyles(X);
 
 const primaryColorMapping = (theme: Theme) => ({
   color: theme.colors.foreground,
 });
+
 const mutedColorMapping = (theme: Theme) => ({
   color: theme.colors.foregroundMuted,
 });

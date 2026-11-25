@@ -57,7 +57,7 @@ import { buildCreateTableDdl } from "@/utils/sql-ddl";
 import { qualifyTable, quoteIdent } from "@/utils/sql-ident";
 import type { DatabaseEngine } from "@jagentdesk/protocol/database/rpc-schemas";
 import type { Theme } from "@/styles/theme";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 
 /** The daemon returns this while introspection races ahead of the parent
  *  connect — common on a cold tailnet open, where a deep link mounts the tree
@@ -241,10 +241,10 @@ function LeafRow({
 }
 
 /** The generic collapsible folder header (Indexes / Foreign keys / Views / …). */
-/** Selected table row: ClickUp's gray selected-row fill instead of the sidebar hover tint. */
-function tableRowStyle(isClickUp: boolean, active: boolean) {
-  if (!isClickUp) return [styles.row, active && styles.rowActive];
-  return [styles.row, active && styles.rowActiveClickUp];
+/** Selected table row: Gumloop's gray selected-row fill instead of the sidebar hover tint. */
+function tableRowStyle(isGumloop: boolean, active: boolean) {
+  if (!isGumloop) return [styles.row, active && styles.rowActive];
+  return [styles.row, active && styles.rowActiveGumloop];
 }
 
 function FolderRow({
@@ -258,12 +258,12 @@ function FolderRow({
   expanded: boolean;
   onPress: () => void;
 }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   return (
     <Pressable style={styles.row} onPress={onPress}>
       <Chevron expanded={expanded} />
       <ThemedFolder size={13} uniProps={faintColor} />
-      <Text style={[styles.folderLabel, isClickUp && styles.folderLabelClickUp]} numberOfLines={1}>
+      <Text style={[styles.folderLabel, isGumloop && styles.folderLabelGumloop]} numberOfLines={1}>
         {label}
       </Text>
       {count != null ? <Text style={styles.folderCount}>{count}</Text> : null}
@@ -496,7 +496,7 @@ function TableNode({
   onSelect: (object: SelectedDbObject) => void;
   actions: TableActions;
 }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const [expanded, setExpanded] = useState(false);
   const [columns, setColumns] = useState<DbColumn[]>([]);
   const [loading, setLoading] = useState(false);
@@ -543,7 +543,7 @@ function TableNode({
       <ContextMenu>
         <ContextMenuTrigger
           enabledOnMobile
-          style={tableRowStyle(isClickUp, active)}
+          style={tableRowStyle(isGumloop, active)}
           onPress={select}
           testID={`db-table-${object.name}`}
         >
@@ -1245,7 +1245,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     paddingHorizontal: theme.spacing[2],
   },
   rowActive: { backgroundColor: theme.colors.surfaceSidebarHover },
-  rowActiveClickUp: { backgroundColor: theme.chrome.selectedRow },
+  rowActiveGumloop: { backgroundColor: theme.chrome.selectedRow },
   rowLabel: { flex: 1, minWidth: 0, fontSize: theme.fontSize.sm, color: theme.colors.foreground },
   rowLabelActive: { fontWeight: theme.fontWeight.medium },
   childIndent: { paddingLeft: theme.spacing[3] },
@@ -1271,7 +1271,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     textTransform: "uppercase" as const,
     letterSpacing: 0.4,
   },
-  folderLabelClickUp: {
+  folderLabelGumloop: {
     color: theme.colors.foregroundMuted,
     textTransform: "none" as const,
     letterSpacing: 0,

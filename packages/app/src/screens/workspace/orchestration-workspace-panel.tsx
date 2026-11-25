@@ -26,6 +26,7 @@ interface WorkspaceOrchestrationPanelProps {
   variant?: "modal" | "dock";
   onClose?: () => void;
   openOnMount?: boolean;
+  hideLabel?: boolean;
 }
 
 const ROLE_ORDER: Record<string, number> = { supervisor: 0, lead: 1, peer: 2 };
@@ -74,6 +75,7 @@ export function WorkspaceOrchestrationPanel({
   variant = "modal",
   onClose,
   openOnMount = false,
+  hideLabel = false,
 }: WorkspaceOrchestrationPanelProps) {
   const { theme } = useUnistyles();
   const router = useRouter();
@@ -343,8 +345,7 @@ export function WorkspaceOrchestrationPanel({
         testID="workspace-orchestration-open"
         accessibilityLabel="Orchestration"
       >
-        {/* Phones show the icon only so the workspace title keeps its room. */}
-        {isCompact ? null : "Orchestration"}
+        {isCompact || hideLabel ? null : "Orchestration"}
       </Button>
       <AdaptiveModalSheet
         visible={visible}

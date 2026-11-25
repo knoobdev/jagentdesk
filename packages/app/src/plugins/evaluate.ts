@@ -1,25 +1,8 @@
+import type { PluginSidebarViewContribution } from "@jagentdesk/plugin/client";
 import { PluginTranslationRuntime, type PluginLocaleSource } from "@jagentdesk/plugin/client/host";
-import type { PluginText } from "@jagentdesk/plugin/client";
-import { localizePluginContribution, registerTranslatedButton } from "./translations";
-import type { createPluginHosts } from "./hosts";
-import { openExternalUrl } from "@/utils/open-external-url";
-import * as pluginUiRuntime from "./react-native/ui";
-import { useSettings } from "./settings/use-settings";
-import * as pluginSharedRuntime from "@jagentdesk/plugin";
 import * as pluginClientRuntime from "@jagentdesk/plugin/client";
-import * as React from "react";
-import * as ReactJsxRuntime from "react/jsx-runtime";
-// eslint-disable-next-line no-restricted-imports -- plugin client runtime injects host ReactNative.
-import * as ReactNative from "react-native";
-// eslint-disable-next-line no-restricted-imports -- plugin bundles receive TanStack's real runtime, not JAgentDesk's query wrappers.
-import * as ReactQuery from "@tanstack/react-query";
-import * as Zod from "zod";
 import {
-  type PluginAttachmentSourceContribution,
-  type PluginCleanup,
-  type PluginThemeContribution,
-} from "@jagentdesk/plugin";
-import {
+  type PluginText,
   type PluginCommandCenterItemContribution,
   type PluginClientContext,
   type PluginScreenContribution,
@@ -33,14 +16,38 @@ import {
   type PluginWorkspacePanelContribution,
   type PluginButtonRegistration,
 } from "@jagentdesk/plugin/client";
-import type { EvaluatedPlugin } from "./types";
-import type { ComponentType } from "react";
+import { localizePluginContribution, registerTranslatedButton } from "./translations";
+import { type createPluginHosts } from "./hosts";
+import { openExternalUrl } from "@/utils/open-external-url";
+import * as pluginUiRuntime from "./react-native/ui";
+import { useSettings } from "./settings/use-settings";
+import * as pluginSharedRuntime from "@jagentdesk/plugin";
+import {
+  type PluginAttachmentSourceContribution,
+  type PluginCleanup,
+  type PluginThemeContribution,
+} from "@jagentdesk/plugin";
+import * as React from "react";
+import { type ComponentType } from "react";
+import * as ReactJsxRuntime from "react/jsx-runtime";
+import * as ReactNative from "react-native";
+// Plugin bundles receive TanStack hooks as part of their public SDK.
+// oxlint-disable-next-line no-restricted-imports
+import * as ReactQuery from "@tanstack/react-query";
+import * as Zod from "zod";
+import { type EvaluatedPlugin } from "./types";
 import { resolvePluginIcon, parsePluginIcon, parseSerializablePluginIcon } from "./icons";
 import { pluginReactNativeRuntime } from "./react-native/runtime";
 import { parsePluginThemeContribution } from "./themes";
 
+// eslint-disable-next-line no-restricted-imports -- plugin client runtime injects host ReactNative.
+
+// eslint-disable-next-line no-restricted-imports -- plugin bundles receive TanStack's real runtime, not JAgentDesk's query wrappers.
+
 const CONTRIBUTION_ID = /^[a-z][a-z0-9-]*$/;
+
 const PANEL_LOCATIONS = ["workspace", "explorer"] as const;
+
 const TIMELINE_ITEM_TYPES = new Set([
   "user_message",
   "assistant_message",
@@ -93,6 +100,7 @@ export type PluginClientRuntime = Pick<
   | "openSettings"
   | "openScreen"
   | "openSurface"
+  | "composers"
   | "openPanel"
   | "subscribe"
 > & {
@@ -116,13 +124,18 @@ export function runPluginClientBundle(
     runtime.localeSource ?? { getLocale: () => "en", subscribe: () => () => {} },
   );
   const localize = <T extends object>(input: T) => localizePluginContribution(input, translations);
+  const sidebarViews: PluginSidebarViewContribution[] = [];
+  const sidebarViewIds = new Set<string>();
   const collector: Omit<EvaluatedPlugin, "id" | "cleanup"> = {
     workspaceRowBadgeItems: [],
     surfaces: [],
     settingsScreens: [],
+    sidebarViews,
     sidebarItems: [],
     sidebarHeaderItems: [],
     sidebarFooterItems: [],
+    composerItems: [],
+    newWorkspaceItems: [],
     workspacePanels: [],
     filePanels: [],
     commandCenterItems: [],
@@ -135,6 +148,8 @@ export function runPluginClientBundle(
   const surfaceIds = new Set<string>();
   const settingsScreenIds = new Set<string>();
   const sidebarItemIds = new Set<string>();
+  const composerItemIds = new Set<string>();
+  const newWorkspaceItemIds = new Set<string>();
   const workspacePanelIds = new Set<string>();
   const commandCenterItemIds = new Set<string>();
   const clientSlashCommandNames = new Set<string>();
@@ -225,6 +240,34 @@ export function runPluginClientBundle(
         contribution,
       );
     },
+    addComposerItem(contribution) {
+      const normalizedId = requireId(contribution.id, "composer item id");
+      if (composerItemIds.has(normalizedId))
+        throw new Error(`Duplicate composer item: ${normalizedId}`);
+      if (!isComponentType(contribution.Component)) {
+        throw new Error(`Composer item ${normalizedId} is not a component`);
+      }
+      composerItemIds.add(normalizedId);
+      return register(
+        collector.composerItems,
+        { id: normalizedId, Component: contribution.Component },
+        () => composerItemIds.delete(normalizedId),
+      );
+    },
+    addNewWorkspaceItem(contribution) {
+      const normalizedId = requireId(contribution.id, "New workspace item id");
+      if (newWorkspaceItemIds.has(normalizedId))
+        throw new Error(`Duplicate New workspace item: ${normalizedId}`);
+      if (!isComponentType(contribution.Component)) {
+        throw new Error(`New workspace item ${normalizedId} is not a component`);
+      }
+      newWorkspaceItemIds.add(normalizedId);
+      return register(
+        collector.newWorkspaceItems,
+        { id: normalizedId, Component: contribution.Component },
+        () => newWorkspaceItemIds.delete(normalizedId),
+      );
+    },
     addSidebarHeaderItem(contribution) {
       return addSidebarEntry("header", contribution);
     },
@@ -259,6 +302,22 @@ export function runPluginClientBundle(
           Component: Component as ComponentType<PluginScreenProps>,
         },
         () => surfaceIds.delete(normalizedId),
+      );
+    },
+    addSidebarView(input) {
+      const contribution = localize(input);
+      const normalizedId = requireId(contribution.id, "sidebar view id");
+      if (sidebarViewIds.has(normalizedId))
+        throw new Error(`Duplicate sidebar view: ${normalizedId}`);
+      if (typeof contribution.Component !== "function")
+        throw new Error(`Sidebar view ${normalizedId} is not a component`);
+      if (!contribution.title.trim()) throw new Error(`Sidebar view ${normalizedId} has no title`);
+      sidebarViewIds.add(normalizedId);
+      return register(
+        sidebarViews,
+        { ...contribution, id: normalizedId },
+        () => sidebarViewIds.delete(normalizedId),
+        contribution,
       );
     },
     addSidebarItem(input: PluginSidebarContribution<PluginText>) {
@@ -538,7 +597,8 @@ export function runPluginClientBundle(
     if (name === "@jagentdesk/plugin/client")
       return {
         ...pluginClientRuntime,
-        useSettings,
+        useSettings: (definition: import("@jagentdesk/plugin").SettingsDefinition) =>
+          useSettings(definition, id),
         openExternalUrl,
         getJAgentDeskClient: (serverId: string) => runtime.hosts.getJAgentDeskClient(serverId),
         useHosts: () =>
@@ -608,10 +668,13 @@ export function runPluginClientBundle(
     workspaceRowBadgeItems: collector.workspaceRowBadgeItems,
     surfaces: collector.surfaces,
     settingsScreens: collector.settingsScreens,
+    sidebarViews,
     sidebarItems: collector.sidebarItems,
     sidebarHeaderItems: collector.sidebarHeaderItems,
     sidebarFooterItems: collector.sidebarFooterItems,
     filePanels: collector.filePanels,
+    composerItems: collector.composerItems,
+    newWorkspaceItems: collector.newWorkspaceItems,
     workspacePanels: collector.workspacePanels as EvaluatedPlugin["workspacePanels"],
     commandCenterItems: collector.commandCenterItems,
     clientSlashCommands: collector.clientSlashCommands,

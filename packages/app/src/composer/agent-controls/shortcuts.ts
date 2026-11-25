@@ -8,7 +8,7 @@ export function useModelPickerShortcut(disabled: boolean) {
   return isActiveComposer && !disabled
     ? {
         id: "message-input.model-toggle" as const,
-        canOpen: () => isInputFocused,
+        canOpen: () => Boolean(isInputFocused),
       }
     : undefined;
 }
@@ -26,7 +26,7 @@ export function useEffortCycleShortcut(
     handlerId,
     actions: ["message-input.effort-cycle"],
     enabled: isActiveComposer && !disabled && nextId !== null && !!onSelect,
-    isActive: () => isInputFocused,
+    isActive: () => Boolean(isInputFocused),
     priority: 200,
     handle: () => {
       if (!onSelect || nextId === null) return false;

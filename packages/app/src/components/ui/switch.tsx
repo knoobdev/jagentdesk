@@ -30,6 +30,9 @@ const TIMING = { duration: 180, easing: Easing.inOut(Easing.ease) };
 
 interface SwitchTrackProps {
   value: boolean;
+  trackWidth: number;
+  trackHeight: number;
+  thumbSize: number;
   trackOffColor: string;
   trackOnColor: string;
   thumbOffColor: string;
@@ -38,6 +41,9 @@ interface SwitchTrackProps {
 
 function SwitchTrack({
   value,
+  trackWidth,
+  trackHeight,
+  thumbSize,
   trackOffColor,
   trackOnColor,
   thumbOffColor,
@@ -51,13 +57,30 @@ function SwitchTrack({
 
   const thumbAnimatedStyle = useAnimatedStyle(() => ({
     backgroundColor: interpolateColor(progress.value, [0, 1], [thumbOffColor, thumbOnColor]),
-    transform: [{ translateX: progress.value * switchGeometry.thumbTravel }],
+    transform: [{ translateX: progress.value * (trackWidth - trackHeight) }],
   }));
 
-  const trackStyle = useMemo(() => [styles.switchTrack, trackAnimatedStyle], [trackAnimatedStyle]);
+  const trackStyle = useMemo(
+    () => [
+      styles.switchTrack,
+      {
+        width: trackWidth,
+        height: trackHeight,
+        borderRadius: trackHeight / 2,
+        padding: (trackHeight - thumbSize) / 2,
+      },
+      trackAnimatedStyle,
+    ],
+    [trackAnimatedStyle, trackWidth, trackHeight, thumbSize],
+  );
   const thumbStyle = useMemo(
-    () => [styles.switchThumb, styles.thumb, thumbAnimatedStyle],
-    [thumbAnimatedStyle],
+    () => [
+      styles.switchThumb,
+      { width: thumbSize, height: thumbSize, borderRadius: thumbSize / 2 },
+      styles.thumb,
+      thumbAnimatedStyle,
+    ],
+    [thumbAnimatedStyle, thumbSize],
   );
 
   return (
@@ -68,8 +91,11 @@ function SwitchTrack({
 }
 
 const ThemedSwitchTrack = withUnistyles(SwitchTrack, (theme: Theme) => ({
+  trackWidth: theme.chrome.switchWidth,
+  trackHeight: theme.chrome.switchHeight,
+  thumbSize: theme.chrome.switchThumbSize,
   trackOffColor: theme.colors.surface3,
-  trackOnColor: theme.colors.accent,
+  trackOnColor: theme.colors.switchOn,
   thumbOffColor: theme.colors.palette.white,
   thumbOnColor: theme.colors.accentForeground,
 }));
