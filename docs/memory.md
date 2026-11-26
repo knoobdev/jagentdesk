@@ -44,17 +44,22 @@ one-term message. Query terms drop English and Vietnamese stopwords; `src/app.ts
 phrase `"src app ts"` because that is how the index tokenized it. Full-text search misses
 paraphrases by design (ADR-0058); agents use `search_memory` for the rest.
 
-## Tools and the chip
+## Tools and timeline rows
 
 Every new agent gets `remember`, `search_memory` and `list_memories` while the built-in is on; with
-Memory switched off in Settings they answer code `disabled`. Results are JSON; the app renders a
-finished `remember` call as "Remembered · …" with Undo and Edit.
+Memory switched off in Settings they answer code `disabled`. Results are JSON.
 
-Each turn that used memories gets one `memory`/`memory-used` plugin timeline item keyed by the
-turn id. It freezes what was injected or found (text, scope, score, source), so the chip opens
-exactly what the provider saw even after an edit. A later `search_memory` in the same turn
-re-appends the same item id, which updates the card in place. Plugin item kinds must match
-`^[a-z][a-z0-9-]*$`.
+Both visible artifacts are daemon plugin timeline items, not tool-call cards: a completed turn
+folds its tool calls into one summary line, and only rows a built-in appended stay outside the fold
+(`isDaemonPluginRow` in `packages/app/src/agent-stream/turn-collapse/model.ts`).
+
+- `memory`/`memory-remembered`, one per saved memory: "Remembered · …" with Undo and Edit.
+- `memory`/`memory-used`, one per turn keyed by the turn id: the "Used N memories" chip. It
+  freezes what was injected or found (text, scope, score, source), so it opens exactly what the
+  provider saw even after an edit. A later `search_memory` in the turn re-appends the same item
+  id, which updates the row in place.
+
+Plugin item kinds must match `^[a-z][a-z0-9-]*$`.
 
 ## App surfaces
 
