@@ -27,7 +27,10 @@ import {
 
 export const TERMINAL_INPUT_CONTEXT_MENU_HIDDEN = true;
 export const TERMINAL_INPUT_HITBOX_SIZE = 1;
-/** Matched by the Android hardware keyboard module to claim arrow keys for this input. */
+/**
+ * Matched on Android by the hardware keyboard module to claim arrow keys for this input, and by
+ * JAgentDeskTerminal to keep the keyboard from learning what is typed here, such as passwords.
+ */
 export const TERMINAL_INPUT_NATIVE_ID = "jagentdesk-terminal-input";
 
 export interface TerminalTextInputChange {

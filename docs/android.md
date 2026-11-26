@@ -22,6 +22,10 @@ generated Android project:
 ./gradlew :jagentdesk-display-metrics:connectedDebugAndroidTest --no-daemon --max-workers=2 -Dorg.gradle.parallel=false
 ```
 
+## Terminal input
+
+The terminal input asks the keyboard not to learn what is typed (`IME_FLAG_NO_PERSONALIZED_LEARNING`), so passwords typed at a prompt stay out of Gboard's suggestions in other apps. React Native's TextInput has no prop for that flag, and it replaces `imeOptions` when `returnKeyType` or `disableFullscreenUI` is set, so the terminal input sets neither. Run the regression the same way with `:jagentdesk-terminal:connectedDebugAndroidTest`.
+
 ## Version codes
 
 `packages/app/app.config.js` derives Android `versionCode` from the package version with:
