@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 import pino from "pino";
 import { type ForgeService } from "../../services/forge-service.js";
 import { isJAgentDeskOwnedWorktreeCwd } from "../../utils/worktree.js";
-import { archiveByScope, type ActiveWorkspaceRef } from "../workspace-archive-service.js";
+import {
+  archiveByScope,
+  type ActiveWorkspaceRef,
+  type ArchiveDependencies,
+} from "../workspace-archive-service.js";
 import {
   type CreateJAgentDeskWorktreeWorkflowFn,
   type CreateJAgentDeskWorktreeWorkflowResult,
@@ -16,10 +20,15 @@ import {
 import { type AgentManager, type AgentSubscriber, type SubscribeOptions } from "./agent-manager.js";
 import { type AgentStorage } from "./agent-storage.js";
 import { type CreateJAgentDeskWorktreeInput } from "../jagentdesk-worktree-service.js";
+import type { PluginWorktreeManagerRuntime } from "../plugins/runtime.js";
 
 interface CreateAgentLifecycleDispatchDependencies {
   jagentdeskHome: string;
   worktreesRoot?: string;
+  worktreeManagers?: Pick<PluginWorktreeManagerRuntime, "removeWorktree">;
+  workspaceArchiveOperations?: ArchiveDependencies["workspaceArchiveOperations"];
+  getWorkspace?: ArchiveDependencies["getWorkspace"];
+  isCheckoutUntrusted?: ArchiveDependencies["isCheckoutUntrusted"];
   agentManager: AgentManager;
   agentStorage: AgentStorage;
   github: ForgeService;
@@ -183,11 +192,15 @@ export class CreateAgentLifecycleDispatch {
       {
         jagentdeskHome: this.dependencies.jagentdeskHome,
         jagentdeskWorktreesBaseRoot: this.dependencies.worktreesRoot,
+        worktreeManagers: this.dependencies.worktreeManagers,
+        workspaceArchiveOperations: this.dependencies.workspaceArchiveOperations,
         github: this.dependencies.github,
         workspaceGitService: this.dependencies.workspaceGitService,
         agentManager: this.dependencies.agentManager,
         agentStorage: this.dependencies.agentStorage,
         findWorkspaceIdForCwd: this.dependencies.findWorkspaceIdForCwd,
+        getWorkspace: this.dependencies.getWorkspace,
+        isCheckoutUntrusted: this.dependencies.isCheckoutUntrusted,
         listActiveWorkspaces: this.dependencies.listActiveWorkspaces,
         archiveWorkspaceRecord: this.dependencies.archiveWorkspaceRecord,
         emitWorkspaceUpdatesForWorkspaceIds: this.dependencies.emitWorkspaceUpdatesForWorkspaceIds,

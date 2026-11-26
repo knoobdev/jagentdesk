@@ -895,6 +895,8 @@ export const ja: TranslationResources = {
             "このブランチはまだリモートに接続されていないため、プッシュはここでは利用できません",
           pushBehind: "取り込む必要がある新しい変更があるため、まだプッシュは利用できません",
           pushNothing: "プッシュする変更がないため、プッシュは利用できません",
+          pushUpstreamGone:
+            "このブランチが追跡しているブランチが存在しないため、プッシュは利用できません",
           pullAndPushNoRemote:
             "このブランチはまだリモートに接続されていないため、プル＆プッシュはここでは利用できません",
           pullAndPushDirty:
@@ -2547,6 +2549,23 @@ export const ja: TranslationResources = {
         name: {
           label: "名前",
         },
+        icon: {
+          label: "アイコン",
+          accessibilityLabel: "アイコン、{{value}}",
+          auto: "自動",
+          autoDetected: "自動 ({{icon}})",
+          options: {
+            server: "サーバー",
+            laptop: "ノート PC",
+            desktop: "デスクトップ",
+            mini: "ミニ PC",
+            workstation: "ワークステーション",
+            cloud: "クラウド",
+            container: "コンテナ",
+            board: "シングルボード PC",
+            terminal: "ターミナル",
+          },
+        },
         color: {
           label: "色",
           accessibilityLabel: "色、{{value}}",
@@ -2582,6 +2601,13 @@ export const ja: TranslationResources = {
         relay: "Relay",
         tailnet: "Tailscale",
         local: "ローカル",
+      },
+      connectionKinds: {
+        local: "ローカル",
+        relay: "リレー",
+        tailscale: "Tailscale",
+        direct: "ダイレクト",
+        routed: "経由",
       },
       connections: {
         active: "Active",

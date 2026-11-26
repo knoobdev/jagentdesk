@@ -2,6 +2,11 @@ import pino from "pino";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, test, vi } from "vitest";
+import type {
+  ProviderEvent,
+  ProviderRegistration,
+  ProviderLaunch,
+} from "@jagentdesk/plugin/server/provider";
 
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import type {
@@ -70,6 +75,38 @@ async function withEnv(key: string, value: string, run: () => Promise<void>): Pr
 }
 
 describe("ProviderSnapshotManager public surface", () => {
+  test("reports a plugin provider whose command is not installed as unavailable", async () => {
+    const manager = new ProviderSnapshotManager({ logger: createTestLogger() });
+    manager.replacePluginProviders([
+      {
+        id: "uninstalled-plugin",
+        label: "Uninstalled plugin",
+        command: ["jagentdesk-test-command-that-is-not-installed"],
+        async getCatalogCacheKey({ launch }) {
+          if (!launch) throw new Error("requires a daemon-resolved executable");
+          return launch.command;
+        },
+        async status({ launch }) {
+          return launch ? { available: true } : { available: false, diagnostic: "Install it" };
+        },
+        async connect() {
+          throw new Error("an uninstalled provider is never connected");
+        },
+      },
+    ]);
+    try {
+      const entry = await manager.getProvider({
+        provider: "uninstalled-plugin",
+        cwd: "/tmp/project",
+        wait: true,
+      });
+      expect(entry).toMatchObject({ status: "unavailable" });
+      expect(entry.error).toBeUndefined();
+    } finally {
+      manager.destroy();
+    }
+  });
+
   test("publishes one model per provider identity and retains the first definition", async () => {
     const first = { provider: "codex", id: "shared", label: "First", isDefault: true };
     const manager = new ProviderSnapshotManager({
@@ -166,6 +203,40 @@ describe("ProviderSnapshotManager public surface", () => {
           },
         }),
       ).resolves.toEqual([]);
+    } finally {
+      manager.destroy();
+    }
+  });
+
+  test("validates workspace-only models against the requested working directory", async () => {
+    const cwd = resolveSnapshotCwd("/tmp/workspace-models");
+    const model = { provider: "opencode", id: "workspace-model", label: "Workspace model" };
+    const manager = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      extraClients: {
+        opencode: createExtraClient("opencode", {
+          isAvailable: async () => true,
+          fetchCatalog: async (options) => ({
+            models: options.scope === "workspace" && options.cwd === cwd ? [model] : [],
+            modes: [],
+          }),
+        }),
+      },
+    });
+    const input = { provider: model.provider, model: model.id };
+    const unavailable = [
+      {
+        path: ["model"],
+        message: "Model 'workspace-model' is not available for provider 'opencode'",
+      },
+    ];
+
+    try {
+      await expect(manager.validateAgentConfiguration(input)).resolves.toEqual(unavailable);
+      await expect(manager.validateAgentConfiguration({ ...input, cwd })).resolves.toEqual([]);
+      await expect(
+        manager.validateAgentConfiguration({ ...input, cwd: "/tmp/missing-workspace" }),
+      ).resolves.toEqual(unavailable);
     } finally {
       manager.destroy();
     }

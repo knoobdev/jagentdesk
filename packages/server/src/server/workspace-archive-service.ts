@@ -19,17 +19,24 @@ import type {
   WorkspaceArchiveContext,
   WorkspaceRegistry,
 } from "./workspace-registry.js";
-import { createRealpathAwarePathMatcher } from "../utils/path.js";
+import { createRealpathAwarePathMatcher, isRealpathInsideRoot } from "../utils/path.js";
+import type { PluginWorktreeManagerRuntime } from "./plugins/runtime.js";
+import type { WorkspaceArchiveOperations } from "./workspace-archive-operations.js";
 
 export type ActiveWorkspaceRef = Pick<
   PersistedWorkspaceRecord,
   "workspaceId" | "cwd" | "kind" | "worktreeRoot" | "isJAgentDeskOwnedWorktree" | "mainRepoRoot"
->;
+> & {
+  worktreeManagerPluginId?: string | null;
+  untrustedSource?: PersistedWorkspaceRecord["untrustedSource"];
+};
 
 export interface ArchiveDependencies {
   jagentdeskHome?: string;
   // Base directory that may hold worktrees across repositories.
   jagentdeskWorktreesBaseRoot?: string;
+  worktreeManagers?: Pick<PluginWorktreeManagerRuntime, "removeWorktree">;
+  workspaceArchiveOperations?: Pick<WorkspaceArchiveOperations, "withCheckout">;
   github: ForgeService;
   workspaceGitService: Pick<WorkspaceGitService, "getSnapshot" | "invalidateWorktrees">;
   agentManager: Pick<AgentManager, "listAgents" | "archiveAgent" | "archiveSnapshot">;
@@ -49,6 +56,7 @@ export interface ArchiveDependencies {
   markWorkspaceArchiving: (workspaceIds: Iterable<string>, archivingAt: string) => void;
   clearWorkspaceArchiving: (workspaceIds: Iterable<string>) => void;
   killTerminalsForWorkspace: (workspaceId: string) => Promise<void>;
+  isCheckoutUntrusted?: (checkoutPath: string) => Promise<boolean>;
   sessionLogger?: Logger;
 }
 
@@ -115,6 +123,8 @@ interface BackingDirectory {
   registryProven: boolean;
   mainRepoRoot: string | null;
   jagentdeskWorktreesRoot: string | null;
+  worktreeManagerPluginId: string | null;
+  untrusted: boolean;
 }
 
 interface ArchiveTarget {
@@ -137,6 +147,13 @@ export async function resolveWorkspaceIdAtPath(
   return dependencies.findWorkspaceIdForCwd(targetPath);
 }
 
+export async function resolveWorkspaceBackingPath(
+  workspace: ActiveWorkspaceRef,
+  dependencies: Pick<ArchiveDependencies, "jagentdeskHome" | "jagentdeskWorktreesBaseRoot">,
+): Promise<string> {
+  return (await resolveWorkspaceBackingDirectory(workspace, dependencies)).path;
+}
+
 // Resolves the in-scope record set, tears each down
 // (agents + terminals + record), then removes the backing directory iff it is
 // JAgentDesk-owned AND no active workspace still references it.
@@ -152,68 +169,97 @@ export async function archiveByScope(
   };
 
   checkpoint();
-  const target = await resolveArchiveTarget(dependencies, request.scope);
-  const targetWorkspaceIds = target.workspaceIds;
+  const runArchive = async (): Promise<ArchiveResult> => {
+    checkpoint();
+    const target = await resolveArchiveTarget(dependencies, request.scope);
+    const targetWorkspaceIds = target.workspaceIds;
 
-  checkpoint();
+    checkpoint();
 
-  if (targetWorkspaceIds.length > 0) {
-    dependencies.markWorkspaceArchiving(targetWorkspaceIds, new Date().toISOString());
-  }
-
-  let removedDirectory = false;
-  let directoryLeftBehind: ArchiveResult["directoryLeftBehind"];
-
-  try {
     if (targetWorkspaceIds.length > 0) {
-      await dependencies.emitWorkspaceUpdatesForWorkspaceIds(targetWorkspaceIds);
+      dependencies.markWorkspaceArchiving(targetWorkspaceIds, new Date().toISOString());
     }
-    checkpoint();
 
-    const { archivedAgents, archivedWorkspaceIds } = await archiveTargetRecords(
-      dependencies,
-      targetWorkspaceIds,
-      { requestId: request.requestId, checkpoint, archivedAt },
-    );
-    checkpoint();
+    let removedDirectory = false;
+    let directoryLeftBehind: ArchiveResult["directoryLeftBehind"];
 
-    if (target.backing?.mainRepoRoot) {
-      try {
-        await dependencies.workspaceGitService.getSnapshot(target.backing.mainRepoRoot, {
-          force: true,
-          reason: "archive-worktree",
-        });
-      } catch (error) {
-        dependencies.sessionLogger?.warn(
-          { err: error, cwd: target.backing.mainRepoRoot, requestId: request.requestId },
-          "Failed to force-refresh workspace git snapshot after archiving",
+    try {
+      if (targetWorkspaceIds.length > 0) {
+        await dependencies.emitWorkspaceUpdatesForWorkspaceIds(targetWorkspaceIds);
+      }
+      checkpoint();
+
+      const { archivedAgents, archivedWorkspaceIds } = await archiveTargetRecords(
+        dependencies,
+        targetWorkspaceIds,
+        { requestId: request.requestId, checkpoint, archivedAt },
+      );
+      checkpoint();
+
+      if (target.backing?.mainRepoRoot) {
+        try {
+          await dependencies.workspaceGitService.getSnapshot(target.backing.mainRepoRoot, {
+            force: true,
+            reason: "archive-worktree",
+          });
+        } catch (error) {
+          dependencies.sessionLogger?.warn(
+            { err: error, cwd: target.backing.mainRepoRoot, requestId: request.requestId },
+            "Failed to force-refresh workspace git snapshot after archiving",
+          );
+        }
+      }
+
+      if (target.backing !== null) {
+        const removal = await maybeRemoveDirectory(
+          dependencies,
+          { requestId: request.requestId, checkpoint },
+          target,
+          archivedWorkspaceIds,
         );
+        removedDirectory = removal.removedDirectory;
+        directoryLeftBehind = removal.directoryLeftBehind;
+      }
+
+      return {
+        archivedAgentIds: Array.from(archivedAgents),
+        archivedWorkspaceIds,
+        removedDirectory,
+        ...(directoryLeftBehind ? { directoryLeftBehind } : {}),
+      };
+    } finally {
+      if (targetWorkspaceIds.length > 0) {
+        dependencies.clearWorkspaceArchiving(targetWorkspaceIds);
+        await dependencies.emitWorkspaceUpdatesForWorkspaceIds(targetWorkspaceIds);
       }
     }
+  };
 
-    if (target.backing !== null) {
-      const removal = await maybeRemoveDirectory(
-        dependencies,
-        { requestId: request.requestId, checkpoint },
-        target,
-        archivedWorkspaceIds,
-      );
-      removedDirectory = removal.removedDirectory;
-      directoryLeftBehind = removal.directoryLeftBehind;
-    }
-
-    return {
-      archivedAgentIds: Array.from(archivedAgents),
-      archivedWorkspaceIds,
-      removedDirectory,
-      ...(directoryLeftBehind ? { directoryLeftBehind } : {}),
-    };
-  } finally {
-    if (targetWorkspaceIds.length > 0) {
-      dependencies.clearWorkspaceArchiving(targetWorkspaceIds);
-      await dependencies.emitWorkspaceUpdatesForWorkspaceIds(targetWorkspaceIds);
-    }
+  const checkoutPath = dependencies.workspaceArchiveOperations
+    ? await resolveArchiveCheckoutPath(dependencies, request.scope)
+    : null;
+  if (dependencies.workspaceArchiveOperations && checkoutPath) {
+    return dependencies.workspaceArchiveOperations.withCheckout(checkoutPath, runArchive);
   }
+  return runArchive();
+}
+
+async function resolveArchiveCheckoutPath(
+  dependencies: ArchiveDependencies,
+  scope: ArchiveScope,
+): Promise<string | null> {
+  if (scope.kind === "workspace") {
+    const record =
+      (await dependencies.getWorkspace?.(scope.workspaceId)) ??
+      (await dependencies.listActiveWorkspaces()).find(
+        (workspace) => workspace.workspaceId === scope.workspaceId,
+      );
+    if (!record) {
+      return null;
+    }
+    return resolveWorkspaceBackingPath(record, dependencies);
+  }
+  return (await resolveBackingDirectory(scope.targetPath, dependencies)).path;
 }
 
 async function resolveArchiveTarget(
@@ -274,6 +320,8 @@ async function resolveWorkspaceBackingDirectory(
   workspace: ActiveWorkspaceRef,
   dependencies: Pick<ArchiveDependencies, "jagentdeskHome" | "jagentdeskWorktreesBaseRoot">,
 ): Promise<BackingDirectory> {
+  const worktreeManagerPluginId = workspace.worktreeManagerPluginId ?? null;
+  const untrusted = Boolean(workspace.untrustedSource);
   if (workspace.isJAgentDeskOwnedWorktree === false) {
     return {
       path: resolve(workspace.worktreeRoot ?? workspace.cwd),
@@ -282,6 +330,8 @@ async function resolveWorkspaceBackingDirectory(
       registryProven: false,
       mainRepoRoot: workspace.mainRepoRoot ?? null,
       jagentdeskWorktreesRoot: null,
+      worktreeManagerPluginId,
+      untrusted,
     };
   }
   if (workspace.isJAgentDeskOwnedWorktree && workspace.worktreeRoot && workspace.mainRepoRoot) {
@@ -292,6 +342,8 @@ async function resolveWorkspaceBackingDirectory(
       registryProven: true,
       mainRepoRoot: workspace.mainRepoRoot,
       jagentdeskWorktreesRoot: null,
+      worktreeManagerPluginId,
+      untrusted,
     };
   }
   if (workspace.kind !== "worktree") {
@@ -302,6 +354,8 @@ async function resolveWorkspaceBackingDirectory(
       registryProven: false,
       mainRepoRoot: workspace.mainRepoRoot ?? null,
       jagentdeskWorktreesRoot: null,
+      worktreeManagerPluginId,
+      untrusted,
     };
   }
 
@@ -311,7 +365,12 @@ async function resolveWorkspaceBackingDirectory(
     workspace.worktreeRoot ?? workspace.cwd,
     dependencies,
   );
-  return { ...backing, mainRepoRoot: workspace.mainRepoRoot ?? backing.mainRepoRoot };
+  return {
+    ...backing,
+    mainRepoRoot: workspace.mainRepoRoot ?? backing.mainRepoRoot,
+    worktreeManagerPluginId: worktreeManagerPluginId ?? backing.worktreeManagerPluginId,
+    untrusted: untrusted || backing.untrusted,
+  };
 }
 
 async function resolveBackingDirectory(
@@ -330,6 +389,8 @@ async function resolveBackingDirectory(
     registryProven: false,
     mainRepoRoot: ownership.repoRoot ?? null,
     jagentdeskWorktreesRoot: ownership.worktreeRoot ?? null,
+    worktreeManagerPluginId: null,
+    untrusted: false,
   };
 }
 
@@ -419,6 +480,8 @@ async function maybeRemoveDirectory(
       .map((teardownTarget) => teardownTarget.cwd),
   );
 
+  const untrustedBacking =
+    backing.untrusted || Boolean(await dependencies.isCheckoutUntrusted?.(backing.path));
   try {
     for (const teardownCwd of teardownCwds) {
       request.checkpoint();
@@ -443,7 +506,7 @@ async function maybeRemoveDirectory(
   if (
     !(await isDirectoryUnreferenced(
       remainingActive,
-      backing.path,
+      backing,
       new Set(archivedWorkspaceIds),
       dependencies,
     ))
@@ -463,19 +526,20 @@ async function maybeRemoveDirectory(
       jagentdeskHome: dependencies.jagentdeskHome,
       worktreesBaseRoot: dependencies.jagentdeskWorktreesBaseRoot,
       registryProven: backing.registryProven,
+      worktreeManagers: dependencies.worktreeManagers,
+      worktreeManagerPluginId: backing.worktreeManagerPluginId,
+      removeReason: "archive",
+      untrusted: untrustedBacking,
     });
     dependencies.workspaceGitService.invalidateWorktrees();
     dependencies.github.invalidate({ cwd: backing.path });
     return { removedDirectory: true };
   } catch (error) {
-    if (error instanceof WorktreeTeardownError) {
-      dependencies.sessionLogger?.warn(
-        { err: error, targetPath: backing.path, requestId: request.requestId },
-        "Worktree disk removal failed during archive; workspace already archived",
-      );
-      return { removedDirectory: false };
-    }
-    throw error;
+    dependencies.sessionLogger?.warn(
+      { err: error, targetPath: backing.path, requestId: request.requestId },
+      "Worktree disk removal failed during archive; workspace already archived",
+    );
+    return { removedDirectory: false };
   }
 }
 
@@ -565,21 +629,28 @@ export async function archiveWorkspaceContents(
   return archivedAgents;
 }
 
-// True when, after archiving
-// the in-scope records, no active workspace still points at targetDir. Derived
-// from records each call — no stored counter.
+// Active workspaces on the same checkout keep it alive. A manager can place
+// a checkout anywhere, so also protect nested workspaces when either checkout
+// is manager-owned.
 async function isDirectoryUnreferenced(
   activeWorkspaces: ActiveWorkspaceRef[],
-  targetDir: string,
+  targetDirectory: BackingDirectory,
   archivedWorkspaceIds: ReadonlySet<string>,
   dependencies: Pick<ArchiveDependencies, "jagentdeskHome" | "jagentdeskWorktreesBaseRoot">,
 ): Promise<boolean> {
-  const target = resolve(targetDir);
+  const target = targetDirectory.path;
   const matchesTarget = createRealpathAwarePathMatcher(target);
   for (const workspace of activeWorkspaces) {
     if (archivedWorkspaceIds.has(workspace.workspaceId)) continue;
     const backingDirectory = await resolveWorkspaceBackingDirectory(workspace, dependencies);
     if (matchesTarget(backingDirectory.path)) return false;
+    if (
+      (targetDirectory.worktreeManagerPluginId || backingDirectory.worktreeManagerPluginId) &&
+      (isRealpathInsideRoot(target, backingDirectory.path) ||
+        isRealpathInsideRoot(target, workspace.cwd))
+    ) {
+      return false;
+    }
   }
   return true;
 }

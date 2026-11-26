@@ -20,6 +20,7 @@ import { type WorkspaceGitService } from "../../workspace-git-service.js";
 import { type CreateJAgentDeskWorktreeWorkflowResult } from "../../worktree-session.js";
 import { deriveProjectKey } from "../../project-key.js";
 import { areEquivalentPaths, createRealpathAwarePathMatcher } from "../../../utils/path.js";
+import { readJAgentDeskWorktreeMetadata } from "../../../utils/worktree-metadata.js";
 import { type JsonValue } from "@jagentdesk/protocol/agent-types";
 
 export interface ResolveOrCreateWorkspaceIdInput {
@@ -57,6 +58,8 @@ export interface CreateWorktreeWorkspaceInput {
   branch: string | null;
 
   baseBranch: string | null;
+
+  worktreeManagerPluginId?: string | null;
 
   title: string | null;
 
@@ -278,6 +281,19 @@ export function createWorkspaceProvisioningService(deps: {
       ? await refreshProjectKind(await requireActiveProject(projectId), normalizedCwd, checkout)
       : // COMPAT(workspaceCreateMissingProjectId): added in v0.1.107, remove after 2027-01-15.
         await findOrCreateProjectForDirectory(normalizedCwd);
+    const checkoutRoot = (checkout.isGit ? checkout.worktreeRoot : null) ?? normalizedCwd;
+    // A directory inside a manager-owned checkout belongs to that manager too.
+    const checkoutMetadata =
+      checkout.isGit && checkout.isJAgentDeskOwnedWorktree
+        ? await readJAgentDeskWorktreeMetadata(checkoutRoot)
+        : null;
+    const matchesCheckout = createRealpathAwarePathMatcher(checkoutRoot);
+    const inheritedUntrustedSource = (await workspaceRegistry.list()).find(
+      (candidate) =>
+        !candidate.archivedAt &&
+        Boolean(candidate.untrustedSource) &&
+        matchesCheckout(candidate.worktreeRoot ?? candidate.cwd),
+    )?.untrustedSource;
     const timestamp = new Date().toISOString();
     const workspace = createPersistedWorkspaceRecord({
       workspaceId: context?.workspaceId ?? generateWorkspaceId(),
@@ -285,6 +301,8 @@ export function createWorkspaceProvisioningService(deps: {
       background: await resolveBackground(context),
       projectId: project.projectId,
       ...initialWorkspacePlacement({ source: "checkout", cwd: normalizedCwd, checkout }),
+      worktreeManagerPluginId: checkoutMetadata?.worktreeManagerPluginId ?? null,
+      ...(inheritedUntrustedSource ? { untrustedSource: inheritedUntrustedSource } : {}),
       title: title?.trim() || null,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -318,6 +336,7 @@ export function createWorkspaceProvisioningService(deps: {
         baseBranch: input.baseBranch,
         mainRepoRoot: repoRoot,
       }),
+      worktreeManagerPluginId: input.worktreeManagerPluginId ?? null,
       title: input.title,
       metadata: input.metadata,
       createdAt: timestamp,

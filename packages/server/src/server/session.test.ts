@@ -504,6 +504,10 @@ test("routes plugin requests and releases its owned catalog subscription on clea
     status: "running" as const,
   };
   const pluginRuntime: NonNullable<SessionOptions["pluginRuntime"]> = {
+    hasWorktreeManager: () => false,
+    createWorktree: async () => null,
+    removeWorktree: async () => null,
+    restoreWorktree: async () => null,
     listPlugins: () => [plugin],
     getLogs: () => [
       {
@@ -3766,7 +3770,11 @@ describe("session checkout pull and push handling", () => {
       requestId: "request-push",
     });
 
-    expect(checkoutGitMocks.pushCurrentBranch).toHaveBeenCalledWith("/tmp/request-worktree");
+    expect(checkoutGitMocks.pushCurrentBranch).toHaveBeenCalledWith(
+      "/tmp/request-worktree",
+      undefined,
+      { jagentdeskHome: "/tmp/jagentdesk-home", worktreesRoot: undefined },
+    );
     expect(workspaceGitService.getSnapshot).toHaveBeenCalledWith("/tmp/request-worktree", {
       force: true,
       reason: "push",

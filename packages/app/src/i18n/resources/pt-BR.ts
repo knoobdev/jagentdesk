@@ -891,6 +891,8 @@ export const ptBR: TranslationResources = {
           pushBehind:
             "Push ainda não está disponível porque há alterações mais recentes para trazer primeiro",
           pushNothing: "Push não está disponível porque não há nada novo para enviar",
+          pushUpstreamGone:
+            "Push não está disponível porque a branch que esta branch acompanha não existe mais",
           pullAndPushNoRemote:
             "Pull e push não estão disponíveis aqui porque esta branch ainda não está conectada a um remoto",
           pullAndPushDirty:
@@ -2540,6 +2542,23 @@ export const ptBR: TranslationResources = {
         name: {
           label: "Nome",
         },
+        icon: {
+          label: "Ícone",
+          accessibilityLabel: "Ícone, {{value}}",
+          auto: "Automático",
+          autoDetected: "Automático ({{icon}})",
+          options: {
+            server: "Servidor",
+            laptop: "Notebook",
+            desktop: "Desktop",
+            mini: "Mini",
+            workstation: "Estação de trabalho",
+            cloud: "Nuvem",
+            container: "Contêiner",
+            board: "PC de placa única",
+            terminal: "Terminal",
+          },
+        },
         color: {
           label: "Cor",
           accessibilityLabel: "Cor, {{value}}",
@@ -2575,6 +2594,13 @@ export const ptBR: TranslationResources = {
         relay: "Relay",
         tailnet: "Tailscale",
         local: "Local",
+      },
+      connectionKinds: {
+        local: "Local",
+        relay: "Relay",
+        tailscale: "Tailscale",
+        direct: "Direto",
+        routed: "Via",
       },
       connections: {
         active: "Active",

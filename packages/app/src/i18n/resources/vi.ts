@@ -360,6 +360,32 @@ export const vi = {
     },
 
     host: {
+      appearance: {
+        icon: {
+          label: "Biểu tượng",
+          accessibilityLabel: "Biểu tượng, {{value}}",
+          auto: "Tự động",
+          autoDetected: "Tự động ({{icon}})",
+          options: {
+            server: "Máy chủ",
+            laptop: "Laptop",
+            desktop: "Máy để bàn",
+            mini: "Máy mini",
+            workstation: "Máy trạm",
+            cloud: "Đám mây",
+            container: "Container",
+            board: "Máy tính bo mạch đơn",
+            terminal: "Terminal",
+          },
+        },
+      },
+      connectionKinds: {
+        local: "Cục bộ",
+        relay: "Relay",
+        tailscale: "Tailscale",
+        direct: "Trực tiếp",
+        routed: "Qua",
+      },
       agents: {
         idleRuntimeCleanup: {
           title: "Giải phóng agent nhàn rỗi",

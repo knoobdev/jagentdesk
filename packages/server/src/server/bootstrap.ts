@@ -68,6 +68,7 @@ import { createServer as createHTTPServer, type IncomingMessage, type ServerResp
 import { constants, existsSync, unlinkSync } from "fs";
 import { open } from "fs/promises";
 import { randomUUID } from "node:crypto";
+import { getCachedHostMachineKind, primeHostMachineKind } from "./host-machine-kind.js";
 import { getHostName } from "./host-name.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -242,6 +243,7 @@ import {
   type ActiveWorkspaceRef,
 } from "./workspace-archive-service.js";
 import { setupAutoArchiveOnMerge } from "./auto-archive-on-merge/index.js";
+import { isCheckoutUntrusted } from "./workspace-automation-gate.js";
 import { wrapSessionMessage, type SessionOutboundMessage } from "./messages.js";
 import type { TerminalManager } from "../terminal/terminal-manager.js";
 import { startWorkerTerminalManager } from "../terminal/worker-terminal-manager.js";
@@ -720,6 +722,9 @@ export async function createJAgentDeskDaemon(
   rootLogger: Logger,
   dependencies: JAgentDeskDaemonDependencies = {},
 ): Promise<JAgentDeskDaemon> {
+  // Start hardware detection at the beginning of bootstrap so it overlaps with disk/registry init
+  // and does not hold up the listener when probes are slow.
+  const hostMachineKindReady = primeHostMachineKind();
   configureGitProcessPolicy(config.git ?? resolveGitProcessPolicy({ env: process.env }));
   const logger = rootLogger.child({ module: "bootstrap" });
   // Recover the user's real PATH before any provider CLI discovery runs. A
@@ -992,11 +997,13 @@ export async function createJAgentDeskDaemon(
   });
 
   app.get("/api/status", (_req, res) => {
+    const machineKind = getCachedHostMachineKind();
     res.json({
       status: "server_info",
       serverId,
       hostname: getHostName(),
       version: daemonVersion,
+      ...(machineKind ? { machineKind } : {}),
       listen: formatListenTarget(boundListenTarget ?? listenTarget),
     });
   });
@@ -1418,6 +1425,8 @@ export async function createJAgentDeskDaemon(
         worktreeRoot: workspace.worktreeRoot,
         isJAgentDeskOwnedWorktree: workspace.isJAgentDeskOwnedWorktree,
         mainRepoRoot: workspace.mainRepoRoot,
+        worktreeManagerPluginId: workspace.worktreeManagerPluginId,
+        untrustedSource: workspace.untrustedSource,
       }));
   };
   const markWorkspaceArchiving = (workspaceIds: Iterable<string>, archivingAt: string) =>
@@ -1463,6 +1472,8 @@ export async function createJAgentDeskDaemon(
   setupAutoArchiveOnMerge({
     jagentdeskHome: config.jagentdeskHome,
     jagentdeskWorktreesBaseRoot: config.worktreesRoot,
+    worktreeManagers: pluginRuntime,
+    workspaceArchiveOperations,
     daemonConfigStore,
     workspaceGitService,
     github,
@@ -1471,6 +1482,8 @@ export async function createJAgentDeskDaemon(
     terminalManager,
     logger,
     findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
+    getWorkspace: (workspaceId) => workspaceRegistry.get(workspaceId),
+    isCheckoutUntrusted: (checkoutPath) => isCheckoutUntrusted(workspaceRegistry, checkoutPath),
     listActiveWorkspaces: listActiveWorkspacesExternal,
     getAutoArchivedChangeRequestUrl: async (workspaceId) =>
       (await workspaceRegistry.get(workspaceId))?.autoArchivedChangeRequestUrl ?? null,
@@ -1491,6 +1504,7 @@ export async function createJAgentDeskDaemon(
         createJAgentDeskWorktree: async (workflowInput, workflowOptions) => {
           return createRegisteredJAgentDeskWorktree(workflowInput, {
             lifecycle: pluginRuntime,
+            worktreeManagers: pluginRuntime,
             github,
             ...(workflowOptions?.resolveDefaultBranch
               ? {
@@ -1547,11 +1561,15 @@ export async function createJAgentDeskDaemon(
       {
         jagentdeskHome: config.jagentdeskHome,
         jagentdeskWorktreesBaseRoot: config.worktreesRoot,
+        worktreeManagers: pluginRuntime,
+        workspaceArchiveOperations,
         github,
         workspaceGitService,
         agentManager,
         agentStorage,
         findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
+        getWorkspace: (workspaceIdToRead) => workspaceRegistry.get(workspaceIdToRead),
+        isCheckoutUntrusted: (checkoutPath) => isCheckoutUntrusted(workspaceRegistry, checkoutPath),
         listActiveWorkspaces: listActiveWorkspacesExternal,
         archiveWorkspaceRecord: (workspaceIdToArchive, archivedAt) =>
           archiveWorkspaceRecordExternal(workspaceIdToArchive, undefined, archivedAt),
@@ -1567,6 +1585,10 @@ export async function createJAgentDeskDaemon(
   const hubAgentLifecycle = new CreateAgentLifecycleDispatch({
     jagentdeskHome: config.jagentdeskHome,
     worktreesRoot: config.worktreesRoot,
+    worktreeManagers: pluginRuntime,
+    workspaceArchiveOperations,
+    getWorkspace: (workspaceId) => workspaceRegistry.get(workspaceId),
+    isCheckoutUntrusted: (checkoutPath) => isCheckoutUntrusted(workspaceRegistry, checkoutPath),
     agentManager,
     agentStorage,
     github,
@@ -1702,11 +1724,15 @@ export async function createJAgentDeskDaemon(
       {
         jagentdeskHome: config.jagentdeskHome,
         jagentdeskWorktreesBaseRoot: config.worktreesRoot,
+        worktreeManagers: pluginRuntime,
+        workspaceArchiveOperations,
         github,
         workspaceGitService,
         agentManager,
         agentStorage,
         findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
+        getWorkspace: (workspaceIdToRead) => workspaceRegistry.get(workspaceIdToRead),
+        isCheckoutUntrusted: (checkoutPath) => isCheckoutUntrusted(workspaceRegistry, checkoutPath),
         listActiveWorkspaces: listActiveWorkspacesExternal,
         archiveWorkspaceRecord: (workspaceIdToArchive, archivedAt) =>
           archiveWorkspaceRecordExternal(workspaceIdToArchive, undefined, archivedAt),
@@ -1953,6 +1979,9 @@ export async function createJAgentDeskDaemon(
     providerSnapshotManager,
     github,
     workspaceGitService,
+    worktreeManagers: pluginRuntime,
+    workspaceArchiveOperations,
+    isCheckoutUntrusted: (checkoutPath) => isCheckoutUntrusted(workspaceRegistry, checkoutPath),
     findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
     listActiveWorkspaces: listActiveWorkspacesExternal,
     archiveWorkspaceRecord: (workspaceId, archivedAt) =>
@@ -2170,6 +2199,17 @@ export async function createJAgentDeskDaemon(
   const start = async () => {
     let mainStarted = false;
     try {
+      // Give hardware detection a brief head start so the first server_info carries machineKind.
+      let machineKindTimeout: ReturnType<typeof setTimeout> | null = null;
+      await Promise.race([
+        hostMachineKindReady,
+        new Promise<void>((resolve) => {
+          machineKindTimeout = setTimeout(resolve, 150);
+          machineKindTimeout.unref();
+        }),
+      ]).finally(() => {
+        if (machineKindTimeout) clearTimeout(machineKindTimeout);
+      });
       if (serviceProxyListenTarget) {
         const boundServiceProxyTarget = await serviceProxy.startStandalone({
           listenTarget: serviceProxyListenTarget,

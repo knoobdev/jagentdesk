@@ -156,8 +156,9 @@ import {
 } from "@/constants/platform";
 import { getDesktopHost } from "@/desktop/host";
 import { OpenInFileManagerMenuItem } from "@/workspace/open-in-file-manager/menu-item";
-import { useLocalDaemonServerId, useLocalDaemonServerIdState } from "@/hooks/use-is-local-daemon";
-import { selectHostBadges, type HostBadgeModel } from "@/hosts/appearance";
+import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
+import { type HostBadgeModel } from "@/hosts/appearance";
+import { useHostBadges } from "@/hosts/use-host-badges";
 
 const workspaceKeyExtractor = (workspace: SidebarWorkspacePlacement) => workspace.workspaceKey;
 
@@ -1996,18 +1997,7 @@ export function SidebarWorkspaceList({
 }: SidebarWorkspaceListProps) {
   const pathname = usePathname();
   const hosts = useHosts();
-  const localServerId = useLocalDaemonServerId();
-  const localDaemon = useLocalDaemonServerIdState();
-  const hostBadgeByServerId = useMemo(
-    () =>
-      selectHostBadges({
-        hosts,
-        localServerId,
-        localHostResolutionPending: localDaemon.status !== "resolved",
-        enabled: shouldShowSidebarHostLabels(projects),
-      }),
-    [hosts, localDaemon.status, localServerId, projects],
-  );
+  const hostBadgeByServerId = useHostBadges({ enabled: shouldShowSidebarHostLabels(projects) });
   const serverIds = useMemo(() => hosts.map((host) => host.serverId), [hosts]);
   const supportsMultiplicityByServerId = useHostFeatureMap(serverIds, "workspaceMultiplicity");
   const supportsPinningByServerId = useHostFeatureMap(serverIds, "workspacePinning");

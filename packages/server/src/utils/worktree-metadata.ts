@@ -22,6 +22,7 @@ const JAgentDeskWorktreeMetadataV1Schema = z.object({
   baseRefName: z.string().min(1),
   baseRef: z.string().min(1).optional(),
   changeRequestLookupTarget: ChangeRequestLookupTargetSchema.optional(),
+  worktreeManagerPluginId: z.string().min(1).optional(),
 });
 
 const JAgentDeskWorktreeMetadataV2Schema = z.object({
@@ -29,6 +30,7 @@ const JAgentDeskWorktreeMetadataV2Schema = z.object({
   baseRefName: z.string().min(1),
   baseRef: z.string().min(1).optional(),
   changeRequestLookupTarget: ChangeRequestLookupTargetSchema.optional(),
+  worktreeManagerPluginId: z.string().min(1).optional(),
   firstAgentBranchAutoName: z
     .discriminatedUnion("status", [
       z.object({
@@ -165,6 +167,22 @@ async function getGitDirForWorktreeRoot(worktreeRoot: string): Promise<string> {
   return gitPath;
 }
 
+/** Locate the admin directory used for shared refs and configuration. */
+export async function getGitCommonDirForWorktreeRoot(worktreeRoot: string): Promise<string | null> {
+  let gitDir: string;
+  try {
+    gitDir = await getGitDirForWorktreeRoot(worktreeRoot);
+  } catch {
+    return null;
+  }
+  try {
+    const commonDir = (await readBoundedFile(join(gitDir, "commondir"))).trim();
+    return commonDir ? resolve(gitDir, commonDir) : gitDir;
+  } catch {
+    return gitDir;
+  }
+}
+
 export async function getJAgentDeskWorktreeMetadataPath(worktreeRoot: string): Promise<string> {
   const gitDir = await getGitDirForWorktreeRoot(worktreeRoot);
   return join(gitDir, "jagentdesk", "worktree.json");
@@ -227,6 +245,7 @@ export async function writeJAgentDeskWorktreeMetadata(
     baseRefName: string;
     baseRef?: string;
     changeRequestLookupTarget?: JAgentDeskWorktreeChangeRequestHint;
+    worktreeManagerPluginId?: string;
   },
 ): Promise<void> {
   return mutateMetadata(worktreeRoot, async (root) => {
@@ -243,6 +262,9 @@ export async function writeJAgentDeskWorktreeMetadata(
       ...(baseRef ? { baseRef } : {}),
       ...(options.changeRequestLookupTarget
         ? { changeRequestLookupTarget: options.changeRequestLookupTarget }
+        : {}),
+      ...(options.worktreeManagerPluginId
+        ? { worktreeManagerPluginId: options.worktreeManagerPluginId }
         : {}),
     };
     await writeJAgentDeskWorktreeMetadataFile(root, metadata);

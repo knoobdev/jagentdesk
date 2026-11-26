@@ -917,6 +917,8 @@ export const ru: TranslationResources = {
             "Push здесь недоступен, поскольку эта ветка еще не подключена к удаленному устройству.",
           pushBehind: "Push пока недоступен, поскольку сначала нужно внести новые изменения.",
           pushNothing: "Push недоступен, поскольку нет ничего нового для отправки.",
+          pushUpstreamGone:
+            "Push недоступен, поскольку ветка, которую отслеживает эта ветка, больше не существует.",
           pullAndPushNoRemote:
             "Функция Pull and Push здесь недоступна, поскольку эта ветка еще не подключена к удаленному устройству.",
           pullAndPushDirty:
@@ -2606,6 +2608,23 @@ export const ru: TranslationResources = {
         name: {
           label: "Имя",
         },
+        icon: {
+          label: "Значок",
+          accessibilityLabel: "Значок, {{value}}",
+          auto: "Авто",
+          autoDetected: "Авто ({{icon}})",
+          options: {
+            server: "Сервер",
+            laptop: "Ноутбук",
+            desktop: "Компьютер",
+            mini: "Мини-ПК",
+            workstation: "Рабочая станция",
+            cloud: "Облако",
+            container: "Контейнер",
+            board: "Одноплатный ПК",
+            terminal: "Терминал",
+          },
+        },
         color: {
           label: "Цвет",
           accessibilityLabel: "Цвет, {{value}}",
@@ -2641,6 +2660,13 @@ export const ru: TranslationResources = {
         relay: "Relay",
         tailnet: "Tailscale",
         local: "Местный",
+      },
+      connectionKinds: {
+        local: "Локальный",
+        relay: "Ретранслятор",
+        tailscale: "Tailscale",
+        direct: "Прямой",
+        routed: "Через",
       },
       connections: {
         active: "Active",

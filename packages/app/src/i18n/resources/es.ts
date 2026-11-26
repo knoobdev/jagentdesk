@@ -896,6 +896,8 @@ export const es: TranslationResources = {
           pushBehind:
             "Push aún no está disponible porque hay cambios más nuevos que implementar primero",
           pushNothing: "Push no está disponible porque no hay nada nuevo que enviar",
+          pushUpstreamGone:
+            "Push no está disponible porque la rama que sigue esta rama ya no existe",
           pullAndPushNoRemote:
             "Tirar y empujar no está disponible aquí porque esta rama aún no está conectada a un control remoto",
           pullAndPushDirty:
@@ -2558,6 +2560,23 @@ export const es: TranslationResources = {
         name: {
           label: "Nombre",
         },
+        icon: {
+          label: "Icono",
+          accessibilityLabel: "Icono, {{value}}",
+          auto: "Automático",
+          autoDetected: "Automático ({{icon}})",
+          options: {
+            server: "Servidor",
+            laptop: "Portátil",
+            desktop: "Escritorio",
+            mini: "Mini",
+            workstation: "Estación de trabajo",
+            cloud: "Nube",
+            container: "Contenedor",
+            board: "PC de placa única",
+            terminal: "Terminal",
+          },
+        },
         color: {
           label: "Color",
           accessibilityLabel: "Color, {{value}}",
@@ -2593,6 +2612,13 @@ export const es: TranslationResources = {
         relay: "Relay",
         tailnet: "Tailscale",
         local: "Local",
+      },
+      connectionKinds: {
+        local: "Local",
+        relay: "Relé",
+        tailscale: "Tailscale",
+        direct: "Directo",
+        routed: "Vía",
       },
       connections: {
         active: "Active",

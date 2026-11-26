@@ -880,6 +880,8 @@ export const en = {
             "Push isn't available here because this branch is not connected to a remote yet",
           pushBehind: "Push isn't available yet because there are newer changes to bring in first",
           pushNothing: "Push isn't available because there is nothing new to send",
+          pushUpstreamGone:
+            "Push isn't available because the branch this one tracks no longer exists",
           pullAndPushNoRemote:
             "Pull and push isn't available here because this branch is not connected to a remote yet",
           pullAndPushDirty:
@@ -2564,6 +2566,23 @@ export const en = {
         name: {
           label: "Name",
         },
+        icon: {
+          label: "Icon",
+          accessibilityLabel: "Icon, {{value}}",
+          auto: "Auto",
+          autoDetected: "Auto ({{icon}})",
+          options: {
+            server: "Server",
+            laptop: "Laptop",
+            desktop: "Desktop",
+            mini: "Mini",
+            workstation: "Workstation",
+            cloud: "Cloud",
+            container: "Container",
+            board: "Single-board PC",
+            terminal: "Terminal",
+          },
+        },
         color: {
           label: "Color",
           accessibilityLabel: "Color, {{value}}",
@@ -2599,6 +2618,13 @@ export const en = {
         relay: "Relay",
         tailnet: "Tailscale",
         local: "Local",
+      },
+      connectionKinds: {
+        local: "Local",
+        relay: "Relay",
+        tailscale: "Tailscale",
+        direct: "Direct",
+        routed: "Via",
       },
       connections: {
         active: "Active",

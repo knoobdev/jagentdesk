@@ -37,7 +37,7 @@ import { type ManagedPluginCandidate, ManagedPluginSources } from "./managed-sou
 import { readPluginManifest } from "./manifest.js";
 import { rewritePaseoSdkImports } from "./paseo-rebrand.js";
 import { runPluginBuild } from "./preparation.js";
-import { PluginRuntime } from "./runtime.js";
+import { PluginRuntime, type PluginWorktreeManagerRuntime } from "./runtime.js";
 import type {
   PluginProviderInstallationMetadata,
   PluginProviderMetadata,
@@ -65,6 +65,10 @@ interface PluginRuntimePort {
   drainEvents?: PluginRuntime["drainEvents"];
   before?: PluginLifecycle["before"];
   wait?: PluginLifecycle["wait"];
+  hasWorktreeManager?: PluginWorktreeManagerRuntime["hasWorktreeManager"];
+  createWorktree?: PluginWorktreeManagerRuntime["createWorktree"];
+  removeWorktree?: PluginWorktreeManagerRuntime["removeWorktree"];
+  restoreWorktree?: PluginWorktreeManagerRuntime["restoreWorktree"];
   catalog: PluginRuntime["catalog"];
   invoke(pluginId: string, method: string, input: unknown): Promise<unknown>;
   startSubscription: PluginRuntime["startSubscription"];
@@ -210,6 +214,31 @@ export class PluginService {
       return this.runtime.before(name, request);
     }
     return request;
+  };
+
+  readonly hasWorktreeManager: PluginWorktreeManagerRuntime["hasWorktreeManager"] = (options) => {
+    return this.runtime.hasWorktreeManager?.(options) ?? false;
+  };
+
+  readonly createWorktree: PluginWorktreeManagerRuntime["createWorktree"] = async (
+    request,
+    options,
+  ) => {
+    return (await this.runtime.createWorktree?.(request, options)) ?? null;
+  };
+
+  readonly removeWorktree: PluginWorktreeManagerRuntime["removeWorktree"] = async (
+    request,
+    options,
+  ) => {
+    return (await this.runtime.removeWorktree?.(request, options)) ?? null;
+  };
+
+  readonly restoreWorktree: PluginWorktreeManagerRuntime["restoreWorktree"] = async (
+    request,
+    options,
+  ) => {
+    return (await this.runtime.restoreWorktree?.(request, options)) ?? null;
   };
 
   subscribeSettings(listener: (pluginId: string, settingsId: string) => void): () => void {

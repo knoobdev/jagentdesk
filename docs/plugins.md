@@ -79,6 +79,16 @@ with plugin attribution; notification failures are logged and do not stop later 
 rolls back a worktree created by that operation. Registered worktree reuse keeps the fork's
 existing ownership rules.
 
+`server.registerWorktreeManager({ create, remove?, restore? })` lets a plugin take over worktree
+creation, removal and restoration. It runs after `worktree.create.before` and before
+`worktree.create.after`, with the 120-second Git worktree timeout. The daemon snapshots existing
+worktree paths before `create` so a manager cannot adopt a pre-existing directory, verifies the
+Git worktree afterwards, records `worktreeManagerPluginId` in `jagentdesk/worktree.json` and on
+the workspace record, and skips first-agent branch auto-rename. Removal saves
+`refs/jagentdesk/kept-commits/<sha>` before the owning plugin's `remove`. All three callbacks carry
+`untrusted` for fork change requests; `remove` and `restore` fall back to built-in Git when the
+plugin declines or is disabled. Example: `plugin-examples/worktrunk`.
+
 Plugin providers participate in provider discovery, launch overrides, diagnostics and reload.
 A reload retires their native sessions; the next prompt reopens a resumable session. Closing
 an already closed provider session does not issue another native close. Provider launch

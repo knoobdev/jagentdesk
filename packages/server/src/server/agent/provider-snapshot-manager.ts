@@ -609,6 +609,7 @@ export class ProviderSnapshotManager {
 
     const provider = await this.getProvider({
       provider: input.provider,
+      cwd: input.cwd,
       wait: true,
     });
     if (!provider.enabled) {
