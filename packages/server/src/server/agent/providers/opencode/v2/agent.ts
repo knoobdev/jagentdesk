@@ -1,6 +1,11 @@
 import { OpenCodeV2Session } from "./session.js";
 import { V2_CAPABILITIES } from "./capabilities.js";
-import { permissionRules, applyResumeOverrides, controls } from "./configuration.js";
+import {
+  permissionRules,
+  applyResumeOverrides,
+  controls,
+  requiresDedicatedV2Server,
+} from "./configuration.js";
 import { SessionMcp } from "./session-mcp.js";
 import { commands } from "./commands.js";
 import { waitForLocationReady } from "./readiness.js";
@@ -41,6 +46,8 @@ interface PreparedLaunch {
   /** The complete shell environment, when the launch sets one. */
   environment: Record<string, string> | undefined;
   mcp?: SessionMcp;
+  /** Spec 33.7 legacy path: `mcp.add` on a server of the agent's own. */
+  legacy?: boolean;
 }
 
 type V2AgentRuntime = Pick<V2Runtime, "acquire" | "shutdown"> & Partial<Pick<V2Runtime, "retire">>;
@@ -126,29 +133,24 @@ export class OpenCodeV2AgentClient implements AgentClient {
     launch?: AgentLaunchContext,
     options?: AgentCreateSessionOptions,
   ): Promise<AgentSession> {
-    const prepared = await this.prepareLaunch(config, launch, false);
+    const { connection, prepared } = await this.connectLaunch(config, launch, false);
     try {
-      const connection = await this.runtime.acquire();
-      try {
-        const info = await connection.client.session.create({
-          location: { directory: config.cwd },
-          title: config.title,
-          agent: config.modeId ?? "build",
-          model: config.model ? modelRef(config.model, config.thinkingOptionId) : undefined,
-          permissions: permissionRules(config),
-        });
-        return await this.attach(
-          connection,
-          info,
-          config,
-          prepared,
-          options?.persistSession !== false,
-        );
-      } catch (error) {
-        await connection.release();
-        throw error;
-      }
+      const info = await connection.client.session.create({
+        location: { directory: config.cwd },
+        title: config.title,
+        agent: config.modeId ?? "build",
+        model: config.model ? modelRef(config.model, config.thinkingOptionId) : undefined,
+        permissions: permissionRules(config),
+      });
+      return await this.attach(
+        connection,
+        info,
+        config,
+        prepared,
+        options?.persistSession !== false,
+      );
     } catch (error) {
+      await connection.release();
       await prepared.mcp?.close();
       throw error;
     }
@@ -169,25 +171,63 @@ export class OpenCodeV2AgentClient implements AgentClient {
       cwd,
     };
     const historyOnly = options?.purpose === "history";
-    const prepared = await this.prepareLaunch(config, launch, historyOnly);
+    const { connection, prepared } = await this.connectLaunch(
+      config,
+      launch,
+      historyOnly,
+      this.connections.get(handle.nativeHandle ?? handle.sessionId)?.retain(),
+    );
     try {
-      const connection =
-        this.connections.get(handle.nativeHandle ?? handle.sessionId)?.retain() ??
-        (await this.runtime.acquire());
-      try {
-        const info = await connection.client.session.get({
-          sessionID: handle.nativeHandle ?? handle.sessionId,
-        });
-        await applyResumeOverrides(connection.client, info, overrides);
-        return await this.attach(connection, info, config, prepared, true, historyOnly);
-      } catch (error) {
-        await connection.release();
-        throw error;
-      }
+      const info = await connection.client.session.get({
+        sessionID: handle.nativeHandle ?? handle.sessionId,
+      });
+      await applyResumeOverrides(connection.client, info, overrides);
+      return await this.attach(connection, info, config, prepared, true, historyOnly);
     } catch (error) {
+      await connection.release();
       await prepared.mcp?.close();
       throw error;
     }
+  }
+  /**
+   * Spec 33.7. An agent with its own MCP servers or process env runs on the shared server when
+   * that server reports `features.mcpTools` (session path). Otherwise it keeps the legacy path:
+   * a server of its own, with its MCP servers attached through `mcp.add`. The shared server
+   * decides once; a session already open on a connection stays on it.
+   */
+  private async connectLaunch(
+    config: AgentSessionConfig,
+    launch: AgentLaunchContext | undefined,
+    historyOnly: boolean,
+    existing?: V2Connection,
+  ): Promise<{ connection: V2Connection; prepared: PreparedLaunch }> {
+    let connection = existing ?? (await this.runtime.acquire());
+    try {
+      const isolated = !historyOnly && requiresDedicatedV2Server(config, launch);
+      if (isolated && (await connection.mcpPath(config.cwd)) === "legacy") {
+        if (!existing) {
+          const dedicated = await this.runtime.acquire({ env: launch?.env, dedicated: true });
+          const shared = connection;
+          connection = dedicated;
+          await shared.release();
+        }
+        return {
+          connection,
+          prepared: { launch, environment: this.launchEnvironment(launch), legacy: true },
+        };
+      }
+      return { connection, prepared: await this.prepareLaunch(config, launch, historyOnly) };
+    } catch (error) {
+      await connection.release();
+      throw error;
+    }
+  }
+  /** The complete shell environment, which OpenCode applies instead of its own. */
+  private launchEnvironment(launch: AgentLaunchContext | undefined) {
+    // Carries the whole launch env, including the browser and PATH shims, to every shell.
+    return launch?.env
+      ? createProviderEnv({ runtimeSettings: this.options.settings, overlays: [launch.env] })
+      : undefined;
   }
   /**
    * Resolves what the session receives from its launch. OpenCode's own MCP servers are shared by
@@ -198,9 +238,7 @@ export class OpenCodeV2AgentClient implements AgentClient {
     launch: AgentLaunchContext | undefined,
     historyOnly: boolean,
   ): Promise<PreparedLaunch> {
-    const environment = launch?.env
-      ? createProviderEnv({ runtimeSettings: this.options.settings, overlays: [launch.env] })
-      : undefined;
+    const environment = this.launchEnvironment(launch);
     const servers = config.mcpServers ?? {};
     if (historyOnly || Object.keys(servers).length === 0) return { launch, environment };
     if (!this.options.bridge)
@@ -218,7 +256,7 @@ export class OpenCodeV2AgentClient implements AgentClient {
     connection: V2Connection,
     info: SessionInfo,
     config: AgentSessionConfig,
-    { launch, environment, mcp }: PreparedLaunch,
+    { launch, environment, mcp, legacy }: PreparedLaunch,
     persist: boolean,
     historyOnly = false,
   ) {
@@ -269,9 +307,11 @@ export class OpenCodeV2AgentClient implements AgentClient {
       requiresJAgentDeskPlugin: Boolean(bridge),
       environment,
       mcp,
+      legacyMcp: legacy,
       unbind: releaseBindings,
       bindChild,
-      acquire: () => this.runtime.acquire(),
+      acquire: () =>
+        this.runtime.acquire(legacy ? { env: launch?.env, dedicated: true } : undefined),
       moved,
       historyOnly,
     });

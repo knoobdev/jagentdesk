@@ -38,6 +38,7 @@ import {
 import { createSessionMetricsReporter } from "../../metrics.js";
 import { replayedTurnMetrics, sessionMetrics } from "./metrics.js";
 import type { SessionMcp } from "./session-mcp.js";
+import { attachMcpServers } from "./mcp-attach.js";
 import { type ProviderOptions } from "@jagentdesk/protocol/agent-types";
 import { applyProviderOptionsPatch } from "../../../option-controls.js";
 import { assertChangesAreLive, validateProviderOptions } from "../../../provider-options.js";
@@ -54,6 +55,11 @@ export interface OpenCodeV2SessionOptions {
   environment?: Record<string, string>;
   /** MCP servers JAgentDesk hosts for this session; the session closes them. */
   mcp?: SessionMcp;
+  /**
+   * Spec 33.7 legacy path: the server does not report `features.mcpTools`, so the agent's MCP
+   * servers go through `mcp.add` on a server of its own.
+   */
+  legacyMcp?: boolean;
   unbind?: () => void;
   bindChild?: (id: string) => void;
   acquire?: () => Promise<V2Connection>;
@@ -114,6 +120,7 @@ export class OpenCodeV2Session implements AgentSession {
   // OpenCode replaces the whole local shell environment, rather than overlaying it.
   private readonly environment: Record<string, string> | undefined;
   private readonly mcp: SessionMcp | undefined;
+  private readonly legacyMcp: boolean;
   private readonly unbind: (() => void) | undefined;
   private readonly acquire: (() => Promise<V2Connection>) | undefined;
   private readonly moved: ((connection: V2Connection) => void) | undefined;
@@ -128,6 +135,7 @@ export class OpenCodeV2Session implements AgentSession {
     this.requiresJAgentDeskPlugin = options.requiresJAgentDeskPlugin;
     this.environment = options.environment;
     this.mcp = options.mcp;
+    this.legacyMcp = options.legacyMcp ?? false;
     this.unbind = options.unbind;
     this.acquire = options.acquire;
     this.moved = options.moved;
@@ -234,6 +242,13 @@ export class OpenCodeV2Session implements AgentSession {
     await waitForLocationReady({ client: this.client, location, signal: this.abort.signal });
     if (this.requiresJAgentDeskPlugin)
       await awaitJAgentDeskPlugin({ client: this.client, location, signal: this.abort.signal });
+    if (this.legacyMcp)
+      await attachMcpServers({
+        client: this.client,
+        location,
+        mcpServers: this.config.mcpServers,
+        signal: this.abort.signal,
+      });
     if (this.historyOnly) return;
     const system = composeSystemPromptParts(
       this.config.systemPrompt,
@@ -518,37 +533,51 @@ export class OpenCodeV2Session implements AgentSession {
   async checkJAgentDeskTools({ signal }: { signal: AbortSignal }): Promise<JAgentDeskToolsHealth> {
     // A dead OpenCode server is replaced, and the session re-bound, when the turn starts.
     if (this.closed || this.historyOnly || this.exited) return { status: "unknown" };
-    const mcp = this.config.mcpServers?.[JAGENTDESK_MCP_SERVER_NAME];
-    if (mcp && isInternalJAgentDeskMcpServer(mcp)) {
-      const catalog = await this.client.mcp.list(
-        { location: { directory: this.config.cwd } },
-        { signal },
-      );
-      const entry = catalog.data.find((item) => item.name === JAGENTDESK_MCP_SERVER_NAME);
-      if (!entry) {
-        return { status: "missing", reason: "the jagentdesk MCP server is not loaded in OpenCode" };
-      }
-      if (entry.status.status !== "connected") {
-        const detail = entry.status.status === "failed" ? `: ${entry.status.error}` : "";
-        return {
-          status: "missing",
-          reason: `the jagentdesk MCP server is ${entry.status.status}${detail}`,
-        };
-      }
-    }
-    if (!this.requiresJAgentDeskPlugin || this.expectedBridgeTools === 0) return { status: "ok" };
+    const legacy = await this.legacyMcpProblem(signal);
+    if (legacy) return { status: "missing", reason: legacy };
+    // On the session path the plugin registers the session's MCP tools; they must be there too.
+    const mcpTools = (this.mcp?.tools ?? []).map((tool) => tool.name);
+    if (!this.requiresJAgentDeskPlugin || (this.expectedBridgeTools === 0 && !mcpTools.length))
+      return { status: "ok" };
     for (let attempt = 0; ; attempt++) {
       signal.throwIfAborted();
       const status = await this.connection.sessionToolsStatus(this.id, this.config.cwd);
       if (!status) return { status: "unknown" };
-      if (status.bound && status.tools.length > 0) return { status: "ok" };
-      const reason = status.bound
-        ? "the JAgentDesk plugin in OpenCode has no tools for this session"
-        : "the JAgentDesk plugin in OpenCode lost this session's binding";
+      const reason = this.pluginToolsProblem(status, mcpTools);
+      if (!reason) return { status: "ok" };
       if (attempt > 0) return { status: "missing", reason };
       this.logger.warn({ reason }, "Re-binding the OpenCode session's JAgentDesk tools");
       await this.connection.bindSession(this.id, this.config.cwd);
     }
+  }
+
+  /** Spec 33.7: on the legacy path OpenCode itself runs the MCP servers, so `mcp.list` tells. */
+  private async legacyMcpProblem(signal: AbortSignal): Promise<string | null> {
+    const mcp = this.config.mcpServers?.[JAGENTDESK_MCP_SERVER_NAME];
+    if (!this.legacyMcp || !mcp || !isInternalJAgentDeskMcpServer(mcp)) return null;
+    const catalog = await this.client.mcp.list(
+      { location: { directory: this.config.cwd } },
+      { signal },
+    );
+    const entry = catalog.data.find((item) => item.name === JAGENTDESK_MCP_SERVER_NAME);
+    if (!entry) return "the jagentdesk MCP server is not loaded in OpenCode";
+    if (entry.status.status === "connected") return null;
+    const detail = entry.status.status === "failed" ? `: ${entry.status.error}` : "";
+    return `the jagentdesk MCP server is ${entry.status.status}${detail}`;
+  }
+
+  private pluginToolsProblem(
+    status: { bound: boolean; tools: string[] },
+    mcpTools: string[],
+  ): string | null {
+    if (!status.bound) return "the JAgentDesk plugin in OpenCode lost this session's binding";
+    const hasBridgeTools =
+      this.expectedBridgeTools === 0 || status.tools.some((name) => !name.startsWith("mcp:"));
+    if (!hasBridgeTools) return "the JAgentDesk plugin in OpenCode has no tools for this session";
+    const missing = mcpTools.filter((name) => !status.tools.includes(`mcp:${name}`));
+    if (missing.length)
+      return `the JAgentDesk plugin in OpenCode is missing this session's MCP tools: ${missing.join(", ")}`;
+    return null;
   }
 
   async listCommands() {

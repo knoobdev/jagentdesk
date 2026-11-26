@@ -1,6 +1,10 @@
 import { type SessionInfo, type PermissionRuleset } from "@opencode/client";
 import { type V2Api } from "./api.js";
-import { type AgentSessionConfig, type AgentOptionControl } from "../../../agent-sdk-types.js";
+import {
+  type AgentLaunchContext,
+  type AgentSessionConfig,
+  type AgentOptionControl,
+} from "../../../agent-sdk-types.js";
 import { OpenCodeProviderOptionsSchema, buildOpenCodePermissionRules } from "../options.js";
 import { modelRef } from "./mapping.js";
 import { openCodeMcpToolName } from "./session-mcp.js";
@@ -56,4 +60,21 @@ export async function applyResumeOverrides(
     await client.session.switchModel({ sessionID: info.id, model });
     info.model = model;
   }
+}
+
+// Agent identity env is applied per session through `session.environment` on every server. Custom
+// MCP and any other env key need either the session path (the shared server reports
+// `features.mcpTools`) or, on the legacy path, a server of the agent's own (spec 33.7).
+const V2_SESSION_ENV_KEYS = new Set([
+  "JAGENTDESK_AGENT_ID",
+  "JAGENTDESK_AGENT_CWD",
+  "JAGENTDESK_WORKSPACE_ID",
+]);
+
+export function requiresDedicatedV2Server(
+  config: AgentSessionConfig,
+  launch?: AgentLaunchContext,
+): boolean {
+  if (Object.keys(config.mcpServers ?? {}).length > 0) return true;
+  return Object.keys(launch?.env ?? {}).some((key) => !V2_SESSION_ENV_KEYS.has(key));
 }

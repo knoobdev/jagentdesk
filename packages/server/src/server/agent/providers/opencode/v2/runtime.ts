@@ -29,6 +29,7 @@ import {
 import {
   bridgeBindings,
   connectSharedService,
+  type OpenCodeMcpPath,
   type OpenCodeSessionToolsStatus,
 } from "./shared-service.js";
 import {
@@ -49,6 +50,8 @@ export interface V2Connection {
   refreshLocation(cwd: string, signal?: AbortSignal): Promise<void>;
   /** Spec 04 §27b.0: the bridge plugin's tools for one session; null when the plugin cannot tell. */
   sessionToolsStatus(sessionId: string, cwd: string): Promise<OpenCodeSessionToolsStatus | null>;
+  /** Spec 33.7: how this server runs an agent's own MCP servers, decided once per server. */
+  mcpPath(cwd: string): Promise<OpenCodeMcpPath>;
   readonly exited: Promise<Error>;
 }
 interface Generation {
@@ -61,6 +64,7 @@ interface Generation {
   refreshLocation(cwd: string, signal?: AbortSignal): Promise<void>;
   /** Spec 04 §27b.0: the bridge plugin's tools for one session; null when the plugin cannot tell. */
   sessionToolsStatus(sessionId: string, cwd: string): Promise<OpenCodeSessionToolsStatus | null>;
+  mcpPath(cwd: string): Promise<OpenCodeMcpPath>;
 }
 export interface V2RuntimeOptions {
   logger: Logger;
@@ -76,6 +80,12 @@ export interface V2RuntimeOptions {
 
 export interface V2RuntimeAcquireOptions {
   fresh?: boolean;
+  /**
+   * Spec 33.7 legacy path: a server of the agent's own, for its `mcp.add` servers and process
+   * env, when the shared server does not report `features.mcpTools`.
+   */
+  dedicated?: boolean;
+  env?: Record<string, string>;
   signal?: AbortSignal;
 }
 
@@ -112,11 +122,7 @@ export class V2Runtime {
     input.signal?.throwIfAborted();
     this.assertBridgePort();
     const selected = await raceProviderRefreshAbort(input.signal, this.selection);
-    const selection: OpenCodeServiceSelection = this.requiresOwnedServer(selected)
-      ? { kind: "owned" }
-      : selected;
-    this.current ??= this.startTracked(selection);
-    const pending = this.current;
+    const pending = this.pendingGeneration(input, selected);
     let generation: Generation;
     try {
       generation = await raceProviderRefreshAbort(input.signal, pending);
@@ -150,6 +156,18 @@ export class V2Runtime {
       throw new Error("OpenCode runtime is closed");
     }
     return connection;
+  }
+
+  private pendingGeneration(
+    input: V2RuntimeAcquireOptions,
+    selected: OpenCodeServiceSelection,
+  ): Promise<Generation> {
+    // Spec 33.7 legacy path: a server of the agent's own, never the shared one.
+    if (input.env || input.dedicated) return this.startTracked({ kind: "owned" }, input.env ?? {});
+    this.current ??= this.startTracked(
+      this.requiresOwnedServer(selected) ? { kind: "owned" } : selected,
+    );
+    return this.current;
   }
 
   private assertBridgePort(): void {
@@ -191,6 +209,7 @@ export class V2Runtime {
       unbindSession: generation.unbindSession,
       refreshLocation: generation.refreshLocation,
       sessionToolsStatus: generation.sessionToolsStatus,
+      mcpPath: generation.mcpPath,
       exited: generation.exited,
     };
   }
@@ -220,8 +239,11 @@ export class V2Runtime {
     this.current = null;
   }
 
-  private startTracked(selection: OpenCodeServiceSelection): Promise<Generation> {
-    const pending = this.start(selection);
+  private startTracked(
+    selection: OpenCodeServiceSelection,
+    dedicatedEnv?: Record<string, string>,
+  ): Promise<Generation> {
+    const pending = this.start(selection, dedicatedEnv);
     this.starts.add(pending);
     void pending.then(
       (generation) =>
@@ -238,7 +260,10 @@ export class V2Runtime {
     return pending;
   }
 
-  private async start(selection: OpenCodeServiceSelection): Promise<Generation> {
+  private async start(
+    selection: OpenCodeServiceSelection,
+    dedicatedEnv?: Record<string, string>,
+  ): Promise<Generation> {
     if (selection.kind !== "owned") {
       const generation: Generation = {
         ...(await connectSharedService(selection, this.options)),
@@ -260,6 +285,7 @@ export class V2Runtime {
     let configured: Record<string, string> = {
       ...(inheritedConfig ? { OPENCODE_CONFIG_CONTENT: inheritedConfig } : {}),
       ...settings?.env,
+      ...dedicatedEnv,
     };
     const injection = this.options.providerConfigInjection
       ? await this.options.providerConfigInjection()
@@ -378,13 +404,19 @@ export class V2Runtime {
           return validateOpenCodeResponse(request, response);
         },
       });
-      await client.server.info({ signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())) });
+      const info = await client.server.info({
+        signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
+      });
       const generation: Generation = {
         client,
         users: 0,
         stop,
         exited,
-        ...bridgeBindings(client, bridge),
+        ...bridgeBindings(client, bridge, undefined, undefined, {
+          logger,
+          version: info.version,
+          dedicated: dedicatedEnv !== undefined,
+        }),
       };
       this.generations.add(generation);
       process.once("exit", () => {
