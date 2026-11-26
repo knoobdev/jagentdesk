@@ -1,13 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  View,
-  Text,
-  Pressable,
-  ScrollView,
-  type GestureResponderEvent,
-  type PressableStateCallbackType,
-} from "react-native";
+import { View, Text, Pressable, ScrollView, type PressableStateCallbackType } from "react-native";
 import { NestableScrollContainer } from "react-native-draggable-flatlist";
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
 import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
@@ -57,11 +50,11 @@ import { SidebarGroupToggleRow } from "@/components/sidebar/sidebar-group-toggle
 import { useLimitedSidebarGroup } from "@/components/sidebar/use-limited-sidebar-group";
 import type { ToggleSidebarWorkspacePin } from "@/hooks/use-sidebar-workspace-pin";
 import {
-  isShiftPressEvent,
   registerSidebarVisibleWorkspaceKeysReader,
   useIsSidebarSelectionMode,
   useIsWorkspaceBulkSelected,
   useSidebarSelectionStore,
+  useWorkspaceSelectionPress,
 } from "@/sidebar-selection";
 
 // Themed icon wrappers
@@ -728,18 +721,10 @@ function StatusWorkspaceRowInner({
     [isSelectionMode, isBulkSelected, selected],
   );
 
-  const handleRowPress = useCallback(
-    (event: GestureResponderEvent) => {
-      const shiftKey = isShiftPressEvent(event);
-      if (isSelectionMode || shiftKey) {
-        event.preventDefault?.();
-        useSidebarSelectionStore.getState().pressWorkspace(workspace.workspaceKey, { shiftKey });
-        return;
-      }
-      onPress();
-    },
-    [isSelectionMode, onPress, workspace.workspaceKey],
-  );
+  const { onPress: handleRowPress, onPressIn: handleRowPressIn } = useWorkspaceSelectionPress({
+    workspaceKey: workspace.workspaceKey,
+    onNavigate: onPress,
+  });
 
   return (
     <SidebarWorkspaceRowFrame workspace={workspace} isSelectionMode={isSelectionMode}>
@@ -790,6 +775,7 @@ function StatusWorkspaceRowInner({
               accessibilityRole={isSelectionMode ? "checkbox" : "button"}
               accessibilityState={accessibilityState}
               style={workspaceRowStyle}
+              onPressIn={handleRowPressIn}
               onPress={handleRowPress}
               testID={`sidebar-workspace-row-${workspace.workspaceKey}`}
             >

@@ -1,13 +1,6 @@
 import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { getSidebarRowBackdrop } from "@/components/sidebar/sidebar-row-backdrop";
 import { selectSidebarGroupVisibility } from "@/components/sidebar/sidebar-group-visibility";
-import {
-  isShiftPressEvent,
-  registerSidebarVisibleWorkspaceKeysReader,
-  useIsSidebarSelectionMode,
-  useIsWorkspaceBulkSelected,
-  useSidebarSelectionStore,
-} from "@/sidebar-selection";
 import { useCompactTimeAgo } from "@/hooks/use-time-ago";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
@@ -115,6 +108,13 @@ import {
 import { useLongPressDragInteraction } from "@/components/sidebar/use-long-press-drag-interaction";
 import { PinnedSectionHeader } from "@/components/sidebar/pinned-section-header";
 import { SidebarGroupToggleRow } from "@/components/sidebar/sidebar-group-toggle-row";
+import {
+  registerSidebarVisibleWorkspaceKeysReader,
+  useIsSidebarSelectionMode,
+  useIsWorkspaceBulkSelected,
+  useSidebarSelectionStore,
+  useWorkspaceSelectionPress,
+} from "@/sidebar-selection";
 import { useLimitedSidebarGroup } from "@/components/sidebar/use-limited-sidebar-group";
 import {
   SidebarWorkspaceRowFrame,
@@ -1167,35 +1167,11 @@ function WorkspaceRowInner({
     });
   }, [workspace.serverId, workspace.workspaceId]);
 
-  const handleRowPress = useCallback(
-    (event: GestureResponderEvent) => {
-      const shiftKey = isShiftPressEvent(event);
-      if (isSelectionMode || shiftKey) {
-        if (interaction.didLongPressRef.current) {
-          interaction.didLongPressRef.current = false;
-          return;
-        }
-        event.preventDefault?.();
-        useSidebarSelectionStore.getState().pressWorkspace(workspace.workspaceKey, { shiftKey });
-        return;
-      }
-      handlePress();
-    },
-    [handlePress, interaction.didLongPressRef, isSelectionMode, workspace.workspaceKey],
-  );
-
-  const handleRowPressIn = useCallback(
-    (event: GestureResponderEvent) => {
-      if (isShiftPressEvent(event)) {
-        event.preventDefault?.();
-        return;
-      }
-      if (!isSelectionMode) {
-        interaction.handlePressIn(event);
-      }
-    },
-    [interaction, isSelectionMode],
-  );
+  const { onPress: handleRowPress, onPressIn: handleRowPressIn } = useWorkspaceSelectionPress({
+    workspaceKey: workspace.workspaceKey,
+    onNavigate: handlePress,
+    onPressIn: interaction.handlePressIn,
+  });
 
   const rowSelected = isSelectionMode ? isBulkSelected : selected;
   const accessibilityState = useMemo(
