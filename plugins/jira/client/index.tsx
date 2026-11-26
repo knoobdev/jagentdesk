@@ -6,6 +6,7 @@ import {
   type JiraComposerAttachment,
 } from "./composer/jira-issue-attachment";
 import { JiraOAuthDelegationBinder } from "./connections/oauth-delegation-binder";
+import { JiraProviderConnectorsCard } from "./connections/provider-connectors-card";
 import { JiraScreen } from "./jira-screen";
 import { SidebarJiraNav } from "./sidebar-jira-nav";
 
@@ -31,4 +32,5 @@ export function register(app: BuiltinClientHost) {
   );
   // Pasted issue links and typed keys become `#ABC-123` chips (spec 29.4, A29.agent.2).
   app.composerTextWatcher("issue-auto-attach", JiraIssueAutoAttach);
+  app.agentSettingsCard("provider-connectors", JiraProviderConnectorsCard, 50);
 }

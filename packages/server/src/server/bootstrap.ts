@@ -499,6 +499,7 @@ export interface JAgentDeskDaemonConfig {
   appendSystemPrompt?: string;
   // Operator / engagement authorization context injected first into every agent's system prompt.
   operatorContext?: string;
+  hideProviderJiraConnectors?: boolean;
   terminalProfiles?: TerminalProfile[];
   orchestration?: OrchestrationConfig;
   staticDir: string;
@@ -662,6 +663,7 @@ function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): Mutab
     resumeOnStartup: config.resumeOnStartup === true,
     resumePrompt: config.resumePrompt ?? "Resume working.",
     operatorContext: config.operatorContext ?? "",
+    jira: { hideProviderConnectors: config.hideProviderJiraConnectors !== false },
     orchestration: config.orchestration ?? createDefaultOrchestrationConfig(),
   };
 
@@ -1128,8 +1130,12 @@ export async function createJAgentDeskDaemon(
   const builtinHostToolSet = createBuiltinHostToolSet({
     state: pluginRuntime.builtin,
     registry: builtinServerRegistry,
+    launchHints: (ids) => builtinServerRegistry.launchHints(config.jagentdeskHome, ids),
   });
   agentManager.setHostToolSet(builtinHostToolSet.source);
+  agentManager.setHideProviderConnectors(
+    () => daemonConfigStore.get().jira?.hideProviderConnectors !== false,
+  );
   agentManager.setProviderLabel((provider) => providerSnapshotManager.getProviderLabel(provider));
 
   const unsubscribeBuiltinAgentSnapshots = agentManager.subscribe(

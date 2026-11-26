@@ -446,6 +446,9 @@ export const MutableDaemonConfigSchema = z
     // does not and cannot override the underlying model's own judgment. Optional (not `.default`) so
     // existing MutableDaemonConfig literals stay valid; readers coalesce to "".
     operatorContext: z.string().optional(),
+    // COMPAT(jiraConnectorSetting): added in v0.10.2, remove after 2027-05-26; optional because older daemons omit it.
+    // Spec 29.4: hide the provider's own Jira/Atlassian connectors from agents (default on).
+    jira: z.object({ hideProviderConnectors: z.boolean() }).optional(),
     terminalProfiles: z.array(TerminalProfileSchema).optional(),
     agentProfiles: z.array(AgentProfileSchema).optional(),
     orchestration: OrchestrationConfigSchema.default(createDefaultOrchestrationConfig()),
@@ -501,6 +504,7 @@ export const MutableDaemonConfigPatchSchema = z
     resumePrompt: z.string().optional(),
     appendSystemPrompt: z.string().optional(),
     operatorContext: z.string().optional(),
+    jira: z.object({ hideProviderConnectors: z.boolean().optional() }).optional(),
     terminalProfiles: z.array(TerminalProfileSchema).optional(),
     agentProfiles: z.array(AgentProfileSchema).optional(),
     orchestration: OrchestrationConfigPatchSchema.optional(),
