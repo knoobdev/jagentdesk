@@ -286,3 +286,6 @@ export const Volume1 = StubIcon;
 export const Volume2 = StubIcon;
 export const Waypoints = StubIcon;
 export const WrapText = StubIcon;
+export const Computer = StubIcon;
+export const Laptop = StubIcon;
+export const PcCase = StubIcon;

@@ -244,6 +244,7 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
                   serverId={hostBadge.serverId}
                   label={hostBadge.label}
                   color={hostBadge.color}
+                  icon={hostBadge.icon}
                   showLabel={hostBadge.showLabel}
                 />
               ) : null}

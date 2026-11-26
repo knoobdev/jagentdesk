@@ -56,6 +56,7 @@ import {
 import { ProvidersSection } from "@/screens/settings/providers-section";
 import { HostUsageSection } from "@/usage/host-usage-section";
 import { HostAppearanceSection } from "@/screens/settings/host-appearance-section";
+import type { HostAppearance } from "@/hosts/appearance";
 import { SettingsSection } from "@/screens/settings/settings-section";
 import { PairedDevicesSection } from "@/screens/settings/paired-devices-section";
 import { migrateHostData } from "@/runtime/migration/host-migration-service";
@@ -1417,10 +1418,12 @@ function PairDeviceRow({ serverId }: { serverId: string }) {
 function MigrateTargetOption({
   serverId,
   label,
+  appearance,
   onSelect,
 }: {
   serverId: string;
   label: string;
+  appearance: HostAppearance;
   onSelect: (targetServerId: string, targetLabel: string) => void;
 }) {
   const handlePress = useCallback(() => onSelect(serverId, label), [onSelect, serverId, label]);
@@ -1428,7 +1431,7 @@ function MigrateTargetOption({
     <HostPickerOption
       serverId={serverId}
       label={label}
-      showActiveConnection
+      appearance={appearance}
       active={false}
       onPress={handlePress}
       testID={`migrate-data-target-${serverId}`}
@@ -1554,6 +1557,7 @@ function MigrateHostDataSection({ host }: { host: HostProfile }) {
                 key={target.serverId}
                 serverId={target.serverId}
                 label={target.label}
+                appearance={target.appearance}
                 onSelect={handleSelectTarget}
               />
             ))}

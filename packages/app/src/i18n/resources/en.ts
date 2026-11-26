@@ -2519,6 +2519,23 @@ export const en = {
         name: {
           label: "Name",
         },
+        icon: {
+          label: "Icon",
+          accessibilityLabel: "Icon, {{value}}",
+          auto: "Auto",
+          autoDetected: "Auto ({{icon}})",
+          options: {
+            server: "Server",
+            laptop: "Laptop",
+            desktop: "Desktop",
+            mini: "Mini",
+            workstation: "Workstation",
+            cloud: "Cloud",
+            container: "Container",
+            board: "Single-board PC",
+            terminal: "Terminal",
+          },
+        },
         color: {
           label: "Color",
           accessibilityLabel: "Color, {{value}}",
@@ -2554,6 +2571,13 @@ export const en = {
         relay: "Relay",
         tailnet: "Tailscale",
         local: "Local",
+      },
+      connectionKinds: {
+        local: "Local",
+        relay: "Relay",
+        tailscale: "Tailscale",
+        direct: "Direct",
+        routed: "Via",
       },
       connections: {
         active: "Active",

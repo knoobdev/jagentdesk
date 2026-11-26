@@ -189,7 +189,7 @@ function HostRow({ serverId }: { serverId: string }) {
       showActiveConnection
       searchable
       desktopPlacement="bottom-start"
-      desktopMinWidth={280}
+      desktopMinWidth={328}
     >
       <Pressable
         ref={anchorRef}

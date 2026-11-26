@@ -1,11 +1,9 @@
 import { Text, View, type TextStyle, type ViewStyle } from "react-native";
-import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { Server } from "lucide-react-native";
-import { HOST_COLORS, type HostColor } from "@/hosts/appearance";
+import { StyleSheet } from "react-native-unistyles";
+import { HOST_COLORS, type HostColor, type HostIcon } from "@/hosts/appearance";
+import { HostIconGlyph } from "@/hosts/host-icon-glyph";
 import { identityColor, identityTint } from "@/styles/identity-colors";
-import type { Theme } from "@/styles/theme";
 
-const ThemedServer = withUnistyles(Server);
 const MAX_NAMED_BADGE_WIDTH = 96;
 
 interface HostBadgeColorOverride {
@@ -27,25 +25,11 @@ function buildColorOverrides(): Record<HostColor, HostBadgeColorOverride> {
   return byColor;
 }
 
-// The identity table is theme-independent, so its icon mapping is fixed for the life of the
-// module. It must not be rebuilt per render: a fresh `uniProps` identity makes withUnistyles
-// re-subscribe every pass.
-function buildIconMappings(): Record<HostColor, (theme: Theme) => { color: string }> {
-  const byColor = {} as Record<HostColor, (theme: Theme) => { color: string }>;
-  for (const color of HOST_COLORS) {
-    byColor[color] =
-      color === "none"
-        ? (theme: Theme) => ({ color: theme.colors.foregroundMuted })
-        : () => ({ color: identityColor(color) });
-  }
-  return byColor;
-}
-
 const COLOR_OVERRIDES = buildColorOverrides();
-const ICON_MAPPINGS = buildIconMappings();
 
 /**
- * Which host a workspace lives on, as a pill after the title. Only rendered in multi-host
+ * Which host a workspace lives on, as a pill after the title: the host's device glyph and, when
+ * the host is configured to show one, its name. Only rendered in multi-host
  * setups — see selectHostBadges. It's a badge rather than a second line of text because the
  * row has to stay scannable at one line per workspace.
  *
@@ -54,11 +38,13 @@ export function HostBadge({
   serverId,
   label,
   color,
+  icon,
   showLabel,
 }: {
   serverId: string;
   label: string;
   color: HostColor;
+  icon: HostIcon;
   showLabel: boolean;
 }) {
   const override = COLOR_OVERRIDES[color];
@@ -71,7 +57,7 @@ export function HostBadge({
       ]}
       testID={`sidebar-host-badge-${serverId}`}
     >
-      <ThemedServer size={9} uniProps={ICON_MAPPINGS[color]} />
+      <HostIconGlyph icon={icon} color={color} size={9} />
       {showLabel ? (
         <Text style={[hostBadgeStyles.text, override.text]} numberOfLines={1}>
           {label}
