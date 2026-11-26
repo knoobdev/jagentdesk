@@ -27,6 +27,32 @@ launch carries browser tools (`AgentLaunchContext.inAppBrowser`):
   permission mode.
 - OpenCode ships no browser of its own; the instructions cover it.
 
+Instructions alone did not hold: agents ran `open report.html` to show a page, and a project with
+Vite's `server.open: true` opened `localhost` in the real Chrome on every `npm run dev`. So every
+agent launch, with or without browser tools, also gets shims (spec 04 §27b item 3b,
+`packages/server/src/server/agent-browser-shim/`):
+
+- `$JAGENTDESK_HOME/agent-bin` first on `PATH`, holding `open` and `xdg-open`, and `BROWSER`
+  pointing at `jagentdesk-browser.js` in the same directory. One file is both a shell script and a
+  CommonJS program, so a shell, Python's `webbrowser` and Node all run it.
+- `BROWSER` must end in `.js`. Vite (and Create React App) run such a file with Node and the URL as
+  the last argument. With `BROWSER` unset, Vite on macOS drives an already-open Chrome through
+  `osascript` and never calls `open`, so a PATH shim alone misses it.
+- http(s) URLs and local `.html`/`.htm`/`.svg`/`.pdf` files go to `POST /api/agent-browser/open`
+  (loopback, per-run agent token from `agent-bin/.endpoint.json`), which runs the same broker
+  `new_tab` as `browser_new_tab` in the agent's workspace. A local file is served from
+  `/api/agent-files/<token>/…` with its directory, so its relative CSS and images load. Any other
+  argument (`open -a Preview x.png`, `open data.xlsx`) runs the real command unchanged. With no
+  browser host the shim exits 1 with "No JAgentDesk browser is connected; tell the user the path
+  instead" and never falls back to the system browser.
+- Codex rebuilds each command's shell from a snapshot of the user's login shell, which replaced
+  `PATH` and dropped the shim. Codex starts with `-c shell_environment_policy.set.PATH/BROWSER`,
+  which it applies on top of the snapshot. Claude Code's shell snapshot and OpenCode's session
+  environment keep the shim first as is.
+- OpenCode applies `PATH` and `BROWSER` per session, so they do not force a dedicated server.
+- Windows: `explorer.cmd` and `BROWSER` only. `start` and `Start-Process` are shell built-ins that
+  no PATH entry replaces; the instructions cover them.
+
 ## Desktop selection
 
 `browser_list_hosts` lists connected windows, including windows with no tabs. With multiple

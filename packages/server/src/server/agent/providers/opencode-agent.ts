@@ -373,6 +373,9 @@ const OPENCODE_SESSION_ENV_KEYS = new Set([
   "JAGENTDESK_AGENT_ID",
   "JAGENTDESK_AGENT_CWD",
   "JAGENTDESK_WORKSPACE_ID",
+  // The agent shim PATH and BROWSER (spec 04 §27b item 3b) are the same for every agent.
+  "PATH",
+  "BROWSER",
 ]);
 
 function requiresDedicatedOpenCodeServer(

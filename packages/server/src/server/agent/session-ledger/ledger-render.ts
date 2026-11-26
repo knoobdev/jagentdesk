@@ -3,8 +3,8 @@ import {
   type LedgerCommand,
   type LedgerError,
   type LedgerFile,
-  type LedgerGoal,
   type LedgerTurn,
+  type LedgerUserMessage,
   type TimelineLedgerFacts,
 } from "./ledger-builder.js";
 import type { LedgerNote, LedgerOpenItem, StoredSessionLedger } from "./ledger-schema.js";
@@ -34,7 +34,12 @@ export interface LedgerFileWithDiff extends LedgerFile {
 
 /** Everything a ledger view or a handoff renders. Mutated in place while fitting. */
 export interface LedgerDocument {
-  goals: LedgerGoal[];
+  /** The agent's own record of the task it is on now (`update_session_ledger { goal }`). */
+  goal: LedgerNote | null;
+  /** The user's messages, newest first. Cut from the end (the oldest) while fitting. */
+  userMessages: LedgerUserMessage[];
+  /** Oldest user messages cut to fit. */
+  omittedUserMessages: number;
   nextStep: LedgerNote | null;
   decisions: LedgerNote[];
   openItems: LedgerOpenItem[];
@@ -49,7 +54,7 @@ export interface LedgerDocument {
 
 export function buildLedgerDocument(input: {
   facts: TimelineLedgerFacts;
-  notes: Pick<StoredSessionLedger, "decisions" | "openItems" | "nextStep">;
+  notes: Pick<StoredSessionLedger, "goal" | "decisions" | "openItems" | "nextStep">;
   diffs?: ReadonlyMap<string, string>;
   /** Notes written at or before this seq are left out (delta handoffs). */
   sinceSeq?: number;
@@ -61,7 +66,9 @@ export function buildLedgerDocument(input: {
   const recentTurns = recentCount > 0 ? turns.slice(-recentCount) : [];
   const earlierTurns = turns.slice(0, turns.length - recentTurns.length);
   return {
-    goals: [...input.facts.goals],
+    goal: input.notes.goal ?? null,
+    userMessages: input.facts.userMessages.toReversed(),
+    omittedUserMessages: 0,
     nextStep: input.notes.nextStep,
     decisions: input.notes.decisions.filter((note) => note.seq > sinceSeq),
     openItems: input.notes.openItems.filter(
@@ -79,7 +86,7 @@ export function buildLedgerDocument(input: {
   };
 }
 
-function quoteBlock(text: string): string {
+export function quoteBlock(text: string): string {
   return text
     .split("\n")
     .map((line) => `> ${line}`)
@@ -92,17 +99,44 @@ function fence(text: string, language = ""): string {
   return `${ticks}${language}\n${text}\n${ticks}`;
 }
 
-function renderGoals(goals: LedgerGoal[]): string[] {
-  if (goals.length === 0) return [];
-  const lines = ["## Goals and constraints (user messages, verbatim, oldest first)", ""];
-  goals.forEach((goal, index) => {
-    lines.push(`${index + 1}.`, quoteBlock(goal.text));
-    if (goal.originalLength) {
-      lines.push(`   (first ${goal.text.length} of ${goal.originalLength} characters)`);
+/**
+ * Spec 42 §2 / 40 §3: never ask the model to act on old requests. Shared with the re-grounding
+ * block so both read the same.
+ */
+export const EARLIER_REQUESTS_NOTE =
+  "Earlier requests, newest first. Older ones may already be done — do not act on them unless the " +
+  "latest message asks.";
+
+/** "2026-11-15 09:12Z" from an ISO time; empty when the row had no time. */
+export function formatMessageTime(at: string | undefined): string {
+  if (!at) return "";
+  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(at);
+  return match ? `${match[1]} ${match[2]}Z` : at;
+}
+
+/** The user's messages newest first, each with its time, under the "Earlier requests" note. */
+export function renderUserMessages(
+  messages: LedgerUserMessage[],
+  options: { heading: string; omitted?: number },
+): string[] {
+  if (messages.length === 0) return [];
+  const lines = [options.heading, "", EARLIER_REQUESTS_NOTE, ""];
+  for (const message of messages) {
+    const time = formatMessageTime(message.at);
+    lines.push(time ? `${time}:` : "(time unknown):", quoteBlock(message.text));
+    if (message.originalLength) {
+      lines.push(`(first ${message.text.length} of ${message.originalLength} characters)`);
     }
     lines.push("");
-  });
+  }
+  if (options.omitted && options.omitted > 0) {
+    lines.push(`(${options.omitted} older messages left out to fit)`, "");
+  }
   return lines;
+}
+
+function renderGoal(goal: LedgerNote | null): string[] {
+  return goal ? ["## Current goal (recorded by the agent)", "", goal.text, ""] : [];
 }
 
 function renderNotes(document: LedgerDocument): string[] {
@@ -193,8 +227,12 @@ export function renderLedgerSections(
   options: { recentHeading?: string } = {},
 ): string {
   return [
-    ...renderGoals(document.goals),
+    ...renderGoal(document.goal),
     ...renderNotes(document),
+    ...renderUserMessages(document.userMessages, {
+      heading: "## The user's messages (verbatim)",
+      omitted: document.omittedUserMessages,
+    }),
     ...renderFiles(document.files),
     ...renderCommands(document.commands),
     ...renderErrors(document.errors),
@@ -206,9 +244,9 @@ export function renderLedgerSections(
 }
 
 /**
- * Cut steps in the order the spec sets: old command output, old turn answers, large diffs. When
- * that is not enough the remaining lists are shortened oldest-first. Goals and the next step are
- * never cut. Each step returns false once it has nothing left to cut.
+ * Cut steps in the order spec 40 §3 sets: old command output, old turn answers, large diffs, then
+ * the oldest user messages. When that is not enough the remaining lists are shortened oldest-first.
+ * The goal, the next step and the newest user message are never cut. Each step returns false once it has nothing left to cut.
  */
 const CUT_STEPS: Array<(document: LedgerDocument) => boolean> = [
   (document) => {
@@ -227,6 +265,12 @@ const CUT_STEPS: Array<(document: LedgerDocument) => boolean> = [
     }
     if (!largest) return false;
     largest.diff = null;
+    return true;
+  },
+  (document) => {
+    if (document.userMessages.length <= 1) return false;
+    document.userMessages.pop();
+    document.omittedUserMessages += 1;
     return true;
   },
   (document) => document.commands.shift() !== undefined,
@@ -296,7 +340,8 @@ export function renderHandoffText(input: {
           `You are taking over JAgentDesk agent ${input.agentId}, which was running on ${input.fromProvider}. ` +
             "This is the session ledger so far: the user's own messages verbatim, the files and commands " +
             "touched, the recorded decisions and the most recent turns. Treat it as your own memory of " +
-            "the conversation and continue from it. Keep the ledger current with update_session_ledger.",
+            "the conversation and continue from the latest user message. Keep the ledger current with " +
+            "update_session_ledger.",
           "",
         ]
       : [

@@ -51,6 +51,18 @@ import { unarchiveAgentState } from "./agent/agent-prompt.js";
 import { unarchiveWorkspaceAgents } from "./workspace-archive-service.js";
 import { createWorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
 import express from "express";
+import {
+  agentShimDir,
+  installAgentBrowserShims,
+  writeAgentShimEndpoint,
+} from "./agent-browser-shim/install.js";
+import {
+  AGENT_BROWSER_OPEN_ROUTE,
+  AGENT_FILES_ROUTE,
+  AgentFileShares,
+  createAgentBrowserOpenRouteHandler,
+  createAgentFilesRouteHandler,
+} from "./agent-browser-shim/routes.js";
 import { createServer as createHTTPServer, type IncomingMessage, type ServerResponse } from "http";
 import { constants, existsSync, unlinkSync } from "fs";
 import { open } from "fs/promises";
@@ -332,6 +344,14 @@ function createAgentMcpBaseUrl(listenTarget: ListenTarget | null): string | null
     "/mcp/agents",
     `http://${formatHostForHttpUrl(host)}:${listenTarget.port}`,
   ).toString();
+}
+
+function createLoopbackBaseUrl(listenTarget: ListenTarget | null): string | null {
+  if (!listenTarget || listenTarget.type !== "tcp") {
+    return null;
+  }
+  const host = resolveAgentMcpClientHost(listenTarget.host);
+  return `http://${formatHostForHttpUrl(host)}:${listenTarget.port}`;
 }
 
 function createTerminalActivityUrl(listenTarget: ListenTarget | null): string | null {
@@ -924,6 +944,27 @@ export async function createJAgentDeskDaemon(
     createTerminalActivityRouteHandler(terminalManager),
   );
 
+  // Spec 04 §27b item 3b: the agent shims (`open`, `xdg-open`, BROWSER) post web targets here and
+  // the in-app tab loads opened local files from the file route. Loopback only; the open route
+  // takes the per-run agent token, the file route an unguessable per-directory token.
+  const agentFileShares = new AgentFileShares();
+  app.post(
+    AGENT_BROWSER_OPEN_ROUTE,
+    express.json(),
+    createAgentBrowserOpenRouteHandler({
+      token: agentMcpAuthToken,
+      resolveAgent: (agentId) => {
+        const agent = agentManager.getAgent(agentId);
+        return agent ? { cwd: agent.cwd, workspaceId: agent.workspaceId ?? null } : null;
+      },
+      execute: (input) => browserToolsBroker.execute(input),
+      shares: agentFileShares,
+      baseUrl: () => createLoopbackBaseUrl(boundListenTarget),
+      logger,
+    }),
+  );
+  app.use(AGENT_FILES_ROUTE, createAgentFilesRouteHandler(agentFileShares));
+
   // Serve the bundled browser web UI when enabled. Mounted after service-proxy
   // classification and host/CORS handling, but before daemon bearer auth, so
   // static app files load without the daemon password while API/WebSocket calls
@@ -1163,6 +1204,14 @@ export async function createJAgentDeskDaemon(
     mcpAuthToken: agentMcpAuthToken,
     logger,
   });
+  // Spec 04 §27b item 3b: shims first on every agent's PATH, BROWSER on the `.js` one.
+  const agentShimDirectory = agentShimDir(config.jagentdeskHome);
+  try {
+    await installAgentBrowserShims({ dir: agentShimDirectory });
+    agentManager.setAgentShimDir(agentShimDirectory);
+  } catch (error) {
+    logger.warn({ err: error }, "Could not install the agent browser shims");
+  }
 
   // Spec 04 §27b.1: built-in tool groups are compared at the start of every turn.
   const builtinHostToolSet = createBuiltinHostToolSet({
@@ -2166,6 +2215,14 @@ export async function createJAgentDeskDaemon(
           };
           const logAndResolve = async () => {
             boundListenTarget = resolveBoundListenTarget(listenTarget, httpServer);
+            const loopbackBaseUrl = createLoopbackBaseUrl(boundListenTarget);
+            void writeAgentShimEndpoint({
+              dir: agentShimDirectory,
+              url: loopbackBaseUrl ? `${loopbackBaseUrl}${AGENT_BROWSER_OPEN_ROUTE}` : null,
+              token: agentMcpAuthToken,
+            }).catch((error: unknown) => {
+              logger.warn({ err: error }, "Could not write the agent shim endpoint");
+            });
             const mcpBaseUrl = mcpEnabled ? createAgentMcpBaseUrl(boundListenTarget) : null;
             agentMcpBaseUrl = config.mcpInjectIntoAgents === false ? null : mcpBaseUrl;
             agentManager.setMcpBaseUrl(agentMcpBaseUrl);

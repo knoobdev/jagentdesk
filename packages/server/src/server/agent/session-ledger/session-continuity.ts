@@ -21,9 +21,9 @@ import type { SessionLedgerStore } from "./ledger-store.js";
 
 export const SESSION_LEDGER_INSTRUCTION = [
   "JAgentDesk keeps a session ledger for you so another model can pick this work up without losing context.",
-  "Call the update_session_ledger tool during normal work, in the same turn, whenever you make a decision " +
-    "worth remembering (with a one-line reason), open or finish a piece of work, or change what you would do " +
-    "next. Keep entries short. Do not call it for trivial turns. Files, commands, errors and the user's " +
+  "Call the update_session_ledger tool during normal work, in the same turn, whenever the user gives you a " +
+    "new task (set goal to it in one line, replacing the old goal), you make a decision worth remembering " +
+    "(with a one-line reason), open or finish a piece of work, or change what you would do next. Keep entries short. Do not call it for trivial turns. Files, commands, errors and the user's " +
     "messages are recorded automatically; do not repeat them.",
   "Before you create a child agent on a provider other than your own, call list_child_providers and " +
     "pick the entry marked suggested unless the task needs a specific model.",
@@ -155,8 +155,8 @@ export class SessionContinuity {
   }
 
   /**
-   * Spec 40 §5: a child on another provider gets its parent's ledger cut down to the goals and the
-   * files touched, instead of the parent's transcript.
+   * Spec 40 §5: a child on another provider gets its parent's ledger cut down to the parent's goal,
+   * the user's messages (newest first) and the files touched, instead of the parent's transcript.
    */
   async renderChildHandoff(input: {
     parentId: string;
@@ -167,9 +167,10 @@ export class SessionContinuity {
     budgetTokens: number;
   }): Promise<string> {
     const facts = collectTimelineLedgerFacts({ rows: input.rows, cwd: input.cwd });
+    const parent = await this.store.read(input.parentId);
     const document = buildLedgerDocument({
       facts: { ...facts, commands: [], errors: [], turns: [] },
-      notes: { decisions: [], openItems: [], nextStep: null },
+      notes: { goal: parent.goal ?? null, decisions: [], openItems: [], nextStep: null },
       recentTurns: 0,
     });
     return fitHandoff({

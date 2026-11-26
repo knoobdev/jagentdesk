@@ -73,7 +73,7 @@ export function buildHostToolInstructions(groups: HostToolGroupState[]): string[
         "Do not just say the tools are unavailable or ask the user to turn them on in Settings; the card does that. Never tell the user to open a new session, chat or agent to get tools.",
         browserOn
           ? ""
-          : "While Browser tools are off, do not open web pages in the system browser instead (no `open`, `xdg-open`, `start` or `Start-Process` with a URL).",
+          : "While Browser tools are off, do not open web pages, HTML or PDF files in the system browser instead (no `open`, `xdg-open`, `start` or `Start-Process` with a URL or such a file); tell the user the URL or path.",
       ]
         .filter(Boolean)
         .join(" "),
@@ -83,7 +83,8 @@ export function buildHostToolInstructions(groups: HostToolGroupState[]): string[
     instructions.push(
       [
         "Browsing: open, read and drive web pages with the JAgentDesk `browser_*` tools. Their tabs open inside the JAgentDesk app, where the user watches them.",
-        "Never open an http(s) URL with `open`, `xdg-open`, `start`, `Start-Process`, `explorer`, `python -m webbrowser` or any other command that launches the system browser, and do not use your own browser or Playwright tools for work the `browser_*` tools can do.",
+        "Never open an http(s) URL, an HTML file or a PDF with `open`, `xdg-open`, `start`, `Start-Process`, `explorer`, `python -m webbrowser` or any other command that launches the system browser, and do not use your own browser or Playwright tools for work the `browser_*` tools can do. To show the user a page or a local HTML/PDF file, use `browser_new_tab`.",
+        'In your shell, `open`, `xdg-open` and `$BROWSER` (which dev servers such as Vite use) already send web pages and local .html/.htm/.svg/.pdf files to the JAgentDesk browser; when one prints "No JAgentDesk browser is connected", tell the user the path or URL instead of trying another way to open it.',
         "If `browser_new_tab` fails or times out, call it again or report the error; never fall back to the system browser.",
       ].join(" "),
     );

@@ -108,14 +108,13 @@ function isPresent<T>(value: T | null): value is T {
   return value !== null;
 }
 
-/** Goal = the agent's first user message; Next and Open come from the ledger notes. */
-function recitationFor(
-  ledger: StoredSessionLedger,
-  rows: readonly LedgerTimelineRow[],
-): string | null {
-  const first = rows.find((row) => row.item.type === "user_message" && row.item.text.trim());
+/**
+ * Goal is the ledger goal the agent wrote itself (spec 42 §2) and never a user message; Next and
+ * Open also come from the ledger notes.
+ */
+function recitationFor(ledger: StoredSessionLedger): string | null {
   return renderRecitation({
-    goal: first?.item.type === "user_message" ? first.item.text : null,
+    goal: ledger.goal?.text ?? null,
     nextStep: ledger.nextStep?.text ?? null,
     openCount: ledger.openItems.filter((item) => item.closedSeq == null).length,
   });
@@ -377,7 +376,7 @@ export class DurableContext {
     const nudge = this.shouldNudge(settings, durable, agent.lastUsage);
     const tail = [
       ...(nudge ? [LEDGER_NUDGE_TEXT] : []),
-      ...(settings.recitation ? [recitationFor(ledger, rows)].filter(isPresent) : []),
+      ...(settings.recitation ? [recitationFor(ledger)].filter(isPresent) : []),
     ];
     if (!block && !clearPending && tail.length === 0) return null;
     let enriched = block ? prependText(prompt, block.regrounding.text) : prompt;

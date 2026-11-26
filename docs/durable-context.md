@@ -19,9 +19,9 @@ Each compaction is recorded in the agent's ledger file (`durable.compactions`) a
 
 `DurableContext.prepareTurn` runs inside `buildTurnPrompt`, so every send path (WebSocket, MCP, schedules, failover resends) gets the same additions:
 
-- The first message after a compaction starts with the "Where we are" block: user messages verbatim, next step, decisions, open items, the artifact index (files with last operation and time, commands with exit codes, unresolved errors with their last output lines) and the lessons and memories for this message. It is cut to 3 000 tokens; the next step is never cut, and the first and latest user messages are the last to go. The block is stored in `durable.regroundings` and the "Re-grounded after compaction" row opens it.
+- The first message after a compaction starts with the "Where we are" block: the ledger goal, the user's messages verbatim (newest first, each with its time, under "Earlier requests, newest first…"), next step, decisions, open items, the artifact index (files with last operation and time, commands with exit codes, unresolved errors with their last output lines) and the lessons and memories for this message. It is cut to 3 000 tokens; the oldest user messages go first, and the goal, the next step and the newest message are never cut. The block is stored in `durable.regroundings` and the "Re-grounded after compaction" row opens it.
 - At 80 % of the context window, a one-sentence request to update the ledger, once per compaction cycle.
-- On every message, `(JAgentDesk recitation) Goal: … · Next: … · Open: n`, under 120 tokens.
+- On every message, `[JAgentDesk context, not a new request] Goal: … · Next: … · Open: n`, under 120 tokens. Goal is the ledger `goal` the agent writes with `update_session_ledger`, never a user message: v0.11.0 recited the first retained user message, and an agent alive for weeks redid a two-week-old request on "continue". Empty parts are left out; with no goal, next step or open item there is no line at all.
 
 A message that starts with `/` or `$` is left alone so the command still parses; a pending block waits for the next normal message. When the message already carries the "Relevant memories" attachment the block points to it instead of repeating it.
 
