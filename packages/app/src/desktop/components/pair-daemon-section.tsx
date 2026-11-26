@@ -48,6 +48,25 @@ function describeCancelledAttempt(state: SasState | null): string {
   }
 }
 
+/** A completed attempt, including a device whose key the host already had. */
+function PairedSummary({ state }: { state: SasState }) {
+  if (state.repaired)
+    return (
+      <>
+        <Text style={styles.title}>Device paired again</Text>
+        <Text style={styles.text}>
+          {state.label || "This device"} was already paired with this host. Its pairing was renewed.
+        </Text>
+      </>
+    );
+  return (
+    <>
+      <Text style={styles.title}>Device paired</Text>
+      <Text style={styles.text}>{state.label ?? "The device"} can now control this host.</Text>
+    </>
+  );
+}
+
 export function PairDaemonSection({ serverId, onClose }: { serverId: string; onClose(): void }) {
   const client = useHostRuntimeClient(serverId);
   // The host runtime swaps its client when it changes connection. The attempt
@@ -153,8 +172,7 @@ export function PairDaemonSection({ serverId, onClose }: { serverId: string; onC
   if (state?.state === "completed")
     return (
       <View ref={setSasScope} style={styles.content}>
-        <Text style={styles.title}>Device paired</Text>
-        <Text style={styles.text}>{state.label ?? "The device"} can now control this host.</Text>
+        <PairedSummary state={state} />
         <Button onPress={onClose}>Done</Button>
       </View>
     );

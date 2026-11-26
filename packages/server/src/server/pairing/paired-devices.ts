@@ -44,6 +44,18 @@ export interface PairedDeviceStore {
     tailnetNodeId?: string;
     kind?: "desktop" | "mobile" | "daemon";
   }): PairedDevice;
+  /**
+   * Registers a device approved by a fresh pairing, or refreshes the record when
+   * its key is already registered. The device id and pairing time stay; name and
+   * kind follow the new pairing, and a tailnet pin is replaced only when the new
+   * pairing carries one.
+   */
+  repair(input: {
+    devicePublicKeyB64: string;
+    deviceName?: string;
+    tailnetNodeId?: string;
+    kind?: "desktop" | "mobile" | "daemon";
+  }): { device: PairedDevice; created: boolean };
   revokeById(deviceId: string): boolean;
   revokeByPublicKey(publicKeyB64: string): boolean;
 }
@@ -107,6 +119,21 @@ export function createPairedDeviceStore(args: {
       devices.push(device);
       persist();
       return device;
+    },
+
+    repair(input) {
+      const index = findIndexByPublicKey(input.devicePublicKeyB64);
+      if (index === -1) return { device: this.register(input), created: true };
+      const existing = devices[index]!;
+      const device: PairedDevice = {
+        ...existing,
+        ...(input.deviceName ? { deviceName: input.deviceName } : {}),
+        ...(input.kind ? { kind: input.kind } : {}),
+        ...(input.tailnetNodeId ? { tailnetNodeId: input.tailnetNodeId } : {}),
+      };
+      devices[index] = device;
+      persist();
+      return { device, created: false };
     },
 
     revokeById(deviceId: string): boolean {

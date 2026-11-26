@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -245,4 +245,78 @@ test("pairing logs every step without keys, nonces, codes or pks", () => {
     code,
   ])
     expect(text).not.toContain(secret);
+});
+
+describe("re-pairing a device key that is already registered", () => {
+  function registeredHello(pk: string, label: string) {
+    return { ...hello(pk, label), publicKeyEd25519: existingKey };
+  }
+  let existingKey: string;
+  let existingId: string;
+  beforeEach(() => {
+    existingKey = exportDevicePublicKey(generateDeviceKeyPair().publicKey);
+    existingId = devices.register({
+      devicePublicKeyB64: existingKey,
+      deviceName: "Old name",
+      kind: "mobile",
+    }).deviceId;
+  });
+  const completed = () =>
+    events.flatMap((e) =>
+      e.type === "pairing.sas.changed" && e.payload.state === "completed" ? [e.payload] : [],
+    );
+
+  test("phone confirms last: renews the record instead of failing", () => {
+    const offer = sas.begin(address);
+    const phone = fakeSocket();
+    sas.handle(phone, registeredHello(offer.pk, "iPhone"));
+    sas.confirm(offer.pk, true);
+    sas.handle(phone, { type: "pair_confirm", pk: offer.pk, accepted: true });
+    expect(phone.sent.at(-1)).toEqual({ type: "pair_done", deviceId: existingId, repaired: true });
+    expect(phone.sent.some((m) => m.type === "pair_error")).toBe(false);
+    expect(completed()).toEqual([expect.objectContaining({ repaired: true })]);
+    expect(devices.list()).toEqual([
+      expect.objectContaining({ deviceId: existingId, deviceName: "iPhone", kind: "mobile" }),
+    ]);
+    expect(logs).toContainEqual(
+      expect.objectContaining({
+        message: "pairing_sas_completed",
+        fields: expect.objectContaining({ repaired: true }),
+      }),
+    );
+  });
+
+  test("host confirms last: renews the record and confirm does not throw", () => {
+    const offer = sas.begin(address);
+    const phone = fakeSocket();
+    sas.handle(phone, registeredHello(offer.pk, "iPhone"));
+    sas.handle(phone, { type: "pair_confirm", pk: offer.pk, accepted: true });
+    expect(() => sas.confirm(offer.pk, true)).not.toThrow();
+    expect(phone.sent.at(-1)).toEqual({ type: "pair_done", deviceId: existingId, repaired: true });
+    expect(completed()).toEqual([expect.objectContaining({ repaired: true })]);
+    expect(devices.list()).toHaveLength(1);
+  });
+
+  test("a new key still pairs as a new device without the repaired flag", () => {
+    const offer = sas.begin(address);
+    const phone = fakeSocket();
+    sas.handle(phone, hello(offer.pk, "Other"));
+    sas.confirm(offer.pk, true);
+    sas.handle(phone, { type: "pair_confirm", pk: offer.pk, accepted: true });
+    expect(phone.sent.at(-1)).toEqual({ type: "pair_done", deviceId: expect.any(String) });
+    expect(completed()).toEqual([expect.not.objectContaining({ repaired: true })]);
+    expect(devices.list()).toHaveLength(2);
+  });
+});
+
+test("repair() keeps a tailnet pin unless the new pairing carries one", () => {
+  const key = exportDevicePublicKey(generateDeviceKeyPair().publicKey);
+  devices.register({ devicePublicKeyB64: key, tailnetNodeId: "node-a" });
+  expect(devices.repair({ devicePublicKeyB64: key }).device.tailnetNodeId).toBe("node-a");
+  expect(devices.repair({ devicePublicKeyB64: key, tailnetNodeId: "node-b" }).device).toMatchObject(
+    { tailnetNodeId: "node-b" },
+  );
+  expect(createPairedDeviceStore({ jagentdeskHome: home }).getByPublicKey(key)).toMatchObject({
+    tailnetNodeId: "node-b",
+  });
 });

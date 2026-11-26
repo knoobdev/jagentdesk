@@ -40,6 +40,8 @@ export const HostPairingResponseSchemas = [
       state: z.enum(["waiting", "comparing", "completed", "cancelled"]),
       /** Why a `cancelled` attempt ended (`PairingEndReason`). Absent from older daemons. */
       reason: z.string().optional(),
+      /** `completed` renewed a device whose key was already paired. Absent from older daemons. */
+      repaired: z.boolean().optional(),
     }),
   }),
   z.object({

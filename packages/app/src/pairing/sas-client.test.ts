@@ -64,7 +64,7 @@ function start(
     compare,
   });
 }
-async function failureOf(promise: Promise<void>) {
+async function failureOf(promise: Promise<unknown>) {
   const error = await promise.then(
     () => null,
     (e: unknown) => e,
@@ -161,5 +161,37 @@ describe("pairAppDevice keepalive", () => {
     const before = peer.sent.length;
     vi.advanceTimersByTime(60_000);
     expect(peer.sent).toHaveLength(before);
+  });
+});
+
+describe("pairAppDevice completion", () => {
+  async function completeWith(done: Record<string, unknown>) {
+    const peer = createPeer();
+    const pairing = start(peer);
+    peer.open();
+    const helloSent = peer.sent[0]!;
+    const daemon = createPairingEphemeral();
+    await peer.deliver({
+      type: "pair_challenge",
+      pk,
+      nonce_host: pairingBase64Url(new Uint8Array(32).fill(7)),
+      pk_host: daemon.publicKey,
+    });
+    await vi.waitFor(() => expect(peer.sent.at(-1)).toMatchObject({ type: "pair_confirm" }));
+    expect(helloSent).toMatchObject({ type: "pair_hello" });
+    await peer.deliver(done);
+    return pairing;
+  }
+
+  it("reports a renewed pairing when the host already had this device's key", async () => {
+    await expect(
+      completeWith({ type: "pair_done", deviceId: "dev-1", repaired: true }),
+    ).resolves.toEqual({ repaired: true });
+  });
+
+  it("reports a first pairing when the host sends no repaired flag", async () => {
+    await expect(completeWith({ type: "pair_done", deviceId: "dev-2" })).resolves.toEqual({
+      repaired: false,
+    });
   });
 });

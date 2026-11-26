@@ -76,6 +76,18 @@ refusal and every host-side end reaches the device as `pair_error` with a `reaso
 the daemon logs each step as `pairing_sas_*` without keys, nonces or codes. Relays
 replace the daemon's close code, so the close alone cannot tell the device why.
 
+Device keys are persistent: an app keeps its key across reinstalls of the host and
+across failed attempts, and an attempt can complete on the daemon while the phone
+never sees `pair_done`. A completed two-sided approval of a key the daemon already has
+renews that record (same device id; new name and kind; the tailnet pin changes only
+when the new attempt carries one) and answers `pair_done { repaired: true }`. Refusing
+it left the phone unable to pair again until someone revoked the old record.
+
+Each relay data socket logs `relay_data_summary` when it closes: E2EE hellos received
+(with their times), encrypted records in and out, and relay control frames, never
+payloads. A client that stops before its signed hello shows up there as records in = 0
+after one hello, or as hellos that keep arriving after the daemon's ready.
+
 The device pings every 10 seconds while the user compares codes. Mobile networks and
 suspended apps drop a silent socket in well under the two-minute window. Anything
 that starts an exchange must start it once per link: the desktop "Pair a device"

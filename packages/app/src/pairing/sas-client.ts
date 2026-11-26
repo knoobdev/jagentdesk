@@ -54,6 +54,11 @@ const PAIRING_KEEPALIVE_MS = 10_000;
 /** Two missed pongs plus slack: the connection is gone (suspended app, lost network). */
 const PAIRING_LIVENESS_TIMEOUT_MS = 25_000;
 
+export interface PairingResult {
+  /** The host already had this device's key and renewed its pairing. */
+  repaired: boolean;
+}
+
 /** Keeps both approvals on the same socket; closing or aborting discards the exchange. */
 export async function pairAppDevice(input: {
   transport: DaemonTransport;
@@ -63,7 +68,7 @@ export async function pairAppDevice(input: {
   kind: "desktop" | "mobile";
   signal: AbortSignal;
   compare(code: string): Promise<boolean>;
-}): Promise<void> {
+}): Promise<PairingResult> {
   const { transport, pk } = input;
   const key = createPairingEphemeral();
   const nonce = pairingBase64Url(globalThis.crypto.getRandomValues(new Uint8Array(32)));
@@ -75,7 +80,7 @@ export async function pairAppDevice(input: {
   const subscriptions: Array<() => void> = [];
   let cancel: () => void = () => {};
   try {
-    await new Promise<void>((resolve, reject) => {
+    return await new Promise<PairingResult>((resolve, reject) => {
       const fail = (failure: PairingFailure) => reject(new PairingError(failure));
       cancel = () => fail("cancelled");
       input.signal.addEventListener("abort", cancel, { once: true });
@@ -167,7 +172,7 @@ export async function pairAppDevice(input: {
                 fail("invalid_response");
                 return;
               }
-              resolve();
+              resolve({ repaired: message.repaired === true });
             } else if (message.type === "pair_error") fail(pairingFailureFromError(message));
             // `pong` only refreshes liveness. The signed-hello nonce arrives first
             // and is used only after enrollment.

@@ -283,15 +283,28 @@ export class SasPairing {
   private complete(): void {
     const a = this.attempt;
     if (!a?.clientConfirmed || !a.hostConfirmed || !a.hello || !a.socket) return;
-    const device = this.devices.register({
+    // Both sides approved this key just now. A device key is persistent, so a
+    // phone that paired before (or whose earlier attempt completed only on this
+    // side) comes back with the same key: renew its record instead of refusing.
+    const { device, created } = this.devices.repair({
       devicePublicKeyB64: a.hello.publicKeyEd25519,
       deviceName: a.hello.label,
       kind: a.hello.kind,
       tailnetNodeId: a.tailnetNodeId,
     });
-    a.socket.send(JSON.stringify({ type: "pair_done", deviceId: device.deviceId }));
-    a.log.info({ attemptId: a.id, kind: a.hello.kind }, "pairing_sas_completed");
-    this.changed({ type: "pairing.sas.changed", payload: { pk: a.pk, state: "completed" } });
+    const repaired = !created;
+    a.socket.send(
+      JSON.stringify({
+        type: "pair_done",
+        deviceId: device.deviceId,
+        ...(repaired ? { repaired } : {}),
+      }),
+    );
+    a.log.info({ attemptId: a.id, kind: a.hello.kind, repaired }, "pairing_sas_completed");
+    this.changed({
+      type: "pairing.sas.changed",
+      payload: { pk: a.pk, state: "completed", ...(repaired ? { repaired } : {}) },
+    });
     clearTimeout(a.timer);
     this.retire(a.pk, "completed");
     this.attempt = undefined;

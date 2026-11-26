@@ -35,6 +35,7 @@ import { isNative } from "@/constants/platform";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 
 const KEEP_AWAKE_TAG = "pair-verify";
+const FIRST_CONNECT_TIMEOUT_MS = 20_000;
 
 export default function PairVerifyScreen() {
   const router = useRouter();
@@ -132,7 +133,7 @@ export default function PairVerifyScreen() {
           })
         : baseFactory;
       const url = config.url;
-      await pairAppDevice({
+      const pairing = await pairAppDevice({
         transport: factory({ url }),
         pk,
         publicKey: signing.devicePublicKeyB64,
@@ -150,6 +151,16 @@ export default function PairVerifyScreen() {
       const result = await connectToDaemon(connection, {
         serverId: offer.serverId,
         signal: controller.signal,
+        // The first connection after pairing often runs on a cellular network and
+        // a relay that has to open a fresh path to the host.
+        timeoutMs: FIRST_CONNECT_TIMEOUT_MS,
+      }).catch((reason: unknown) => {
+        // Pairing itself succeeded; say so, so the next step is not another pairing.
+        const paired = pairing.repaired
+          ? "This device was already paired with the host, and its pairing was renewed."
+          : "This device is paired with the host.";
+        const detail = reason instanceof Error ? reason.message : String(reason);
+        throw new Error(`${paired} The first connection to it failed: ${detail}`);
       });
       try {
         if (result.client.getLastServerInfoMessage()?.serverId !== offer.serverId)
