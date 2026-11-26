@@ -1,3 +1,4 @@
+import { AgentContinuityOverridesSchema } from "./failover/failover-policy.js";
 import { promises as fs, type Dirent } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
@@ -50,6 +51,25 @@ const PERSISTENCE_HANDLE_SCHEMA = z
   .nullable()
   .optional();
 
+/** Native session of one provider that has run this agent; resumed when the agent switches back. */
+const PROVIDER_SESSION_SCHEMA = z.object({
+  persistence: z.object({
+    provider: z.string(),
+    sessionId: z.string(),
+    nativeHandle: z.any().optional(),
+    metadata: z.record(z.string(), z.any()).optional(),
+  }),
+  model: z.string().nullable().optional(),
+  /** Latest timeline seq this provider has seen; a resume sends only what came after it. */
+  lastTimelineSeq: z.number(),
+  /** Seq at which this provider last took over the agent. */
+  enteredAtSeq: z.number().optional(),
+  turns: z.number().optional(),
+  lastUsedAt: z.string(),
+});
+
+export type StoredProviderSession = z.infer<typeof PROVIDER_SESSION_SCHEMA>;
+
 const RAW_STORED_AGENT_SCHEMA = z.object({
   id: z.string(),
   provider: z.string(),
@@ -99,6 +119,11 @@ const RAW_STORED_AGENT_SCHEMA = z.object({
   background: z.boolean().optional(),
   archivedAt: z.string().nullable().optional(),
   owner: AgentOwnerSchema.optional(),
+  providerSessions: z.record(z.string(), PROVIDER_SESSION_SCHEMA).optional(),
+  /** Per-agent failover / child-provider overrides (spec 40 §4–§5). */
+  continuity: AgentContinuityOverridesSchema.optional(),
+  /** Seq at which the current provider took over; absent until the first provider switch. */
+  providerEnteredAtSeq: z.number().optional(),
 });
 
 const STORED_AGENT_SCHEMA = RAW_STORED_AGENT_SCHEMA.transform(foldLegacyRecordFields);
@@ -260,7 +285,7 @@ export class AgentStorage {
     await (this.pendingWrites.get(agentId) ?? Promise.resolve());
     const paths = Array.from(this.pathsById.get(agentId) ?? []);
     await Promise.all(
-      paths.map(async (filePath) => {
+      [...paths, ...paths.map(ledgerPathForRecord)].map(async (filePath) => {
         try {
           await fs.unlink(filePath);
         } catch (error) {
@@ -305,10 +330,35 @@ export class AgentStorage {
       }
       // Background is fixed at creation; a runtime opened without it cannot clear it.
       if (existing?.background) record.background = true;
+      carryProviderSessions(record, existing);
       record.resumeOnStartup =
         existing?.resumeOnStartup && agent.lifecycle !== "idle" && agent.lifecycle !== "error";
       return record;
     });
+  }
+
+  /** Fields only the daemon's continuity paths write; snapshots carry them over. */
+  async patchRecordFields(
+    agentId: string,
+    mutate: (
+      record: StoredAgentRecord,
+    ) => Partial<
+      Pick<StoredAgentRecord, "providerSessions" | "providerEnteredAtSeq" | "continuity">
+    >,
+  ): Promise<void> {
+    await this.load();
+    await this.queueRecordMutation(agentId, (existing) => {
+      if (!existing) throw new Error(`Agent ${agentId} not found`);
+      return { ...existing, ...mutate(existing) };
+    });
+  }
+
+  /** The session ledger file of an agent, next to its record; null before the record exists. */
+  async ledgerPathFor(agentId: string): Promise<string | null> {
+    await this.load();
+    await this.waitForPendingWrite(agentId);
+    const recordPath = this.pathById.get(agentId);
+    return recordPath ? ledgerPathForRecord(recordPath) : null;
   }
 
   async setTitle(agentId: string, title: string): Promise<void> {
@@ -374,7 +424,7 @@ export class AgentStorage {
     }
 
     const rootRecordPaths = entries
-      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+      .filter((entry) => entry.isFile() && isAgentRecordFileName(entry.name))
       .map((entry) => path.join(this.baseDir, entry.name));
 
     const projectDirs = entries
@@ -386,7 +436,7 @@ export class AgentStorage {
         try {
           const files = await fs.readdir(projectDir, { withFileTypes: true });
           return files
-            .filter((file) => file.isFile() && file.name.endsWith(".json"))
+            .filter((file) => file.isFile() && isAgentRecordFileName(file.name))
             .map((file) => path.join(projectDir, file.name));
         } catch {
           return [];
@@ -473,6 +523,28 @@ export class AgentStorage {
   private async waitForPendingWrite(agentId: string): Promise<void> {
     await (this.pendingWrites.get(agentId) ?? Promise.resolve()).catch(() => undefined);
   }
+}
+
+/** Provider sessions are written by provider switches only; snapshots carry them over. */
+function carryProviderSessions(
+  record: StoredAgentRecord,
+  existing: StoredAgentRecord | null,
+): void {
+  if (existing?.providerSessions) record.providerSessions = existing.providerSessions;
+  if (existing?.providerEnteredAtSeq !== undefined) {
+    record.providerEnteredAtSeq = existing.providerEnteredAtSeq;
+  }
+  if (existing?.continuity) record.continuity = existing.continuity;
+}
+
+const LEDGER_SUFFIX = ".ledger.json";
+
+function isAgentRecordFileName(name: string): boolean {
+  return name.endsWith(".json") && !name.endsWith(LEDGER_SUFFIX);
+}
+
+function ledgerPathForRecord(recordPath: string): string {
+  return recordPath.replace(/\.json$/, LEDGER_SUFFIX);
 }
 
 function projectDirNameFromCwd(cwd: string): string {

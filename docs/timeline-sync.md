@@ -65,9 +65,20 @@ Provider message IDs are not guaranteed for every displayed item. JAgentDesk-gen
 Actions that address a point in chat history, such as Fork, use the daemon timeline `epoch` plus the projected item's `seqEnd`. The app carries that position on the rendered assistant item for both live and fetched history. When adjacent projected chunks merge, the merged item retains the newer chunk's position.
 
 The daemon validates the epoch and locates the projected item at the selected position. A fork
-includes projected items through that checkpoint. If an item spans the checkpoint and changed
-afterward, the daemon refuses that fork with an actionable error: discarded historical payloads
-cannot be reconstructed from sequence metadata. Forking the current context remains available.
+into a tab of the same workspace is native (`agent.fork.request`, gated on
+`features.agentNativeFork`): the provider copies its own conversation up to that point
+(`AgentSession.forkConversation`; Claude forks the transcript before the next turn's user message)
+and a new agent resumes the copy with `historyPrimed`, so nothing is replayed into a prompt or into
+the new timeline. The fork's only row is a `jagentdesk`/`fork-origin` plugin item that names the
+parent and the position; the app pages the parent's history from the parent agent when the user
+opens it. That durable row also keeps a later load from hydrating the forked transcript.
+
+Providers without `forkConversation` answer `native_fork_unavailable`, and a fork into a new
+workspace runs in another checkout a provider session cannot move to. Both keep the seeded draft:
+`agent.fork_context.request` curates projected items through the checkpoint into a chat-history
+attachment (at most 100 000 characters, newest kept). It copies only user, assistant and tool-call
+rows, so a plugin card updated later never blocks a checkpoint, and a tool call that changed after
+the checkpoint is copied as still running.
 
 ## Resume behavior
 

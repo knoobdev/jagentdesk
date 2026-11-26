@@ -22,6 +22,7 @@ do not rename them.
 | `workbench`        | Workbench                                     | on      | `devices`     |
 | `forge-hub`        | Forge Hub ([forges](forge-providers.md))      | on      |               |
 | `skills`           | Skills                                        | on      |               |
+| `memory`           | Memory ([guide](memory.md))                   | on      |               |
 | `spec-mode`        | Spec mode                                     | on      | `skills`      |
 | `autorun`          | Autonomous run                                | off     |               |
 | `insights`         | Insights                                      | on      |               |
@@ -30,7 +31,7 @@ do not rename them.
 
 The same Built-in list also holds `bots` ([Bots](bots.md)), `worktree-include`, the bundled
 provider plugins and the `*-usage-source` plugins. Those keep the SDK runtime described in
-[Plugins](plugins.md#bundled-plugins); this doc covers the 17 features above. The manifest in
+[Plugins](plugins.md#bundled-plugins); this doc covers the 18 features above. The manifest in
 `plugins/<id>/jagentdesk-plugin.json` is the source of truth for names, defaults and dependencies.
 
 ## Turning a built-in off
@@ -131,7 +132,7 @@ would load it, and its CommonJS entry pulls raw React Native into the app's unit
 - `host.shared(create)` returns an accessor for one value per daemon, keyed by its config store
   (Argo CD's SSE service).
 - `host.provide(key, get)` serves a port declared in `BuiltinPorts`. Core flows read ports
-  (prompt delivery reads `skillInvocation`, spawn reads `specMode`), and features that `require`
+  (prompt delivery reads `skillInvocation` and `memory`, spawn reads `specMode`), and features that `require`
   this one read `BuiltinProvidedServices` entries with `provided(key)`. Devices provides the
   simulator installer that Workbench's `sim_install_batch` uses.
 - `host.botTriggerSource(source)` adds a source to the Bots poller while the plugin is on.
@@ -167,7 +168,8 @@ libraries.
 add a sidebar destination and mobile drawer entry, a left panel, a route screen, settings sections,
 a card on Settings → Providers, composer items, agent controls, header controls, composer docks,
 agent panel accessories, Settings → Agents cards, a user message body, turn preparers, timeline
-renderers, tool call cards, attachment sources and pills, and per-host mounts. Read the interface
+renderers, tool call cards, attachment sources and pills, per-host mounts, message actions (under every user message and
+assistant turn) and agent inspector tabs. Read the interface
 for each signature.
 
 - Use one destination for desktop and mobile. `group: "Tools"` puts it in the sidebar's Tools

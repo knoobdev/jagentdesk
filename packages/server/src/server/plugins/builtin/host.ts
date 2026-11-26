@@ -22,6 +22,7 @@ import type { BrowserToolsBroker } from "../../browser-tools/broker.js";
 import type { BrowserFingerprintProfile } from "@jagentdesk/protocol/browser-automation/fingerprint-profile";
 import type { AgentStorage } from "../../agent/agent-storage.js";
 import type { SkillInvocationResolver } from "../../agent/agent-prompt.js";
+import type { MemoryPort } from "../../agent/memory-port.js";
 import type { HostCapabilityService } from "../../host-capabilities/service.js";
 import type { TunnelManager } from "../../tunnels/tunnel-manager.js";
 import type { WebSocket as WsSocket } from "ws";
@@ -68,6 +69,8 @@ export interface BuiltinPorts extends BuiltinProvidedServices {
   autorun: AutorunPort;
   /** Insights records every billed turn (AgentManager `onUsageBilled`). */
   usageHistory: UsageHistoryPort;
+  /** Memory: relevant memories in front of each user turn (spec 41 §3.1). */
+  memory: MemoryPort;
 }
 /**
  * Services one built-in offers the built-ins that require it. Core declares each contract so a
@@ -116,6 +119,18 @@ export interface BuiltinDaemonDeps {
   sendPush(notice: BuiltinPushNotice): void;
   /** Core resources Session sharing uses; guest confinement stays in the daemon's sessions. */
   sessionShare: SessionShareDeps;
+  /** Projects (spec 02) and the project an agent works in; absent in daemons built for tests. */
+  projects?: BuiltinProjectAccess;
+}
+export interface BuiltinProject {
+  projectId: string;
+  name: string;
+  rootPath: string;
+}
+export interface BuiltinProjectAccess {
+  list(): Promise<BuiltinProject[]>;
+  /** The project of the agent's workspace, else the project whose root holds the agent's cwd. */
+  forAgent(agentId: string): Promise<BuiltinProject | null>;
 }
 export interface GuestSocketParams {
   agentId: string;

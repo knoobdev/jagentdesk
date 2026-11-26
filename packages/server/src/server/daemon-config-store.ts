@@ -491,6 +491,10 @@ function mergeMutableConfigIntoPersistedConfig(params: {
     resumeOnStartup: mutable.resumeOnStartup,
     resumePrompt: mutable.resumePrompt,
     idleRuntimeCleanup: mutable.idleRuntimeCleanup !== false,
+    ...(mutable.agentFailover ? { failover: mutable.agentFailover } : {}),
+    ...(mutable.crossProviderChildren
+      ? { crossProviderChildren: mutable.crossProviderChildren }
+      : {}),
   };
   return {
     ...persisted,

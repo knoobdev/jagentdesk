@@ -1,7 +1,9 @@
+import { useHostFeature } from "@/runtime/host-features";
 import { getPanelManifest, panelCanLaunchInPane } from "@/panels/panel-manifest";
 import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
 import { buildWorkspaceTabPersistenceKey, type WorkspaceTabTarget } from "@/workspace-tabs/model";
 import { useInstalledPlugins } from "@/plugins/registry";
+import { useBuiltinInspectorTabs } from "@/plugins/builtin/surfaces";
 import { pluginPanelSupportsLocation } from "@/plugins/workspace-panels/locations";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
@@ -875,6 +877,9 @@ export function WorkspaceDesktopTabsRow({
       closeOthers: t("workspace.tabs.menu.closeOthers"),
       reloadAgent: t("workspace.tabs.menu.reloadAgent"),
       reloadAgentTooltip: t("workspace.tabs.menu.reloadAgentTooltip"),
+      failover: t("continuity.failover.menu"),
+      rollover: t("continuity.durable.rolloverMenu"),
+      captureLessons: t("continuity.durable.captureMenu"),
       close: t("workspace.tabs.menu.close"),
     }),
     [t],
@@ -1499,13 +1504,22 @@ function ExplorerAddTabMenu({
 }) {
   const { t } = useTranslation();
   const plugins = useInstalledPlugins();
+  const inspectorTabs = useBuiltinInspectorTabs(serverId);
+  const ledgerSupported = useHostFeature(serverId, "crossProviderContinuity");
   const workspaceKey = buildWorkspaceTabPersistenceKey({ serverId, workspaceId })!;
   const items = useMemo(
     () => [
       { target: { kind: "files" } as const, label: t("workspace.tabs.explorer.files") },
       { target: { kind: "changes_tree" } as const, label: t("workspace.tabs.explorer.changes") },
       { target: { kind: "pull_request" } as const, label: t("panels.pullRequest.label") },
+      ...(ledgerSupported
+        ? [{ target: { kind: "ledger" } as const, label: t("continuity.ledger.tab") }]
+        : []),
       { target: { kind: "working_diff" } as const, label: t("panels.diff.changesSubtitle") },
+      ...inspectorTabs.map((tab) => ({
+        target: { kind: "builtin_inspector", tabId: tab.id } as const,
+        label: tab.title,
+      })),
       ...plugins
         .filter((plugin) => plugin.serverId === serverId)
         .flatMap((plugin) =>
@@ -1525,7 +1539,7 @@ function ExplorerAddTabMenu({
             })),
         ),
     ],
-    [plugins, serverId, t],
+    [inspectorTabs, ledgerSupported, plugins, serverId, t],
   );
   const kinds = tabs.map((item) => item.tab.kind);
   return (

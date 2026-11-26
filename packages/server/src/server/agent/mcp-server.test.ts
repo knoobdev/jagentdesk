@@ -225,6 +225,8 @@ function buildAgentManagerSpies() {
       permission: null,
       lastMessage: null,
     }),
+    // Spec 40 §5: same-provider children pass and get no handoff.
+    prepareChildProvider: vi.fn().mockResolvedValue({ handoff: null }),
     setAgentMode: vi.fn().mockResolvedValue(undefined),
     setAgentModel: vi.fn().mockResolvedValue(undefined),
     setAgentThinkingOption: vi.fn().mockResolvedValue(undefined),
@@ -3392,6 +3394,11 @@ describe("create_agent MCP tool", () => {
     const childClient = new HeldTurnAgentClient("codex", false, { finishTurnsDuringStart: true });
     const agentManager = new AgentManager({
       clients: { claude: parentClient, codex: childClient },
+      // Spec 40 §5: a Claude parent may start a Codex child only when the host allows it.
+      resolveContinuityConfig: () => ({
+        failover: { enabled: false, order: [] },
+        crossProviderChildren: { enabled: true, allowed: [{ provider: "codex", model: null }] },
+      }),
       registry: storage,
       logger,
     });

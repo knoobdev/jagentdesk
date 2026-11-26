@@ -1,10 +1,12 @@
 import { sshModuleStrings } from "./ssh-modules";
 import { builtinPluginStrings } from "./builtin-plugins";
 import { botsStrings } from "./bots";
+import { memoryStrings } from "./memory";
 import { pluginSettings } from "./plugin-settings";
 
 export const en = {
   bots: botsStrings,
+  memory: memoryStrings,
   builtinPlugins: builtinPluginStrings,
   ssh: sshModuleStrings,
   pluginCombobox: {
@@ -343,6 +345,17 @@ export const en = {
       forkUnavailable: "Update the host to use this.",
       forkMissingWorkspace: "This agent is not in a workspace.",
       forkFailed: "Failed to fork chat",
+      forkPreparing: "Preparing fork…",
+      forkRetry: "Retry",
+      forkedFrom: "Forked from {{title}}",
+      forkedFromUnknown: "Forked from another agent",
+      forkShowEarlier: "Show earlier messages",
+      forkLoadOlder: "Load older messages",
+      forkHideEarlier: "Hide earlier messages",
+      forkOpenOriginal: "Open original",
+      forkYou: "You",
+      forkAgent: "Agent",
+      forkToolCalls: "{{count}} tool calls",
       openFile: "Open file",
       copied: "Copied",
     },
@@ -1592,6 +1605,80 @@ export const en = {
     unavailableBody:
       "This build has no Tailscale native module. Install a build with Tailscale support, or connect over your local network with a direct connection.",
   },
+  continuity: {
+    durable: {
+      rolloverMenu: "Rollover to a fresh session…",
+      captureMenu: "Capture lessons…",
+      rolloverTitle: "Rollover to a fresh session",
+      rolloverBody:
+        "Ends this agent's current native session and starts a new one on the same provider and model. The new session gets the session ledger, the artifact index and the last three turns verbatim. The timeline stays as it is.",
+      rolloverConfirm: "Rollover",
+      rolloverDone: "Rolled over to a fresh session",
+      captureTitle: "Capture lessons",
+      captureBody:
+        "Sends one visible message asking the agent to save what it learned in this session as pending lessons, with citations. You approve each one under Memory → Pending lessons.",
+      captureConfirm: "Capture lessons",
+      captureSent: "Asked the agent to capture lessons",
+      archiveTitle: "Capture lessons before archiving?",
+      archiveBody:
+        "This agent ran {{count}} turns. Ask it to save what it learned as pending lessons first, then archive it once it has answered.",
+      archiveNow: "Archive now",
+      updateHost: "Update this host to use Rollover and Capture lessons.",
+      viewBlock: "View block",
+      regroundedTitle: "Re-grounded after compaction",
+      regroundedSubtitle: "{{tokens}} tokens sent with the message",
+      blockMissing: "This block is no longer stored.",
+      compactions: "Compactions",
+      inferred: "inferred",
+      showSummary: "Show summary",
+      hideSummary: "Hide summary",
+    },
+    settings: {
+      addProvider: "Add provider",
+      moveUp: "Up",
+      moveDown: "Down",
+      remove: "Remove",
+      emptyList: "No providers yet.",
+      failoverTitle: "Failover",
+      failoverHint:
+        "When a provider reports a usage limit, the agent switches in place to the next provider in this list and resends the failed message. At most once per turn and three times an hour per agent.",
+      childrenTitle: "Child agents on other providers",
+      childrenHint:
+        "Agents may start child agents on these providers; the daemon suggests the one with the most usage left. Off: children run on their parent's provider.",
+    },
+    usageLimit: {
+      hintOff: "Failover is off for this agent.",
+      hintUsedUp: "No provider in the failover list could take over.",
+      continueWith: "Continue with {{provider}}",
+    },
+    failover: {
+      menu: "Failover…",
+      sheetTitle: "Failover for this agent",
+      useHost: "Use the host setting",
+      save: "Save",
+    },
+    viewHandoff: "View handoff",
+    viewDelta: "View update sent",
+    handoffTitle: "Handoff",
+    deltaTitle: "Update sent on resume",
+    handoffSubtitle: "{{from}} → {{to}} · {{tokens}} of {{budget}} tokens",
+    handoffMissing: "This handoff is no longer stored.",
+    ledger: {
+      tab: "Ledger",
+      noAgent: "Open an agent to see its session ledger.",
+      updateHost: "Update this host to see session ledgers.",
+      loading: "Loading…",
+      loadFailed: "Could not load the session ledger.",
+      providers: "Providers",
+      current: "current",
+      defaultModel: "default model",
+      turns: "Turns: {{count}}",
+      lastUsed: "Last used {{time}}",
+      handoffs: "Handoffs",
+      view: "View",
+      export: "Export Markdown",
+    },
+  },
   modelSelector: {
     title: "Select provider",
     selectModel: "Select model",
@@ -1606,6 +1693,7 @@ export const en = {
     unfavoriteModel: "Unfavorite model",
     modelCount: "{{count}} model",
     modelCountPlural: "{{count}} models",
+    switchProvider: "Switch provider",
     retry: "Retry",
     retrying: "Retrying...",
     noMatches: "No models match your search",

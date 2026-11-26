@@ -41,9 +41,13 @@ export type WorkspaceTabTarget =
   | { kind: "files" }
   | { kind: "changes_tree" }
   | { kind: "pull_request" }
+  /** Spec 40 §2: the focused agent's session ledger, in the inspector. */
+  | { kind: "ledger" }
   | WorkspaceFileTabTarget
   | WorkspaceWorkingDiffTabTarget
   | PluginWorkspaceTabTarget
+  /** A built-in feature's agent inspector tab (spec 41 §5 Memory); shows the inspected agent. */
+  | { kind: "builtin_inspector"; tabId: string }
   | { kind: "setup"; workspaceId: string }
   | { kind: "commit_diff"; sha: string };
 

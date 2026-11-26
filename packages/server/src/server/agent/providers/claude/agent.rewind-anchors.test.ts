@@ -317,3 +317,48 @@ describe("Claude rewind to a message steered into a running turn", () => {
     expect(rewindSdk.recordedForks).toEqual([{ upToMessageId: "tool-result-1" }]);
   });
 });
+
+describe("Claude fast fork (spec 41 §6)", () => {
+  test("forks up to the reply before the selected turn and leaves this session alone", async () => {
+    const conversation = createConversation([
+      { assistantMessageId: "assistant-1" },
+      { assistantMessageId: "assistant-2" },
+      { assistantMessageId: "assistant-3" },
+    ]);
+    const rewindSdk = new FakeClaudeSdk();
+    rewindSdk.setNextSessionId("fork-session");
+    const session = await createSession(conversation, rewindSdk);
+
+    try {
+      await runTurns(session, 3);
+      const handle = await session.forkConversation?.({
+        beforeUserMessageId: conversation.userMessageIds[2]!,
+      });
+      expect(handle).toMatchObject({
+        provider: "claude",
+        sessionId: "fork-session",
+        nativeHandle: "fork-session",
+      });
+      expect(session.describePersistence()?.sessionId).toBe(SESSION_ID);
+    } finally {
+      await session.close();
+    }
+
+    expect(rewindSdk.recordedForks).toEqual([{ upToMessageId: "assistant-2" }]);
+  });
+
+  test("forks the whole conversation when no turn is selected", async () => {
+    const conversation = createConversation([{ assistantMessageId: "assistant-1" }]);
+    const rewindSdk = new FakeClaudeSdk();
+    const session = await createSession(conversation, rewindSdk);
+
+    try {
+      await runTurns(session, 1);
+      await session.forkConversation?.({ beforeUserMessageId: null });
+    } finally {
+      await session.close();
+    }
+
+    expect(rewindSdk.recordedForks).toEqual([{ upToMessageId: undefined }]);
+  });
+});

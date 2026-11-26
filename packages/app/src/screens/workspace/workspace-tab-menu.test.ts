@@ -52,6 +52,9 @@ describe("buildWorkspaceTabMenuEntries", () => {
       "Close to the right",
       "Close other tabs",
       "Reload agent",
+      "Failover…",
+      "Rollover to a fresh session…",
+      "Capture lessons…",
       "Close",
     ]);
   });
@@ -83,6 +86,9 @@ describe("buildWorkspaceTabMenuEntries", () => {
       "Close tabs below",
       "Close other tabs",
       "Reload agent",
+      "Failover…",
+      "Rollover to a fresh session…",
+      "Capture lessons…",
       "Close",
     ]);
   });

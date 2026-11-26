@@ -1,5 +1,14 @@
 import type { AgentMessage } from "@jagentdesk/protocol/agent-message";
-import type { AgentMetric, AgentProvider, ToolCallDetail } from "@jagentdesk/protocol/agent-types";
+import type {
+  AgentMetric,
+  AgentProvider,
+  AgentTimelineItem,
+  ProviderSwitchNotice,
+  RegroundingNotice,
+  ToolCallDetail,
+  UsageLimitNotice,
+} from "@jagentdesk/protocol/agent-types";
+import { timelineItemIdentity } from "@jagentdesk/protocol/timeline-identity";
 import type { AgentAttachment, AgentStreamEventPayload } from "@jagentdesk/protocol/messages";
 import type { AttachmentMetadata } from "@/attachments/types";
 import { stampCompletedTurnMetrics } from "@/timeline/turn-metrics";
@@ -779,6 +788,12 @@ export interface ActivityLogItem {
   activityType: ActivityLogType;
   message: string;
   metadata?: Record<string, unknown>;
+  /** Set on the row a provider switch appended (spec 40 §3). */
+  providerSwitch?: ProviderSwitchNotice;
+  /** Set on the row a usage limit appended when no failover ran (spec 40 §4). */
+  usageLimit?: UsageLimitNotice;
+  /** Set on the "Re-grounded after compaction" row (spec 42 §2). */
+  regrounding?: RegroundingNotice;
 }
 
 export interface CompactionItem {
@@ -1253,6 +1268,36 @@ function normalizeTodoEntry(item: TodoEntry): TodoEntry {
   return entry;
 }
 
+// Daemon-side plugin rows (built-in cards such as Memory's "Used N memories" and a fork's
+// origin). Re-appending the same id updates the row in place. Ported from Paseo e34aea206.
+function appendPluginTimelineItem(
+  state: StreamItem[],
+  item: Extract<AgentTimelineItem, { type: "plugin" }>,
+  timestamp: Date,
+  timelineCursor?: TimelinePosition,
+): StreamItem[] {
+  const identity = timelineItemIdentity(item);
+  if (identity === null) return state;
+  const nextItem: PluginTimelineStreamItem = {
+    kind: "plugin",
+    id: identity,
+    pluginId: item.pluginId,
+    pluginItemId: item.id,
+    itemKind: item.kind,
+    version: item.version,
+    data: item.data,
+    timestamp,
+    ...(timelineCursor ? { timelineCursor } : {}),
+  };
+  const existingIndex = findExistingTimelineIdentityIndex(state, identity);
+  if (existingIndex < 0) return [...state, nextItem];
+  const existing = state[existingIndex];
+  if (!existing || existing.kind !== "plugin") return state;
+  const next = [...state];
+  next[existingIndex] = { ...nextItem, id: existing.id };
+  return next;
+}
+
 function appendTodoList(
   state: StreamItem[],
   provider: AgentProvider,
@@ -1461,10 +1506,15 @@ function reduceTimelineEvent(
         sourceType: "notification",
         level: item.level,
         message: item.message,
+        ...(item.providerSwitch ? { providerSwitch: item.providerSwitch } : {}),
+        ...(item.usageLimit ? { usageLimit: item.usageLimit } : {}),
+        ...(item.regrounding ? { regrounding: item.regrounding } : {}),
       });
     }
     case "compaction":
       return reduceTimelineCompaction(state, item, timestamp, timelineCursor);
+    case "plugin":
+      return appendPluginTimelineItem(state, item, timestamp, timelineCursor);
     default:
       return state;
   }
@@ -1624,6 +1674,8 @@ function getEventItemKind(event: AgentStreamEventPayload): StreamItem["kind"] | 
     case "error":
     case "notification":
       return "activity_log";
+    case "plugin":
+      return "plugin";
     default:
       return null;
   }

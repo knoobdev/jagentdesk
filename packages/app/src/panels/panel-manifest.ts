@@ -90,6 +90,22 @@ const manifests = {
     compactSheet: null,
     resourceKey: () => "changes_tree",
   },
+  builtin_inspector: {
+    kind: "builtin_inspector",
+    supportedHosts: ["explorer"],
+    showCloseButton: true,
+    singleton: false,
+    compactSheet: null,
+    resourceKey: (target) => target.tabId,
+  },
+  ledger: {
+    kind: "ledger",
+    supportedHosts: ["explorer"],
+    showCloseButton: true,
+    singleton: true,
+    compactSheet: null,
+    resourceKey: () => "ledger",
+  },
   files: {
     kind: "files",
     supportedHosts: ["explorer"],

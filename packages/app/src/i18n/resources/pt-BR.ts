@@ -1,11 +1,13 @@
 import { sshModuleStrings } from "./ssh-modules";
 import { builtinPluginStrings } from "./builtin-plugins";
 import { botsStrings } from "./bots";
+import { memoryStrings } from "./memory";
 import { type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ptBR: TranslationResources = {
   bots: botsStrings,
+  memory: memoryStrings,
   builtinPlugins: builtinPluginStrings,
   ssh: sshModuleStrings,
   pluginCombobox: {
@@ -351,6 +353,17 @@ export const ptBR: TranslationResources = {
       forkUnavailable: "Atualize o host para usar isto.",
       forkMissingWorkspace: "Este agente não está em um workspace.",
       forkFailed: "Falha ao bifurcar o chat",
+      forkPreparing: "Preparando a bifurcação…",
+      forkRetry: "Tentar novamente",
+      forkedFrom: "Bifurcado de {{title}}",
+      forkedFromUnknown: "Bifurcado de outro agente",
+      forkShowEarlier: "Mostrar mensagens anteriores",
+      forkLoadOlder: "Carregar mensagens mais antigas",
+      forkHideEarlier: "Ocultar mensagens anteriores",
+      forkOpenOriginal: "Abrir original",
+      forkYou: "Você",
+      forkAgent: "Agente",
+      forkToolCalls: "{{count}} chamadas de ferramentas",
       openFile: "Abrir arquivo",
       copied: "Copiado",
     },
@@ -1557,6 +1570,80 @@ export const ptBR: TranslationResources = {
       settings: "Configurações",
     },
   },
+  continuity: {
+    durable: {
+      rolloverMenu: "Passar para uma sessão nova…",
+      captureMenu: "Registrar lições…",
+      rolloverTitle: "Passar para uma sessão nova",
+      rolloverBody:
+        "Encerra a sessão nativa atual deste agente e abre uma nova com o mesmo provedor e modelo. A sessão nova recebe o registro da sessão, o índice de artefatos e os três últimos turnos na íntegra. A linha do tempo continua igual.",
+      rolloverConfirm: "Passar",
+      rolloverDone: "Passou para uma sessão nova",
+      captureTitle: "Registrar lições",
+      captureBody:
+        "Envia uma mensagem visível pedindo ao agente que salve o que aprendeu nesta sessão como lições pendentes, com citações. Você aprova cada uma em Memória → Lições pendentes.",
+      captureConfirm: "Registrar lições",
+      captureSent: "Pedimos ao agente que registre lições",
+      archiveTitle: "Registrar lições antes de arquivar?",
+      archiveBody:
+        "Este agente fez {{count}} turnos. Peça primeiro que salve o que aprendeu como lições pendentes e arquive-o depois que ele responder.",
+      archiveNow: "Arquivar agora",
+      updateHost: "Atualize este host para usar Passar para uma sessão nova e Registrar lições.",
+      viewBlock: "Ver bloco",
+      regroundedTitle: "Reancorado após a compactação",
+      regroundedSubtitle: "{{tokens}} tokens enviados com a mensagem",
+      blockMissing: "Este bloco não está mais salvo.",
+      compactions: "Compactações",
+      inferred: "inferida",
+      showSummary: "Ver resumo",
+      hideSummary: "Ocultar resumo",
+    },
+    settings: {
+      addProvider: "Adicionar provedor",
+      moveUp: "Subir",
+      moveDown: "Descer",
+      remove: "Remover",
+      emptyList: "Nenhum provedor ainda.",
+      failoverTitle: "Failover",
+      failoverHint:
+        "Quando um provedor atinge o limite de uso, o agente troca no lugar para o próximo provedor desta lista e reenvia a mensagem que falhou. No máximo uma vez por turno e três vezes por hora por agente.",
+      childrenTitle: "Agentes filhos em outros provedores",
+      childrenHint:
+        "Agentes podem iniciar agentes filhos nesses provedores; o daemon sugere o que tem mais uso restante. Desligado: os filhos usam o provedor do pai.",
+    },
+    usageLimit: {
+      hintOff: "O failover está desligado para este agente.",
+      hintUsedUp: "Nenhum provedor da lista pôde assumir.",
+      continueWith: "Continuar com {{provider}}",
+    },
+    failover: {
+      menu: "Failover…",
+      sheetTitle: "Failover deste agente",
+      useHost: "Usar a configuração do host",
+      save: "Salvar",
+    },
+    viewHandoff: "Ver passagem",
+    viewDelta: "Ver atualização enviada",
+    handoffTitle: "Passagem",
+    deltaTitle: "Atualização enviada ao retomar",
+    handoffSubtitle: "{{from}} → {{to}} · {{tokens}} de {{budget}} tokens",
+    handoffMissing: "Esta passagem não está mais armazenada.",
+    ledger: {
+      tab: "Registro",
+      noAgent: "Abra um agente para ver o registro da sessão.",
+      updateHost: "Atualize este host para ver os registros de sessão.",
+      loading: "Carregando…",
+      loadFailed: "Não foi possível carregar o registro da sessão.",
+      providers: "Provedores",
+      current: "atual",
+      defaultModel: "modelo padrão",
+      turns: "Turnos: {{count}}",
+      lastUsed: "Último uso {{time}}",
+      handoffs: "Passagens",
+      view: "Ver",
+      export: "Exportar Markdown",
+    },
+  },
   modelSelector: {
     title: "Selecionar provedor",
     selectModel: "Selecionar modelo",
@@ -1571,6 +1658,7 @@ export const ptBR: TranslationResources = {
     unfavoriteModel: "Remover modelo dos favoritos",
     modelCount: "{{count}} modelo",
     modelCountPlural: "{{count}} modelos",
+    switchProvider: "Trocar de provedor",
     retry: "Tentar novamente",
     retrying: "Tentando novamente...",
     noMatches: "Nenhum modelo corresponde à sua busca",

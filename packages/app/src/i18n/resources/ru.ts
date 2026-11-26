@@ -1,11 +1,13 @@
 import { sshModuleStrings } from "./ssh-modules";
 import { builtinPluginStrings } from "./builtin-plugins";
 import { botsStrings } from "./bots";
+import { memoryStrings } from "./memory";
 import { type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ru: TranslationResources = {
   bots: botsStrings,
+  memory: memoryStrings,
   builtinPlugins: builtinPluginStrings,
   ssh: sshModuleStrings,
   pluginCombobox: {
@@ -369,6 +371,17 @@ export const ru: TranslationResources = {
       forkUnavailable: "Обновите хост, чтобы использовать это.",
       forkMissingWorkspace: "Этот агент не находится в рабочем пространстве.",
       forkFailed: "Не удалось форкнуть чат",
+      forkPreparing: "Готовим форк…",
+      forkRetry: "Повторить",
+      forkedFrom: "Форк из {{title}}",
+      forkedFromUnknown: "Форк из другого агента",
+      forkShowEarlier: "Показать предыдущие сообщения",
+      forkLoadOlder: "Загрузить более старые сообщения",
+      forkHideEarlier: "Скрыть предыдущие сообщения",
+      forkOpenOriginal: "Открыть оригинал",
+      forkYou: "Вы",
+      forkAgent: "Агент",
+      forkToolCalls: "Вызовов инструментов: {{count}}",
       turnStats: "Статистика ответа",
       openFile: "Открыть файл",
       copied: "Скопировано",
@@ -1614,6 +1627,81 @@ export const ru: TranslationResources = {
       settings: "Настройки",
     },
   },
+  continuity: {
+    durable: {
+      rolloverMenu: "Перейти на новую сессию…",
+      captureMenu: "Сохранить уроки…",
+      rolloverTitle: "Перейти на новую сессию",
+      rolloverBody:
+        "Завершает текущую нативную сессию агента и открывает новую с тем же провайдером и моделью. Новая сессия получает журнал сессии, индекс артефактов и три последних хода дословно. Лента остаётся прежней.",
+      rolloverConfirm: "Перейти",
+      rolloverDone: "Переход на новую сессию выполнен",
+      captureTitle: "Сохранить уроки",
+      captureBody:
+        "Отправляет одно видимое сообщение с просьбой к агенту сохранить усвоенное в этой сессии как ожидающие уроки со ссылками. Каждый урок вы утверждаете в разделе Память → Ожидающие уроки.",
+      captureConfirm: "Сохранить уроки",
+      captureSent: "Агента попросили сохранить уроки",
+      archiveTitle: "Сохранить уроки перед архивацией?",
+      archiveBody:
+        "Этот агент выполнил ходов: {{count}}. Сначала попросите его сохранить усвоенное как ожидающие уроки, а после ответа заархивируйте.",
+      archiveNow: "Архивировать сейчас",
+      updateHost:
+        "Обновите этот хост, чтобы пользоваться переходом на новую сессию и сохранением уроков.",
+      viewBlock: "Показать блок",
+      regroundedTitle: "Контекст восстановлен после сжатия",
+      regroundedSubtitle: "{{tokens}} токенов отправлено с сообщением",
+      blockMissing: "Этот блок больше не хранится.",
+      compactions: "Сжатия",
+      inferred: "выведено",
+      showSummary: "Показать сводку",
+      hideSummary: "Скрыть сводку",
+    },
+    settings: {
+      addProvider: "Добавить провайдера",
+      moveUp: "Вверх",
+      moveDown: "Вниз",
+      remove: "Удалить",
+      emptyList: "Провайдеров пока нет.",
+      failoverTitle: "Переключение при сбое",
+      failoverHint:
+        "Когда провайдер сообщает о лимите использования, агент на месте переключается на следующего провайдера из этого списка и повторно отправляет неудавшееся сообщение. Не чаще одного раза за ход и трёх раз в час на агента.",
+      childrenTitle: "Дочерние агенты у других провайдеров",
+      childrenHint:
+        "Агенты могут запускать дочерних агентов у этих провайдеров; демон предлагает того, у кого осталось больше всего лимита. Выключено: дочерние агенты работают у провайдера родителя.",
+    },
+    usageLimit: {
+      hintOff: "Переключение при сбое для этого агента выключено.",
+      hintUsedUp: "Ни один провайдер из списка не смог продолжить.",
+      continueWith: "Продолжить с {{provider}}",
+    },
+    failover: {
+      menu: "Переключение при сбое…",
+      sheetTitle: "Переключение при сбое для этого агента",
+      useHost: "Использовать настройку хоста",
+      save: "Сохранить",
+    },
+    viewHandoff: "Показать передачу",
+    viewDelta: "Показать отправленное обновление",
+    handoffTitle: "Передача",
+    deltaTitle: "Обновление, отправленное при возобновлении",
+    handoffSubtitle: "{{from}} → {{to}} · {{tokens}} из {{budget}} токенов",
+    handoffMissing: "Эта передача больше не хранится.",
+    ledger: {
+      tab: "Журнал",
+      noAgent: "Откройте агента, чтобы увидеть журнал его сеанса.",
+      updateHost: "Обновите этот хост, чтобы видеть журналы сеансов.",
+      loading: "Загрузка…",
+      loadFailed: "Не удалось загрузить журнал сеанса.",
+      providers: "Провайдеры",
+      current: "текущий",
+      defaultModel: "модель по умолчанию",
+      turns: "Ходов: {{count}}",
+      lastUsed: "Последнее использование {{time}}",
+      handoffs: "Передачи",
+      view: "Показать",
+      export: "Экспорт в Markdown",
+    },
+  },
   modelSelector: {
     title: "Выберите провайдера",
     selectModel: "Выберите модель",
@@ -1628,6 +1716,7 @@ export const ru: TranslationResources = {
     unfavoriteModel: "Нелюбимая модель",
     modelCount: "{{count}} модель",
     modelCountPlural: "{{count}} моделей",
+    switchProvider: "Сменить провайдера",
     retry: "Повторить попытку",
     retrying: "Повторная попытка...",
     noMatches: "Ни одна модель не соответствует вашему запросу",

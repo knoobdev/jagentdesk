@@ -262,8 +262,19 @@ function shouldEmitPlanApprovalPrompt(prompt: AgentPromptInput): boolean {
   return /emit\s+(?:a\s+)?synthetic\s+plan\s+approval/i.test(promptToText(prompt));
 }
 
-function shouldEmitTurnFailure(prompt: AgentPromptInput): boolean {
-  return /emit\s+(?:a\s+)?synthetic\s+turn\s+failure/i.test(promptToText(prompt));
+/** Error text of a requested synthetic failure, or null. Usage-limit and network shapes test failover. */
+function requestedTurnFailure(prompt: AgentPromptInput): string | null {
+  const text = promptToText(prompt);
+  if (/emit\s+(?:a\s+)?synthetic\s+usage\s+limit\s+failure/i.test(text)) {
+    return "You've hit your usage limit. Upgrade to Pro or try again at 9:00 PM.";
+  }
+  if (/emit\s+(?:a\s+)?synthetic\s+network\s+failure/i.test(text)) {
+    return "fetch failed: ECONNRESET";
+  }
+  if (/emit\s+(?:a\s+)?synthetic\s+turn\s+failure/i.test(text)) {
+    return "Requested mock provider failure";
+  }
+  return null;
 }
 
 function parseSteeringReplayShape(prompt: AgentPromptInput): SteeringReplayShape | null {
@@ -908,8 +919,9 @@ export class MockLoadTestAgentSession implements AgentSession {
     const settledAssistantImageMarkdown = parseSettledAssistantImageMarkdown(prompt);
     const steeringReplayShape = parseSteeringReplayShape(prompt);
     const scheduleTurn = () => {
-      if (shouldEmitTurnFailure(prompt)) {
-        this.scheduleFailedTurn(turn);
+      const failure = requestedTurnFailure(prompt);
+      if (failure) {
+        this.scheduleFailedTurn(turn, failure);
       } else if (steeringReplayShape) {
         this.scheduleSteeringReplayTurn(turn, steeringReplayShape);
       } else if (this.streamingAssistantResponse !== null) {
@@ -1199,7 +1211,7 @@ export class MockLoadTestAgentSession implements AgentSession {
     turn.timer.unref?.();
   }
 
-  private scheduleFailedTurn(turn: ActiveTurn): void {
+  private scheduleFailedTurn(turn: ActiveTurn, error: string): void {
     turn.timer = setTimeout(() => {
       if (this.activeTurn !== turn) {
         return;
@@ -1211,7 +1223,7 @@ export class MockLoadTestAgentSession implements AgentSession {
         type: "turn_failed",
         provider: this.provider,
         turnId: turn.turnId,
-        error: "Requested mock provider failure",
+        error,
       });
       turn.resolve({
         sessionId: this.id,

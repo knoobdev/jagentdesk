@@ -1,11 +1,13 @@
 import { sshModuleStrings } from "./ssh-modules";
 import { builtinPluginStrings } from "./builtin-plugins";
 import { botsStrings } from "./bots";
+import { memoryStrings } from "./memory";
 import { type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ja: TranslationResources = {
   bots: botsStrings,
+  memory: memoryStrings,
   builtinPlugins: builtinPluginStrings,
   ssh: sshModuleStrings,
   pluginCombobox: {
@@ -357,6 +359,17 @@ export const ja: TranslationResources = {
       forkUnavailable: "これを使用するにはホストを更新してください。",
       forkMissingWorkspace: "このエージェントはワークスペース内にありません。",
       forkFailed: "チャットのフォークに失敗しました",
+      forkPreparing: "フォークを準備しています…",
+      forkRetry: "再試行",
+      forkedFrom: "{{title}} からフォーク",
+      forkedFromUnknown: "別のエージェントからフォーク",
+      forkShowEarlier: "以前のメッセージを表示",
+      forkLoadOlder: "さらに古いメッセージを読み込む",
+      forkHideEarlier: "以前のメッセージを隠す",
+      forkOpenOriginal: "元の会話を開く",
+      forkYou: "あなた",
+      forkAgent: "エージェント",
+      forkToolCalls: "ツール呼び出し {{count}} 件",
       openFile: "ファイルを開く",
       copied: "コピーしました",
     },
@@ -1563,6 +1576,81 @@ export const ja: TranslationResources = {
       settings: "設定",
     },
   },
+  continuity: {
+    durable: {
+      rolloverMenu: "新しいセッションへ切り替え…",
+      captureMenu: "教訓を記録…",
+      rolloverTitle: "新しいセッションへ切り替え",
+      rolloverBody:
+        "このエージェントの現在のネイティブセッションを終了し、同じプロバイダーとモデルで新しいセッションを開始します。新しいセッションにはセッション台帳、成果物インデックス、直近 3 ターンの原文が渡されます。タイムラインはそのまま残ります。",
+      rolloverConfirm: "切り替え",
+      rolloverDone: "新しいセッションに切り替えました",
+      captureTitle: "教訓を記録",
+      captureBody:
+        "このセッションで学んだことを引用付きの保留中の教訓として保存するよう、エージェントに見える形でメッセージを 1 件送ります。各教訓は「メモリ → 保留中の教訓」で承認します。",
+      captureConfirm: "教訓を記録",
+      captureSent: "エージェントに教訓の記録を依頼しました",
+      archiveTitle: "アーカイブ前に教訓を記録しますか？",
+      archiveBody:
+        "このエージェントは {{count}} ターン実行しました。先に学んだことを保留中の教訓として保存させ、回答後にアーカイブしてください。",
+      archiveNow: "今すぐアーカイブ",
+      updateHost:
+        "新しいセッションへの切り替えと教訓の記録を使うには、このホストを更新してください。",
+      viewBlock: "ブロックを表示",
+      regroundedTitle: "コンパクション後に再提示しました",
+      regroundedSubtitle: "メッセージと一緒に {{tokens}} トークンを送信",
+      blockMissing: "このブロックは保存されていません。",
+      compactions: "コンパクション",
+      inferred: "推定",
+      showSummary: "要約を表示",
+      hideSummary: "要約を隠す",
+    },
+    settings: {
+      addProvider: "プロバイダーを追加",
+      moveUp: "上へ",
+      moveDown: "下へ",
+      remove: "削除",
+      emptyList: "プロバイダーはまだありません。",
+      failoverTitle: "フェイルオーバー",
+      failoverHint:
+        "プロバイダーが使用量の上限に達すると、エージェントはその場でこの一覧の次のプロバイダーに切り替え、失敗したメッセージを再送します。1ターンにつき最大1回、エージェントごとに1時間に3回まで。",
+      childrenTitle: "他のプロバイダーの子エージェント",
+      childrenHint:
+        "エージェントはこれらのプロバイダーで子エージェントを起動できます。デーモンは残り使用量が最も多いものを提案します。オフ: 子エージェントは親のプロバイダーで動作します。",
+    },
+    usageLimit: {
+      hintOff: "このエージェントのフェイルオーバーはオフです。",
+      hintUsedUp: "フェイルオーバー一覧のどのプロバイダーも引き継げませんでした。",
+      continueWith: "{{provider}} で続行",
+    },
+    failover: {
+      menu: "フェイルオーバー…",
+      sheetTitle: "このエージェントのフェイルオーバー",
+      useHost: "ホストの設定を使用",
+      save: "保存",
+    },
+    viewHandoff: "引き継ぎを表示",
+    viewDelta: "送信した更新を表示",
+    handoffTitle: "引き継ぎ",
+    deltaTitle: "再開時に送信した更新",
+    handoffSubtitle: "{{from}} → {{to}} · {{budget}} トークン中 {{tokens}}",
+    handoffMissing: "この引き継ぎは保存されていません。",
+    ledger: {
+      tab: "台帳",
+      noAgent: "エージェントを開くとセッション台帳が表示されます。",
+      updateHost: "セッション台帳を表示するにはこのホストを更新してください。",
+      loading: "読み込み中…",
+      loadFailed: "セッション台帳を読み込めませんでした。",
+      providers: "プロバイダー",
+      current: "現在",
+      defaultModel: "デフォルトモデル",
+      turns: "ターン数: {{count}}",
+      lastUsed: "最終使用 {{time}}",
+      handoffs: "引き継ぎ",
+      view: "表示",
+      export: "Markdown をエクスポート",
+    },
+  },
   modelSelector: {
     title: "プロバイダーを選択",
     selectModel: "モデルを選択",
@@ -1577,6 +1665,7 @@ export const ja: TranslationResources = {
     unfavoriteModel: "お気に入りを解除",
     modelCount: "{{count}}つのモデル",
     modelCountPlural: "{{count}}つのモデル",
+    switchProvider: "プロバイダーを切り替え",
     retry: "再試行",
     retrying: "再試行中...",
     noMatches: "検索に一致するモデルがありません",

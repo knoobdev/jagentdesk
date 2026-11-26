@@ -1,4 +1,7 @@
+import type { ComponentProps } from "react";
 import { useRouter } from "expo-router";
+import { randomUUID } from "expo-crypto";
+import { ForkFailedNotice } from "@/components/fork-failed-notice";
 import { useTranslation } from "react-i18next";
 import {
   type AgentForkContextOptions,
@@ -90,6 +93,10 @@ function buildChatHistoryAttachment(input: {
   };
 }
 
+function renderForkFailedNotice(props: ComponentProps<typeof ForkFailedNotice>) {
+  return <ForkFailedNotice {...props} />;
+}
+
 function buildForkDraftSetup(agent: ForkAgentSource): WorkspaceDraftTabSetup | undefined {
   if (!agent.provider) {
     return undefined;
@@ -126,15 +133,99 @@ export function useForkAgent(
   const router = useRouter();
   const client = useSessionStore((state) => state.sessions[serverId]?.client ?? null);
   const supportsAgentForkContext = useHostFeature(serverId, "agentForkContext") && !readOnly;
+  const supportsNativeFork = useHostFeature(serverId, "agentNativeFork") && !readOnly;
+
+  /**
+   * Fast fork (spec 41 §6): the daemon forks the provider conversation natively and the new
+   * agent opens as a tab. "Preparing fork…" stays up until it lands; a failure keeps its reason
+   * and offers Retry with the same fork id. Resolves false when the provider has no native fork.
+   */
+  const forkNatively = async (request: {
+    agentId: string;
+    workspaceId: string;
+    boundary?: ForkAgentBoundary;
+    forkAgentId: string;
+  }): Promise<boolean> => {
+    if (!client) throw new Error(t("workspace.terminal.hostDisconnected"));
+    const dismissPreparing = toast?.show(t("message.actions.forkPreparing"), {
+      durationMs: null,
+      testID: "fork-preparing-toast",
+    });
+    let result: Awaited<ReturnType<DaemonClient["forkAgent"]>>;
+    try {
+      result = await client.forkAgent(request.agentId, {
+        ...request.boundary,
+        forkAgentId: request.forkAgentId,
+      });
+    } catch (error) {
+      result = {
+        requestId: "",
+        agentId: request.agentId,
+        agent: null,
+        error: toErrorMessage(error) || t("message.actions.forkFailed"),
+        code: null,
+      };
+    } finally {
+      dismissPreparing?.();
+    }
+    if (result.code === "native_fork_unavailable") return false;
+    if (!result.agent) {
+      const retry = () => {
+        void forkNatively(request).catch((error: unknown) =>
+          toast?.error(toErrorMessage(error) || t("message.actions.forkFailed")),
+        );
+      };
+      toast?.show(
+        renderForkFailedNotice({
+          message: result.error ?? t("message.actions.forkFailed"),
+          retryLabel: t("message.actions.forkRetry"),
+          onRetry: retry,
+        }),
+        { variant: "error", durationMs: null, testID: "fork-failed-toast" },
+      );
+      return true;
+    }
+    navigateToWorkspace({
+      serverId,
+      workspaceId: request.workspaceId,
+      target: { kind: "agent", agentId: result.agent.id },
+    });
+    return true;
+  };
+
+  const canFork = supportsAgentForkContext || supportsNativeFork;
+  // A fork into another workspace runs in another checkout, which a provider session cannot move
+  // to, so it keeps the seeded draft.
+  const tryNativeFork = async (request: {
+    agentId: string;
+    workspaceId?: string;
+    target: AssistantForkTarget;
+    boundary?: ForkAgentBoundary;
+  }): Promise<boolean> => {
+    if (!supportsNativeFork || request.target !== "tab" || !request.workspaceId) return false;
+    return forkNatively({
+      agentId: request.agentId,
+      workspaceId: request.workspaceId,
+      boundary: request.boundary,
+      forkAgentId: randomUUID(),
+    });
+  };
 
   return useStableEvent(async ({ agentId, agent, workspaceId, target, boundary }) => {
     try {
-      if (!supportsAgentForkContext) {
+      if (!canFork) {
         toast?.error(t("message.actions.forkUnavailable"));
         return;
       }
       if (!client) {
         throw new Error(t("workspace.terminal.hostDisconnected"));
+      }
+      if (await tryNativeFork({ agentId, workspaceId, target, boundary })) return;
+      // TODO(spec 40 §3): providers without a native fork are seeded with the curated chat
+      // history below until the session ledger handoff (plat/xp) replaces it.
+      if (!supportsAgentForkContext) {
+        toast?.error(t("message.actions.forkUnavailable"));
+        return;
       }
       const draftSetup = buildForkDraftSetup(agent);
       const prepareForkDraft = async () => {

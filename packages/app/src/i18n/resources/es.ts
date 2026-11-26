@@ -1,11 +1,13 @@
 import { sshModuleStrings } from "./ssh-modules";
 import { builtinPluginStrings } from "./builtin-plugins";
 import { botsStrings } from "./bots";
+import { memoryStrings } from "./memory";
 import { type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const es: TranslationResources = {
   bots: botsStrings,
+  memory: memoryStrings,
   builtinPlugins: builtinPluginStrings,
   ssh: sshModuleStrings,
   pluginCombobox: {
@@ -352,6 +354,17 @@ export const es: TranslationResources = {
       forkUnavailable: "Actualiza el host para usar esto.",
       forkMissingWorkspace: "Este agente no está en un espacio de trabajo.",
       forkFailed: "No se pudo bifurcar el chat",
+      forkPreparing: "Preparando la bifurcación…",
+      forkRetry: "Reintentar",
+      forkedFrom: "Bifurcado de {{title}}",
+      forkedFromUnknown: "Bifurcado de otro agente",
+      forkShowEarlier: "Mostrar mensajes anteriores",
+      forkLoadOlder: "Cargar mensajes más antiguos",
+      forkHideEarlier: "Ocultar mensajes anteriores",
+      forkOpenOriginal: "Abrir original",
+      forkYou: "Tú",
+      forkAgent: "Agente",
+      forkToolCalls: "{{count}} llamadas a herramientas",
       openFile: "Abrir archivo",
       copied: "Copiado",
     },
@@ -1573,6 +1586,80 @@ export const es: TranslationResources = {
       settings: "Ajustes",
     },
   },
+  continuity: {
+    durable: {
+      rolloverMenu: "Pasar a una sesión nueva…",
+      captureMenu: "Capturar lecciones…",
+      rolloverTitle: "Pasar a una sesión nueva",
+      rolloverBody:
+        "Cierra la sesión nativa actual de este agente y abre una nueva con el mismo proveedor y modelo. La sesión nueva recibe el registro de sesión, el índice de artefactos y los tres últimos turnos literales. La línea de tiempo no cambia.",
+      rolloverConfirm: "Pasar",
+      rolloverDone: "Se pasó a una sesión nueva",
+      captureTitle: "Capturar lecciones",
+      captureBody:
+        "Envía un mensaje visible que pide al agente guardar lo aprendido en esta sesión como lecciones pendientes, con citas. Apruebas cada una en Memoria → Lecciones pendientes.",
+      captureConfirm: "Capturar lecciones",
+      captureSent: "Se pidió al agente capturar lecciones",
+      archiveTitle: "¿Capturar lecciones antes de archivar?",
+      archiveBody:
+        "Este agente hizo {{count}} turnos. Pídele primero que guarde lo aprendido como lecciones pendientes y archívalo cuando responda.",
+      archiveNow: "Archivar ahora",
+      updateHost: "Actualiza este host para usar Pasar a una sesión nueva y Capturar lecciones.",
+      viewBlock: "Ver bloque",
+      regroundedTitle: "Reubicado tras la compactación",
+      regroundedSubtitle: "{{tokens}} tokens enviados con el mensaje",
+      blockMissing: "Este bloque ya no está guardado.",
+      compactions: "Compactaciones",
+      inferred: "inferida",
+      showSummary: "Ver resumen",
+      hideSummary: "Ocultar resumen",
+    },
+    settings: {
+      addProvider: "Añadir proveedor",
+      moveUp: "Subir",
+      moveDown: "Bajar",
+      remove: "Quitar",
+      emptyList: "Aún no hay proveedores.",
+      failoverTitle: "Conmutación por error",
+      failoverHint:
+        "Cuando un proveedor alcanza su límite de uso, el agente cambia en el sitio al siguiente proveedor de esta lista y reenvía el mensaje fallido. Como máximo una vez por turno y tres veces por hora por agente.",
+      childrenTitle: "Agentes hijos en otros proveedores",
+      childrenHint:
+        "Los agentes pueden iniciar agentes hijos en estos proveedores; el daemon sugiere el que tenga más uso disponible. Desactivado: los hijos usan el proveedor de su padre.",
+    },
+    usageLimit: {
+      hintOff: "La conmutación por error está desactivada para este agente.",
+      hintUsedUp: "Ningún proveedor de la lista pudo continuar.",
+      continueWith: "Continuar con {{provider}}",
+    },
+    failover: {
+      menu: "Conmutación por error…",
+      sheetTitle: "Conmutación por error de este agente",
+      useHost: "Usar la configuración del host",
+      save: "Guardar",
+    },
+    viewHandoff: "Ver traspaso",
+    viewDelta: "Ver actualización enviada",
+    handoffTitle: "Traspaso",
+    deltaTitle: "Actualización enviada al reanudar",
+    handoffSubtitle: "{{from}} → {{to}} · {{tokens}} de {{budget}} tokens",
+    handoffMissing: "Este traspaso ya no está guardado.",
+    ledger: {
+      tab: "Registro",
+      noAgent: "Abre un agente para ver el registro de su sesión.",
+      updateHost: "Actualiza este host para ver los registros de sesión.",
+      loading: "Cargando…",
+      loadFailed: "No se pudo cargar el registro de la sesión.",
+      providers: "Proveedores",
+      current: "actual",
+      defaultModel: "modelo predeterminado",
+      turns: "Turnos: {{count}}",
+      lastUsed: "Último uso {{time}}",
+      handoffs: "Traspasos",
+      view: "Ver",
+      export: "Exportar Markdown",
+    },
+  },
   modelSelector: {
     title: "Seleccionar proveedor",
     selectModel: "Seleccionar modelo",
@@ -1587,6 +1674,7 @@ export const es: TranslationResources = {
     unfavoriteModel: "Modelo no favorito",
     modelCount: "{{count}} modelo",
     modelCountPlural: "{{count}} modelos",
+    switchProvider: "Cambiar de proveedor",
     retry: "Rever",
     retrying: "Reintentando...",
     noMatches: "Ningún modelo coincide con tu búsqueda",

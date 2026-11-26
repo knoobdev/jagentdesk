@@ -4,6 +4,13 @@ import type {
   AgentOptionToggleControl,
 } from "@jagentdesk/protocol/agent-types";
 export type { AgentOptionControl, AgentOptionSelectControl, AgentOptionToggleControl };
+import type {
+  ContextCompactionNotice,
+  ProviderSwitchNotice,
+  RegroundingNotice,
+  UsageLimitNotice,
+} from "@jagentdesk/protocol/agent-types";
+export type { ContextCompactionNotice, ProviderSwitchNotice, RegroundingNotice, UsageLimitNotice };
 import type { AgentMessage } from "@jagentdesk/protocol/agent-message";
 import type { Options as ClaudeAgentOptions } from "@anthropic-ai/claude-agent-sdk";
 import type {
@@ -409,7 +416,19 @@ export type AgentTimelineItem =
   | ToolCallTimelineItem
   | { type: "todo"; items: AgentTaskItem[] }
   | { type: "error"; message: string }
-  | { type: "notification"; level: "info" | "warning" | "error"; message: string }
+  | {
+      type: "notification";
+      level: "info" | "warning" | "error";
+      message: string;
+      /** Set on the row a provider switch appends (spec 40 §3). */
+      providerSwitch?: ProviderSwitchNotice;
+      /** Set on the row a usage-limit failure appends when no failover ran (spec 40 §4). */
+      usageLimit?: UsageLimitNotice;
+      /** Set on the "Context compacted" row (spec 42 §1). */
+      contextCompaction?: ContextCompactionNotice;
+      /** Set on the "Re-grounded after compaction" row (spec 42 §2). */
+      regrounding?: RegroundingNotice;
+    }
   | CompactionTimelineItem
   | PluginTimelineItem;
 
@@ -681,7 +700,20 @@ export interface AgentSessionConfig {
   internal?: boolean;
 }
 
+/**
+ * Spec 42 §3: provider compaction hooks (Claude PreCompact / PostCompact). Runtime-only, never
+ * persisted; providers without compaction hooks ignore it.
+ */
+export interface AgentCompactionHooks {
+  /** Extra instructions for the compaction itself, or null to add none. */
+  preCompactInstruction(): string | null;
+  /** The provider's own summary after a compaction, kept to compare with the ledger. */
+  onCompactSummary(input: { summary: string; trigger: "auto" | "manual" | null }): void;
+}
+
 export interface AgentLaunchContext {
+  /** Spec 42 §3 compaction hooks; runtime-only. */
+  compactionHooks?: AgentCompactionHooks;
   /** Launch-only instructions contributed by plugins. */
   appendSystemPrompt?: string[];
   /** Launch-only plugin MCP servers and their owners; never persisted. */
@@ -853,6 +885,13 @@ export interface AgentSession {
   applyOptions?(options: ProviderOptions): Promise<Record<string, unknown> | void>;
 
   revertConversation?(input: { messageId: string }): Promise<void>;
+
+  /**
+   * Fast fork (spec 41 §6): copies the provider conversation into a new provider session that ends
+   * before the turn `beforeUserMessageId` opened (the whole conversation when null) and returns
+   * its handle. This session is unchanged; nothing is replayed into a prompt.
+   */
+  forkConversation?(input: { beforeUserMessageId: string | null }): Promise<AgentPersistenceHandle>;
 
   revertFiles?(input: { messageId: string }): Promise<void>;
 

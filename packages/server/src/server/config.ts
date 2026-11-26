@@ -568,6 +568,8 @@ export function loadConfig(
     ...resolveRestartRecoveryConfig(persisted.agents),
     agentProviderSettings: extractAgentProviderSettings(providerOverrides),
     idleRuntimeCleanup: persisted.agents?.idleRuntimeCleanup ?? true,
+    agentFailover: persisted.agents?.failover,
+    crossProviderChildren: persisted.agents?.crossProviderChildren,
     metadataGeneration: persisted.agents?.metadataGeneration,
     providerOverrides,
     log: resolveLogConfigFromEnv(env, persisted),

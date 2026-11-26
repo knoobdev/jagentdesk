@@ -1,11 +1,13 @@
 import { sshModuleStrings } from "./ssh-modules";
 import { builtinPluginStrings } from "./builtin-plugins";
 import { botsStrings } from "./bots";
+import { memoryStrings } from "./memory";
 import { type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const fr: TranslationResources = {
   bots: botsStrings,
+  memory: memoryStrings,
   builtinPlugins: builtinPluginStrings,
   ssh: sshModuleStrings,
   pluginCombobox: {
@@ -356,6 +358,17 @@ export const fr: TranslationResources = {
       forkUnavailable: "Mettez \u00E0 jour l\u2019h\u00F4te pour utiliser cette fonction.",
       forkMissingWorkspace: "Cet agent n\u2019est dans aucun espace de travail.",
       forkFailed: "Impossible de forker la conversation",
+      forkPreparing: "Préparation du fork…",
+      forkRetry: "Réessayer",
+      forkedFrom: "Forké depuis {{title}}",
+      forkedFromUnknown: "Forké depuis un autre agent",
+      forkShowEarlier: "Afficher les messages précédents",
+      forkLoadOlder: "Charger des messages plus anciens",
+      forkHideEarlier: "Masquer les messages précédents",
+      forkOpenOriginal: "Ouvrir l’original",
+      forkYou: "Vous",
+      forkAgent: "Agent",
+      forkToolCalls: "{{count}} appels d’outils",
       openFile: "Ouvrir le fichier",
       copied: "Copié",
     },
@@ -1593,6 +1606,81 @@ export const fr: TranslationResources = {
       settings: "Paramètres",
     },
   },
+  continuity: {
+    durable: {
+      rolloverMenu: "Passer à une nouvelle session…",
+      captureMenu: "Capturer les leçons…",
+      rolloverTitle: "Passer à une nouvelle session",
+      rolloverBody:
+        "Termine la session native actuelle de cet agent et en ouvre une nouvelle avec le même fournisseur et le même modèle. La nouvelle session reçoit le registre de session, l'index des artefacts et les trois derniers tours mot pour mot. La chronologie reste telle quelle.",
+      rolloverConfirm: "Passer",
+      rolloverDone: "Passé à une nouvelle session",
+      captureTitle: "Capturer les leçons",
+      captureBody:
+        "Envoie un message visible demandant à l'agent d'enregistrer ce qu'il a appris dans cette session comme leçons en attente, avec citations. Vous approuvez chacune dans Mémoire → Leçons en attente.",
+      captureConfirm: "Capturer les leçons",
+      captureSent: "L'agent doit capturer les leçons",
+      archiveTitle: "Capturer les leçons avant d'archiver ?",
+      archiveBody:
+        "Cet agent a fait {{count}} tours. Demandez-lui d'abord d'enregistrer ce qu'il a appris comme leçons en attente, puis archivez-le une fois qu'il a répondu.",
+      archiveNow: "Archiver maintenant",
+      updateHost:
+        "Mettez à jour cet hôte pour utiliser Passer à une nouvelle session et Capturer les leçons.",
+      viewBlock: "Voir le bloc",
+      regroundedTitle: "Recadré après la compaction",
+      regroundedSubtitle: "{{tokens}} jetons envoyés avec le message",
+      blockMissing: "Ce bloc n'est plus enregistré.",
+      compactions: "Compactions",
+      inferred: "déduite",
+      showSummary: "Voir le résumé",
+      hideSummary: "Masquer le résumé",
+    },
+    settings: {
+      addProvider: "Ajouter un fournisseur",
+      moveUp: "Monter",
+      moveDown: "Descendre",
+      remove: "Retirer",
+      emptyList: "Aucun fournisseur pour l’instant.",
+      failoverTitle: "Basculement",
+      failoverHint:
+        "Quand un fournisseur atteint sa limite d’utilisation, l’agent bascule sur place vers le fournisseur suivant de cette liste et renvoie le message échoué. Au plus une fois par tour et trois fois par heure par agent.",
+      childrenTitle: "Agents enfants sur d’autres fournisseurs",
+      childrenHint:
+        "Les agents peuvent lancer des agents enfants sur ces fournisseurs ; le daemon suggère celui qui a le plus de quota restant. Désactivé : les enfants utilisent le fournisseur de leur parent.",
+    },
+    usageLimit: {
+      hintOff: "Le basculement est désactivé pour cet agent.",
+      hintUsedUp: "Aucun fournisseur de la liste n’a pu prendre le relais.",
+      continueWith: "Continuer avec {{provider}}",
+    },
+    failover: {
+      menu: "Basculement…",
+      sheetTitle: "Basculement de cet agent",
+      useHost: "Utiliser le réglage de l’hôte",
+      save: "Enregistrer",
+    },
+    viewHandoff: "Voir la passation",
+    viewDelta: "Voir la mise à jour envoyée",
+    handoffTitle: "Passation",
+    deltaTitle: "Mise à jour envoyée à la reprise",
+    handoffSubtitle: "{{from}} → {{to}} · {{tokens}} sur {{budget}} jetons",
+    handoffMissing: "Cette passation n’est plus conservée.",
+    ledger: {
+      tab: "Journal",
+      noAgent: "Ouvrez un agent pour voir le journal de sa session.",
+      updateHost: "Mettez à jour cet hôte pour voir les journaux de session.",
+      loading: "Chargement…",
+      loadFailed: "Impossible de charger le journal de session.",
+      providers: "Fournisseurs",
+      current: "actuel",
+      defaultModel: "modèle par défaut",
+      turns: "Tours : {{count}}",
+      lastUsed: "Dernière utilisation {{time}}",
+      handoffs: "Passations",
+      view: "Voir",
+      export: "Exporter en Markdown",
+    },
+  },
   modelSelector: {
     title: "S\u00E9lectionner le fournisseur",
     selectModel: "S\u00E9lectionner le mod\u00E8le",
@@ -1607,6 +1695,7 @@ export const fr: TranslationResources = {
     unfavoriteModel: "Modèle défavorisé",
     modelCount: "{{count}} modèle",
     modelCountPlural: "{{count}} modèles",
+    switchProvider: "Changer de fournisseur",
     retry: "Réessayer",
     retrying: "Nouvelle tentative\u2026",
     noMatches: "Aucun modèle ne correspond à votre recherche",

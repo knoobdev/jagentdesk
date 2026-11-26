@@ -418,9 +418,58 @@ export type AgentTimelineItem =
   | ToolCallTimelineItem
   | { type: "todo"; items: AgentTaskItem[] }
   | { type: "error"; message: string }
-  | { type: "notification"; level: "info" | "warning" | "error"; message: string }
+  | {
+      type: "notification";
+      level: "info" | "warning" | "error";
+      message: string;
+      /** Set on the row a provider switch appends (spec 40 §3). */
+      providerSwitch?: ProviderSwitchNotice;
+      /** Set on the row a usage-limit failure appends when no failover ran (spec 40 §4). */
+      usageLimit?: UsageLimitNotice;
+      /** Set on the "Context compacted" row (spec 42 §1). */
+      contextCompaction?: ContextCompactionNotice;
+      /** Set on the "Re-grounded after compaction" row (spec 42 §2). */
+      regrounding?: RegroundingNotice;
+    }
   | CompactionTimelineItem
   | PluginTimelineItem;
+
+export interface ProviderSwitchNotice {
+  fromProvider: string;
+  toProvider: string;
+  model: string | null;
+  /** "manual" or "failover"; open string so new reasons parse on old clients. */
+  reason: string;
+  /** "resume" (native session resumed, delta sent) or "handoff" (new session, ledger sent). */
+  mode: string;
+  handoffId: string | null;
+}
+
+export interface ContextCompactionNotice {
+  id: string;
+  provider: string;
+  /** "auto" or "manual" when the provider says; null when unknown or inferred. */
+  trigger: string | null;
+  preTokens: number | null;
+  postTokens: number | null;
+  /** True when no provider event reported it and the daemon read it off a context-usage drop. */
+  inferred: boolean;
+}
+
+export interface RegroundingNotice {
+  /** Id of the block in the session ledger (`agent.ledger.get` → `regroundings`). */
+  id: string;
+  compactionId: string | null;
+  estimatedTokens: number;
+}
+
+export interface UsageLimitNotice {
+  provider: string;
+  /** Why no failover ran: "off", "exhausted", "capped" or "repeat"; open string. */
+  failover: string;
+  /** The provider and model "Continue with …" moves the agent to, when one is enabled. */
+  suggestion: { provider: string; model: string | null } | null;
+}
 
 export type AgentStreamEvent =
   | { type: "thread_started"; sessionId: string; provider: AgentProvider }

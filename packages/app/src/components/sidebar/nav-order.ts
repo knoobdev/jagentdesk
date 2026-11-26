@@ -7,6 +7,7 @@ const APP_NAV_ORDER: readonly string[] = [
   "bots",
   "shared-sessions",
   "skills",
+  "memory",
   "marketplace",
   "docker",
   "simulators",
