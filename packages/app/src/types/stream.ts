@@ -1,5 +1,10 @@
 import type { AgentMessage } from "@jagentdesk/protocol/agent-message";
-import type { AgentMetric, AgentProvider, ToolCallDetail } from "@jagentdesk/protocol/agent-types";
+import type {
+  AgentMetric,
+  AgentProvider,
+  ProviderSwitchNotice,
+  ToolCallDetail,
+} from "@jagentdesk/protocol/agent-types";
 import type { AgentAttachment, AgentStreamEventPayload } from "@jagentdesk/protocol/messages";
 import type { AttachmentMetadata } from "@/attachments/types";
 import { stampCompletedTurnMetrics } from "@/timeline/turn-metrics";
@@ -779,6 +784,8 @@ export interface ActivityLogItem {
   activityType: ActivityLogType;
   message: string;
   metadata?: Record<string, unknown>;
+  /** Set on the row a provider switch appended (spec 40 §3). */
+  providerSwitch?: ProviderSwitchNotice;
 }
 
 export interface CompactionItem {
@@ -1461,6 +1468,7 @@ function reduceTimelineEvent(
         sourceType: "notification",
         level: item.level,
         message: item.message,
+        ...(item.providerSwitch ? { providerSwitch: item.providerSwitch } : {}),
       });
     }
     case "compaction":

@@ -102,6 +102,8 @@ import {
   type DraftAgentProfileControls,
 } from "@/agent-profiles";
 import { buildSettingsHostSectionRoute } from "@/utils/host-routes";
+import { useHostFeature } from "@/runtime/host-features";
+import { ModelBrowserSwitchFromContext } from "@/components/model-browser";
 
 interface AgentControlOption {
   id: string;
@@ -1034,7 +1036,15 @@ export const AgentControls = memo(function AgentControls({
     () => buildAgentProviderModels(agent?.provider, models),
     [agent?.provider, models],
   );
+  // A host with cross-provider continuity lists every enabled provider; a pick from another
+  // provider moves this agent there and keeps its context (spec 40 §3).
+  const canSwitchProvider = useHostFeature(serverId, "crossProviderContinuity");
   const agentModelSelectorProviders = useMemo(() => {
+    if (canSwitchProvider && snapshotEntries && snapshotEntries.length > 0) {
+      return buildSelectableProviderSelectorProviders(snapshotEntries, {
+        selectedProvider: agent?.provider ?? null,
+      });
+    }
     if (snapshotSelectedEntry) {
       return buildSelectableProviderSelectorProviders([snapshotSelectedEntry], {
         selectedProvider: agent?.provider ?? null,
@@ -1044,7 +1054,14 @@ export const AgentControls = memo(function AgentControls({
       providerDefinitions: agentProviderDefinitions,
       modelsByProvider: agentProviderModels,
     });
-  }, [agentProviderDefinitions, agentProviderModels, snapshotSelectedEntry, agent?.provider]);
+  }, [
+    agentProviderDefinitions,
+    agentProviderModels,
+    snapshotSelectedEntry,
+    agent?.provider,
+    canSwitchProvider,
+    snapshotEntries,
+  ]);
 
   const modelSelection = resolveAgentModelSelection({
     models,
@@ -1089,9 +1106,44 @@ export const AgentControls = memo(function AgentControls({
     },
     [agentId, agentProvider, client, toast, updatePreferences],
   );
+  const handleSelectProviderAndModel = useCallback(
+    async (provider: AgentProvider, modelId: string) => {
+      if (!client || !agentProvider) {
+        return;
+      }
+      if (provider === agentProvider) {
+        await handleSelectModel(modelId);
+        return;
+      }
+      try {
+        await client.switchAgentProvider(agentId, provider, modelId);
+        await updatePreferences((current) =>
+          mergeProviderPreferences({
+            preferences: current,
+            provider,
+            updates: { model: modelId },
+          }),
+        );
+      } catch (error) {
+        console.warn("[AgentControls] switchAgentProvider failed", error);
+        toast.error(toErrorMessage(error));
+      }
+    },
+    [agentId, agentProvider, client, handleSelectModel, toast, updatePreferences],
+  );
+  const providerSwitch = useMemo(
+    () =>
+      canSwitchProvider && agentProvider
+        ? { from: agentProvider, onSelect: handleSelectProviderAndModel }
+        : { from: null, onSelect: undefined },
+    [agentProvider, canSwitchProvider, handleSelectProviderAndModel],
+  );
   const handleSelectCommandCenterModel = useCallback(
-    (_provider: AgentProvider, modelId: string) => handleSelectModel(modelId),
-    [handleSelectModel],
+    (provider: AgentProvider, modelId: string) =>
+      canSwitchProvider
+        ? handleSelectProviderAndModel(provider, modelId)
+        : handleSelectModel(modelId),
+    [canSwitchProvider, handleSelectModel, handleSelectProviderAndModel],
   );
 
   // A running agent is one provider's process, so only that provider's profiles
@@ -1256,31 +1308,34 @@ export const AgentControls = memo(function AgentControls({
     <ComposerModelProvider value={composer}>
       {commandCenterRegistration}
       {profileEditor.element}
-      <ControlledAgentControls
-        provider={agent.provider}
-        modelSelectorProviders={agentModelSelectorProviders}
-        modelOptions={modelOptions}
-        selectedModelId={modelSelection.activeModelId ?? undefined}
-        onSelectModel={handleSelectModel}
-        agentProfiles={agentProfiles}
-        onApplyAgentProfile={agentProfiles?.applyProfile}
-        onEditAgentProfiles={handleEditAgentProfiles}
-        onCreateAgentProfile={profileActions.create}
-        onEditAgentProfile={profileActions.edit}
-        thinkingOptions={thinkingOptions.length > 0 ? thinkingOptions : undefined}
-        selectedThinkingOptionId={modelSelection.selectedThinkingId ?? undefined}
-        onSelectThinkingOption={handleSelectThinkingOption}
-        optionControls={agentOptionControls}
-        isModelLoading={snapshotIsLoading || selectedProviderIsLoading}
-        onModelSelectorOpen={handleModelSelectorOpen}
-        onRetryModelProvider={handleRetryModelProvider}
-        isRetryingModelProvider={snapshotIsRefreshing}
-        onDropdownClose={onDropdownClose}
-        disabled={!client}
-        modeControl={modeControl}
-        modelSelectorServerId={serverId}
-        isCompactLayout={isCompactLayout}
-      />
+      <ModelBrowserSwitchFromContext.Provider value={providerSwitch.from}>
+        <ControlledAgentControls
+          provider={agent.provider}
+          modelSelectorProviders={agentModelSelectorProviders}
+          modelOptions={modelOptions}
+          selectedModelId={modelSelection.activeModelId ?? undefined}
+          onSelectModel={handleSelectModel}
+          onSelectProviderAndModel={providerSwitch.onSelect}
+          agentProfiles={agentProfiles}
+          onApplyAgentProfile={agentProfiles?.applyProfile}
+          onEditAgentProfiles={handleEditAgentProfiles}
+          onCreateAgentProfile={profileActions.create}
+          onEditAgentProfile={profileActions.edit}
+          thinkingOptions={thinkingOptions.length > 0 ? thinkingOptions : undefined}
+          selectedThinkingOptionId={modelSelection.selectedThinkingId ?? undefined}
+          onSelectThinkingOption={handleSelectThinkingOption}
+          optionControls={agentOptionControls}
+          isModelLoading={snapshotIsLoading || selectedProviderIsLoading}
+          onModelSelectorOpen={handleModelSelectorOpen}
+          onRetryModelProvider={handleRetryModelProvider}
+          isRetryingModelProvider={snapshotIsRefreshing}
+          onDropdownClose={onDropdownClose}
+          disabled={!client}
+          modeControl={modeControl}
+          modelSelectorServerId={serverId}
+          isCompactLayout={isCompactLayout}
+        />
+      </ModelBrowserSwitchFromContext.Provider>
     </ComposerModelProvider>
   );
 });

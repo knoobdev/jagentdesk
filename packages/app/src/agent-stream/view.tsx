@@ -1,3 +1,4 @@
+import { ProviderSwitchRow } from "@/continuity/provider-switch-row";
 import { useChatOutlineRail } from "@/chat-rail";
 import { SubagentLaunchMarker } from "@/subagents/launch-marker";
 import { useRevealedText } from "@/hooks/use-revealed-text";
@@ -1002,6 +1003,17 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             );
 
           case "activity_log":
+            if (item.providerSwitch) {
+              return (
+                <ProviderSwitchRow
+                  serverId={resolvedServerId}
+                  agentId={agentId}
+                  message={item.message}
+                  timestamp={item.timestamp.getTime()}
+                  notice={item.providerSwitch}
+                />
+              );
+            }
             return (
               <ActivityLog
                 type={item.activityType}
