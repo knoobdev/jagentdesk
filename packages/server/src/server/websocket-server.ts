@@ -1465,6 +1465,14 @@ export class VoiceAssistantWebSocketServer {
     return closed;
   }
 
+  /** Paired devices with at least one open socket right now (spec 15.11.1 "Connected"). */
+  public listConnectedDeviceIds(): Set<string> {
+    const ids = new Set<string>();
+    for (const identity of this.socketIdentities.values())
+      if (identity.deviceId) ids.add(identity.deviceId);
+    return ids;
+  }
+
   public listTrustedSessions(): Session[] {
     return Array.from(
       new Set(
@@ -2280,6 +2288,7 @@ export class VoiceAssistantWebSocketServer {
       cancelPendingPairingRequest: ({ requestId, reason }) =>
         this.cancelPendingPairingRequest({ requestId, reason }),
       closeConnectionsForDevice: (deviceId) => this.closeConnectionsForDevice(deviceId),
+      listConnectedDeviceIds: () => this.listConnectedDeviceIds(),
       serviceProxy: this.serviceProxy ?? undefined,
       scriptRuntimeStore: this.scriptRuntimeStore ?? undefined,
       workspaceSetupSnapshots: this.workspaceSetupSnapshots,
@@ -2423,6 +2432,7 @@ export class VoiceAssistantWebSocketServer {
       const device = this.pairing?.devices.getByPublicKey(message.devicePublicKeyB64);
       if (device) {
         pending.identity.deviceId = device.deviceId;
+        this.pairing?.devices.markSeen(device.deviceId, Date.now());
       }
     }
     pending.connectionLogger.info(
@@ -2975,6 +2985,7 @@ export class VoiceAssistantWebSocketServer {
     this.applicationSocketLease.release(ws);
     const identity = this.socketIdentities.get(ws);
     const identityFields = identity ? toConnectionLogFields(identity) : {};
+    if (identity?.deviceId) this.pairing?.devices.markSeen(identity.deviceId, Date.now());
     const pending = this.clearPendingConnection(ws);
     if (pending) {
       this.incrementRuntimeCounter("pendingDisconnected");

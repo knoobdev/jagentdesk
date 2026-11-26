@@ -8065,6 +8065,11 @@ export class DaemonClient {
     });
   }
 
+  /** The public key this client signs its hello with, to find itself in the paired devices. */
+  getDevicePublicKeyB64(): string | null {
+    return this.config.deviceSigning?.devicePublicKeyB64 ?? null;
+  }
+
   async pairingDeviceList(requestId?: string): Promise<PairingDeviceListResponse["payload"]> {
     return this.sendNamespacedCorrelatedSessionRequest<"pairing.device.list.response">({
       requestId,

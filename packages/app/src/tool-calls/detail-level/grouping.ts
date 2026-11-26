@@ -1,6 +1,7 @@
 import { isTurnTrigger, isTurnBoundary } from "@/agent-stream/turn-membership";
 import type { ToolCallDetail } from "@jagentdesk/protocol/agent-types";
 import type { StreamItem, ToolCallItem, ThoughtItem } from "@/types/stream";
+import { isBackgroundTimelineItem } from "@/background-work/timeline";
 
 export interface ToolCallDescriptor {
   detail: ToolCallDetail;
@@ -73,6 +74,8 @@ export function isGroupableToolCall(
   if (item.kind !== "tool_call" || isTurnTrigger(item)) {
     return false;
   }
+  // Background start/finish rows are system rows, not calls to fold away (spec 38 §4.4b).
+  if (isBackgroundTimelineItem(item)) return false;
   const descriptor = describeToolCall(item);
   return descriptor.detail.type !== "plan" && descriptor.name.trim().toLowerCase() !== "speak";
 }
