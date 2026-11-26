@@ -32,7 +32,7 @@ async function setup(overrides: Record<string, unknown> = {}) {
 }
 
 describe("static built-in plugin registry", () => {
-  it("keeps the 18 feature defaults and adds bundled plugins independently of installed plugins", async () => {
+  it("keeps the 19 feature defaults and adds bundled plugins independently of installed plugins", async () => {
     const { state } = await setup({ pluginsEnabled: false });
     expect(new Set(state.list().map(({ id }) => id))).toEqual(new Set(BUILTIN_PLUGIN_IDS));
     expect(
@@ -42,7 +42,7 @@ describe("static built-in plugin registry", () => {
           ({ id, enabled }) =>
             (STATIC_BUILTIN_PLUGIN_IDS as readonly string[]).includes(id) && enabled,
         ),
-    ).toHaveLength(15);
+    ).toHaveLength(16);
     expect(state.isEnabled("worktree-include")).toBe(true);
     expect(
       state
