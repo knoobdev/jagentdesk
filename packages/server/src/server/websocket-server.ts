@@ -1750,14 +1750,19 @@ export class VoiceAssistantWebSocketServer {
     ws: WebSocketLike,
     message: WSOutboundMessage,
   ): Promise<void> {
+    if (!this.ensureOutboundCapacity(ws, 0)) throw new Error("Source message delivery unavailable");
     const frame = JSON.stringify(message);
-    const sent = await sendBoundedPhysicalFrameAndWait({
-      socket: ws,
-      frame,
-      frameBytes: outboundFrameByteLength(frame),
-      onHighWater: () => this.closeAtOutboundHighWater(ws),
-    });
-    if (!sent) throw new Error("Source message delivery unavailable");
+    // Through the chunked transport, so a large awaited reply reaches a direct client in
+    // frames it can count as progress.
+    try {
+      await this.sendSocketFrame(ws, frame, outboundFrameByteLength(frame), true);
+    } catch (err) {
+      if (ws.readyState !== 1)
+        throw new Error("Source message delivery unavailable", { cause: err });
+      this.logger.warn({ err }, "ws_send_failed");
+      throw err;
+    }
+    this.runtimeMetrics.recordOutboundMessage(message, ws.bufferedAmount);
   }
 
   private sendMessageToSockets(sockets: Iterable<WebSocketLike>, message: WSOutboundMessage): void {
