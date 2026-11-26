@@ -165,6 +165,8 @@ export function AddProviderModelSheet({
       onClose={onClose}
       onDismiss={onClose}
       footer={footer}
+      // Keeps Cancel/Add on screen at the compact sheet's first snap point.
+      sizeContentToCurrentSnapPoint
       desktopMaxWidth={480}
       testID={`${testIDPrefix}-add-sheet`}
     >
