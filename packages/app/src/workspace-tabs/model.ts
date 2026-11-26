@@ -44,6 +44,8 @@ export type WorkspaceTabTarget =
   | WorkspaceFileTabTarget
   | WorkspaceWorkingDiffTabTarget
   | PluginWorkspaceTabTarget
+  /** A built-in feature's agent inspector tab (spec 41 §5 Memory); shows the inspected agent. */
+  | { kind: "builtin_inspector"; tabId: string }
   | { kind: "setup"; workspaceId: string }
   | { kind: "commit_diff"; sha: string };
 

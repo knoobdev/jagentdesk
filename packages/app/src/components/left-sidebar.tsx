@@ -99,7 +99,7 @@ import { SidebarWorkspaceList } from "./sidebar-workspace-list";
 
 // Classic sidebar positions of migrated built-in destinations; the rest follow Marketplace.
 const CLASSIC_SLOT_SHARING: readonly string[] = ["shared-sessions"];
-const CLASSIC_SLOT_SKILLS: readonly string[] = ["skills"];
+const CLASSIC_SLOT_SKILLS: readonly string[] = ["skills", "memory"];
 const CLASSIC_SLOT_INSIGHTS: readonly string[] = ["insights"];
 const CLASSIC_SLOT_INFRA: readonly string[] = ["clusters", "databases", "servers"];
 const CLASSIC_SLOT_DEPLOY: readonly string[] = ["argocd"];

@@ -11,4 +11,5 @@ export const builtinPluginStrings = {
   turnedOff: "Plugin turned off",
   turnOn: "Turn on",
   turningOn: "Turning on...",
+  inspectorNoAgent: "Open an agent to see this tab.",
 } as const;

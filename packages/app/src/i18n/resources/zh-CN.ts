@@ -1,11 +1,13 @@
 import { sshModuleStrings } from "./ssh-modules";
 import { builtinPluginStrings } from "./builtin-plugins";
 import { botsStrings } from "./bots";
+import { memoryStrings } from "./memory";
 import { type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const zhCN: TranslationResources = {
   bots: botsStrings,
+  memory: memoryStrings,
   builtinPlugins: builtinPluginStrings,
   ssh: sshModuleStrings,
   pluginCombobox: {
@@ -349,6 +351,17 @@ export const zhCN: TranslationResources = {
       forkUnavailable: "请更新主机以使用此功能。",
       forkMissingWorkspace: "此 Agent 不在工作区中。",
       forkFailed: "分叉聊天失败",
+      forkPreparing: "正在准备分叉…",
+      forkRetry: "重试",
+      forkedFrom: "分叉自 {{title}}",
+      forkedFromUnknown: "分叉自另一个代理",
+      forkShowEarlier: "显示更早的消息",
+      forkLoadOlder: "加载更早的消息",
+      forkHideEarlier: "隐藏更早的消息",
+      forkOpenOriginal: "打开原始对话",
+      forkYou: "你",
+      forkAgent: "代理",
+      forkToolCalls: "{{count}} 次工具调用",
       openFile: "打开文件",
       copied: "已复制",
     },

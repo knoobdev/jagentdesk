@@ -21,6 +21,8 @@ import type {
   BuiltinUserMessageBodyProps,
   BuiltinScreen as ScreenProps,
   BuiltinTurnPreparation,
+  BuiltinInspectorTab,
+  BuiltinMessageActionProps,
 } from "./host";
 import { BuiltinPluginScreenBoundary } from "./route-boundary";
 
@@ -213,6 +215,28 @@ export function BuiltinClientItems({
         )),
       )}
     </>
+  );
+}
+
+/** Feature actions under one chat message, after Copy. */
+export function BuiltinMessageActions(props: BuiltinMessageActionProps) {
+  const entries = useBuiltinClientContributions(props.serverId);
+  return (
+    <>
+      {[...entries].flatMap(([id, entry]) =>
+        [...entry.messageActions].map(([key, Component]) => (
+          <Component key={`${id}/${key}`} {...props} />
+        )),
+      )}
+    </>
+  );
+}
+/** Feature tabs of the agent inspector, in plugin order. */
+export function useBuiltinInspectorTabs(serverId: string): BuiltinInspectorTab[] {
+  const entries = useBuiltinClientContributions(serverId);
+  return useMemo(
+    () => Array.from(entries.values()).flatMap((entry) => Array.from(entry.inspectorTabs.values())),
+    [entries],
   );
 }
 

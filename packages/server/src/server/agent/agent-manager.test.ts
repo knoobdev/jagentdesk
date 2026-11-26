@@ -13,6 +13,7 @@ import {
   AgentManager,
   AgentManagerShuttingDownError,
   commandMayHaveChangedExternalState,
+  NativeForkUnavailableError,
   type AgentManagerEvent,
   type ManagedAgent,
 } from "./agent-manager.js";
@@ -12774,4 +12775,172 @@ test("importProviderSession keeps the stats the provider reported with its histo
     ["user_message", null],
     ["assistant_message", null],
   ]);
+});
+
+test("forkAgent forks the provider conversation at the selected turn and only references the parent", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-fast-fork-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+
+  class ForkableSession extends TestAgentSession {
+    readonly forks: Array<string | null> = [];
+    historyStreams = 0;
+    private turn = 0;
+
+    override async startTurn(
+      prompt: AgentPromptInput,
+      options?: AgentRunOptions,
+    ): Promise<{ turnId: string }> {
+      const index = ++this.turn;
+      const turnId = `fork-turn-${index}`;
+      setTimeout(() => {
+        this.pushEvent({ type: "turn_started", provider: this.provider, turnId });
+        this.pushEvent({
+          type: "timeline",
+          provider: this.provider,
+          turnId,
+          item: {
+            type: "user_message",
+            text: typeof prompt === "string" ? prompt : "",
+            messageId: `provider-user-${index}`,
+            clientMessageId: options?.clientMessageId,
+          },
+        });
+        this.pushEvent({
+          type: "timeline",
+          provider: this.provider,
+          turnId,
+          item: {
+            type: "assistant_message",
+            text: `answer ${index}`,
+            messageId: `answer-${index}`,
+          },
+        });
+        this.pushEvent({ type: "turn_completed", provider: this.provider, turnId });
+      }, 0);
+      return { turnId };
+    }
+
+    override async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
+      this.historyStreams += 1;
+      yield {
+        type: "timeline",
+        provider: this.provider,
+        item: { type: "user_message", text: "replayed parent history" },
+      };
+    }
+
+    async forkConversation(input: {
+      beforeUserMessageId: string | null;
+    }): Promise<AgentPersistenceHandle> {
+      this.forks.push(input.beforeUserMessageId);
+      return { provider: "codex", sessionId: `forked-${this.forks.length}` };
+    }
+  }
+
+  class ForkableClient extends TestAgentClient {
+    readonly sessions: ForkableSession[] = [];
+    readonly resumedHandles: AgentPersistenceHandle[] = [];
+
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      const session = new ForkableSession(config);
+      this.sessions.push(session);
+      return session;
+    }
+
+    override async resumeSession(
+      handle: AgentPersistenceHandle,
+      config?: Partial<AgentSessionConfig>,
+    ): Promise<AgentSession> {
+      this.resumedHandles.push(handle);
+      const session = new ForkableSession({ provider: "codex", cwd: config?.cwd ?? workdir });
+      this.sessions.push(session);
+      return session;
+    }
+  }
+
+  const client = new ForkableClient();
+  let nextId = 0;
+  const manager = new AgentManager({
+    clients: { codex: client },
+    registry: storage,
+    logger,
+    idFactory: () => `00000000-0000-4000-8000-${String(++nextId).padStart(12, "0")}`,
+  });
+
+  try {
+    const parent = await manager.createAgent(
+      { provider: "codex", cwd: workdir, title: "Parent" },
+      undefined,
+      { workspaceId: undefined },
+    );
+    await manager.runAgent(parent.id, "first question", { clientMessageId: "client-1" });
+    await manager.runAgent(parent.id, "second question", { clientMessageId: "client-2" });
+    const parentRows = manager.fetchTimeline(parent.id, { direction: "tail", limit: 0 }).rows;
+    const firstAnswer = parentRows.find(
+      (row) => row.item.type === "assistant_message" && row.item.text === "answer 1",
+    );
+    const epoch = manager.fetchTimeline(parent.id, { direction: "tail", limit: 1 }).epoch;
+    expect(firstAnswer).toBeDefined();
+
+    const fork = await manager.forkAgent(parent.id, {
+      boundary: { epoch, seq: firstAnswer!.seq },
+    });
+
+    // The provider forks before the second turn; the new agent resumes the provider's copy.
+    expect(client.sessions[0]!.forks).toEqual(["provider-user-2"]);
+    expect(client.resumedHandles).toEqual([{ provider: "codex", sessionId: "forked-1" }]);
+    expect(fork.config.title).toBe("Fork: Parent");
+
+    // No parent row is copied and no provider history is replayed, even on an explicit hydrate.
+    await manager.hydrateTimelineFromProvider(fork.id);
+    const forkRows = manager.fetchTimeline(fork.id, { direction: "tail", limit: 0 }).rows;
+    expect(forkRows.map((row) => row.item)).toEqual([
+      {
+        type: "plugin",
+        id: "fork-origin",
+        pluginId: "jagentdesk",
+        kind: "fork-origin",
+        version: 1,
+        data: {
+          parentAgentId: parent.id,
+          parentTitle: "Parent",
+          provider: "codex",
+          boundary: { epoch, seq: firstAnswer!.seq },
+        },
+      },
+    ]);
+    expect(client.sessions.at(-1)!.historyStreams).toBe(0);
+
+    // A whole-conversation fork pins the parent's current end as its reference.
+    const whole = await manager.forkAgent(parent.id, { boundary: null });
+    expect(client.sessions[0]!.forks).toEqual(["provider-user-2", null]);
+    const wholeOrigin = manager.fetchTimeline(whole.id, { direction: "tail", limit: 0 }).rows[0]!;
+    expect(wholeOrigin.item).toMatchObject({
+      data: { boundary: { epoch, seq: parentRows.at(-1)!.seq } },
+    });
+  } finally {
+    await manager.flush().catch(() => undefined);
+    await storage.flush().catch(() => undefined);
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("forkAgent reports providers without a native fork", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-no-native-fork-"));
+  const manager = new AgentManager({
+    clients: { codex: new TestAgentClient() },
+    logger,
+    idFactory: () => "00000000-0000-4000-8000-000000000501",
+  });
+  try {
+    const parent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    await expect(manager.forkAgent(parent.id, { boundary: null })).rejects.toBeInstanceOf(
+      NativeForkUnavailableError,
+    );
+  } finally {
+    await manager.flush().catch(() => undefined);
+    rmSync(workdir, { recursive: true, force: true });
+  }
 });

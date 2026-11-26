@@ -160,6 +160,27 @@ function submittedPromptText(prompt: AgentPromptInput): string {
     .trim();
 }
 
+/** The provider has no native fork; the caller seeds a new agent instead (spec 41 §6). */
+export class NativeForkUnavailableError extends Error {
+  readonly code = "native_fork_unavailable";
+  constructor(readonly provider: string) {
+    super(`${provider} agents cannot be forked natively`);
+    this.name = "NativeForkUnavailableError";
+  }
+}
+
+/** Where a fork's history comes from; the fork's timeline shows these parent rows by reference. */
+export interface AgentForkOrigin {
+  parentAgentId: string;
+  parentTitle: string | null;
+  provider: string;
+  /** The parent's timeline position the fork ends at; null for the whole conversation. */
+  boundary: { epoch: string; seq: number } | null;
+}
+
+export const FORK_ORIGIN_PLUGIN_ID = "jagentdesk";
+export const FORK_ORIGIN_ITEM_KIND = "fork-origin";
+
 export class AgentManagerShuttingDownError extends Error {
   constructor() {
     super("Agent manager is shutting down");
@@ -1832,6 +1853,8 @@ export class AgentManager {
       owner?: AgentOwner;
       background?: boolean;
       attention?: AttentionState;
+      /** Skip replaying provider history into the timeline (a fast fork shows its parent's). */
+      historyPrimed?: boolean;
     },
     resumeOptions?: AgentResumeSessionOptions,
   ): Promise<ManagedAgent> {
@@ -1854,6 +1877,8 @@ export class AgentManager {
       owner?: AgentOwner;
       background?: boolean;
       attention?: AttentionState;
+      /** Skip replaying provider history into the timeline (a fast fork shows its parent's). */
+      historyPrimed?: boolean;
     },
     resumeOptions?: AgentResumeSessionOptions,
   ): Promise<ManagedAgent> {
@@ -4293,6 +4318,91 @@ export class AgentManager {
   ): Promise<void> {
     const agent = this.requireSessionAgent(agentId);
     await this.hydrateTimelineFromLegacyProviderHistory(agent, options);
+  }
+
+  /**
+   * Fast fork (spec 41 §6, ADR-0058): the provider copies its own conversation up to `boundary`
+   * and a new agent resumes that copy. Nothing is replayed into a prompt and the parent's
+   * timeline is not copied: the fork's first row references it.
+   */
+  async forkAgent(
+    parentId: string,
+    options: {
+      boundary: { epoch: string; seq: number } | null;
+      agentId?: string;
+      title?: string | null;
+    },
+  ): Promise<ManagedAgent> {
+    const parent = this.requireSessionAgent(parentId);
+    if (!parent.session.forkConversation) throw new NativeForkUnavailableError(parent.provider);
+    const beforeUserMessageId = this.forkAnchorUserMessageId(parentId, options.boundary);
+    const handle = await parent.session.forkConversation({ beforeUserMessageId });
+    const storedParent = this.registry ? await this.registry.get(parentId) : null;
+    const parentTitle = (storedParent?.title ?? parent.config.title)?.trim() || null;
+    const agent = await this.resumeAgentFromPersistence(
+      handle,
+      { cwd: parent.cwd, title: options.title ?? (parentTitle ? `Fork: ${parentTitle}` : null) },
+      options.agentId,
+      { workspaceId: parent.workspaceId, historyPrimed: true },
+    );
+    const origin: AgentForkOrigin = {
+      parentAgentId: parentId,
+      parentTitle,
+      provider: parent.provider,
+      // A fork of the whole conversation still pins where it ended, so the parent's later turns
+      // stay out of the fork's reference.
+      boundary: options.boundary ?? this.timelineTail(parentId),
+    };
+    // Also a durable row, so a reload never hydrates the forked transcript into this timeline.
+    await this.appendTimelineItem(agent.id, {
+      type: "plugin",
+      id: FORK_ORIGIN_ITEM_KIND,
+      pluginId: FORK_ORIGIN_PLUGIN_ID,
+      kind: FORK_ORIGIN_ITEM_KIND,
+      version: 1,
+      data: { ...origin },
+    });
+    return this.getAgent(agent.id) ?? agent;
+  }
+
+  private timelineTail(agentId: string): { epoch: string; seq: number } | null {
+    const last = this.timelineStore.getRows(agentId).at(-1);
+    return last ? { epoch: this.timelineStore.getEpoch(agentId), seq: last.seqEnd } : null;
+  }
+
+  /** The timeline position of an assistant message (older apps send only its id). */
+  forkBoundaryForMessage(
+    agentId: string,
+    messageId: string | undefined,
+  ): { epoch: string; seq: number } | null {
+    if (!messageId) return null;
+    const row = this.timelineStore
+      .getRows(agentId)
+      .findLast(
+        (entry) => entry.item.type === "assistant_message" && entry.item.messageId === messageId,
+      );
+    if (!row) throw new Error("Selected assistant message is no longer available.");
+    return { epoch: this.timelineStore.getEpoch(agentId), seq: row.seqEnd };
+  }
+
+  /** The provider id of the first user message after `boundary`; null forks everything. */
+  private forkAnchorUserMessageId(
+    agentId: string,
+    boundary: { epoch: string; seq: number } | null,
+  ): string | null {
+    if (!boundary) return null;
+    if (boundary.epoch !== this.timelineStore.getEpoch(agentId)) {
+      throw new Error("Selected timeline position is no longer available.");
+    }
+    const next = this.timelineStore
+      .getRows(agentId)
+      .find((row) => row.seq > boundary.seq && row.item.type === "user_message");
+    if (!next || next.item.type !== "user_message") return null;
+    if (next.providerMessageId) return next.providerMessageId;
+    if (next.item.clientMessageId) {
+      throw new Error("Cannot fork before the provider acknowledges the next message");
+    }
+    return next.item.messageId ?? null;
   }
 
   async rewind(agentId: string, messageId: string, mode: RewindMode): Promise<void> {

@@ -82,6 +82,10 @@ function normalizeSimpleWorkspaceTabTarget(value: WorkspaceTabTarget): Workspace
       const sha = trimNonEmpty(value.sha);
       return sha ? { kind: "commit_diff", sha } : null;
     }
+    case "builtin_inspector": {
+      const tabId = trimNonEmpty(value.tabId);
+      return tabId ? { kind: "builtin_inspector", tabId } : null;
+    }
     default:
       return null;
   }
@@ -174,6 +178,9 @@ function pluginWorkspaceTabTargetsEqual(
       (left.context !== "agent" || right.context !== "agent" || left.agentId === right.agentId)
     );
   }
+  if (left.kind === "builtin_inspector" && right.kind === "builtin_inspector") {
+    return left.tabId === right.tabId;
+  }
   return false;
 }
 
@@ -240,6 +247,9 @@ export function buildDeterministicWorkspaceTabId(target: WorkspaceTabTarget): st
       return `plugin_agent_${target.pluginId.length}_${target.pluginId}_${target.panelId.length}_${target.panelId}_${target.agentId.length}_${target.agentId}`;
     }
     return `plugin_workspace_${target.pluginId.length}_${target.pluginId}_${target.panelId.length}_${target.panelId}`;
+  }
+  if (target.kind === "builtin_inspector") {
+    return `builtin_inspector_${target.tabId}`;
   }
   if (target.kind === "files" || target.kind === "changes_tree" || target.kind === "pull_request")
     return target.kind;

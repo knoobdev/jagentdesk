@@ -198,6 +198,7 @@ import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseRegistry } from "./database/database-registry.js";
 import { ScheduleService } from "./schedule/service.js";
 import { sendPromptToAgent } from "./agent/agent-prompt.js";
+import { createBuiltinProjectAccess } from "./plugins/builtin/project-access.js";
 import { TunnelManager } from "./tunnels/tunnel-manager.js";
 import { DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
 import { PluginService } from "./plugins/index.js";
@@ -1690,6 +1691,15 @@ export async function createJAgentDeskDaemon(
       // A live capability toggle re-scopes already-connected guest sessions (ADR-0019).
       updateGuestScopes: (agentId, scopes) => wsServer?.updateGuestScopesForAgent(agentId, scopes),
     },
+    projects: createBuiltinProjectAccess({
+      projectRegistry,
+      workspaceRegistry,
+      workspaceIdOf: async (agentId) =>
+        agentManager.getAgent(agentId)?.workspaceId ??
+        (await agentStorage.get(agentId))?.workspaceId,
+      cwdOf: async (agentId) =>
+        agentManager.getAgent(agentId)?.cwd ?? (await agentStorage.get(agentId))?.cwd,
+    }),
   });
   pluginRuntime.builtinDaemon = builtinDaemon;
   // Spec mode's launch environment (spec 28): the provider process sees the shared checkout env.

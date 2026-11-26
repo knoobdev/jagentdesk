@@ -13,6 +13,12 @@ const MAX_TOOL_SUMMARY_CHARS = 200;
 const MAX_FORK_CONTEXT_CHARS = 100_000;
 const MAX_FORK_METADATA_CHARS = 1_000;
 const FORK_HISTORY_OMITTED = "[Earlier chat history omitted]\n";
+// A fork copies only these kinds.
+const FORK_CONTEXT_KINDS: readonly AgentTimelineItem["type"][] = [
+  "user_message",
+  "assistant_message",
+  "tool_call",
+];
 
 interface ActivityCuratorOptions {
   maxItems?: number;
@@ -354,7 +360,7 @@ export function buildAgentForkContextAttachment(input: {
   const entries = curateProjectedActivityEntries(selected.items, {
     maxItems: 0,
     labelAssistantMessages: true,
-    includeKinds: ["user_message", "assistant_message", "tool_call"],
+    includeKinds: FORK_CONTEXT_KINDS,
     includeExternalToolInput: false,
   });
   const metadata = { agentTitle: input.agentTitle, cwd: input.cwd };

@@ -197,6 +197,22 @@ describe("collapseTurns", () => {
     expect(result.hostIdByFoldedMessageId.get("early")).toBe("u1");
   });
 
+  it("keeps a built-in's own rows visible in a folded turn", () => {
+    const chip: StreamItem = {
+      kind: "plugin",
+      id: "memory/memory-used:turn-1",
+      timestamp: at,
+      pluginId: "memory",
+      pluginItemId: "memory-used:turn-1",
+      itemKind: "memory-used",
+      version: 1,
+      data: { memories: [] },
+    };
+    const result = collapse([user("u1"), chip, shell("c1"), reply("final")]);
+
+    expect(ids(result.tail)).toEqual(["u1", "memory/memory-used:turn-1", "final"]);
+  });
+
   it("shows an expanded turn's work as nested rows between the prompt and the reply", () => {
     const result = collapse([user("u1"), thought("t1"), shell("c1"), reply("final")], {
       expandedHostIds: new Set(["u1"]),

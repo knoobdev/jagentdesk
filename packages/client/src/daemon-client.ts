@@ -353,6 +353,15 @@ import {
   type SkillSourceStatus,
   type SkillWrittenPaths,
 } from "@jagentdesk/protocol/native-skills";
+import type {
+  MemoryListRequest,
+  MemoryProject,
+  MemoryRecordWire,
+  MemorySaveRequest,
+  MemorySettingsSetRequest,
+  MemorySettingsWire,
+  MemoryUseWire,
+} from "@jagentdesk/protocol/memory";
 import { type LifetimeUsage, type UsageDayRollup } from "@jagentdesk/protocol/usage-history";
 import { terminalSubscriptionKey } from "@jagentdesk/protocol/terminal-subscription-key";
 import {
@@ -1589,6 +1598,10 @@ type ScheduleUpdatePayload = Extract<
 
 export type FetchAgentTimelinePayload = FetchAgentTimelineResponseMessage["payload"];
 
+export type AgentForkPayload = Extract<
+  SessionOutboundMessage,
+  { type: "agent.fork.response" }
+>["payload"];
 export type AgentForkContextPayload = AgentForkContextResponseMessage["payload"];
 
 export type FetchAgentTimelineDirection = FetchAgentTimelinePayload["direction"];
@@ -5034,6 +5047,37 @@ export class DaemonClient {
     return payload;
   }
 
+  /**
+   * Fast fork (spec 41 §6): the daemon forks the provider conversation natively and answers with
+   * the new agent. `code: "native_fork_unavailable"` means seed a new agent instead.
+   */
+  async forkAgent(
+    agentId: string,
+    options: AgentForkContextOptions & { forkAgentId?: string; title?: string } = {},
+  ): Promise<AgentForkPayload> {
+    const resolvedRequestId = this.createRequestId(options.requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "agent.fork.request",
+      agentId,
+      requestId: resolvedRequestId,
+      ...(options.boundaryCursor ? { boundaryCursor: options.boundaryCursor } : {}),
+      ...(options.boundaryMessageId ? { boundaryMessageId: options.boundaryMessageId } : {}),
+      ...(options.forkAgentId ? { forkAgentId: options.forkAgentId } : {}),
+      ...(options.title ? { title: options.title } : {}),
+    });
+    return this.sendRequest({
+      requestId: resolvedRequestId,
+      message,
+      timeout: 120_000,
+      options: { skipQueue: true },
+      select: (msg) => {
+        if (msg.type !== "agent.fork.response") return null;
+        if (msg.payload.requestId !== resolvedRequestId) return null;
+        return msg.payload;
+      },
+    });
+  }
+
   // ============================================================================
   // Agent Interaction
   // ============================================================================
@@ -8122,6 +8166,77 @@ export class DaemonClient {
     return this.sendNamespacedCorrelatedSessionRequest({
       requestId,
       message: { type: "skills.mutate.request", mutation },
+    });
+  }
+
+  // ── Memory built-in (spec 41). Errors reject with DaemonRpcError; codes: "secret",
+  // "too_long", "empty", "not_found", "no_project", "disabled", "plugin_disabled".
+  async listMemories(
+    options: Omit<MemoryListRequest, "type" | "requestId">,
+    requestId?: string,
+  ): Promise<{
+    requestId: string;
+    memories: MemoryRecordWire[];
+    projects: MemoryProject[];
+    projectId: string | null;
+  }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "memory.list.request", ...options },
+    });
+  }
+
+  async saveMemory(
+    input: Omit<MemorySaveRequest, "type" | "requestId">,
+    requestId?: string,
+  ): Promise<{ requestId: string; memory: MemoryRecordWire; deduplicated: boolean }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "memory.save.request", ...input },
+    });
+  }
+
+  async deleteMemory(
+    id: string,
+    requestId?: string,
+  ): Promise<{ requestId: string; id: string; deleted: boolean }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "memory.delete.request", id },
+    });
+  }
+
+  async getAgentMemories(
+    agentId: string,
+    requestId?: string,
+  ): Promise<{
+    requestId: string;
+    agentId: string;
+    created: MemoryRecordWire[];
+    used: MemoryUseWire[];
+  }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "memory.agent.request", agentId },
+    });
+  }
+
+  async getMemorySettings(
+    requestId?: string,
+  ): Promise<{ requestId: string; settings: MemorySettingsWire }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "memory.settings.get.request" },
+    });
+  }
+
+  async setMemorySettings(
+    patch: Omit<MemorySettingsSetRequest, "type" | "requestId">,
+    requestId?: string,
+  ): Promise<{ requestId: string; settings: MemorySettingsWire }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "memory.settings.set.request", ...patch },
     });
   }
 

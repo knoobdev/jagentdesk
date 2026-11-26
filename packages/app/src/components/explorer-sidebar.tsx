@@ -1,10 +1,13 @@
 import { Portal } from "@gorhom/portal";
+import { useBuiltinInspectorTabs } from "@/plugins/builtin/surfaces";
+import type { BuiltinInspectorTab } from "@/plugins/builtin/host";
+import { useInspectedAgentId } from "@/panels/builtin-inspector-panel";
 import { GUMLOOP_INSPECTOR_HOST } from "@/components/gumloop-shell/sidebar-state";
 import {
   useGumloopDesktopShell,
   useIsGumloopTheme,
 } from "@/components/gumloop-shell/use-gumloop-chrome";
-import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   View,
   Text,
@@ -260,23 +263,95 @@ export function ExplorerSidebar({
   return sheetInspector ? <Portal hostName={GUMLOOP_INSPECTOR_HOST}>{content}</Portal> : content;
 }
 
-interface ExplorerTabButtonProps {
-  tab: ExplorerTab;
+interface ExplorerBuiltinTabState {
+  tabs: BuiltinInspectorTab[];
+  tab: BuiltinInspectorTab | null;
+  agentId: string | null;
+  select: (tabId: string) => void;
+  handleCoreTabPress: (tab: ExplorerTab) => void;
+  /** The core tab shown, or null while a built-in tab is open. */
+  coreTab: ExplorerTab | null;
+}
+
+/** Built-in inspector tabs (Memory) describe the inspected agent; the core tabs stay persisted. */
+function useExplorerBuiltinTab(input: {
+  serverId: string;
+  workspaceId?: string | null;
+  onTabPress: (tab: ExplorerTab) => void;
+  resolvedTab: ExplorerTab;
+}): ExplorerBuiltinTabState {
+  const { onTabPress } = input;
+  const tabs = useBuiltinInspectorTabs(input.serverId);
+  const agentId = useInspectedAgentId(input.serverId, input.workspaceId);
+  const [tabId, setTabId] = useState<string | null>(null);
+  const handleCoreTabPress = useCallback(
+    (tab: ExplorerTab) => {
+      setTabId(null);
+      onTabPress(tab);
+    },
+    [onTabPress],
+  );
+  const { resolvedTab } = input;
+  return useMemo(() => {
+    const tab = tabs.find((entry) => entry.id === tabId) ?? null;
+    return {
+      tabs,
+      tab,
+      agentId,
+      select: setTabId,
+      handleCoreTabPress,
+      coreTab: tab ? null : resolvedTab,
+    };
+  }, [agentId, handleCoreTabPress, resolvedTab, tabId, tabs]);
+}
+
+function BuiltinInspectorTabButtons({ builtin }: { builtin: ExplorerBuiltinTabState }) {
+  if (!builtin.agentId) return null;
+  return (
+    <>
+      {builtin.tabs.map((tab) => (
+        <ExplorerTabButton
+          key={tab.id}
+          tab={tab.id}
+          active={builtin.tab?.id === tab.id}
+          label={tab.title}
+          onTabPress={builtin.select}
+          testID={`explorer-tab-builtin-${tab.id}`}
+        />
+      ))}
+    </>
+  );
+}
+
+function BuiltinInspectorContent({
+  serverId,
+  builtin,
+}: {
+  serverId: string;
+  builtin: ExplorerBuiltinTabState;
+}) {
+  if (!builtin.tab || !builtin.agentId) return null;
+  const Component = builtin.tab.component;
+  return <Component serverId={serverId} agentId={builtin.agentId} />;
+}
+
+interface ExplorerTabButtonProps<T extends string> {
+  tab: T;
   active: boolean;
   label?: string;
-  onTabPress: (tab: ExplorerTab) => void;
+  onTabPress: (tab: T) => void;
   testID: string;
   children?: React.ReactNode;
 }
 
-function ExplorerTabButton({
+function ExplorerTabButton<T extends string>({
   tab,
   active,
   label,
   onTabPress,
   testID,
   children,
-}: ExplorerTabButtonProps) {
+}: ExplorerTabButtonProps<T>) {
   const handlePress = useCallback(() => onTabPress(tab), [onTabPress, tab]);
   const gumloop = useIsGumloopTheme();
   const tabStyle = useMemo(
@@ -352,6 +427,8 @@ function ExplorerSidebarContent({
     () => buildWorkspaceAttachmentScopeKey({ serverId, workspaceId, cwd: workspaceRoot }),
     [serverId, workspaceId, workspaceRoot],
   );
+  const builtin = useExplorerBuiltinTab({ serverId, workspaceId, onTabPress, resolvedTab });
+  const { handleCoreTabPress, coreTab } = builtin;
 
   return (
     <View style={styles.sidebarContent} pointerEvents="auto">
@@ -367,25 +444,25 @@ function ExplorerSidebarContent({
           {isGit && (
             <ExplorerTabButton
               tab="changes"
-              active={resolvedTab === "changes"}
+              active={coreTab === "changes"}
               label={t("workspace.tabs.explorer.changes")}
-              onTabPress={onTabPress}
+              onTabPress={handleCoreTabPress}
               testID="explorer-tab-changes"
             />
           )}
           <ExplorerTabButton
             tab="files"
-            active={resolvedTab === "files"}
+            active={coreTab === "files"}
             label={t("workspace.tabs.explorer.files")}
-            onTabPress={onTabPress}
+            onTabPress={handleCoreTabPress}
             testID="explorer-tab-files"
           />
           {isGit && showPrTab && (
             <ExplorerTabButton
               tab="pr"
-              active={resolvedTab === "pr"}
+              active={coreTab === "pr"}
               label={prTabLabel}
-              onTabPress={onTabPress}
+              onTabPress={handleCoreTabPress}
               testID="explorer-tab-pr"
             >
               <PullRequestTabIcon
@@ -397,6 +474,7 @@ function ExplorerSidebarContent({
               />
             </ExplorerTabButton>
           )}
+          <BuiltinInspectorTabButtons builtin={builtin} />
         </View>
         <View style={styles.headerRightSection}>
           {!hasRightWindowControls && (
@@ -425,7 +503,8 @@ function ExplorerSidebarContent({
 
       {/* Content based on active tab */}
       <View style={styles.contentArea} testID="explorer-content-area">
-        {resolvedTab === "changes" && (
+        <BuiltinInspectorContent serverId={serverId} builtin={builtin} />
+        {coreTab === "changes" && (
           <ChangedFilesPane
             serverId={serverId}
             workspaceId={workspaceId}
@@ -434,7 +513,7 @@ function ExplorerSidebarContent({
             onOpenFile={onOpenFile}
           />
         )}
-        {resolvedTab === "files" && (
+        {coreTab === "files" && (
           <FilesPane
             serverId={serverId}
             workspaceId={workspaceId}
@@ -442,7 +521,7 @@ function ExplorerSidebarContent({
             onOpenFile={onOpenFile}
           />
         )}
-        {resolvedTab === "pr" && (
+        {coreTab === "pr" && (
           <PrTabContent
             serverId={serverId}
             cwd={workspaceRoot}

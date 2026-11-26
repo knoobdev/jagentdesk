@@ -467,6 +467,9 @@ function getFallbackTabOptionDescription(
   if (tab.target.kind === "plugin") {
     return tab.target.pluginId;
   }
+  if (tab.target.kind === "builtin_inspector") {
+    return tab.target.tabId;
+  }
   if (
     tab.target.kind === "files" ||
     tab.target.kind === "changes_tree" ||

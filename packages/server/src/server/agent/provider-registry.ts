@@ -519,6 +519,7 @@ export function wrapSessionProvider(provider: AgentProvider, inner: AgentSession
     setThinkingOption: inner.setThinkingOption?.bind(inner),
     applyOptions: inner.applyOptions?.bind(inner),
     revertConversation: inner.revertConversation?.bind(inner),
+    forkConversation: inner.forkConversation?.bind(inner),
     revertFiles: inner.revertFiles?.bind(inner),
     revertBoth: inner.revertBoth?.bind(inner),
     tryHandleOutOfBand: inner.tryHandleOutOfBand?.bind(inner),

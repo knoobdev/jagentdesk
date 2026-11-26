@@ -99,7 +99,20 @@ function findUpdatedHosts(
 }
 
 function staysVisibleWhenCollapsed(item: StreamItem): boolean {
-  return isTurnTrigger(item) || item.kind === "compaction" || item.kind === "activity_log";
+  return (
+    isTurnTrigger(item) ||
+    item.kind === "compaction" ||
+    item.kind === "activity_log" ||
+    isDaemonPluginRow(item)
+  );
+}
+
+/**
+ * A row the daemon (a built-in) added on purpose, such as Memory's "Used N memories" chip,
+ * stays in a folded turn. Rows a client transform made from a source item fold with it.
+ */
+function isDaemonPluginRow(item: StreamItem): boolean {
+  return item.kind === "plugin" && item.sourceKind === undefined;
 }
 
 function isAssistantReply(item: StreamItem): boolean {

@@ -79,6 +79,7 @@ import {
   SkillsChangedStatusPayloadSchema,
 } from "./skills.js";
 import { NativeSkillsRequestSchemas, NativeSkillsResponseSchemas } from "./native-skills.js";
+import { MemoryRequestSchemas, MemoryResponseSchemas } from "./memory.js";
 import {
   UsageHistoryGetRequestSchema,
   UsageHistoryGetResponseSchema,
@@ -2344,6 +2345,19 @@ export const AgentForkContextRequestMessageSchema = z.object({
   boundaryCursor: AgentTimelineCursorSchema.optional(),
   boundaryMessageId: z.string().optional(),
   requestId: z.string(),
+});
+
+// Fast fork (spec 41 §6): the provider forks its own conversation; the new agent's first timeline
+// row references the parent. Gated on `server_info.features.agentNativeFork`.
+export const AgentForkRequestMessageSchema = z.object({
+  type: z.literal("agent.fork.request"),
+  requestId: z.string(),
+  agentId: z.string(),
+  boundaryCursor: AgentTimelineCursorSchema.optional(),
+  boundaryMessageId: z.string().optional(),
+  /** The fork's id; a Retry resends the same one. */
+  forkAgentId: z.string().optional(),
+  title: z.string().optional(),
 });
 
 export const SetAgentModeRequestMessageSchema = z.object({
@@ -4727,6 +4741,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   SkillsGetRequestSchema,
   SkillsMutateRequestSchema,
   ...NativeSkillsRequestSchemas,
+  ...MemoryRequestSchemas,
   UsageHistoryGetRequestSchema,
   UsageHistoryResetRequestSchema,
   HostCapabilitiesRefreshRequestSchema,
@@ -4767,6 +4782,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ProviderSubagentTimelineRequestMessageSchema,
   SetAgentTimelineSubscriptionRequestMessageSchema,
   AgentForkContextRequestMessageSchema,
+  AgentForkRequestMessageSchema,
   SetAgentModeRequestMessageSchema,
   SetAgentModelRequestMessageSchema,
   SwitchAgentProviderRequestMessageSchema,
@@ -5251,6 +5267,8 @@ export const ServerInfoStatusPayloadSchema = z
         agentForkContext: z.boolean().optional(),
         // COMPAT(agentForkContextCursor): added in v0.1.108, remove gate after 2027-01-14.
         agentForkContextCursor: z.boolean().optional(),
+        // Fast fork (spec 41 §6): agent.fork.request.
+        agentNativeFork: z.boolean().optional(),
         // COMPAT(providerSubagents): added in v0.1.107, remove gate after 2027-01-12.
         providerSubagents: z.boolean().optional(),
         // COMPAT(agentBackgroundWork): added after v0.11.0-beta.5, remove gate after 2027-04-06.
@@ -5342,6 +5360,8 @@ export const ServerInfoStatusPayloadSchema = z
         devices: z.boolean().optional(),
         workbench: z.boolean().optional(),
         skills: z.boolean().optional(),
+        // Memory built-in (spec 41).
+        memory: z.boolean().optional(),
         insights: z.boolean().optional(),
         browserTools: z.boolean().optional(),
         remoteTasks: z.boolean().optional(),
@@ -6390,6 +6410,18 @@ export const AgentForkContextResponseMessageSchema = z.object({
     boundaryMessageId: z.string().nullable(),
     boundaryCursor: AgentTimelineCursorSchema.nullable().optional(),
     error: z.string().nullable(),
+  }),
+});
+
+export const AgentForkResponseMessageSchema = z.object({
+  type: z.literal("agent.fork.response"),
+  payload: z.object({
+    requestId: z.string(),
+    agentId: z.string(),
+    agent: AgentSnapshotPayloadSchema.nullable(),
+    error: z.string().nullable(),
+    /** `native_fork_unavailable`: the provider has no native fork; seed a new agent instead. */
+    code: z.string().nullable(),
   }),
 });
 
@@ -9175,6 +9207,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   SkillsGetResponseSchema,
   SkillsMutateResponseSchema,
   ...NativeSkillsResponseSchemas,
+  ...MemoryResponseSchemas,
   UsageHistoryGetResponseSchema,
   UsageHistoryResetResponseSchema,
   HostCapabilitiesRefreshResponseSchema,
@@ -9237,6 +9270,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   SetAgentTimelineSubscriptionResponseMessageSchema,
   AgentAttentionRequiredMessageSchema,
   AgentForkContextResponseMessageSchema,
+  AgentForkResponseMessageSchema,
   CancelAgentResponseMessageSchema,
   ClearAgentAttentionResponseMessageSchema,
   WorkspaceCreateResponseSchema,

@@ -72,6 +72,7 @@ export const BUILTIN_PLUGIN_FEATURES = {
     "forgeHubLogin",
   ],
   skills: ["skills"],
+  memory: ["memory"],
   "spec-mode": ["specMode"],
   autorun: ["autorun", "autorunApproval"],
   insights: ["insights"],

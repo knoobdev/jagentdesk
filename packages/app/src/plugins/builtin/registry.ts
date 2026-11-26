@@ -30,6 +30,7 @@ const ROUTE_PLUGINS: Readonly<Record<string, BuiltinPluginId>> = {
   database: "databases",
   servers: "ssh-servers",
   skills: "skills",
+  memory: "memory",
   jira: "jira",
   argocd: "argocd",
   simulator: "devices",

@@ -1926,3 +1926,27 @@ describe("turn lifecycle events", () => {
     );
   });
 });
+
+describe("daemon plugin timeline rows", () => {
+  it("appends a plugin row and updates it in place when the same id is re-appended", () => {
+    const pluginEvent = (count: number): AgentStreamEventPayload => ({
+      type: "timeline",
+      provider: "claude",
+      item: {
+        type: "plugin",
+        id: "memory-used:turn-1",
+        pluginId: "memory",
+        kind: "memory-used",
+        version: 1,
+        data: { turnKey: "turn-1", memories: Array.from({ length: count }, (_, i) => ({ id: `m${i}` })) },
+      },
+    });
+    const first = reduceStreamUpdate([], pluginEvent(1), new Date(1_000));
+    expect(first).toMatchObject([
+      { kind: "plugin", pluginId: "memory", pluginItemId: "memory-used:turn-1", itemKind: "memory-used" },
+    ]);
+    const second = reduceStreamUpdate(first, pluginEvent(2), new Date(2_000));
+    expect(second).toHaveLength(1);
+    expect(second[0]).toMatchObject({ id: first[0]!.id, data: { memories: [{ id: "m0" }, { id: "m1" }] } });
+  });
+});

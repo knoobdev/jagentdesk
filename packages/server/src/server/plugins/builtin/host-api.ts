@@ -38,6 +38,8 @@ export type {
   BuiltinRequestContext,
   BuiltinPorts,
   BuiltinPortKey,
+  BuiltinProject,
+  BuiltinProjectAccess,
   BuiltinDaemonDeps,
   BuiltinToolSelection,
   BuiltinSessionServices,
@@ -138,6 +140,7 @@ export {
   type SkillDirLabel,
 } from "../../agent/native-skill-paths.js";
 
+export type { MemoryPort, MemoryTurnInjection } from "../../agent/memory-port.js";
 // Autorun reads turn usage; Session sharing reads agent timelines.
 export type { AgentTimelineItem, AgentUsage } from "../../agent/agent-sdk-types.js";
 

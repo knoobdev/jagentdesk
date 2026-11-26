@@ -1,4 +1,5 @@
 import { builtinClientRegistry } from "../builtin/loaded";
+import { ForkOriginCard, readForkOriginData } from "@/agent-stream/fork-origin-card";
 import { useBuiltinClientContributions } from "../builtin/surfaces";
 import type { PluginTimelineItemProps } from "@jagentdesk/plugin/client";
 import type { PluginTheme } from "@jagentdesk/plugin";
@@ -119,9 +120,15 @@ export function PluginTimelineItemView(props: {
     }),
     [props.item],
   );
+  // Core's own card: a fast fork's reference to its parent's history (spec 41 §6).
+  const forkOrigin =
+    props.item.pluginId === "jagentdesk" && props.item.itemKind === "fork-origin"
+      ? readForkOriginData(props.item.data)
+      : null;
   const Renderer = [...entries]
     .find(([id]) => id === props.item.pluginId)?.[1]
     .timeline.get(props.item.itemKind);
+  if (forkOrigin) return <ForkOriginCard serverId={props.serverId} data={forkOrigin} />;
   if (Renderer) return <Renderer serverId={props.serverId} item={item} />;
   if (builtinClientRegistry.hasPlugin(props.item.pluginId)) return null;
   return <ThemedPluginTimelineItemBody {...props} uniProps={pluginThemeMapping} />;

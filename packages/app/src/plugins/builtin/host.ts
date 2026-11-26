@@ -52,6 +52,19 @@ export interface BuiltinAttachmentPillProps {
 export interface BuiltinAgentProps extends BuiltinClientProps {
   agentId: string;
 }
+/** An action under a chat message (user bubble or assistant turn footer). */
+export interface BuiltinMessageActionProps extends BuiltinAgentProps {
+  role: "user" | "assistant";
+  /** The whole message or turn text. */
+  getContent: () => string;
+}
+/** A tab in the agent inspector (desktop right panel, compact inspector sheet). */
+export interface BuiltinInspectorTab {
+  id: string;
+  title: string;
+  icon: LucideIcon;
+  component: ComponentType<BuiltinAgentProps>;
+}
 export interface BuiltinComposerDockProps extends BuiltinAgentProps {
   cwd: string;
   onOpenFile: (absolutePath: string) => void;
@@ -138,6 +151,10 @@ export interface BuiltinClientHost {
   agentSettingsCard(id: string, component: ComponentType<BuiltinClientProps>, order: number): void;
   /** Renders a parsed phase-command user message; one per host. */
   userMessageBody(component: ComponentType<BuiltinUserMessageBodyProps>): void;
+  /** An action next to Copy under every user message and assistant turn. */
+  messageAction(id: string, component: ComponentType<BuiltinMessageActionProps>): void;
+  /** A tab in the agent inspector. */
+  inspectorTab(tab: BuiltinInspectorTab): void;
 }
 export interface BuiltinAttachmentSource {
   source: PluginAttachmentSourceContribution;
@@ -165,6 +182,8 @@ export interface BuiltinClientContributions {
   workspaceHeader: Map<string, ComponentType<BuiltinClientProps>>;
   userMessageBody: ComponentType<BuiltinUserMessageBodyProps> | null;
   agentSettings: Map<string, { component: ComponentType<BuiltinClientProps>; order: number }>;
+  messageActions: Map<string, ComponentType<BuiltinMessageActionProps>>;
+  inspectorTabs: Map<string, BuiltinInspectorTab>;
 }
 export class BuiltinClientRegistry {
   private readonly entries = new Map<BuiltinPluginId, BuiltinClientContributions>();
@@ -192,6 +211,8 @@ export class BuiltinClientRegistry {
       workspaceHeader: new Map(),
       userMessageBody: null,
       agentSettings: new Map(),
+      messageActions: new Map(),
+      inspectorTabs: new Map(),
     };
     this.entries.set(id, entry);
     const add = <T>(map: Map<string, T>, key: string, value: T) => {
@@ -224,6 +245,8 @@ export class BuiltinClientRegistry {
       workspaceHeaderControl: (key, component) => add(entry.workspaceHeader, key, component),
       agentSettingsCard: (key, component, order) =>
         add(entry.agentSettings, key, { component, order }),
+      messageAction: (key, component) => add(entry.messageActions, key, component),
+      inspectorTab: (tab) => add(entry.inspectorTabs, tab.id, tab),
       userMessageBody: (component) => {
         if (entry.userMessageBody) throw new Error(`Duplicate built-in message body: ${id}`);
         entry.userMessageBody = component;

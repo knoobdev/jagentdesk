@@ -1,11 +1,13 @@
 import { sshModuleStrings } from "./ssh-modules";
 import { builtinPluginStrings } from "./builtin-plugins";
 import { botsStrings } from "./bots";
+import { memoryStrings } from "./memory";
 import { type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ja: TranslationResources = {
   bots: botsStrings,
+  memory: memoryStrings,
   builtinPlugins: builtinPluginStrings,
   ssh: sshModuleStrings,
   pluginCombobox: {
@@ -357,6 +359,17 @@ export const ja: TranslationResources = {
       forkUnavailable: "これを使用するにはホストを更新してください。",
       forkMissingWorkspace: "このエージェントはワークスペース内にありません。",
       forkFailed: "チャットのフォークに失敗しました",
+      forkPreparing: "フォークを準備しています…",
+      forkRetry: "再試行",
+      forkedFrom: "{{title}} からフォーク",
+      forkedFromUnknown: "別のエージェントからフォーク",
+      forkShowEarlier: "以前のメッセージを表示",
+      forkLoadOlder: "さらに古いメッセージを読み込む",
+      forkHideEarlier: "以前のメッセージを隠す",
+      forkOpenOriginal: "元の会話を開く",
+      forkYou: "あなた",
+      forkAgent: "エージェント",
+      forkToolCalls: "ツール呼び出し {{count}} 件",
       openFile: "ファイルを開く",
       copied: "コピーしました",
     },

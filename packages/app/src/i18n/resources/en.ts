@@ -1,10 +1,12 @@
 import { sshModuleStrings } from "./ssh-modules";
 import { builtinPluginStrings } from "./builtin-plugins";
 import { botsStrings } from "./bots";
+import { memoryStrings } from "./memory";
 import { pluginSettings } from "./plugin-settings";
 
 export const en = {
   bots: botsStrings,
+  memory: memoryStrings,
   builtinPlugins: builtinPluginStrings,
   ssh: sshModuleStrings,
   pluginCombobox: {
@@ -343,6 +345,17 @@ export const en = {
       forkUnavailable: "Update the host to use this.",
       forkMissingWorkspace: "This agent is not in a workspace.",
       forkFailed: "Failed to fork chat",
+      forkPreparing: "Preparing fork…",
+      forkRetry: "Retry",
+      forkedFrom: "Forked from {{title}}",
+      forkedFromUnknown: "Forked from another agent",
+      forkShowEarlier: "Show earlier messages",
+      forkLoadOlder: "Load older messages",
+      forkHideEarlier: "Hide earlier messages",
+      forkOpenOriginal: "Open original",
+      forkYou: "You",
+      forkAgent: "Agent",
+      forkToolCalls: "{{count}} tool calls",
       openFile: "Open file",
       copied: "Copied",
     },
