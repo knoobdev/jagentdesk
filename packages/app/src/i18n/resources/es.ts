@@ -1587,6 +1587,33 @@ export const es: TranslationResources = {
     },
   },
   continuity: {
+    durable: {
+      rolloverMenu: "Pasar a una sesión nueva…",
+      captureMenu: "Capturar lecciones…",
+      rolloverTitle: "Pasar a una sesión nueva",
+      rolloverBody:
+        "Cierra la sesión nativa actual de este agente y abre una nueva con el mismo proveedor y modelo. La sesión nueva recibe el registro de sesión, el índice de artefactos y los tres últimos turnos literales. La línea de tiempo no cambia.",
+      rolloverConfirm: "Pasar",
+      rolloverDone: "Se pasó a una sesión nueva",
+      captureTitle: "Capturar lecciones",
+      captureBody:
+        "Envía un mensaje visible que pide al agente guardar lo aprendido en esta sesión como lecciones pendientes, con citas. Apruebas cada una en Memoria → Lecciones pendientes.",
+      captureConfirm: "Capturar lecciones",
+      captureSent: "Se pidió al agente capturar lecciones",
+      archiveTitle: "¿Capturar lecciones antes de archivar?",
+      archiveBody:
+        "Este agente hizo {{count}} turnos. Pídele primero que guarde lo aprendido como lecciones pendientes y archívalo cuando responda.",
+      archiveNow: "Archivar ahora",
+      updateHost: "Actualiza este host para usar Pasar a una sesión nueva y Capturar lecciones.",
+      viewBlock: "Ver bloque",
+      regroundedTitle: "Reubicado tras la compactación",
+      regroundedSubtitle: "{{tokens}} tokens enviados con el mensaje",
+      blockMissing: "Este bloque ya no está guardado.",
+      compactions: "Compactaciones",
+      inferred: "inferida",
+      showSummary: "Ver resumen",
+      hideSummary: "Ocultar resumen",
+    },
     settings: {
       addProvider: "Añadir proveedor",
       moveUp: "Subir",

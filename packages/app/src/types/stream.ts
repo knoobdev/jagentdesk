@@ -4,6 +4,7 @@ import type {
   AgentProvider,
   AgentTimelineItem,
   ProviderSwitchNotice,
+  RegroundingNotice,
   ToolCallDetail,
   UsageLimitNotice,
 } from "@jagentdesk/protocol/agent-types";
@@ -791,6 +792,8 @@ export interface ActivityLogItem {
   providerSwitch?: ProviderSwitchNotice;
   /** Set on the row a usage limit appended when no failover ran (spec 40 §4). */
   usageLimit?: UsageLimitNotice;
+  /** Set on the "Re-grounded after compaction" row (spec 42 §2). */
+  regrounding?: RegroundingNotice;
 }
 
 export interface CompactionItem {
@@ -1505,6 +1508,7 @@ function reduceTimelineEvent(
         message: item.message,
         ...(item.providerSwitch ? { providerSwitch: item.providerSwitch } : {}),
         ...(item.usageLimit ? { usageLimit: item.usageLimit } : {}),
+        ...(item.regrounding ? { regrounding: item.regrounding } : {}),
       });
     }
     case "compaction":

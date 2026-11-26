@@ -878,6 +878,8 @@ export function WorkspaceDesktopTabsRow({
       reloadAgent: t("workspace.tabs.menu.reloadAgent"),
       reloadAgentTooltip: t("workspace.tabs.menu.reloadAgentTooltip"),
       failover: t("continuity.failover.menu"),
+      rollover: t("continuity.durable.rolloverMenu"),
+      captureLessons: t("continuity.durable.captureMenu"),
       close: t("workspace.tabs.menu.close"),
     }),
     [t],

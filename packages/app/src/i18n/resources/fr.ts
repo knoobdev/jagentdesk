@@ -1607,6 +1607,34 @@ export const fr: TranslationResources = {
     },
   },
   continuity: {
+    durable: {
+      rolloverMenu: "Passer à une nouvelle session…",
+      captureMenu: "Capturer les leçons…",
+      rolloverTitle: "Passer à une nouvelle session",
+      rolloverBody:
+        "Termine la session native actuelle de cet agent et en ouvre une nouvelle avec le même fournisseur et le même modèle. La nouvelle session reçoit le registre de session, l'index des artefacts et les trois derniers tours mot pour mot. La chronologie reste telle quelle.",
+      rolloverConfirm: "Passer",
+      rolloverDone: "Passé à une nouvelle session",
+      captureTitle: "Capturer les leçons",
+      captureBody:
+        "Envoie un message visible demandant à l'agent d'enregistrer ce qu'il a appris dans cette session comme leçons en attente, avec citations. Vous approuvez chacune dans Mémoire → Leçons en attente.",
+      captureConfirm: "Capturer les leçons",
+      captureSent: "L'agent doit capturer les leçons",
+      archiveTitle: "Capturer les leçons avant d'archiver ?",
+      archiveBody:
+        "Cet agent a fait {{count}} tours. Demandez-lui d'abord d'enregistrer ce qu'il a appris comme leçons en attente, puis archivez-le une fois qu'il a répondu.",
+      archiveNow: "Archiver maintenant",
+      updateHost:
+        "Mettez à jour cet hôte pour utiliser Passer à une nouvelle session et Capturer les leçons.",
+      viewBlock: "Voir le bloc",
+      regroundedTitle: "Recadré après la compaction",
+      regroundedSubtitle: "{{tokens}} jetons envoyés avec le message",
+      blockMissing: "Ce bloc n'est plus enregistré.",
+      compactions: "Compactions",
+      inferred: "déduite",
+      showSummary: "Voir le résumé",
+      hideSummary: "Masquer le résumé",
+    },
     settings: {
       addProvider: "Ajouter un fournisseur",
       moveUp: "Monter",

@@ -1577,6 +1577,34 @@ export const ja: TranslationResources = {
     },
   },
   continuity: {
+    durable: {
+      rolloverMenu: "新しいセッションへ切り替え…",
+      captureMenu: "教訓を記録…",
+      rolloverTitle: "新しいセッションへ切り替え",
+      rolloverBody:
+        "このエージェントの現在のネイティブセッションを終了し、同じプロバイダーとモデルで新しいセッションを開始します。新しいセッションにはセッション台帳、成果物インデックス、直近 3 ターンの原文が渡されます。タイムラインはそのまま残ります。",
+      rolloverConfirm: "切り替え",
+      rolloverDone: "新しいセッションに切り替えました",
+      captureTitle: "教訓を記録",
+      captureBody:
+        "このセッションで学んだことを引用付きの保留中の教訓として保存するよう、エージェントに見える形でメッセージを 1 件送ります。各教訓は「メモリ → 保留中の教訓」で承認します。",
+      captureConfirm: "教訓を記録",
+      captureSent: "エージェントに教訓の記録を依頼しました",
+      archiveTitle: "アーカイブ前に教訓を記録しますか？",
+      archiveBody:
+        "このエージェントは {{count}} ターン実行しました。先に学んだことを保留中の教訓として保存させ、回答後にアーカイブしてください。",
+      archiveNow: "今すぐアーカイブ",
+      updateHost:
+        "新しいセッションへの切り替えと教訓の記録を使うには、このホストを更新してください。",
+      viewBlock: "ブロックを表示",
+      regroundedTitle: "コンパクション後に再提示しました",
+      regroundedSubtitle: "メッセージと一緒に {{tokens}} トークンを送信",
+      blockMissing: "このブロックは保存されていません。",
+      compactions: "コンパクション",
+      inferred: "推定",
+      showSummary: "要約を表示",
+      hideSummary: "要約を隠す",
+    },
     settings: {
       addProvider: "プロバイダーを追加",
       moveUp: "上へ",

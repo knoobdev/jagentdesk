@@ -1,3 +1,4 @@
+import { AgentDurableActionHost } from "@/continuity/agent-durable-actions";
 import { AgentFailoverSheetHost } from "@/continuity/agent-failover-sheet";
 import {
   useWindowLayout,
@@ -725,6 +726,8 @@ function MobileWorkspaceTabOption({
       reloadAgent: t("workspace.tabs.menu.reloadAgent"),
       reloadAgentTooltip: t("workspace.tabs.menu.reloadAgentTooltip"),
       failover: t("continuity.failover.menu"),
+      rollover: t("continuity.durable.rolloverMenu"),
+      captureLessons: t("continuity.durable.captureMenu"),
       close: t("workspace.tabs.menu.close"),
     }),
     [t],
@@ -4561,6 +4564,7 @@ function WorkspaceScreenContent({
                 onClose={handleRenameModalClose}
               />
               <AgentFailoverSheetHost serverId={normalizedServerId} />
+              <AgentDurableActionHost serverId={normalizedServerId} />
             </View>
           </RenderProfile>
         </WorkspaceFocusProvider>

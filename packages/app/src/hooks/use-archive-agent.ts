@@ -7,6 +7,7 @@ import {
   type QueryKey,
 } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { askCaptureLessonsBeforeArchive } from "@/continuity/archive-capture-lessons";
 import { useSessionStore } from "@/stores/session-store";
 import { agentHistoryQueryKey, allAgentHistoryQueryRootKey } from "./agent-history-query-key";
 
@@ -488,6 +489,8 @@ export function useArchiveAgent() {
 
   const archiveAgent = useCallback(
     async (input: ArchiveAgentInput): Promise<void> => {
+      // Spec 42 §7: a long-running agent may capture lessons first; it stays until archived again.
+      if ((await askCaptureLessonsBeforeArchive(input)) !== "archive") return;
       await archiveMutateAsync(input);
     },
     [archiveMutateAsync],

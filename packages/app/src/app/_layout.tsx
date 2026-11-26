@@ -62,6 +62,7 @@ import { WorkspacePinShortcutHandler } from "@/components/workspace-pin-shortcut
 import { CompactExplorerSidebarHost } from "@/components/compact-explorer-sidebar-host";
 import { WorkspaceArchiveShortcutHandler } from "@/components/workspace-archive-shortcut-handler";
 import { WorkspaceArchiveUndoShortcutHost } from "@/workspace/archive-undo";
+import { ArchiveCaptureLessonsHost } from "@/continuity/agent-durable-actions";
 import { ProviderSettingsHost } from "@/components/provider-settings-host";
 import { WorkspaceSetupDialog } from "@/components/workspace-setup-dialog";
 import { WorkspaceShortcutTargetsSubscriber } from "@/components/workspace-shortcut-targets-subscriber";
@@ -563,6 +564,7 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
       <PluginCommandCenterActions />
       <WorkspacePinShortcutHandler />
       <WorkspaceArchiveUndoShortcutHost />
+      <ArchiveCaptureLessonsHost />
       <CommandCenter />
       <AddProjectFlowHost />
       <PairDeviceRequestAutoOpener />

@@ -1571,6 +1571,33 @@ export const ptBR: TranslationResources = {
     },
   },
   continuity: {
+    durable: {
+      rolloverMenu: "Passar para uma sessão nova…",
+      captureMenu: "Registrar lições…",
+      rolloverTitle: "Passar para uma sessão nova",
+      rolloverBody:
+        "Encerra a sessão nativa atual deste agente e abre uma nova com o mesmo provedor e modelo. A sessão nova recebe o registro da sessão, o índice de artefatos e os três últimos turnos na íntegra. A linha do tempo continua igual.",
+      rolloverConfirm: "Passar",
+      rolloverDone: "Passou para uma sessão nova",
+      captureTitle: "Registrar lições",
+      captureBody:
+        "Envia uma mensagem visível pedindo ao agente que salve o que aprendeu nesta sessão como lições pendentes, com citações. Você aprova cada uma em Memória → Lições pendentes.",
+      captureConfirm: "Registrar lições",
+      captureSent: "Pedimos ao agente que registre lições",
+      archiveTitle: "Registrar lições antes de arquivar?",
+      archiveBody:
+        "Este agente fez {{count}} turnos. Peça primeiro que salve o que aprendeu como lições pendentes e arquive-o depois que ele responder.",
+      archiveNow: "Arquivar agora",
+      updateHost: "Atualize este host para usar Passar para uma sessão nova e Registrar lições.",
+      viewBlock: "Ver bloco",
+      regroundedTitle: "Reancorado após a compactação",
+      regroundedSubtitle: "{{tokens}} tokens enviados com a mensagem",
+      blockMissing: "Este bloco não está mais salvo.",
+      compactions: "Compactações",
+      inferred: "inferida",
+      showSummary: "Ver resumo",
+      hideSummary: "Ocultar resumo",
+    },
     settings: {
       addProvider: "Adicionar provedor",
       moveUp: "Subir",

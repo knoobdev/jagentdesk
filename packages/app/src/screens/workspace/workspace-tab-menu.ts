@@ -1,3 +1,4 @@
+import { useAgentDurableActionStore } from "@/continuity/agent-durable-action-store";
 import { useAgentFailoverSheetStore } from "@/continuity/agent-failover-store";
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
 import { i18n } from "@/i18n/i18next";
@@ -20,6 +21,8 @@ export interface WorkspaceTabMenuLabels {
   reloadAgent: string;
   reloadAgentTooltip: string;
   failover: string;
+  rollover: string;
+  captureLessons: string;
   close: string;
 }
 
@@ -37,6 +40,8 @@ export const DEFAULT_WORKSPACE_TAB_MENU_LABELS: WorkspaceTabMenuLabels = {
   reloadAgent: i18n.t("workspace.tabs.menu.reloadAgent"),
   reloadAgentTooltip: i18n.t("workspace.tabs.menu.reloadAgentTooltip"),
   failover: i18n.t("continuity.failover.menu"),
+  rollover: i18n.t("continuity.durable.rolloverMenu"),
+  captureLessons: i18n.t("continuity.durable.captureMenu"),
   close: i18n.t("workspace.tabs.menu.close"),
 };
 
@@ -321,6 +326,25 @@ export function buildWorkspaceTabMenuEntries(
       testID: `${menuTestIDBase}-failover`,
       onSelect: () => {
         useAgentFailoverSheetStore.getState().open(agentId);
+      },
+    });
+    // Spec 42 §6–§7: user-triggered only; each one shows in the timeline.
+    entries.push({
+      kind: "item",
+      key: "rollover",
+      label: labels.rollover,
+      testID: `${menuTestIDBase}-rollover`,
+      onSelect: () => {
+        useAgentDurableActionStore.getState().open(agentId, "rollover");
+      },
+    });
+    entries.push({
+      kind: "item",
+      key: "capture-lessons",
+      label: labels.captureLessons,
+      testID: `${menuTestIDBase}-capture-lessons`,
+      onSelect: () => {
+        useAgentDurableActionStore.getState().open(agentId, "captureLessons");
       },
     });
   }

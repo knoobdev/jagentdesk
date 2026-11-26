@@ -1606,6 +1606,33 @@ export const en = {
       "This build has no Tailscale native module. Install a build with Tailscale support, or connect over your local network with a direct connection.",
   },
   continuity: {
+    durable: {
+      rolloverMenu: "Rollover to a fresh session…",
+      captureMenu: "Capture lessons…",
+      rolloverTitle: "Rollover to a fresh session",
+      rolloverBody:
+        "Ends this agent's current native session and starts a new one on the same provider and model. The new session gets the session ledger, the artifact index and the last three turns verbatim. The timeline stays as it is.",
+      rolloverConfirm: "Rollover",
+      rolloverDone: "Rolled over to a fresh session",
+      captureTitle: "Capture lessons",
+      captureBody:
+        "Sends one visible message asking the agent to save what it learned in this session as pending lessons, with citations. You approve each one under Memory → Pending lessons.",
+      captureConfirm: "Capture lessons",
+      captureSent: "Asked the agent to capture lessons",
+      archiveTitle: "Capture lessons before archiving?",
+      archiveBody:
+        "This agent ran {{count}} turns. Ask it to save what it learned as pending lessons first, then archive it once it has answered.",
+      archiveNow: "Archive now",
+      updateHost: "Update this host to use Rollover and Capture lessons.",
+      viewBlock: "View block",
+      regroundedTitle: "Re-grounded after compaction",
+      regroundedSubtitle: "{{tokens}} tokens sent with the message",
+      blockMissing: "This block is no longer stored.",
+      compactions: "Compactions",
+      inferred: "inferred",
+      showSummary: "Show summary",
+      hideSummary: "Hide summary",
+    },
     settings: {
       addProvider: "Add provider",
       moveUp: "Up",

@@ -1526,6 +1526,33 @@ export const zhCN: TranslationResources = {
     },
   },
   continuity: {
+    durable: {
+      rolloverMenu: "切换到新会话…",
+      captureMenu: "总结经验…",
+      rolloverTitle: "切换到新会话",
+      rolloverBody:
+        "结束此代理当前的原生会话，并以相同的提供方和模型开启新会话。新会话会收到会话账本、产出物索引和最近三轮的原文。时间线保持不变。",
+      rolloverConfirm: "切换",
+      rolloverDone: "已切换到新会话",
+      captureTitle: "总结经验",
+      captureBody:
+        "发送一条可见消息，请代理把本次会话学到的内容连同引用保存为待审经验。你在“记忆 → 待审经验”中逐条批准。",
+      captureConfirm: "总结经验",
+      captureSent: "已请代理总结经验",
+      archiveTitle: "归档前先总结经验？",
+      archiveBody:
+        "此代理运行了 {{count}} 轮。先让它把学到的内容保存为待审经验，等它回答后再归档。",
+      archiveNow: "立即归档",
+      updateHost: "请更新此主机以使用“切换到新会话”和“总结经验”。",
+      viewBlock: "查看内容块",
+      regroundedTitle: "压缩后已重新定位",
+      regroundedSubtitle: "随消息发送了 {{tokens}} 个 token",
+      blockMissing: "此内容块已不再保存。",
+      compactions: "压缩记录",
+      inferred: "推断",
+      showSummary: "显示摘要",
+      hideSummary: "隐藏摘要",
+    },
     settings: {
       addProvider: "添加提供商",
       moveUp: "上移",

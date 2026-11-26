@@ -1,4 +1,5 @@
 import { ProviderSwitchRow } from "@/continuity/provider-switch-row";
+import { RegroundingRow } from "@/continuity/regrounding-row";
 import { buildProviderSegments } from "@/continuity/provider-segments";
 import { UsageLimitRow } from "@/continuity/usage-limit-row";
 import { useChatOutlineRail } from "@/chat-rail";
@@ -1018,6 +1019,17 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
                   agentId={agentId}
                   message={item.message}
                   notice={item.usageLimit}
+                />
+              );
+            }
+            if (item.regrounding) {
+              return (
+                <RegroundingRow
+                  serverId={resolvedServerId}
+                  agentId={agentId}
+                  message={item.message}
+                  timestamp={item.timestamp.getTime()}
+                  notice={item.regrounding}
                 />
               );
             }

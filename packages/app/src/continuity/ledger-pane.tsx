@@ -2,7 +2,11 @@ import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ScrollView, Share, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import type { SessionLedger, SessionLedgerHandoff } from "@jagentdesk/protocol/messages";
+import type {
+  SessionLedger,
+  SessionLedgerCompaction,
+  SessionLedgerHandoff,
+} from "@jagentdesk/protocol/messages";
 import { isWeb } from "@/constants/platform";
 import { MarkdownRenderer } from "@/components/markdown/renderer";
 import { Button } from "@/components/ui/button";
@@ -93,6 +97,53 @@ function Handoffs({
   );
 }
 
+function formatTokens(value: number | null): string {
+  return value === null ? "?" : value.toLocaleString();
+}
+
+function CompactionRow({ compaction }: { compaction: SessionLedgerCompaction }) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+  const toggle = useCallback(() => setExpanded((value) => !value), []);
+  return (
+    <View style={styles.row}>
+      <View style={styles.handoffRow}>
+        <Text style={styles.rowTitle} numberOfLines={1}>
+          {providerDisplayLabel(compaction.provider)} · {formatTokens(compaction.preTokens)} →{" "}
+          {formatTokens(compaction.postTokens)}
+          {compaction.inferred ? ` · ${t("continuity.durable.inferred")}` : ""}
+        </Text>
+        {compaction.summary ? (
+          <Button size="sm" variant="ghost" onPress={toggle} testID="ledger-compaction-summary">
+            {t(expanded ? "continuity.durable.hideSummary" : "continuity.durable.showSummary")}
+          </Button>
+        ) : null}
+      </View>
+      <Text style={styles.rowMeta}>{formatTimeAgo(new Date(compaction.at))}</Text>
+      {expanded && compaction.summary ? (
+        <MarkdownRenderer text={compaction.summary} compact selectable />
+      ) : null}
+    </View>
+  );
+}
+
+/** Spec 42 §1/§3: compactions the daemon saw, with Claude's own summary to compare. */
+function Compactions({ compactions }: { compactions: SessionLedgerCompaction[] | undefined }) {
+  const { t } = useTranslation();
+  if (!compactions || compactions.length === 0) return null;
+  return (
+    <View style={styles.section} testID="ledger-compactions">
+      <Text style={styles.heading}>{t("continuity.durable.compactions")}</Text>
+      {Array.from(
+        { length: compactions.length },
+        (_, index) => compactions[compactions.length - 1 - index]!,
+      ).map((compaction) => (
+        <CompactionRow key={compaction.id} compaction={compaction} />
+      ))}
+    </View>
+  );
+}
+
 const AGENT_TAB_PREFIX = "agent_";
 
 /** The agent of the workspace's focused tab, else the host's focused agent. */
@@ -157,6 +208,7 @@ export function LedgerPane({
       </View>
       <ProviderSessions ledger={ledger.data} />
       <Handoffs handoffs={ledger.data.handoffs} onView={setViewing} />
+      <Compactions compactions={ledger.data.compactions} />
       <View style={styles.section} testID="ledger-markdown">
         <MarkdownRenderer text={ledger.data.markdown} compact selectable />
       </View>
