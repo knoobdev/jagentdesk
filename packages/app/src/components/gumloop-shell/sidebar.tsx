@@ -540,7 +540,7 @@ export function GumloopSidebar({ active }: { active: boolean }) {
             accessibilityRole="button"
             testID="sidebar-global-new-workspace"
           >
-            <ThemedPlus size={18} uniProps={foreground} />
+            <ThemedPlus size={16} uniProps={foreground} />
             <Text style={styles.newAgentLabel}>New agent</Text>
           </Pressable>
         </View>
@@ -657,17 +657,8 @@ const styles = StyleSheet.create((theme: Theme) => ({
     gap: 8,
     paddingHorizontal: 10,
   },
-  row: {
-    height: { xs: 44, md: 34 },
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingHorizontal: 10,
-    borderRadius: 8,
-  },
-  label: { flex: 1, fontSize: 16, fontWeight: "500", color: theme.colors.foreground },
-  selected: { backgroundColor: theme.chrome.selectedRow },
-  hovered: { backgroundColor: theme.colors.surfaceSidebarHover },
+  // Sidebar labels (host row, account row, drill-in title) are 14/500 like the nav (spec 38 §4.2).
+  label: { flex: 1, fontSize: 14, fontWeight: "500", color: theme.colors.foreground },
   newAgent: {
     height: { xs: 44, md: 34 },
     flexDirection: "row",
@@ -679,12 +670,13 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderColor: theme.colors.border,
     borderRadius: 10,
   },
-  newAgentLabel: { fontSize: 16, fontWeight: "500", color: theme.colors.foreground },
+  newAgentLabel: { fontSize: 14, fontWeight: "500", color: theme.colors.foreground },
   middle: { flex: 1, minHeight: 0, overflow: "hidden" },
   rootScroll: { paddingHorizontal: 8, paddingBottom: 16 },
   drillContent: { paddingHorizontal: 10, paddingBottom: 16 },
   navigation: { paddingHorizontal: 2 },
-  navItems: { gap: 3 },
+  // 32 px rows on a 34 px pitch (spec 38 §4.2).
+  navItems: { gap: 2 },
   groupHeading: {
     marginTop: 24,
     height: { xs: 44, md: 34 },

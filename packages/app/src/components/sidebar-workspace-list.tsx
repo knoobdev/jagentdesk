@@ -986,7 +986,7 @@ function ProjectHeaderRow({
   const rowChildren = (
     <>
       <View style={styles.projectRowLeft(gumloop)}>
-        <View style={styles.projectLeadingVisual(gumloop)}>
+        <View style={styles.projectLeadingVisual}>
           <ProjectLeadingVisual
             displayName={displayName}
             iconDataUri={iconDataUri}
@@ -2545,9 +2545,11 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.sm,
     textAlign: "center",
   },
+  // Gumloop project rows share the nav geometry: 32 px, 16 px icon at x = 20, label at x = 40
+  // (spec 38 §4.2).
   projectRow: (gumloop: boolean) => ({
     position: "relative",
-    minHeight: gumloop ? 34 : 36,
+    minHeight: gumloop ? 32 : 36,
     paddingVertical: gumloop ? 0 : theme.spacing[2],
     paddingHorizontal: gumloop ? 10 : theme.spacing[2],
     marginHorizontal: gumloop ? 2 : 0,
@@ -2573,16 +2575,16 @@ const styles = StyleSheet.create((theme) => ({
     zIndex: 3,
     ...theme.shadow.md,
   },
-  projectLeadingVisual: (gumloop: boolean) => ({
-    width: gumloop ? 18 : 16,
+  projectLeadingVisual: {
+    width: 16,
     height: 20,
     alignItems: "center",
     justifyContent: "center",
-  }),
+  },
   projectRowLeft: (gumloop: boolean) => ({
     flexDirection: "row",
     alignItems: "center",
-    gap: gumloop ? 12 : theme.spacing[2],
+    gap: gumloop ? 4 : theme.spacing[2],
     flex: 1,
     minWidth: 0,
   }),

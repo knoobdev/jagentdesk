@@ -698,6 +698,17 @@ export interface ShellChrome {
   chipActiveForeground: string;
   sectionTitleWeight: "400" | "500" | "600";
   rowTitleWeight: "400" | "500" | "600";
+  /**
+   * Menus (dropdown, ⋮, context menu, Command Center): label size, pointer row heights and group
+   * titles. Gumloop reads at 14 px on 32 px rows with 12/600 group titles (spec 38 §4.6 "Menu");
+   * classic keeps its own sizes. Phones keep their touch heights from the menu components.
+   */
+  menuItemFontSize: number;
+  menuItemHeight: number;
+  contextMenuItemHeight: number;
+  contextMenuItemPaddingVertical: number;
+  menuGroupTitleSize: number;
+  menuGroupTitleWeight: "400" | "500" | "600";
 }
 
 interface ClassicChromeSource {
@@ -769,6 +780,12 @@ function classicChrome(c: ClassicChromeSource): ShellChrome {
     chipActiveForeground: c.foreground,
     sectionTitleWeight: "400",
     rowTitleWeight: "400",
+    menuItemFontSize: FONT_SIZE.base,
+    menuItemHeight: 28,
+    contextMenuItemHeight: 36,
+    contextMenuItemPaddingVertical: SPACING[2],
+    menuGroupTitleSize: FONT_SIZE.sm,
+    menuGroupTitleWeight: "400",
   };
 }
 
@@ -1179,6 +1196,12 @@ function gumloopChrome(c: typeof gumloopLightColors, dark: boolean): ShellChrome
     chipActiveForeground: c.foreground,
     sectionTitleWeight: "500",
     rowTitleWeight: "500",
+    menuItemFontSize: FONT_SIZE.sm,
+    menuItemHeight: 32,
+    contextMenuItemHeight: 32,
+    contextMenuItemPaddingVertical: SPACING[1],
+    menuGroupTitleSize: FONT_SIZE.xs,
+    menuGroupTitleWeight: "600",
   };
 }
 export const GUMLOOP_LIGHT_CHROME = gumloopChrome(gumloopLightColors, false);

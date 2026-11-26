@@ -837,6 +837,7 @@ const styles = StyleSheet.create((theme) => ({
   },
   labelText: {
     fontSize: theme.fontSize.xs,
+    fontWeight: theme.chrome.menuGroupTitleWeight,
     color: theme.colors.foregroundMuted,
     textTransform: "uppercase",
     letterSpacing: 0.6,
@@ -857,13 +858,15 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.sm,
     color: theme.colors.foreground,
   },
+  // Gumloop rows are 32 px (spec 38 §4.6 "Menu"): its tokens drop the padding so the floor, not
+  // the content, sets the height. Classic keeps 36 px and 8 px padding.
   item: {
     flexDirection: "row",
     alignItems: "center",
-    minHeight: 36,
+    minHeight: theme.chrome.contextMenuItemHeight,
     gap: theme.spacing[2],
     paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[2],
+    paddingVertical: theme.chrome.contextMenuItemPaddingVertical,
     borderWidth: theme.borderWidth[1],
     borderColor: "transparent",
   },
