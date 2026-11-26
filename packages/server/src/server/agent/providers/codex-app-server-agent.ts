@@ -6216,9 +6216,11 @@ export class CodexAppServerAgentSession implements AgentSession {
         // layer — otherwise every internal tool call raises a redundant
         // `mcpServer/elicitation/request`, which for user-facing DB/cluster
         // chats loops indefinitely (the tool never runs). Tell Codex to
-        // auto-approve this server so its own approval flow stays authoritative.
+        // approve this server's tools so the daemon's approval flow stays authoritative.
+        // "auto" is not enough: Codex still asks for every tool without a read-only
+        // annotation ("Allow the jagentdesk MCP server to run tool …?").
         if (isInternalJAgentDeskMcpServer(serverConfig)) {
-          codexServer.default_tools_approval_mode = "auto";
+          codexServer.default_tools_approval_mode = "approve";
         }
         mcpServers[name] = codexServer;
       }

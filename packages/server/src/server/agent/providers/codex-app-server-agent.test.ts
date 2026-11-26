@@ -1867,7 +1867,9 @@ describe("Codex app-server provider", () => {
     expect(turnStart).toMatchObject({
       config: {
         mcp_servers: {
-          jagentdesk: { default_tools_approval_mode: "auto" },
+          // "auto" still asks for tools without a read-only annotation (Codex 0.172 shows
+          // "Allow the jagentdesk MCP server to run tool …?"); "approve" never asks.
+          jagentdesk: { default_tools_approval_mode: "approve" },
         },
       },
     });
