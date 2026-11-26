@@ -9,6 +9,22 @@ import { join, relative } from "node:path";
 // the patch's node_modules/... paths relative to its working directory.
 const patchedPackages = [
   { nodeModulesPath: "node_modules/mermaid", patchPrefix: "mermaid+" },
+  // Portal state lives in a store that each host subscribes to. As the provider's context value it
+  // changed on every portal add, update and remove, and React searched every fiber under the
+  // provider (the whole app) for consumers. No upstream fix; keep while the app uses this package.
+  // Keyed hosts: backport of https://github.com/gorhom/react-native-portal/pull/62, unreleased
+  // after 1.0.14. Remove the PortalHost hunks when an installed release includes it.
+  {
+    nodeModulesPath: "node_modules/@gorhom/portal",
+    patchPrefix: "@gorhom+portal+",
+  },
+  // Backport of React 19.3.0 to the development builds: clear each render timing after reporting
+  // it. The browser keeps every performance measure for the life of the page, so a development
+  // session held millions of them and gigabytes of memory. Remove when react-dom is >= 19.3.0.
+  {
+    nodeModulesPath: "node_modules/react-dom",
+    patchPrefix: "react-dom+",
+  },
   {
     nodeModulesPath: "node_modules/react-native-reanimated",
     patchPrefix: "react-native-reanimated+",

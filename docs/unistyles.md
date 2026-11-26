@@ -86,7 +86,7 @@ Values that must reach React props rather than `style`, such as icon colors, go 
 
 ## Dynamic Pixel Styles On Web
 
-Avoid feeding changing pixel values such as `{ top, left }`, `{ maxHeight }`, or `{ minWidth }` into the `style` prop of Unistyles-managed React Native components on web. The web runtime hashes each distinct style object by value and appends a CSS rule to `#unistyles-web`; those rules are not reclaimed during the page lifetime, so pointer-driven positioning can turn into steady stylesheet growth.
+Avoid feeding changing pixel values such as `{ top, left }`, `{ maxHeight }`, or `{ minWidth }` into the `style` prop of Unistyles-managed React Native components on web. The web runtime hashes each distinct style object by value and inserts a CSS rule into `#unistyles-web` for it, then deletes the rule when the last element using it unmounts. Pointer-driven positioning turns into a rule insert and delete per move.
 
 Use the inline style escape hatch below for high-churn values. Do not split a component into plain/web/native variants just to keep one measured value out of the CSS registry. Raw DOM wrappers are reserved for real DOM infrastructure, such as terminal hosts, virtualized web rows, or third-party drag wrappers.
 
@@ -212,6 +212,7 @@ Quick confirmation in DevTools console:
 ```js
 [...document.styleSheets]
   .flatMap((s) => [...(s.cssRules || [])])
+  .flatMap((r) => (r.cssRules ? [...r.cssRules] : [r]))
   .map((r) => r.cssText)
   .filter((t) => t.includes("unistyles") && t.includes("> *"));
 ```
@@ -336,6 +337,26 @@ Gotchas:
 - **High-churn draft values** (live-while-typing in the appearance preview) bypass the theme: apply them as inline styles marked with `inlineUnistylesStyle` so per-keystroke values don't grow the `#unistyles-web` CSS registry.
 - **Mounted parsed content uses `AppearanceStyleBoundary`.** Markdown, syntax-highlighted code, and tool-call detail bodies can contain memoized/custom renderer trees that do not naturally re-run when runtime-patched appearance tokens change. Wrap the parsed surface once with `packages/app/src/components/appearance-style-boundary.tsx`; do not add local "appearance key" props at each callsite.
 - **Dynamic font tokens stay widened.** `fontFamily`, `fontSize`, and `lineHeight` on `commonTheme` are annotated `string`/`number` (not narrowed by `as const`) so the updater's return assigns; the platform default stacks live in `DEFAULT_UI_FONT_STACK` / `DEFAULT_MONO_FONT_STACK`.
+
+## Patching The Web Runtime
+
+When backporting a Unistyles web fix, patch the TypeScript source and both
+shipped JavaScript builds. Native Metro resolves the package's `react-native`
+export to `src`, but browser and Electron Metro resolve its `browser` export to
+`lib/module`; CommonJS consumers use `lib/commonjs`. A source-only patch leaves
+Electron running the old code.
+
+The stylesheet patch backports upstream PR #1354 (3.8.0). Unistyles 3.2.4 rewrote
+the whole text of `#unistyles-web` whenever a class was added or removed, and
+the browser then restyled the entire document: about 5 ms each time, several
+times for one hover card. The backport changes one CSSOM rule per class instead.
+The tag therefore has no text; read its rules through `sheet.cssRules`. Classes
+without a media query sit inside an `@media all` group. Assert on the stylesheet
+in E2E with `packages/app/e2e/support/helpers/shared-stylesheet.ts`.
+
+Register every dependency patch in `scripts/postinstall-patches.mjs`. A file in
+`patches/` is inert unless that script knows which installed package activates
+it.
 
 ## Debugging
 
