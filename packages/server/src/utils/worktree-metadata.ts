@@ -167,6 +167,22 @@ async function getGitDirForWorktreeRoot(worktreeRoot: string): Promise<string> {
   return gitPath;
 }
 
+/** Locate the admin directory used for shared refs and configuration. */
+export async function getGitCommonDirForWorktreeRoot(worktreeRoot: string): Promise<string | null> {
+  let gitDir: string;
+  try {
+    gitDir = await getGitDirForWorktreeRoot(worktreeRoot);
+  } catch {
+    return null;
+  }
+  try {
+    const commonDir = (await readBoundedFile(join(gitDir, "commondir"))).trim();
+    return commonDir ? resolve(gitDir, commonDir) : gitDir;
+  } catch {
+    return gitDir;
+  }
+}
+
 export async function getJAgentDeskWorktreeMetadataPath(worktreeRoot: string): Promise<string> {
   const gitDir = await getGitDirForWorktreeRoot(worktreeRoot);
   return join(gitDir, "jagentdesk", "worktree.json");

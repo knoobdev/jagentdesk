@@ -226,7 +226,7 @@ export function looksLikeDefiniteWindowsPath(value: string): boolean {
   );
 }
 
-function normalizePathForComparison(value: string, compareAsWindows: boolean): string {
+export function normalizePathForComparison(value: string, compareAsWindows: boolean): string {
   const platformPath = compareAsWindows ? nodePath.win32 : nodePath.posix;
   const comparableValue = compareAsWindows ? stripWindowsNamespacePrefix(value) : value;
   const platformNormalized = platformPath.normalize(comparableValue);
