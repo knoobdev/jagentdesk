@@ -58,6 +58,38 @@ describe("explicit compaction signals (spec 42 §1)", () => {
     expect(detected?.trigger).toBe("auto");
   });
 
+  it("waits for a smaller usage report: Codex repeats the old size right after compacting", () => {
+    const { tracker: signals } = tracker();
+    signals.observeUsage({
+      agentId: "a",
+      provider: "codex",
+      sessionId: "s1",
+      usage: usage(20_228),
+    });
+    signals.observeTimelineItem({
+      agentId: "a",
+      provider: "codex",
+      sessionId: "s1",
+      item: { type: "compaction", status: "completed", trigger: "manual" },
+    });
+    expect(
+      signals.observeUsage({
+        agentId: "a",
+        provider: "codex",
+        sessionId: "s1",
+        usage: usage(20_228),
+      }),
+    ).toEqual({ detected: null, postTokens: null });
+    expect(
+      signals.observeUsage({
+        agentId: "a",
+        provider: "codex",
+        sessionId: "s1",
+        usage: usage(6_100),
+      }).postTokens,
+    ).toBe(6_100);
+  });
+
   it("ignores the loading row; only the completed one counts", () => {
     const { tracker: signals } = tracker();
     expect(

@@ -40,8 +40,11 @@ export interface UsageObservation {
 interface AgentSignalState {
   sessionId: string | null;
   lastUsedTokens: number | null;
-  /** An explicit compaction is waiting for the next usage report to learn its size after. */
-  awaitingPostTokens: boolean;
+  /**
+   * An explicit compaction is waiting for a usage report smaller than its size before. Codex reports
+   * the old size once more right after compacting; that report is not the size after.
+   */
+  awaitingPostTokens: { preTokens: number | null } | null;
   lastExplicitAt: number | null;
   lastInferredAt: number | null;
 }
@@ -66,7 +69,7 @@ export class CompactionSignalTracker {
       state = {
         sessionId,
         lastUsedTokens: null,
-        awaitingPostTokens: false,
+        awaitingPostTokens: null,
         lastExplicitAt: null,
         lastInferredAt: null,
       };
@@ -95,9 +98,9 @@ export class CompactionSignalTracker {
       state.lastInferredAt !== null && now - state.lastInferredAt <= SAME_COMPACTION_WINDOW_MS;
     state.lastExplicitAt = now;
     state.lastInferredAt = null;
-    state.awaitingPostTokens = !confirmsPrevious;
     const preTokens =
       typeof item.preTokens === "number" ? item.preTokens : (state.lastUsedTokens ?? null);
+    state.awaitingPostTokens = confirmsPrevious ? null : { preTokens };
     let trigger: DetectedCompaction["trigger"] = null;
     if (item.trigger === "manual" || item.trigger === "auto") trigger = item.trigger;
     return {
@@ -122,7 +125,9 @@ export class CompactionSignalTracker {
     const previous = state.lastUsedTokens;
     state.lastUsedTokens = used;
     if (state.awaitingPostTokens) {
-      state.awaitingPostTokens = false;
+      const pre = state.awaitingPostTokens.preTokens;
+      if (pre !== null && used >= pre) return { detected: null, postTokens: null };
+      state.awaitingPostTokens = null;
       return { detected: null, postTokens: used };
     }
     if (previous === null || EXPLICIT_COMPACTION_PROVIDERS.has(input.provider)) {
