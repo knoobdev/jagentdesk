@@ -1048,4 +1048,10 @@ export interface AgentClient {
    * shuts down. Must be idempotent.
    */
   shutdown?(): Promise<void>;
+  /**
+   * The provider registry replaced or removed this client (its config changed). Release what it
+   * holds while idle, such as an owned helper server; sessions still running on it keep their
+   * resources until they end. The client is not used for new work afterwards.
+   */
+  retire?(): Promise<void>;
 }

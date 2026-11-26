@@ -40,12 +40,14 @@ import { type OpenCodeProviderInjection } from "../../../../custom-providers/mat
 import { type OpenCodeServiceSelection } from "./service-selection.js";
 import { modelRef, modesFromV2, modelsFromV2 } from "./mapping.js";
 
+type V2AgentRuntime = Pick<V2Runtime, "acquire" | "shutdown"> & Partial<Pick<V2Runtime, "retire">>;
+
 interface V2AgentOptions {
   logger: Logger;
   settings?: ProviderRuntimeSettings;
   managedProcesses?: ManagedProcessRegistry;
   bridge?: OpenCodeBridge;
-  runtime?: Pick<V2Runtime, "acquire" | "shutdown">;
+  runtime?: V2AgentRuntime;
   providerConfigInjection?: () => Promise<OpenCodeProviderInjection | null>;
   selection?: OpenCodeServiceSelection;
 }
@@ -55,7 +57,7 @@ export class OpenCodeV2AgentClient implements AgentClient {
 
   readonly capabilities: AgentCapabilityFlags;
 
-  private readonly runtime: Pick<V2Runtime, "acquire" | "shutdown">;
+  private readonly runtime: V2AgentRuntime;
 
   private readonly connections = new Map<string, V2Connection>();
 
@@ -77,6 +79,10 @@ export class OpenCodeV2AgentClient implements AgentClient {
 
   async shutdown() {
     await this.runtime.shutdown();
+  }
+
+  async retire() {
+    await this.runtime.retire?.();
   }
 
   async fetchCatalog(options: FetchCatalogOptions, context?: ProviderRefreshContext) {

@@ -75,6 +75,7 @@ export class V2Runtime {
   private generations = new Set<Generation>();
   private starts = new Set<Promise<Generation>>();
   private closed = false;
+  private retired = false;
   private readonly selection: Promise<OpenCodeServiceSelection>;
 
   constructor(private readonly options: V2RuntimeOptions) {
@@ -97,7 +98,7 @@ export class V2Runtime {
   }
 
   async acquire(input: V2RuntimeAcquireOptions = {}): Promise<V2Connection> {
-    if (this.closed) throw new Error("OpenCode runtime is closed");
+    if (this.closed || this.retired) throw new Error("OpenCode runtime is closed");
     input.signal?.throwIfAborted();
     this.assertBridgePort();
     const selected = await raceProviderRefreshAbort(input.signal, this.selection);
@@ -198,6 +199,23 @@ export class V2Runtime {
       refreshLocation: generation.refreshLocation,
       exited: generation.exited,
     };
+  }
+
+  /**
+   * The registry dropped the client that owns this runtime. Idle servers stop now; a server with
+   * sessions on it stops when the last one releases it (it is no longer `current`).
+   */
+  async retire(): Promise<void> {
+    this.retired = true;
+    this.current = null;
+    await Promise.allSettled(this.starts);
+    const idle = [...this.generations].filter((generation) => generation.users === 0);
+    for (const generation of idle) this.generations.delete(generation);
+    this.options.logger.info(
+      { stopped: idle.length, inUse: this.generations.size },
+      "OpenCode runtime retired",
+    );
+    await Promise.all(idle.map((generation) => generation.stop()));
   }
 
   async shutdown(): Promise<void> {
