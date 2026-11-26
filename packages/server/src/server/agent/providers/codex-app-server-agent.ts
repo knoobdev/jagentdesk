@@ -56,6 +56,7 @@ import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { renderPromptAttachmentAsText } from "../prompt-attachments.js";
+import { CODEX_PROVIDER_BROWSER_SKILLS } from "../system-browser.js";
 import { composeAgentSystemPrompt } from "../system-prompt.js";
 import { CodexInstructionSnapshot } from "./codex/instruction-snapshot.js";
 import {
@@ -8077,6 +8078,18 @@ const lookupLatestCodexRelease: LatestReleaseLookup = async ({ executablePath, s
   return tag.replace(/^rust-v/, "");
 };
 
+/**
+ * With JAgentDesk browser tools on, Codex's bundled Browser and Chrome plugin skills would
+ * drive the user's real Chrome for "open this page" requests (spec 04 §27b.3). `-c skills.config`
+ * merges with the user's own skill switches, so only these two are turned off for this runtime.
+ */
+export function codexProviderBrowserOverrides(): string[] {
+  const entries = CODEX_PROVIDER_BROWSER_SKILLS.map(
+    (name) => `{name=${JSON.stringify(name)},enabled=false}`,
+  );
+  return ["-c", `skills.config=[${entries.join(",")}]`];
+}
+
 export class CodexAppServerAgentClient implements AgentClient {
   readonly provider = CODEX_PROVIDER;
   readonly capabilities = CODEX_APP_SERVER_CAPABILITIES;
@@ -8225,10 +8238,15 @@ export class CodexAppServerAgentClient implements AgentClient {
     environment: NodeJS.ProcessEnv;
     goalsEnabled?: boolean;
     agentId?: string;
+    inAppBrowser?: boolean;
   }): Promise<() => ChildProcessWithoutNullStreams> {
     const processPort = this.deps.appServerProcess ?? defaultCodexAppServerProcess;
     const launchPrefix = await processPort.resolvePrefix({ runtimeSettings: this.runtimeSettings });
-    const args = [...launchPrefix.args, "app-server"];
+    const args = [
+      ...launchPrefix.args,
+      ...(options.inAppBrowser ? codexProviderBrowserOverrides() : []),
+      "app-server",
+    ];
     if (options.goalsEnabled) {
       args.push("--enable", "goals");
     }
@@ -8292,6 +8310,7 @@ export class CodexAppServerAgentClient implements AgentClient {
       environment,
       goalsEnabled,
       agentId: launchContext?.agentId,
+      inAppBrowser: launchContext?.inAppBrowser,
     });
     const session = new CodexAppServerAgentSession(
       sessionConfig,
@@ -8328,6 +8347,7 @@ export class CodexAppServerAgentClient implements AgentClient {
       environment,
       goalsEnabled,
       agentId: launchContext?.agentId,
+      inAppBrowser: launchContext?.inAppBrowser,
     });
     const session = new CodexAppServerAgentSession(
       merged,

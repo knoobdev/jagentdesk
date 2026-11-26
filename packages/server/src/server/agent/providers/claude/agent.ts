@@ -12,6 +12,11 @@ import stripAnsi from "strip-ansi";
 import { createImportDescriptorScheduler } from "./import-descriptor-scheduler.js";
 import { bypassApprovesAsk } from "./bypass-approval.js";
 import {
+  CLAUDE_PROVIDER_BROWSER_TOOL_RULE,
+  SYSTEM_BROWSER_REFUSAL,
+  isSystemBrowserOpenCommand,
+} from "../../system-browser.js";
+import {
   type AgentDefinition,
   type CanUseTool,
   type HookCallback,
@@ -516,12 +521,31 @@ type ClaudeImportDescriptorResult =
   | { type: "parsed"; descriptor: ImportableProviderSession | null }
   | { type: "unreadable"; error: Error };
 
+/**
+ * With JAgentDesk browser tools on, a Bash command that opens a URL in the system browser is
+ * refused, in every permission mode, and Claude is pointed at the browser_* tools (spec 04 §27b.3).
+ */
+export const refuseSystemBrowserBashHook: HookCallback = async (input) => {
+  if (input.hook_event_name !== "PreToolUse") return {};
+  const command = (input.tool_input as { command?: unknown } | undefined)?.command;
+  if (typeof command !== "string" || !isSystemBrowserOpenCommand(command)) return {};
+  return {
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: SYSTEM_BROWSER_REFUSAL,
+    },
+  };
+};
+
 interface ClaudeAgentSessionOptions {
   defaults?: { agents?: Record<string, AgentDefinition> };
   runtimeSettings?: ProviderRuntimeSettings;
   handle?: AgentPersistenceHandle;
   agentId?: string;
   launchEnv?: Record<string, string>;
+  /** JAgentDesk browser tools are on for this launch (spec 04 §27b.3). */
+  inAppBrowser?: boolean;
   persistSession?: boolean;
   logger: Logger;
   queryFactory?: ClaudeQueryFactory;
@@ -1756,6 +1780,7 @@ export class ClaudeAgentClient implements AgentClient {
       runtimeSettings: this.runtimeSettings,
       agentId: launchContext?.agentId,
       launchEnv: launchContext?.env,
+      inAppBrowser: launchContext?.inAppBrowser,
       persistSession: options?.persistSession,
       logger: this.logger,
       queryFactory: this.queryFactory,
@@ -1787,6 +1812,7 @@ export class ClaudeAgentClient implements AgentClient {
       handle,
       agentId: launchContext?.agentId,
       launchEnv: launchContext?.env,
+      inAppBrowser: launchContext?.inAppBrowser,
       logger: this.logger,
       queryFactory: this.queryFactory,
       resolveBinary: this.resolveBinary,
@@ -2480,6 +2506,8 @@ class ClaudeAgentSession implements AgentSession {
 
   private readonly agentId?: string;
 
+  private readonly inAppBrowser: boolean;
+
   private readonly defaults?: { agents?: Record<string, AgentDefinition> };
 
   private readonly runtimeSettings?: ProviderRuntimeSettings;
@@ -2684,6 +2712,7 @@ class ClaudeAgentSession implements AgentSession {
     assertClaudeThinkingOptionSupported(config.model, config.thinkingOptionId);
     this.launchEnv = options.launchEnv;
     this.agentId = options.agentId;
+    this.inAppBrowser = options.inAppBrowser === true;
     this.defaults = options.defaults;
     this.runtimeSettings = options.runtimeSettings;
     this.persistSession = options.persistSession;
@@ -4111,7 +4140,7 @@ class ClaudeAgentSession implements AgentSession {
       // subagents keep running. Without this declaration an interrupt kills every one of them.
       // Claude stops a helper itself with its TaskStop tool.
       perTaskStopAffordance: true,
-      hooks: { ...this.buildSubagentEffortHooks(), Stop: [{ hooks: [this.observeStopHook] }] },
+      hooks: this.buildSessionHooks(),
       ...(this.persistSession === undefined ? {} : { persistSession: this.persistSession }),
       env: sdkEnv,
     };
@@ -4132,6 +4161,10 @@ class ClaudeAgentSession implements AgentSession {
         ...(base.disallowedTools ?? []),
         ...this.runtimeSettings.disallowedTools,
       ];
+    }
+    if (this.inAppBrowser) {
+      // Claude in Chrome would open pages in the user's real Chrome instead of the app.
+      base.disallowedTools = [...(base.disallowedTools ?? []), CLAUDE_PROVIDER_BROWSER_TOOL_RULE];
     }
     return base;
   }
@@ -5795,6 +5828,21 @@ class ClaudeAgentSession implements AgentSession {
    * These are observation-only: they record what they see and always return an empty result, so
    * they can never alter tool execution or turn control.
    */
+  private buildSessionHooks(): NonNullable<ClaudeOptions["hooks"]> {
+    const hooks = {
+      ...this.buildSubagentEffortHooks(),
+      Stop: [{ hooks: [this.observeStopHook] }],
+    };
+    if (!this.inAppBrowser) return hooks;
+    return {
+      ...hooks,
+      PreToolUse: [
+        ...(hooks.PreToolUse ?? []),
+        { matcher: "Bash", hooks: [refuseSystemBrowserBashHook] },
+      ],
+    };
+  }
+
   private buildSubagentEffortHooks(): NonNullable<ClaudeOptions["hooks"]> {
     const observe = async (input: unknown): Promise<Record<string, never>> => {
       try {
