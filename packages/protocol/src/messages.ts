@@ -6681,6 +6681,10 @@ export const PairingDeviceListResponseSchema = z.object({
         deviceName: z.string().optional(),
         pairedAtMs: z.number(),
         kind: DeviceKindSchema.optional(),
+        /** Last socket open or close of this device; absent before the daemon recorded one. */
+        lastSeenMs: z.number().optional(),
+        /** True while the device has an open socket to the daemon. */
+        connected: z.boolean().optional(),
       }),
     ),
   }),

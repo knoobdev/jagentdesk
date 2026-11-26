@@ -15,7 +15,12 @@ export interface PairedDevice {
   pairedAtMs: number;
   tailnetNodeId?: string;
   kind?: "desktop" | "mobile" | "daemon";
+  /** Last time a socket of this device opened or closed (spec 15.11.1 "Last active"). */
+  lastSeenMs?: number;
 }
+
+/** A connection churning every few seconds must not rewrite the devices file every time. */
+const LAST_SEEN_WRITE_INTERVAL_MS = 60_000;
 
 const PairedDeviceSchema = z.object({
   deviceId: z.string().min(1),
@@ -24,6 +29,7 @@ const PairedDeviceSchema = z.object({
   pairedAtMs: z.number(),
   tailnetNodeId: z.string().optional(),
   kind: DeviceKindSchema.optional(),
+  lastSeenMs: z.number().optional(),
 });
 
 const PairedDevicesFileSchema = z.object({
@@ -46,6 +52,7 @@ export interface PairedDeviceStore {
   }): PairedDevice;
   revokeById(deviceId: string): boolean;
   revokeByPublicKey(publicKeyB64: string): boolean;
+  markSeen(deviceId: string, atMs: number): void;
 }
 
 export function createPairedDeviceStore(args: {
@@ -117,6 +124,19 @@ export function createPairedDeviceStore(args: {
       devices.splice(index, 1);
       persist();
       return true;
+    },
+
+    markSeen(deviceId: string, atMs: number): void {
+      const device = devices.find((candidate) => candidate.deviceId === deviceId);
+      if (!device) return;
+      if (device.lastSeenMs !== undefined && atMs - device.lastSeenMs < LAST_SEEN_WRITE_INTERVAL_MS)
+        return;
+      device.lastSeenMs = atMs;
+      try {
+        persist();
+      } catch (error) {
+        log?.warn({ err: error, deviceId }, "Failed to record paired device activity");
+      }
     },
 
     revokeByPublicKey(publicKeyB64: string): boolean {

@@ -781,6 +781,8 @@ export interface SessionOptions {
 
   /** Spec 05.5: closes every live socket of a revoked device on all transports. */
   closeConnectionsForDevice?: (deviceId: string) => number;
+  /** Paired devices with an open socket, for the device list's "Connected" chip. */
+  listConnectedDeviceIds?: () => ReadonlySet<string>;
 }
 
 export type SessionLifecycleIntent =
@@ -1230,6 +1232,7 @@ export class Session {
       pairingCodeManager,
       cancelPendingPairingRequest,
       closeConnectionsForDevice,
+      listConnectedDeviceIds,
     } = options;
     this.clientId = clientId;
     this.scopes = [...scopes];
@@ -1490,6 +1493,7 @@ export class Session {
       pairingCodeManager,
       cancelPendingPairingRequest,
       closeConnectionsForDevice,
+      listConnectedDeviceIds,
     });
     this.hubExecutionController = options.hubExecutionAgents
       ? new HubExecutionController({
