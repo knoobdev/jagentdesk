@@ -1,9 +1,33 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.10.0`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.10.1`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.10.1 — 2026-11-26
+
+A fix release for v0.10.0. Full notes: [docs/releases/v0.10.1.md](docs/releases/v0.10.1.md).
+
+### Fixes
+
+- iOS app no longer crashes on launch (`navigator` polyfill installed before any module loads; Paseo #6734).
+- Desktop plugins load again: `typescript` ships with the app and built-in plugins compile from
+  `app.asar.unpacked`.
+- Docker: `docker events` watchers no longer pile up (local and SSH).
+- Bots: a bot can be created with an empty Identity; each form field shows its own error.
+- The desktop's own daemon is labelled Local and its hello is device-signed on the probe path too.
+- Releases are no longer marked Latest before their files are checked.
+- Desktop: page title rows drag and zoom the window; macOS traffic lights line up with the logo.
+
+### Changes
+
+- First run: no "Connect type" chooser. Desktop connects to its own daemon; phones pair by QR code or link
+  through the relay, with Tailscale optional (ADR-0056).
+- Bots: searchable Provider and Model pickers, slug from name, in-app help (empty-state card, field hints,
+  How to ask, How bots work).
+- 44 px rows in History, Docker, Kubernetes, Databases, SSH servers, Schedules and bot items.
+- iOS IPA built with Xcode 26.
 
 ## v0.10.0 — 2026-11-26
 

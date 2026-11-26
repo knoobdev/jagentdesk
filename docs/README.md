@@ -1,12 +1,13 @@
 # JAgentDesk docs
 
 Docs for people working on JAgentDesk. User-facing guides live in [`public-docs/`](../public-docs/index.md);
-release notes live in [`releases/`](releases/v0.10.0.md).
+release notes live in [`releases/`](releases/v0.10.1.md).
 
 ## Product
 
 - [product.md](product.md) — what JAgentDesk is, who it is for, what ships in this version.
 - [glossary.md](glossary.md) — the terms to use; the UI label wins.
+- [releases/v0.10.1.md](releases/v0.10.1.md) — release notes for v0.10.1.
 - [releases/v0.10.0.md](releases/v0.10.0.md) — release notes for v0.10.0.
 
 ## Architecture
