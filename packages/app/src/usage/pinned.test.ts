@@ -366,6 +366,27 @@ describe("resolvePinnedUsage", () => {
     ]);
   });
 
+  it("shows sources the host marks off by default when no shown card has data", () => {
+    // The host stamps `defaultEnabled: false` when it does not find the source's provider active.
+    const claudeHinted = { ...claude, defaultEnabled: false };
+    const codexHinted = { ...codex, defaultEnabled: false };
+    expect(windows([claudeHinted, codexHinted], preferences(null)).map((item) => item.key)).toEqual(
+      ["claude:default/five-hour", "codex:default/weekly"],
+    );
+    // A card that is on and has data keeps the hinted ones out.
+    expect(windows([claudeHinted, codex], preferences(null)).map((item) => item.key)).toEqual([
+      "codex:default/weekly",
+    ]);
+    // A card the user turned off stays off.
+    const userOff: UsagePreferences = {
+      ...preferences(null),
+      cardVisibility: { [claude.id]: false },
+    };
+    expect(windows([claudeHinted, codexHinted], userOff).map((item) => item.key)).toEqual([
+      "codex:default/weekly",
+    ]);
+  });
+
   it("is empty only when no source reports a window with data", () => {
     const noPercent = report({
       sourceId: "opencode",

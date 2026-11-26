@@ -8,6 +8,7 @@ import {
 } from "./format";
 import { displayPercent, resolveUsageSnapshot } from "./model";
 import {
+  arrangeUsageReports,
   defaultUsagePins,
   effectiveUsagePins,
   usageReportsOn,
@@ -141,6 +142,31 @@ export function summaryUsagePins(
   return live.length > 0 ? live : defaultUsagePins(preferences.displayAs, reports);
 }
 
+function hasData(entry: UsageReportEntry, preferences: UsagePreferences): boolean {
+  const snapshot = resolveUsageSnapshot(entry);
+  return (
+    snapshot?.report.windows.some(
+      (window) => displayPercent(window, preferences.displayAs) !== null,
+    ) ?? false
+  );
+}
+
+/**
+ * The reports the summary reads: the cards that are on. When none of them has data, every report
+ * the user has not turned off themselves, so the host's default-off hint (a source whose provider
+ * the daemon did not find active) never empties the summary while a source reports numbers.
+ */
+function summaryReports(
+  reports: readonly UsageReportEntry[],
+  preferences: UsagePreferences,
+): UsageReportEntry[] {
+  const on = usageReportsOn(reports, preferences);
+  if (on.some((entry) => hasData(entry, preferences))) return on;
+  return arrangeUsageReports(reports, preferences).filter(
+    (entry) => preferences.cardVisibility[entry.id] !== false,
+  );
+}
+
 /**
  * The sidebar Usage item's summary: one group per account in card order, each with its windows in
  * its report's order. Accounts turned off or with nothing to show are left out.
@@ -150,7 +176,7 @@ export function resolvePinnedUsage(
   preferences: UsagePreferences,
   t: TFunction = i18n.t,
 ): PinnedUsageSource[] {
-  const shown = usageReportsOn(reports, preferences);
+  const shown = summaryReports(reports, preferences);
   const pins = summaryUsagePins(shown, preferences);
   return shown.flatMap((entry) => {
     const snapshot = resolveUsageSnapshot(entry);
