@@ -65,6 +65,8 @@ What re-probes a provider:
 
 A custom API provider's refresh asks its models endpoint first (`checkApiProviderEndpoint`), before any provider process starts. A refusal (401, 403, 429, unreachable) puts it in `error`, and the background schedule skips it until its config changes or someone refreshes it. Concurrent refreshes of one provider share one endpoint check, and Claude shares one model-discovery process across cwds.
 
+A refresh stops at its deadline (`JAGENTDESK_PROVIDER_REFRESH_TIMEOUT_MS`, default 120 s). A plugin provider's connection is shared with its running sessions, so the bridge cannot close it at the deadline; it sends `request.cancel` for the abandoned catalogue request instead, and the provider stops that request's work. The ACP shim stops the probe process it started for that request.
+
 Do not add focus, selector-open or config-reload refreshes. Registry and config replacement may update label, description, default mode, enabled state and membership, but must not spawn provider processes for providers whose config did not change.
 
 ### Draft metadata
