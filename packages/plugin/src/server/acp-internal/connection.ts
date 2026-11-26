@@ -13,14 +13,15 @@ import {
   type RequestPermissionRequest,
   type RequestPermissionResponse,
   type SessionConfigOption,
+  type SessionInfo,
   type SessionNotification,
   type SessionUpdate,
   type ToolCall,
-  type ToolCallContent,
   type ToolCallUpdate,
   type Stream,
 } from "@agentclientprotocol/sdk";
 import { z } from "zod";
+import type { JsonValue } from "@jagentdesk/protocol/agent-types";
 import type {
   AcpConfigAccess,
   AcpConfigChange,
@@ -31,6 +32,7 @@ import type {
   AcpVendorUpdate,
   RunAcpProviderOptions,
 } from "../acp.js";
+import { standardToolCallDetail } from "./tool-call-detail.js";
 import {
   PROVIDER_PROTOCOL_VERSION,
   ProviderEventSchema,
@@ -47,6 +49,7 @@ import {
   type ProviderInput,
   type ProviderLaunch,
   type ProviderPermissionResponse,
+  type ProviderToolCallDetail,
   type ProviderPersistence,
   type ProviderSessionConfig,
   type ProviderSetting,
@@ -295,8 +298,7 @@ async function listSessions(
     emit: state.emit,
   });
   try {
-    const response = await runtime.listSessions(input.cwd);
-    const selected = input.limit ? response.sessions.slice(0, input.limit) : response.sessions;
+    const selected = await runtime.listSessions({ cwd: input.cwd, limit: input.limit });
     state.emit({
       type: "sessions",
       requestId: input.requestId,
@@ -409,14 +411,14 @@ interface ActivePrompt {
 }
 
 const DEFAULT_DEFERRED_SETTLE_DELAY_MS = 500;
+const SESSION_SCAN_LIMIT = 500;
+// COMPAT(acpAutoAccept): added in v0.17.4, remove after 2027-05-23. The generic ACP adapter saves
+// its Auto Accept toggle as this setting on agents that later moved to a bundled ACP provider.
+const LEGACY_AUTO_ACCEPT_SETTING = "auto_accept";
 const DEFAULT_DEFERRED_QUIET_LIMIT_MS = 120_000;
 
-type AcpToolCallSource = AcpToolCallSnapshot & {
-  diff?: Extract<ToolCallContent, { type: "diff" }>;
-};
-
 interface AcpToolCallState {
-  source: AcpToolCallSource;
+  source: AcpToolCallSnapshot;
   presentation: AcpToolCallSnapshot;
 }
 
@@ -895,8 +897,17 @@ class AcpRuntime {
     return true;
   }
 
-  listSessions(cwd?: string) {
-    return this.call(this.connection.listSessions({ cwd }));
+  /** Follows `nextCursor` until `limit` sessions, the last page, or the scan cap. */
+  async listSessions({ cwd, limit }: { cwd?: string; limit?: number }): Promise<SessionInfo[]> {
+    const wanted = Math.min(limit ?? SESSION_SCAN_LIMIT, SESSION_SCAN_LIMIT);
+    const sessions: SessionInfo[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await this.call(this.connection.listSessions({ cwd, cursor }));
+      sessions.push(...page.sessions);
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor && sessions.length < wanted);
+    return sessions.slice(0, wanted);
   }
 
   async drainNotifications(): Promise<void> {
@@ -1051,15 +1062,39 @@ class AcpRuntime {
     const requested: AcpConfigChange[] = [];
     if (config.model) requested.push({ target: "model", value: config.model });
     const autoAcceptMode = this.options.options.acpOptions?.autoAcceptMode;
-    const mode = config.mode ?? (autoAcceptMode?.default ? autoAcceptMode.mode.id : undefined);
+    const { settings, legacyAutoAccept } = this.withoutLegacyAutoAccept(config.settings);
+    // The toggle stays saved after a mode is chosen here, so it counts only while the saved mode
+    // is one the generic adapter wrote.
+    const mode =
+      legacyAutoAccept && autoAcceptMode && !this.offersMode(config.mode)
+        ? autoAcceptMode.mode.id
+        : (config.mode ?? (autoAcceptMode?.default ? autoAcceptMode.mode.id : undefined));
     if (mode) requested.push({ target: "mode", value: mode });
     if (config.thinkingOption) {
       requested.push({ target: "thinking", value: config.thinkingOption });
     }
-    for (const [id, value] of Object.entries(config.settings)) {
+    for (const [id, value] of Object.entries(settings)) {
       requested.push({ target: "setting", id, value });
     }
     for (const change of this.inAgentOrder(requested)) await this.applyConfigChange(change);
+  }
+
+  private offersMode(mode: string | undefined): boolean {
+    if (mode === undefined) return false;
+    if (mode === this.options.options.acpOptions?.autoAcceptMode?.mode.id) return true;
+    return toProviderCatalog(this.modes, this.configOptions).modes.some(({ id }) => id === mode);
+  }
+
+  /** Reads the generic ACP adapter's saved Auto Accept toggle unless the agent has such a setting. */
+  private withoutLegacyAutoAccept(settings: Readonly<Record<string, JsonValue>>): {
+    settings: Readonly<Record<string, JsonValue>>;
+    legacyAutoAccept: boolean;
+  } {
+    if (this.configOptions.some((option) => option.id === LEGACY_AUTO_ACCEPT_SETTING)) {
+      return { settings, legacyAutoAccept: false };
+    }
+    const { [LEGACY_AUTO_ACCEPT_SETTING]: saved, ...rest } = settings;
+    return { settings: rest, legacyAutoAccept: saved === true };
   }
 
   // One option can reset another: choosing an fx provider also selects that provider's saved
@@ -1260,6 +1295,7 @@ class AcpRuntime {
       }
     }
     const permissionId = `permission:${request.toolCall.toolCallId}`;
+    const { presentation } = this.presentToolCall(request.toolCall);
     return new Promise((resolve) => {
       this.permissions.set(permissionId, { request, resolve, turnId: this.activePrompt?.turnId });
       if (this.activePrompt?.deferred) this.scheduleDeferredSettle();
@@ -1272,6 +1308,7 @@ class AcpRuntime {
           kind: "tool",
           title: request.toolCall.title ?? undefined,
           input: jsonRecord(request.toolCall.rawInput),
+          detail: toolCallDetail(presentation),
           actions: request.options.map((option) => ({
             id: option.optionId,
             label: option.name,
@@ -1540,6 +1577,21 @@ class AcpRuntime {
     this.pendingCompactions.clear();
   }
 
+  /** Merges an update into the call's earlier updates and runs it through the transformers. */
+  private presentToolCall(update: ToolCall | ToolCallUpdate): AcpToolCallState {
+    const tool = this.toolCalls.get(update.toolCallId);
+    const source = mergeToolCallSnapshot(update, tool?.source);
+    const context = {
+      sessionId: this.options.boundarySessionId,
+      mcpServerNames: this.mcpServerNames,
+      previous: tool?.presentation,
+    };
+    let presentation: AcpToolCallSnapshot = source;
+    for (const transformer of this.transformers)
+      presentation = transformer.toolCall?.(presentation, context) ?? presentation;
+    return { source, presentation };
+  }
+
   private reduceToolCall(
     update: Extract<SessionUpdate, { sessionUpdate: "tool_call" | "tool_call_update" }>,
     wireSeq: number,
@@ -1559,25 +1611,7 @@ class AcpRuntime {
       current !== undefined &&
       this.liveOpenToolIds.has(current.id) &&
       this.toolKeepsTurnOpen(current);
-    const source = mergeToolCallSnapshot(update, tool?.source);
-    let snapshot: AcpToolCallSnapshot = source;
-    const context = {
-      sessionId: this.options.boundarySessionId,
-      mcpServerNames: this.mcpServerNames,
-    };
-    for (const transformer of this.transformers)
-      snapshot = transformer.toolCall?.(snapshot, context) ?? snapshot;
-    if (!snapshot.detail && source.diff && snapshot.kind === "edit") {
-      snapshot = {
-        ...snapshot,
-        detail: {
-          type: "edit",
-          filePath: source.diff.path,
-          oldString: source.diff.oldText ?? undefined,
-          newString: source.diff.newText,
-        },
-      };
-    }
+    const { source, presentation: snapshot } = this.presentToolCall(update);
     this.toolCalls.set(snapshot.id, { source, presentation: snapshot });
     const isOpen = snapshot.status === "pending" || snapshot.status === "in_progress";
     if (this.replayWindow === null) {
@@ -2157,8 +2191,8 @@ function ownConnectorStream(source: Stream): {
 
 function mergeToolCallSnapshot(
   update: ToolCall | ToolCallUpdate,
-  current: AcpToolCallSource | undefined,
-): AcpToolCallSource {
+  current: AcpToolCallSnapshot | undefined,
+): AcpToolCallSnapshot {
   return {
     id: update.toolCallId,
     name: firstText(update.name, current?.name),
@@ -2168,10 +2202,7 @@ function mergeToolCallSnapshot(
     input: jsonValue(firstDefined(update.rawInput, current?.input, null)),
     output: jsonValue(firstDefined(update.rawOutput, current?.output, null)),
     locations: update.locations?.map((location) => location.path) ?? current?.locations ?? [],
-    diff:
-      update.content === undefined
-        ? current?.diff
-        : update.content?.find((item) => item.type === "diff"),
+    content: update.content === undefined ? current?.content : jsonValue(update.content),
   };
 }
 
@@ -2343,23 +2374,14 @@ function configValues(
   return Object.fromEntries(options.map((option) => [option.id, option.currentValue]));
 }
 
+function toolCallDetail(snapshot: AcpToolCallSnapshot): ProviderToolCallDetail {
+  return snapshot.detail ?? standardToolCallDetail(snapshot);
+}
+
 function toolTimelineItem(
   snapshot: AcpToolCallSnapshot,
 ): Extract<ProviderTimelineItem, { type: "tool_call" }> {
-  const input = jsonRecord(snapshot.input);
-  const isEdit = snapshot.kind === "edit" || snapshot.name?.toLowerCase().includes("edit") === true;
-  const detail =
-    snapshot.detail ??
-    (isEdit
-      ? {
-          type: "edit" as const,
-          filePath:
-            typeof input.filePath === "string" ? input.filePath : (snapshot.locations[0] ?? ""),
-          oldString: typeof input.oldString === "string" ? input.oldString : undefined,
-          newString: typeof input.newString === "string" ? input.newString : undefined,
-          unifiedDiff: typeof input.unifiedDiff === "string" ? input.unifiedDiff : undefined,
-        }
-      : { type: "unknown" as const, input: snapshot.input, output: snapshot.output });
+  const detail = toolCallDetail(snapshot);
   const status =
     snapshot.status === "in_progress" || snapshot.status === "pending"
       ? "running"
@@ -2394,6 +2416,7 @@ function jsonValue(value: unknown) {
 }
 
 function jsonRecord(value: unknown): Record<string, ReturnType<typeof jsonValue>> {
+  if (value === undefined) return {};
   const parsed = jsonValue(value);
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
   return parsed;

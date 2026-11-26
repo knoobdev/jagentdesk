@@ -27,6 +27,7 @@ export const BUNDLED_PLUGIN_IDS = [
   "hoplite-provider",
   "fx-provider",
   "goose-provider",
+  "hermes-provider",
   "claude-usage-source",
   "codex-usage-source",
   "copilot-usage-source",
@@ -226,6 +227,14 @@ export const GENERATED_BUILTIN_MANIFESTS = [
     defaultEnabled: false,
     requires: [],
     command: "goose",
+  },
+  {
+    id: "hermes-provider",
+    name: "Hermes",
+    description: "Run Hermes through its local hermes CLI.",
+    defaultEnabled: true,
+    requires: [],
+    command: "hermes",
   },
   {
     id: "claude-usage-source",
