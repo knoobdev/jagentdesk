@@ -8,9 +8,13 @@ pre-commit:
         - "**/package-lock.json"
         # Vendored upstream files are byte-for-byte copies (.oxfmtrc.json ignores them).
         - "packages/server/vendor/**"
+        - "packages/react-native-enriched-markdown/**"
       run: npm run format:check:files -- {staged_files}
     - name: lint
       glob: "*.{js,jsx,ts,tsx}"
+      # oxlint fails when every path it is given is ignored (.oxlintrc.json ignores the fork).
+      exclude:
+        - "packages/react-native-enriched-markdown/**"
       run: npm run lint -- {staged_files}
     - name: typecheck
       run: npm run typecheck

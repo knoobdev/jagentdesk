@@ -25,6 +25,7 @@ release notes live in [`releases/`](releases/v0.11.0.md).
 - [terminal-performance.md](terminal-performance.md) — terminal latency, coalescing and backpressure.
 - [terminal-activity.md](terminal-activity.md) — terminal activity indicators and hook providers.
 - [agent-stream-performance.md](agent-stream-performance.md) — assistant text coalescing and paced reveal.
+- [markdown-renderer.md](markdown-renderer.md) — the vendored Markdown engine fork, its layout and backports.
 - [notifications.md](notifications.md) — OS notifications, startup readiness, deferred targets.
 
 ## Protocol and security

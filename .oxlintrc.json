@@ -3,7 +3,12 @@
   "options": {
     "typeAware": false
   },
-  "ignorePatterns": [".dev/**", "scratchpad/**", "packages/server/vendor/**"],
+  "ignorePatterns": [
+    ".dev/**",
+    "scratchpad/**",
+    "packages/server/vendor/**",
+    "packages/react-native-enriched-markdown/**"
+  ],
   "plugins": ["react", "react-perf", "unicorn", "typescript", "oxc", "import", "promise"],
   "categories": {
     "correctness": "error",

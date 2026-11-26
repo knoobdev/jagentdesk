@@ -16,6 +16,7 @@
     "**/*.gen.ts",
     "**/*.gen.tsx",
     "scratchpad/**",
-    "packages/server/vendor/**"
+    "packages/server/vendor/**",
+    "packages/react-native-enriched-markdown/**"
   ]
 }

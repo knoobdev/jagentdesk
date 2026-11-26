@@ -24,6 +24,7 @@
   },
   "workspaces": [
     "packages/expo-two-way-audio",
+    "packages/react-native-enriched-markdown",
     "packages/highlight",
     "packages/protocol",
     "packages/relay",

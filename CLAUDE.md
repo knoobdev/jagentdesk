@@ -73,6 +73,7 @@ At the start of non-trivial work, list `docs/` and skim anything relevant to the
 | [docs/terminal-performance.md](docs/terminal-performance.md)           | Terminal latency pipeline, coalescing/backpressure invariants, benchmark + perf spec usage                                             |
 | [docs/terminal-activity.md](docs/terminal-activity.md)                 | Terminal activity indicators — source-agnostic tracker, agent hook reporting, adding a new hook provider                               |
 | [docs/agent-stream-performance.md](docs/agent-stream-performance.md)   | Assistant text pipeline — coalescing window, paced reveal, why arrival lumps are smoothed at render                                    |
+| [docs/markdown-renderer.md](docs/markdown-renderer.md)                 | Markdown engine — the vendored `react-native-enriched-markdown` fork, its layout, backports, native tests                              |
 | [docs/development.md](docs/development.md)                             | Dev server, build sync gotchas, CLI reference, agent state, Playwright MCP                                                             |
 | [docs/testing.md](docs/testing.md)                                     | TDD workflow, determinism, real dependencies over mocks, test organization                                                             |
 | [docs/qa.md](docs/qa.md)                                               | QA evidence bar for pull requests — platform matrix, version drift, performance, UI proof                                              |
