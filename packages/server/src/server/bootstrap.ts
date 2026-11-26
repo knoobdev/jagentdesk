@@ -1,5 +1,6 @@
 import { builtinServerRegistry } from "./plugins/builtin/loaded.js";
 import { createBuiltinCoreServices } from "./plugins/builtin/services.js";
+import { createBuiltinHostToolSet } from "./plugins/builtin/host-tool-set.js";
 import {
   createFinishSubscriptions as createRemoteFinishSubscriptions,
   createJsonFinishSubscriptionStore as createRemoteFinishStore,
@@ -1123,6 +1124,14 @@ export async function createJAgentDeskDaemon(
     logger,
   });
 
+  // Spec 04 §27b.1: built-in tool groups are compared at the start of every turn.
+  const builtinHostToolSet = createBuiltinHostToolSet({
+    state: pluginRuntime.builtin,
+    registry: builtinServerRegistry,
+  });
+  agentManager.setHostToolSet(builtinHostToolSet.source);
+  agentManager.setProviderLabel((provider) => providerSnapshotManager.getProviderLabel(provider));
+
   const unsubscribeBuiltinAgentSnapshots = agentManager.subscribe(
     (event) => {
       if (event.type === "agent_state") pluginRuntime.builtin.forAgent(event.agent.id);
@@ -1897,6 +1906,7 @@ export async function createJAgentDeskDaemon(
     },
     requestHostToolPermission: (agentId, req) =>
       agentManager.requestHostToolPermission(agentId, req),
+    hostToolGroups: builtinHostToolSet.groups,
     logger,
   });
   const createAgentToolCatalog = (runtime: JAgentDeskToolRuntimeContext) =>

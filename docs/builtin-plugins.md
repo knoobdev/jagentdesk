@@ -54,8 +54,15 @@ While a built-in is off:
   controls without a reload. A deep link to its screen shows "Plugin turned off" with a
   permission-gated "Turn on".
 - Its RPCs answer `plugin_disabled`.
-- New agents do not get its tools. Each agent captures its enabled set once
-  (`BuiltinPluginState.forAgent`), so running agents keep the tools they opened with.
+- Agents lose its tools from their next message. A provider reads its tool list once, when its
+  runtime starts, so each launch adopts the host's current set (`BuiltinPluginState.forAgent`
+  holds it for that runtime's stateless MCP requests). At the start of every turn the agent manager
+  compares that set with the host's; when a built-in with agent tools changed, it closes the runtime
+  and resumes the same native session, keeping the agent id and timeline (spec 04 §27b.1). A
+  session without a resumable id keeps its old tools and gets one "New tools apply from a new
+  session" row.
+- An agent asked for an off built-in calls `turn_on_host_tools`, which shows "Turn on <name> for
+  this host?" even in unattended modes, because it changes host settings.
 - Its background services and session contributions stop within five seconds.
 - Its data and secrets stay on disk.
 

@@ -47,6 +47,7 @@ import {
   type AgentSlashCommand,
   type AgentMode,
   type AgentPermissionRequest,
+  type AgentPermissionAction,
   type AgentPermissionResponse,
   type AgentPermissionResult,
   type AgentPersistenceHandle,
@@ -107,6 +108,12 @@ import {
 } from "./runtime-mcp-config.js";
 import { resolveCreateAgentTitles } from "./create-agent-title.js";
 import { type JAgentDeskToolCatalogFactory } from "./tools/types.js";
+import {
+  diffHostToolSets,
+  hostToolSetSignature,
+  type HostToolSetDiff,
+  type HostToolSetSource,
+} from "./host-tool-set.js";
 import {
   ProviderSubagentStore,
   type ProviderSubagentDescriptor,
@@ -412,6 +419,10 @@ export interface AgentManagerOptions {
   ) => ProviderJAgentDeskToolsPolicy | undefined;
   jagentdeskToolsEnabled?: boolean;
   jagentdeskToolCatalogFactory?: JAgentDeskToolCatalogFactory;
+  /** Built-in tool groups the host has on; compared at the start of every turn (spec 04 §27b.1). */
+  hostToolSet?: HostToolSetSource;
+  /** Display name of a provider, for timeline rows. */
+  providerLabel?: (provider: AgentProvider) => string;
   appendSystemPrompt?: string;
   operatorContext?: string;
   agentStreamCoalesceWindowMs?: number;
@@ -1018,6 +1029,16 @@ export class AgentManager {
 
   private readonly sessionOpenGenerations = new Map<string, number>();
 
+  private hostToolSet: HostToolSetSource | null = null;
+
+  private providerLabel: (provider: AgentProvider) => string = (provider) => provider;
+
+  /** Tool-group instructions of the agent's latest launch; joined into the daemon prompt. */
+  private readonly hostToolInstructions = new Map<string, string[]>();
+
+  /** Last tool-set change a non-resumable session was told about, so the row is written once. */
+  private readonly unappliedHostToolSets = new Map<string, string>();
+
   private readonly attachedPluginTools = new Map<string, AttachedAgentTool[]>();
 
   private readonly pluginAgentTools: PluginAgentToolsRuntime | undefined;
@@ -1114,6 +1135,16 @@ export class AgentManager {
   private configureJAgentDeskTools(options: AgentManagerOptions): void {
     this.jagentdeskToolsEnabled = options.jagentdeskToolsEnabled ?? true;
     this.jagentdeskToolCatalogFactory = options.jagentdeskToolCatalogFactory ?? null;
+    this.hostToolSet = options.hostToolSet ?? null;
+    if (options.providerLabel) this.providerLabel = options.providerLabel;
+  }
+
+  setHostToolSet(source: HostToolSetSource | null): void {
+    this.hostToolSet = source;
+  }
+
+  setProviderLabel(label: (provider: AgentProvider) => string): void {
+    this.providerLabel = label;
   }
 
   registerClient(provider: AgentProvider, client: AgentClient): void {
@@ -1169,14 +1200,65 @@ export class AgentManager {
     this.sessionOpenGeneration++;
   }
 
+  /**
+   * Runs before every foreground turn. A plugin that changed what agents open with, or a
+   * built-in tool group turned on or off for the host (spec 04 §27b.1), restarts the runtime
+   * on the same native session so this turn already has the host's current tools.
+   */
   async reloadStalePluginSession(agentId: string): Promise<void> {
-    if (!this.needsPluginSessionReload(agentId)) return;
+    if (!this.needsPluginSessionReload(agentId) && !this.pendingHostToolSetDiff(agentId)) return;
     await this.trackAgentRegistrationOperation(
       this.runLifecycleMutation(agentId, async () => {
-        if (!this.needsPluginSessionReload(agentId)) return;
+        const pluginStale = this.needsPluginSessionReload(agentId);
+        const toolDiff = this.pendingHostToolSetDiff(agentId);
+        if (!pluginStale && !toolDiff) return;
+        if (toolDiff && !this.canResumeNativeSession(agentId)) {
+          // A fresh provider session would drop the conversation; keep the old tools.
+          await this.noteUnappliedHostToolSet(agentId, toolDiff);
+          if (!pluginStale) return;
+        }
+        if (toolDiff) {
+          this.logger.info(
+            { agentId, added: toolDiff.added, removed: toolDiff.removed },
+            "Host tool groups changed; resuming the agent's session with the new tools",
+          );
+        }
         await this.reloadAgentSessionInternal(agentId);
       }),
     );
+  }
+
+  /** The host's tool groups differ from the ones the agent's live runtime was opened with. */
+  private pendingHostToolSetDiff(agentId: string): HostToolSetDiff | null {
+    if (!this.hostToolSet) return null;
+    const agent = this.getAgent(agentId);
+    if (!agent || agent.lifecycle === "closed" || agent.internal || this.hasInFlightRun(agentId)) {
+      return null;
+    }
+    // Without the JAgentDesk tools the host's tool groups never reach this runtime.
+    if (
+      !this.jagentdeskToolsEnabled ||
+      !isJAgentDeskToolPolicyEnabled(this.jagentdeskToolPolicies.get(agentId))
+    ) {
+      return null;
+    }
+    return diffHostToolSets(this.hostToolSet.launched(agentId), this.hostToolSet.current());
+  }
+
+  private canResumeNativeSession(agentId: string): boolean {
+    return Boolean(this.agents.get(agentId)?.persistence?.sessionId);
+  }
+
+  private async noteUnappliedHostToolSet(agentId: string, diff: HostToolSetDiff): Promise<void> {
+    const signature = hostToolSetSignature(diff);
+    if (this.unappliedHostToolSets.get(agentId) === signature) return;
+    this.unappliedHostToolSets.set(agentId, signature);
+    const agent = this.requireAgent(agentId);
+    await this.appendTimelineItem(agentId, {
+      type: "notification",
+      level: "info",
+      message: `New tools apply from a new session for ${this.providerLabel(agent.provider)}`,
+    });
   }
 
   private needsPluginSessionReload(agentId: string): boolean {
@@ -4080,13 +4162,16 @@ export class AgentManager {
       title?: string;
       description?: string;
       input?: Record<string, unknown>;
+      actions?: AgentPermissionAction[];
+      /** Host settings changes the user decides themselves, even in an unattended mode. */
+      alwaysAsk?: boolean;
     },
   ): Promise<AgentPermissionResponse> {
     const agent = this.requireAgent(agentId);
     // Spec 33.7 ("Chế độ bypass được tôn trọng"): an unattended provider mode is the
     // operator's standing approval, so every JAgentDesk permission card is auto-approved —
     // no pending card, no permission_requested event. Attended modes keep the card.
-    if (this.isAgentSessionUnattended(agent)) {
+    if (!request.alwaysAsk && this.isAgentSessionUnattended(agent)) {
       this.logger.debug(
         { agentId, tool: request.name, modeId: agent.currentModeId },
         "Auto-approved host tool permission: agent is in an unattended provider mode",
@@ -4102,6 +4187,7 @@ export class AgentManager {
       title: request.title,
       description: request.description,
       input: request.input as Record<string, unknown>,
+      ...(request.actions ? { actions: request.actions } : {}),
     };
 
     const promise = new Promise<AgentPermissionResponse>((resolvePermission) => {
@@ -4954,6 +5040,8 @@ export class AgentManager {
 
   private discardRetainedAgentState(agentId: string): void {
     this.jagentdeskToolPolicies.delete(agentId);
+    this.hostToolInstructions.delete(agentId);
+    this.unappliedHostToolSets.delete(agentId);
     this.timelineStore.delete(agentId);
     this.detachPluginTools(agentId);
     for (const event of this.providerSubagents.deleteParent(agentId)) {
@@ -6638,6 +6726,7 @@ export class AgentManager {
     const jagentdeskToolPolicy = this.resolveJAgentDeskToolPolicy(client.provider);
     this.jagentdeskToolPolicies.set(agentId, jagentdeskToolPolicy);
     this.detachPluginTools(agentId);
+    const hostTools = this.adoptHostToolSet(agentId, opening?.purpose);
     let appendSystemPrompt: string[] | undefined;
     let mcpServers: AgentSessionConfig["mcpServers"];
     let mcpServerOwners: Record<string, string> | undefined;
@@ -6667,6 +6756,7 @@ export class AgentManager {
     }
     const context: AgentLaunchContext = {
       agentId,
+      ...hostTools,
       ...pluginPromptContext(appendSystemPrompt),
       mcpServers,
       mcpServerOwners,
@@ -6697,6 +6787,25 @@ export class AgentManager {
     return context;
   }
 
+  /**
+   * Every launch (create, resume, reload, idle-runtime resume) opens with the host's current
+   * tool groups; the per-agent snapshot only keeps one runtime's tools consistent. Records the
+   * launch's tool instructions, which `resolveProviderLaunchConfig` joins into the daemon prompt.
+   */
+  private adoptHostToolSet(
+    agentId: string,
+    purpose: PluginSessionOpenRequest["purpose"] | undefined,
+  ): Pick<AgentLaunchContext, "inAppBrowser"> {
+    this.unappliedHostToolSets.delete(agentId);
+    this.hostToolInstructions.delete(agentId);
+    if (!this.hostToolSet) return {};
+    this.hostToolSet.adopt(agentId);
+    const instructions =
+      (purpose ?? "interactive") === "interactive" ? this.hostToolSet.instructions(agentId) : [];
+    if (instructions.length) this.hostToolInstructions.set(agentId, instructions);
+    return this.hostToolSet.inAppBrowser(agentId) ? { inAppBrowser: true } : {};
+  }
+
   private resolveProviderLaunchConfig(
     launchConfig: AgentSessionConfig,
     launchContext: AgentLaunchContext,
@@ -6713,7 +6822,13 @@ export class AgentManager {
         throw new Error(`MCP server '${name}' from plugin ${owner} collides with ${existingOwner}`);
       }
     }
-    launchConfig = { ...launchConfig, pluginAppendSystemPrompt: launchContext.appendSystemPrompt };
+    launchConfig = {
+      ...withHostToolInstructions(
+        launchConfig,
+        this.hostToolInstructions.get(launchContext.agentId ?? ""),
+      ),
+      pluginAppendSystemPrompt: launchContext.appendSystemPrompt,
+    };
     const merged =
       Object.keys(launchContext.mcpServers ?? {}).length > 0
         ? {
@@ -6838,6 +6953,19 @@ export function commandMayHaveChangedExternalState(command: string): boolean {
     // ahead/behind counts can drift stale until the next refresh.
     /\bgit\s+fetch\b/.test(normalized)
   );
+}
+
+// Joined into the daemon prompt rather than the plugin prompt: every provider reads it, and
+// Codex before 0.121 refuses plugin prompts on a new thread.
+function withHostToolInstructions(
+  config: AgentSessionConfig,
+  instructions: string[] | undefined,
+): AgentSessionConfig {
+  if (!instructions?.length) return config;
+  const daemonAppendSystemPrompt = [config.daemonAppendSystemPrompt, ...instructions]
+    .filter((part): part is string => Boolean(part?.trim()))
+    .join("\n\n");
+  return { ...config, daemonAppendSystemPrompt };
 }
 
 function pluginPromptContext(

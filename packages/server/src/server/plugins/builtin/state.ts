@@ -108,16 +108,31 @@ export class BuiltinPluginState {
     );
   }
 
-  /** Capture once per agent, including stateless HTTP MCP requests and provider reopen. */
+  /**
+   * The set one agent runtime opened with. Stateless HTTP MCP requests read it, so a runtime's
+   * tool list stays the one it was given; `adoptForAgent` moves it to the host's current set
+   * right before the agent's next launch (spec 04 §27b.1).
+   */
   forAgent(agentId?: string): ReadonlySet<BuiltinPluginId> {
     if (agentId) {
       const existing = this.agentSnapshots.get(agentId);
       if (existing) return existing;
     }
-    const snapshot = new Set(
+    const snapshot = this.current();
+    if (agentId) this.agentSnapshots.set(agentId, snapshot);
+    return snapshot;
+  }
+
+  /** Built-ins on for this host right now. */
+  current(): ReadonlySet<BuiltinPluginId> {
+    return new Set(
       this.manifests.filter((entry) => this.isEnabled(entry.id)).map((entry) => entry.id),
     );
-    if (agentId) this.agentSnapshots.set(agentId, snapshot);
+  }
+
+  adoptForAgent(agentId: string): ReadonlySet<BuiltinPluginId> {
+    const snapshot = this.current();
+    this.agentSnapshots.set(agentId, snapshot);
     return snapshot;
   }
 

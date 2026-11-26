@@ -690,6 +690,12 @@ export interface AgentLaunchContext {
   agentId?: string;
   env?: Record<string, string>;
   /**
+   * JAgentDesk browser tools are part of this launch. Providers turn off their own browser
+   * tooling (Codex's Browser/Chrome plugin skills, Claude in Chrome) and refuse shell commands
+   * that open a URL in the system browser, so pages open in the app (spec 04 §27b.3).
+   */
+  inAppBrowser?: boolean;
+  /**
    * Runtime-only internal JAgentDesk tools. This must never be persisted into
    * AgentSessionConfig; providers may adapt it to their native tool surface.
    */

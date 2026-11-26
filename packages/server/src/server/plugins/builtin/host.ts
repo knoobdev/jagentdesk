@@ -627,6 +627,10 @@ export class BuiltinServerRegistry {
       }, toolContext);
     }
   }
+  /** Built-ins that install agent tools, in any slot. */
+  agentToolPluginIds(): ReadonlySet<BuiltinPluginId> {
+    return new Set(this.tools.map((tools) => tools.id));
+  }
   session(
     state: BuiltinPluginState | undefined,
     services: BuiltinSessionServices,
