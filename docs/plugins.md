@@ -96,8 +96,13 @@ configuration preserves custom-provider environment overlays and internal MCP ap
 
 `agent.open.before` can attach per-agent tools, MCP servers and instructions. These are launch
 state, not persisted user configuration. Tools are filtered through the provider's
-`jagentdeskTools` policy. Tool and MCP name collisions fail before the session opens. Plugin
-changes invalidate open sessions so the next open uses current contributions.
+`jagentdeskTools` policy. Tool and MCP name collisions fail before the session opens.
+`packages/server/src/server/plugins/session-attachments.ts` records what each plugin contributed to
+each live session. A plugin start, stop, or reload reruns only that plugin's callback per session,
+swaps its tools in place, and reopens a session only when its launch would differ. A reopen closes
+the provider process, so a reload must not reopen agents the plugin does not change. Agents with
+native plugin tools resolve the tool by plugin and name at call time and keep their launch-time
+catalog until the reopen.
 
 Plugin sessions receive events only when they express demand through `observeEvents` or
 registered handlers. Plugin RPC subscriptions own their delivery, release and reconnect

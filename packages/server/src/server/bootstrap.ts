@@ -1153,7 +1153,7 @@ export async function createJAgentDeskDaemon(
       resolveSnapshotContextWindow(providerSnapshotManager.getSnapshot(), provider, model),
     resolveJAgentDeskToolPolicy: (provider) =>
       resolveJAgentDeskToolPolicy(provider, daemonConfigStore.get().providers),
-    pluginAgentTools: pluginRuntime,
+    pluginSessions: pluginRuntime,
     clients: initialAgentManagerState.clients,
     providerDefinitions: initialAgentManagerState.providerDefinitions,
     registry: agentStorage,
@@ -1191,10 +1191,6 @@ export async function createJAgentDeskDaemon(
     agentManager.updateProviderRegistry(
       providerSnapshotManager.replacePluginProviders(pluginRuntime.getProviderRegistrations()),
     );
-  });
-
-  const unsubscribePluginSessionChanges = pluginRuntime.subscribeSessionOpenChanges(() => {
-    agentManager.invalidatePluginSessions();
   });
 
   const detachAgentStoragePersistence = attachAgentStoragePersistence(
@@ -2027,6 +2023,7 @@ export async function createJAgentDeskDaemon(
     const normalizeAgentMcpProtocol = createAgentMcpProtocolNormalizer(logger);
 
     const createAgentMcpSession = async (callerAgentId?: string) => {
+      if (callerAgentId) await agentManager.refreshPluginTools(callerAgentId);
       const agentMcpServer = await createAgentMcpServer(
         createAgentToolHostDependencies({ callerAgentId }),
       );
@@ -2439,7 +2436,6 @@ export async function createJAgentDeskDaemon(
       scriptHealthMonitor.start();
     } catch (error) {
       unsubscribePluginProviders();
-      unsubscribePluginSessionChanges();
       await pluginRuntime.stopAllPlugins().catch(() => undefined);
       await serviceProxy.stopStandalone().catch(() => undefined);
       if (mainStarted) {
@@ -2454,7 +2450,6 @@ export async function createJAgentDeskDaemon(
     const keepTerminals = options?.keepTerminals === true;
     let terminalShutdownError: unknown = null;
     unsubscribePluginProviders();
-    unsubscribePluginSessionChanges();
     await hubRelationships.stop();
     workspaceReconciliation.dispose();
     scriptHealthMonitor.stop();

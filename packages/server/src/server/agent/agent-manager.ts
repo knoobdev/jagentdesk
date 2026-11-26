@@ -1,7 +1,11 @@
 import { type RuntimeCleanupCandidate } from "./idle-runtime-cleanup/index.js";
 import { type ProviderJAgentDeskToolsPolicy } from "@jagentdesk/protocol/provider-config";
 import { isJAgentDeskToolPolicyEnabled } from "./jagentdesk-tool-policy.js";
-import type { AttachedAgentTool, PluginAgentToolsRuntime } from "../plugins/agent-tools.js";
+import type {
+  AttachedAgentTool,
+  PluginSessionsRuntime,
+  SessionOpenAgentFacts,
+} from "../plugins/agent-tools.js";
 import type { AgentToolResult } from "@jagentdesk/plugin/server";
 import { TimelineProjection } from "./timeline-projection.js";
 import type { PluginLifecycle } from "../plugins/lifecycle/index.js";
@@ -259,6 +263,28 @@ export type AgentRunCancellationResult =
   | { status: "settled" }
   | { status: "refused" };
 
+interface ResumeAgentOptions {
+  createdAt?: Date;
+  updatedAt?: Date;
+  lastUserMessageAt?: Date | null;
+  labels?: Record<string, string>;
+  metadata?: AgentMetadata;
+  workspaceId?: string;
+  owner?: AgentOwner;
+  background?: boolean;
+  attention?: AttentionState;
+  /** Skip replaying provider history into the timeline (a fast fork shows its parent's). */
+  historyPrimed?: boolean;
+}
+
+interface PluginToolCall {
+  pluginId: string;
+  toolName: string;
+  agentId: string;
+  input: unknown;
+  signal?: AbortSignal;
+}
+
 interface StopAgentBackgroundWorkOptions {
   agentId: string;
   itemId: string;
@@ -492,7 +518,7 @@ export interface AgentManagerOptions {
   terminalManager?: TerminalManager | null;
   mcpBaseUrl?: string;
   mcpAuthToken?: string;
-  pluginAgentTools?: PluginAgentToolsRuntime;
+  pluginSessions?: PluginSessionsRuntime;
   resolveJAgentDeskToolPolicy?: (
     provider: AgentProvider,
   ) => ProviderJAgentDeskToolsPolicy | undefined;
@@ -1223,10 +1249,6 @@ export class AgentManager {
 
   private readonly mcpAuthToken: string | null;
 
-  private sessionOpenGeneration = 0;
-
-  private readonly sessionOpenGenerations = new Map<string, number>();
-
   private hostToolSet: HostToolSetSource | null = null;
 
   private providerLabel: (provider: AgentProvider) => string = (provider) => provider;
@@ -1241,9 +1263,7 @@ export class AgentManager {
   /** Last "JAgentDesk tools are unavailable" reason written to an agent's timeline. */
   private readonly unavailableJAgentDeskTools = new Map<string, string>();
 
-  private readonly attachedPluginTools = new Map<string, AttachedAgentTool[]>();
-
-  private readonly pluginAgentTools: PluginAgentToolsRuntime | undefined;
+  private readonly pluginSessions: PluginSessionsRuntime | undefined;
 
   private jagentdeskToolsEnabled = true;
 
@@ -1310,7 +1330,7 @@ export class AgentManager {
   constructor(options: AgentManagerOptions) {
     this.pluginLifecycle = options.pluginLifecycle;
     this.resolveJAgentDeskToolPolicy = options.resolveJAgentDeskToolPolicy ?? (() => undefined);
-    this.pluginAgentTools = options.pluginAgentTools;
+    this.pluginSessions = options.pluginSessions;
     this.timelineStore = options.timelineStore ?? new InMemoryAgentTimelineStore();
     this.idFactory = options.idFactory ?? (() => randomUUID());
     this.registry = options.registry;
@@ -1433,20 +1453,19 @@ export class AgentManager {
     this.jagentdeskToolsEnabled = enabled;
   }
 
-  invalidatePluginSessions(): void {
-    this.sessionOpenGeneration++;
-  }
-
   /**
-   * Runs before every foreground turn. A plugin that changed what agents open with, or a
-   * built-in tool group turned on or off for the host (spec 04 §27b.1), restarts the runtime
-   * on the same native session so this turn already has the host's current tools.
+   * Runs before every foreground turn. A plugin change the running provider session cannot pick
+   * up (env, instructions, MCP servers, or tool definitions), or a built-in tool group turned on
+   * or off for the host (spec 04 §27b.1), restarts the runtime on the same native session so this
+   * turn already has the host's current tools. A plugin change that leaves the agent's launch as
+   * it was keeps the session, with its background work and subagents.
    */
   async reloadStalePluginSession(agentId: string): Promise<void> {
-    if (!this.needsPluginSessionReload(agentId) && !this.pendingHostToolSetDiff(agentId)) return;
+    if (!(await this.needsPluginSessionReload(agentId)) && !this.pendingHostToolSetDiff(agentId))
+      return;
     await this.trackAgentRegistrationOperation(
       this.runLifecycleMutation(agentId, async () => {
-        const pluginStale = this.needsPluginSessionReload(agentId);
+        const pluginStale = await this.needsPluginSessionReload(agentId);
         const toolDiff = this.pendingHostToolSetDiff(agentId);
         if (!pluginStale && !toolDiff) return;
         if (toolDiff && !this.canResumeNativeSession(agentId)) {
@@ -1586,14 +1605,10 @@ export class AgentManager {
     });
   }
 
-  private needsPluginSessionReload(agentId: string): boolean {
+  private async needsPluginSessionReload(agentId: string): Promise<boolean> {
     const agent = this.getAgent(agentId);
-    return (
-      agent !== null &&
-      agent.lifecycle !== "closed" &&
-      this.sessionOpenGenerations.get(agentId) !== this.sessionOpenGeneration &&
-      !this.hasInFlightRun(agentId)
-    );
+    if (!agent || agent.lifecycle === "closed" || this.hasInFlightRun(agentId)) return false;
+    return (await this.refreshPluginTools(agentId)).stale;
   }
 
   getJAgentDeskToolPolicy(agentId: string): ProviderJAgentDeskToolsPolicy | undefined {
@@ -1601,22 +1616,53 @@ export class AgentManager {
   }
 
   getPluginTools(agentId: string): readonly AttachedAgentTool[] {
-    return (this.attachedPluginTools.get(agentId) ?? []).filter((tool) =>
-      this.pluginAgentTools?.isToolPluginAvailable(tool.pluginId, tool.pluginInstanceId),
-    );
+    return this.pluginSessions?.sessionTools(agentId) ?? [];
   }
 
-  async executePluginTool(
-    tool: AttachedAgentTool,
-    agentId: string,
-    input: unknown,
-    signal?: AbortSignal,
-  ): Promise<AgentToolResult> {
+  /**
+   * Brings a live session's plugin tools up to date with the running plugins. A plugin restart gives it a new
+   * instance; only that plugin's open is rerun for the session, without reopening it or interrupting its turn.
+   */
+  async refreshPluginTools(agentId: string): Promise<{ stale: boolean }> {
+    if (!this.pluginSessions) return { stale: false };
+    return this.pluginSessions.refreshSession(agentId, {
+      reservedToolNames: () => this.reservedAgentToolNames(agentId),
+      agentFacts: () => this.pluginOpenAgentFacts(agentId),
+    });
+  }
+
+  /** The agent fields a reopen would put in its plugin open request. */
+  private async pluginOpenAgentFacts(agentId: string): Promise<SessionOpenAgentFacts> {
+    const agent = this.requireAgent(agentId);
+    return {
+      workspaceId: agent.workspaceId ?? null,
+      title: await this.resolveInitialPersistedTitle(agentId, agent.config, null),
+      ...pluginOpeningVisibility(agent),
+      ...agentEntityData(agent),
+    };
+  }
+
+  /**
+   * Resolves the plugin's current instance of the tool at call time, so a launch-time catalog reaches a restarted
+   * plugin and never a different plugin that took the name.
+   */
+  async executePluginTool({
+    pluginId,
+    toolName,
+    agentId,
+    input,
+    signal,
+  }: PluginToolCall): Promise<AgentToolResult> {
     const agent = this.getAgent(agentId);
     if (!agent || agent.lifecycle === "closed") throw new Error(`Agent is not live: ${agentId}`);
-    if (!this.pluginAgentTools) throw new Error("Plugin tools are unavailable");
+    if (!this.pluginSessions) throw new Error("Plugin tools are unavailable");
+    await this.refreshPluginTools(agentId);
+    const tool = this.getPluginTools(agentId).find(
+      (entry) => entry.pluginId === pluginId && entry.name === toolName,
+    );
+    if (!tool) return { isError: true, text: `Plugin tool is not available: ${toolName}` };
     const record = await this.registry?.get(agentId);
-    return this.pluginAgentTools.callTool(
+    return this.pluginSessions.callTool(
       tool.pluginId,
       tool.pluginInstanceId,
       describeHookAgent({ ...agent, title: record?.title ?? agent.config.title }),
@@ -1626,10 +1672,27 @@ export class AgentManager {
     );
   }
 
+  /**
+   * JAgentDesk's own tool names for the agent, including the ones its provider disables. The catalog also lists the
+   * agent's plugin tools; the plugin session owner settles those names between plugins itself.
+   */
+  private async reservedAgentToolNames(agentId: string): Promise<ReadonlySet<string>> {
+    if (!this.jagentdeskToolCatalogFactory) return new Set();
+    const pluginToolNames = new Set(this.getPluginTools(agentId).map((tool) => tool.name));
+    const catalog = await this.jagentdeskToolCatalogFactory({
+      callerAgentId: agentId,
+      jagentdeskToolPolicy: {},
+    });
+    return new Set([...catalog.tools.keys()].filter((name) => !pluginToolNames.has(name)));
+  }
+
   private detachPluginTools(agentId: string): void {
-    this.attachedPluginTools.delete(agentId);
-    this.sessionOpenGenerations.delete(agentId);
-    this.pluginAgentTools?.detachTools(agentId);
+    this.pluginSessions?.closeSession(agentId);
+  }
+
+  /** The agent now runs this launch, so its plugin open describes the running session. */
+  private commitPluginSessionOpen(agentId: string): void {
+    this.pluginSessions?.sessionLaunched(agentId);
   }
 
   setJAgentDeskToolCatalogFactory(factory: JAgentDeskToolCatalogFactory | null): void {
@@ -2153,7 +2216,17 @@ export class AgentManager {
     );
   }
 
-  private async createAgentInternal(
+  private createAgentInternal(
+    config: AgentSessionConfig,
+    resolvedAgentId: string,
+    options: CreateAgentOptions,
+  ): Promise<ManagedAgent> {
+    return this.launchAgent(resolvedAgentId, () =>
+      this.createAgentSession(config, resolvedAgentId, options),
+    );
+  }
+
+  private async createAgentSession(
     config: AgentSessionConfig,
     resolvedAgentId: string,
     options: CreateAgentOptions,
@@ -2255,12 +2328,34 @@ export class AgentManager {
     },
     resumeOptions?: AgentResumeSessionOptions,
   ): Promise<ManagedAgent> {
+    const resolvedAgentId = validateAgentId(
+      agentId ?? this.idFactory(),
+      "resumeAgentFromPersistence",
+    );
     return this.trackAgentRegistrationOperation(
-      this.resumeAgentFromPersistenceInternal(handle, overrides, agentId, options, resumeOptions),
+      this.resumeAgentFromPersistenceInternal(
+        handle,
+        overrides,
+        resolvedAgentId,
+        options,
+        resumeOptions,
+      ),
     );
   }
 
-  private async resumeAgentFromPersistenceInternal(
+  private resumeAgentFromPersistenceInternal(
+    handle: AgentPersistenceHandle,
+    overrides: Partial<AgentSessionConfig> | undefined,
+    agentId: string,
+    options?: ResumeAgentOptions,
+    resumeOptions?: AgentResumeSessionOptions,
+  ): Promise<ManagedAgent> {
+    return this.launchAgent(agentId, () =>
+      this.resumeAgentSession(handle, overrides, agentId, options, resumeOptions),
+    );
+  }
+
+  private async resumeAgentSession(
     handle: AgentPersistenceHandle,
     overrides?: Partial<AgentSessionConfig>,
     agentId?: string,
@@ -2372,18 +2467,23 @@ export class AgentManager {
     workspaceId: string;
     labels?: Record<string, string>;
   }): Promise<ManagedAgent> {
-    return this.trackAgentRegistrationOperation(this.importProviderSessionInternal(input));
+    const resolvedAgentId = validateAgentId(this.idFactory(), "importProviderSession");
+    return this.trackAgentRegistrationOperation(
+      this.launchAgent(resolvedAgentId, () => this.importAgentSession(input, resolvedAgentId)),
+    );
   }
 
-  private async importProviderSessionInternal(input: {
-    provider: AgentProvider;
-    providerHandleId: string;
-    cwd: string;
-    workspaceId: string;
-    labels?: Record<string, string>;
-  }): Promise<ManagedAgent> {
+  private async importAgentSession(
+    input: {
+      provider: AgentProvider;
+      providerHandleId: string;
+      cwd: string;
+      workspaceId: string;
+      labels?: Record<string, string>;
+    },
+    resolvedAgentId: string,
+  ): Promise<ManagedAgent> {
     this.assertAcceptingAgentRegistrations();
-    const resolvedAgentId = validateAgentId(this.idFactory(), "importProviderSession");
     this.requireEnabledProvider(input.provider);
 
     const client = await this.requireAvailableClient({ provider: input.provider });
@@ -2455,7 +2555,6 @@ export class AgentManager {
       return agent;
     } finally {
       if (!handedToRegistration) {
-        this.detachPluginTools(resolvedAgentId);
         await this.closeUnregisteredSession(imported.session);
       }
     }
@@ -2479,7 +2578,29 @@ export class AgentManager {
     );
   }
 
-  private async reloadAgentSessionInternal(
+  private reloadAgentSessionInternal(
+    agentId: string,
+    overrides?: Partial<AgentSessionConfig>,
+    options?: { rehydrateFromDisk?: boolean },
+  ): Promise<ManagedAgent> {
+    return this.launchAgent(agentId, () => this.reopenAgentSession(agentId, overrides, options));
+  }
+
+  /**
+   * Runs one provider launch: create, resume, import, or reopen. Its plugin open takes over the session once
+   * `registerSession` admits the agent. A launch that fails before then discards that open, so a session still
+   * running keeps its plugin tools.
+   */
+  private async launchAgent<T>(agentId: string, launch: () => Promise<T>): Promise<T> {
+    try {
+      return await launch();
+    } catch (error) {
+      this.pluginSessions?.sessionLaunchFailed(agentId);
+      throw error;
+    }
+  }
+
+  private async reopenAgentSession(
     agentId: string,
     overrides?: Partial<AgentSessionConfig>,
     options?: { rehydrateFromDisk?: boolean },
@@ -2523,17 +2644,12 @@ export class AgentManager {
         metadata: existing.metadata,
       },
     );
-    const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
-
     // Refuse before releasing the live runtime: the replacement would be refused anyway.
-    if (
-      Object.keys(stripInternalJAgentDeskMcpServer(providerLaunchConfig).mcpServers ?? {}).length >
-        0 &&
-      existing.session.capabilities.supportsMcpServers !== true
-    ) {
-      this.detachPluginTools(agentId);
-      throw this.unsupportedMcpError(providerLaunchConfig, launchContext);
-    }
+    const providerLaunchConfig = this.resolveReloadLaunchConfig(
+      existing,
+      launchConfig,
+      launchContext,
+    );
 
     const launchedOptions = this.launchOptionsFor({ client, own: storedConfig.providerOptions });
     let session: AgentSession | undefined;
@@ -2598,10 +2714,28 @@ export class AgentManager {
       throw error;
     } finally {
       if (!handedToRegistration) {
-        this.detachPluginTools(agentId);
+        // The closed agent drops its plugin record; a launch that never closed it leaves the rollback to launchAgent.
+        if (closedExisting) this.detachPluginTools(agentId);
         if (session) await this.closeUnregisteredSession(session);
       }
     }
+  }
+
+  /** Validates a reload's launch before it closes the running session. */
+  private resolveReloadLaunchConfig(
+    existing: ActiveManagedAgent,
+    launchConfig: AgentSessionConfig,
+    launchContext: AgentLaunchContext,
+  ): AgentSessionConfig {
+    const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
+    const mcpServers = stripInternalJAgentDeskMcpServer(providerLaunchConfig).mcpServers ?? {};
+    if (
+      Object.keys(mcpServers).length > 0 &&
+      existing.session.capabilities.supportsMcpServers !== true
+    ) {
+      throw this.unsupportedMcpError(providerLaunchConfig, launchContext);
+    }
+    return providerLaunchConfig;
   }
 
   private async closeReloadedSession(session: AgentSession, agentId: string): Promise<void> {
@@ -5842,6 +5976,7 @@ export class AgentManager {
       this.runtimeCleanupIdentities.set(session, Object.freeze({ openedAt: Date.now() }));
       this.agents.set(resolvedAgentId, managed);
       registered = true;
+      this.commitPluginSessionOpen(resolvedAgentId);
       // Initialize previousStatus to track transitions
       this.previousStatuses.set(resolvedAgentId, managed.lifecycle);
       if (session.initialTimeline?.length) {
@@ -7845,16 +7980,13 @@ export class AgentManager {
       metadata?: AgentMetadata;
     },
   ): Promise<AgentLaunchContext> {
-    // A plugin changing during this open must still make the resulting session stale.
-    const generation = this.sessionOpenGeneration;
     const jagentdeskToolPolicy = this.resolveJAgentDeskToolPolicy(client.provider);
     this.jagentdeskToolPolicies.set(agentId, jagentdeskToolPolicy);
-    this.detachPluginTools(agentId);
     const hostTools = this.adoptHostToolSet(agentId, opening?.purpose);
     let appendSystemPrompt: string[] | undefined;
     let mcpServers: AgentSessionConfig["mcpServers"];
     let mcpServerOwners: Record<string, string> | undefined;
-    if (this.pluginLifecycle) {
+    if (this.pluginSessions) {
       const request = {
         agentId,
         provider: client.provider,
@@ -7869,10 +8001,9 @@ export class AgentManager {
         tools: [],
         mcpServers: {},
       };
-      const transformed = await this.pluginLifecycle.before("agent.open.before", request);
+      const transformed = await this.pluginSessions.openSession(request);
       env = transformed.env;
       if (request.purpose === "interactive") {
-        this.attachedPluginTools.set(agentId, transformed.tools as AttachedAgentTool[]);
         appendSystemPrompt = transformed.appendSystemPrompt;
         mcpServers = transformed.mcpServers;
         mcpServerOwners = transformed.mcpServerOwners;
@@ -7896,19 +8027,14 @@ export class AgentManager {
       this.jagentdeskToolCatalogFactory &&
       (useNativeTools || this.getPluginTools(agentId).length > 0)
     ) {
-      try {
-        const catalog = await this.jagentdeskToolCatalogFactory({
-          callerAgentId: agentId,
-          callerAgentLabels: opening?.labels,
-          jagentdeskToolPolicy,
-        });
-        if (useNativeTools) context.jagentdeskTools = catalog;
-      } catch (error) {
-        this.detachPluginTools(agentId);
-        throw error;
-      }
+      // Building the catalog checks the plugin tools against JAgentDesk's own names.
+      const catalog = await this.jagentdeskToolCatalogFactory({
+        callerAgentId: agentId,
+        callerAgentLabels: opening?.labels,
+        jagentdeskToolPolicy,
+      });
+      if (useNativeTools) context.jagentdeskTools = catalog;
     }
-    this.sessionOpenGenerations.set(agentId, generation);
     return context;
   }
 
