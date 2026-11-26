@@ -17,17 +17,14 @@ The package keeps the npm tarball's layout, including its build output:
 
 CI does not build native code or run the fork's Robolectric suites. For Android changes, run them from `packages/app/android` after `expo prebuild`:
 
-```sh
-./gradlew :react-native-enriched-markdown:testReleaseUnitTest --no-daemon --max-workers=2
-```
-
 Native changes require a client rebuild; JavaScript refresh cannot enable compiled grammars.
 
 Some fork changes are backports. A sync past the upstream version drops them in favour of upstream's code:
 
-| Fork change                                                       | Upstream                                                                                                                                                     | Released in |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------- |
-| Android nested list items start their text after their own marker | [#1015](https://github.com/software-mansion/enriched-markdown/pull/1015), [#1023](https://github.com/software-mansion/enriched-markdown/pull/1023) (Android) | `1.2.0`     |
+| Fork change                                                         | Upstream                                                                                                                                                     | Released in |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------- |
+| Android long-press drag selection keeps parent intercept disallowed | [#1012](https://github.com/software-mansion/enriched-markdown/pull/1012)                                                                                     | `1.2.0`     |
+| Android nested list items start their text after their own marker   | [#1015](https://github.com/software-mansion/enriched-markdown/pull/1015), [#1023](https://github.com/software-mansion/enriched-markdown/pull/1023) (Android) | `1.2.0`     |
 
 Android measures and displays a reply with the same span order, and applies list line height before blockquote spacers, so a list with nested quotes fits above its turn footer. `ListBlockquoteMeasurementTest` covers it.
 
