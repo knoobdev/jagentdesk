@@ -49,6 +49,8 @@ export interface FinishRegistration {
   reject(): Promise<void>;
 }
 export interface FinishSubscriptions {
+  /** Whether the agent waits on a child on another host (Paseo #10864 delegated agents). */
+  hasPendingForCaller(agentId: string): boolean;
   start(): Promise<void>;
   register(
     input: Omit<FinishSubscription, "id">,
@@ -302,6 +304,11 @@ export function createFinishSubscriptions(deps: Dependencies): FinishSubscriptio
   }
 
   return {
+    hasPendingForCaller(agentId) {
+      for (const group of watches.values())
+        for (const watch of group) if (watch.records[0]!.callerAgentId === agentId) return true;
+      return false;
+    },
     start: () =>
       serialize(async () => {
         const groups = new Map<string, FinishSubscription[]>();

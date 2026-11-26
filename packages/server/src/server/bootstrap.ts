@@ -42,6 +42,7 @@ import {
   FinishSubscriptionStore,
   restoreFinishSubscriptions,
   hasOutstandingFinishSubscriptions,
+  setRemoteDelegationProbe,
   suspendFinishNotifications,
 } from "./agent/finish-subscriptions/index.js";
 import { ensureToolDirsOnPath, HostToolInstaller } from "./host-tools/installer.js";
@@ -1260,6 +1261,7 @@ export async function createJAgentDeskDaemon(
         requireParentOwnership: record.requireParentOwnership,
         restoredSubscriptionId: record.id,
         restoredSubscriptionIds: subscriptionIds,
+        restoredFollowingSince: record.followingSince,
         logger,
       }).ready;
     },
@@ -2303,6 +2305,11 @@ export async function createJAgentDeskDaemon(
               logger,
             });
             await remoteFinishSubscriptions.start();
+            // A local child waiting on an agent on another host is still working (Paseo #10864).
+            const remoteSubscriptions = remoteFinishSubscriptions;
+            setRemoteDelegationProbe(agentManager, (agentId) =>
+              remoteSubscriptions.hasPendingForCaller(agentId),
+            );
             await attachHostServices(wsServer);
             botsRuntimeReady = true;
             if (pluginRuntime.builtin.isEnabled("bots")) {
