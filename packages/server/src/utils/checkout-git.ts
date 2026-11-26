@@ -919,7 +919,14 @@ export interface CheckoutStatusGitNonJAgentDesk {
   aheadOfOrigin: number | null;
   behindOfOrigin: number | null;
   upstreamState: UpstreamState;
+  // Whether origin is configured. Pull and Push do not need it; see pullRemote and pushRemote.
   hasRemote: boolean;
+  // The remote Pull fetches currentBranch from, as git names it: the remote of the branch's
+  // configured upstream, or "." when the upstream is a local branch. Null without an upstream.
+  pullRemote: string | null;
+  // The remote Push sends currentBranch to, resolved as pushCurrentBranch resolves it. Null when
+  // Push has nowhere to send the branch.
+  pushRemote: string | null;
   firstPushRemote: string | null;
   remoteUrl: string | null;
   isJAgentDeskOwnedWorktree: false;
@@ -939,6 +946,8 @@ export interface CheckoutStatusGitJAgentDesk {
   behindOfOrigin: number | null;
   upstreamState: UpstreamState;
   hasRemote: boolean;
+  pullRemote: string | null;
+  pushRemote: string | null;
   firstPushRemote: string | null;
   remoteUrl: string | null;
   isJAgentDeskOwnedWorktree: true;
@@ -976,6 +985,9 @@ export interface CheckoutContext {
   logger?: Pick<Logger, "trace" | "warn">;
   facts?: CheckoutSnapshotFacts | null;
   runGitCommand?: RunGitCommand;
+  // `git config --get` results shared by the lookups of one snapshot, keyed by config key.
+  // Several lookups read the same keys; this keeps each to one process.
+  gitConfigReads?: Map<string, Promise<string | null>>;
 }
 
 export type CheckoutSnapshotFacts =
@@ -997,7 +1009,8 @@ export type CheckoutSnapshotFacts =
       branchRemoteName: string | null;
       branchMergeRef: string | null;
       upstreamStatus: UpstreamStatus;
-      firstPushRemote: string | null;
+      // Where Push sends the current branch. Null when Push has nowhere to send it.
+      pushTarget: PushTarget | null;
       pullRequestLookupTarget: PullRequestStatusLookupTarget | null;
     };
 
@@ -1459,16 +1472,7 @@ export async function getOriginRemoteUrl(
   cwd: string,
   context?: CheckoutContext,
 ): Promise<string | null> {
-  try {
-    const { stdout } = await getRunGitCommand(context)(["config", "--get", "remote.origin.url"], {
-      cwd,
-      envOverlay: READ_ONLY_GIT_ENV,
-    });
-    const url = stdout.trim();
-    return url.length > 0 ? url : null;
-  } catch {
-    return null;
-  }
+  return getGitConfigValue(cwd, "remote.origin.url", context);
 }
 
 export async function hasOriginRemote(cwd: string): Promise<boolean> {
@@ -1477,6 +1481,23 @@ export async function hasOriginRemote(cwd: string): Promise<boolean> {
 }
 
 async function getGitConfigValue(
+  cwd: string,
+  key: string,
+  context?: CheckoutContext,
+): Promise<string | null> {
+  const reads = context?.gitConfigReads;
+  if (!reads) {
+    return readGitConfigValue(cwd, key, context);
+  }
+  let read = reads.get(key);
+  if (!read) {
+    read = readGitConfigValue(cwd, key, context);
+    reads.set(key, read);
+  }
+  return read;
+}
+
+async function readGitConfigValue(
   cwd: string,
   key: string,
   context?: CheckoutContext,
@@ -2023,32 +2044,6 @@ async function readGitPushRemote(input: {
   return branchPushRemote ?? pushDefault ?? input.branchRemoteName ?? "origin";
 }
 
-// pushCurrentBranch publishes a branch with no upstream here.
-const FIRST_PUSH_REMOTE = "origin";
-
-// Where a first push publishes the branch, when the daemon can confirm git would push it there
-// too. When git picks another remote, as in a fork setup, this is null so that clients do not
-// offer a first push that lands in a different repository than `git push` would use.
-async function readFirstPushRemote(input: {
-  cwd: string;
-  storedBranchName: string | null;
-  branchRemoteName: string | null;
-  hasOrigin: boolean;
-  context?: CheckoutContext;
-}): Promise<string | null> {
-  const { cwd, storedBranchName, branchRemoteName, context } = input;
-  if (!storedBranchName || !input.hasOrigin) {
-    return null;
-  }
-  const gitPushRemote = await readGitPushRemote({
-    cwd,
-    storedBranchName,
-    branchRemoteName,
-    context,
-  });
-  return gitPushRemote === FIRST_PUSH_REMOTE ? FIRST_PUSH_REMOTE : null;
-}
-
 interface CheckoutInspectionContext {
   worktreeRoot: string;
   currentBranch: string | null;
@@ -2308,7 +2303,13 @@ export async function getCheckoutSnapshotFacts(
   if (context?.facts) {
     return context.facts;
   }
+  return collectCheckoutSnapshotFacts(cwd, { ...context, gitConfigReads: new Map() });
+}
 
+async function collectCheckoutSnapshotFacts(
+  cwd: string,
+  context: CheckoutContext,
+): Promise<CheckoutSnapshotFacts> {
   const inspected = await inspectCheckoutContext(cwd, context);
   if (!inspected) {
     return { isGit: false };
@@ -2354,13 +2355,14 @@ export async function getCheckoutSnapshotFacts(
       ]);
     }
   }
-  const firstPushRemotePromise = readFirstPushRemote({
-    cwd,
-    storedBranchName,
-    branchRemoteName,
-    hasOrigin: inspected.remoteUrl !== null,
-    context,
-  });
+  const pushTargetPromise = storedBranchName
+    ? resolvePushTarget({
+        cwd,
+        storedBranchName,
+        jagentdeskWorktree: inspected.jagentdeskWorktree,
+        context,
+      })
+    : null;
   let pullRequestLookupTarget = await resolveFactsPullRequestLookupTarget({
     cwd,
     inspected,
@@ -2396,7 +2398,7 @@ export async function getCheckoutSnapshotFacts(
     branchRemoteName,
     branchMergeRef,
     upstreamStatus,
-    firstPushRemote: await firstPushRemotePromise,
+    pushTarget: pushTargetOrNull(await pushTargetPromise),
     pullRequestLookupTarget,
   };
 }
@@ -2570,6 +2572,16 @@ export async function getCheckoutStatus(
   // comparisons and actions read it.
   const displayBaseRef = baseRef ? branchNameFromRef(baseRef) : null;
   const upstream = projectUpstreamStatus(facts.upstreamStatus);
+  const pushRemote = facts.pushTarget?.remoteName ?? null;
+  const remotes = {
+    hasRemote,
+    pullRemote: resolvePullRemote(facts.branchRemoteName, facts.branchMergeRef),
+    pushRemote,
+    // COMPAT(checkoutFirstPushRemote): added in v0.17.5, remove after 2027-05-24 once the app
+    // floor reads pushRemote. v0.17.4 apps offer a regular checkout's first push only when this
+    // is set, and the daemon they shipped with set it when the push went to origin.
+    firstPushRemote: pushRemote === PUBLISH_REMOTE ? pushRemote : null,
+  };
 
   if (jagentdeskWorktree.isJAgentDeskOwnedWorktree && baseRef) {
     return {
@@ -2582,8 +2594,7 @@ export async function getCheckoutStatus(
       baseRefExact: baseRef,
       aheadBehind,
       ...upstream,
-      hasRemote,
-      firstPushRemote: facts.firstPushRemote,
+      ...remotes,
       remoteUrl,
       isJAgentDeskOwnedWorktree: true,
     };
@@ -2600,8 +2611,7 @@ export async function getCheckoutStatus(
     baseRefExact: baseRef,
     aheadBehind,
     ...upstream,
-    hasRemote,
-    firstPushRemote: facts.firstPushRemote,
+    ...remotes,
     remoteUrl,
     isJAgentDeskOwnedWorktree: false,
   };
@@ -4273,10 +4283,8 @@ export async function pullCurrentBranch(cwd: string, forgeService?: ForgeService
   if (!currentBranch || currentBranch === "HEAD") {
     throw new Error("Unable to determine current branch for pull");
   }
-  const hasRemote = await hasOriginRemote(cwd);
-  if (!hasRemote) {
-    throw new Error("Remote 'origin' is not configured.");
-  }
+  // Git decides whether there is something to pull from. It does not need origin, and it can
+  // pull some branches that have no upstream, as in a single-branch clone.
   try {
     await runGitCommand(["pull"], { cwd, timeout: 120_000 });
     forgeService?.invalidate({ cwd });
@@ -4284,6 +4292,16 @@ export async function pullCurrentBranch(cwd: string, forgeService?: ForgeService
     await abortGitPullConflictState(cwd);
     throw error;
   }
+}
+
+// The remote `git pull` fetches a branch from when the branch has a configured upstream, which
+// git names "." when the upstream is a local branch. Checkout status reports it so that clients
+// offer Pull for any upstream, not only one on origin.
+function resolvePullRemote(
+  branchRemoteName: string | null,
+  branchMergeRef: string | null,
+): string | null {
+  return branchMergeRef === null ? null : branchRemoteName;
 }
 
 export async function pushCurrentBranch(
@@ -4297,55 +4315,177 @@ export async function pushCurrentBranch(
     throw new Error("Unable to determine current branch for push");
   }
   const storedBranchName = await readStoredBranchName(cwd, currentBranch, context);
-  const configuredPushTarget = await getCurrentBranchConfiguredPushTarget(cwd, storedBranchName);
-  if (configuredPushTarget) {
-    await runGitCommand(
-      ["push", configuredPushTarget.remoteName, `HEAD:refs/heads/${configuredPushTarget.headRef}`],
-      { cwd, timeout: 120_000 },
-    );
-    await refreshCurrentBranchTrackedRefAfterPush(cwd, storedBranchName, configuredPushTarget);
-    forgeService?.invalidate({ cwd });
-    return;
+  // The status a client acted on can be older than the git configuration, so the destination is
+  // resolved again before anything is sent.
+  const target = await resolvePushTarget({ cwd, storedBranchName, context });
+  switch (target.kind) {
+    case "refused":
+      throw new Error(target.reason);
+    case "configured":
+      await runGitCommand(["push", target.remoteName, `HEAD:refs/heads/${target.headRef}`], {
+        cwd,
+        timeout: 120_000,
+      });
+      await refreshCurrentBranchTrackedRefAfterPush(cwd, storedBranchName, target);
+      break;
+    case "upstream":
+      await runGitCommand(["push", "-u", target.remoteName, `HEAD:refs/heads/${target.headRef}`], {
+        cwd,
+        timeout: 120_000,
+      });
+      break;
+    case "publish":
+      await runGitCommand(["push", "-u", target.remoteName, currentBranch], {
+        cwd,
+        timeout: 120_000,
+      });
+      break;
   }
-
-  const upstreamTarget = await getCurrentBranchUpstreamPushTarget(cwd, storedBranchName);
-  if (upstreamTarget) {
-    await runGitCommand(
-      ["push", "-u", upstreamTarget.remoteName, `HEAD:refs/heads/${upstreamTarget.headRef}`],
-      { cwd, timeout: 120_000 },
-    );
-    forgeService?.invalidate({ cwd });
-    return;
-  }
-
-  const hasRemote = await hasOriginRemote(cwd);
-  if (!hasRemote) {
-    throw new Error("Remote 'origin' is not configured.");
-  }
-  await requireFirstPushAgreesWithGit(cwd, storedBranchName, context);
-  await runGitCommand(["push", "-u", FIRST_PUSH_REMOTE, currentBranch], { cwd, timeout: 120_000 });
   forgeService?.invalidate({ cwd });
 }
 
-// The status a client acted on can be older than the git configuration, so a first push checks
-// the destination again before it sends anything. JAgentDesk worktrees always publish to origin.
-async function requireFirstPushAgreesWithGit(
-  cwd: string,
-  storedBranchName: string,
-  context?: CheckoutContext,
-): Promise<void> {
+// A branch with no upstream on a remote is published here.
+const PUBLISH_REMOTE = "origin";
+
+// Where Push sends the current branch. In a checkout that has origin, in order: the branch's push
+// remote with a HEAD push refspec, then its upstream, then origin under the branch's own name,
+// which sets the upstream. Without origin, see resolvePushWithoutOrigin. Checkout status reports
+// the remote of this target, so the Push offer and the push cannot disagree.
+export type PushTarget =
+  | { kind: "configured"; remoteName: string; headRef: string }
+  | { kind: "upstream"; remoteName: string; headRef: string }
+  | { kind: "publish"; remoteName: typeof PUBLISH_REMOTE };
+
+// Push has nowhere to send the branch. The reason is written for the user.
+interface PushRefusal {
+  kind: "refused";
+  reason: string;
+}
+
+function pushTargetOrNull(resolved: PushTarget | PushRefusal | null): PushTarget | null {
+  return resolved === null || resolved.kind === "refused" ? null : resolved;
+}
+
+interface ResolvePushTargetInput {
+  cwd: string;
+  storedBranchName: string;
+  // Known by the caller. Looked up when absent.
+  jagentdeskWorktree?: JAgentDeskWorktreeForCwd;
+  context?: CheckoutContext;
+}
+
+async function resolvePushTarget(input: ResolvePushTargetInput): Promise<PushTarget | PushRefusal> {
+  const { cwd, storedBranchName, context } = input;
+  if ((await getOriginRemoteUrl(cwd, context)) === null) {
+    return resolvePushWithoutOrigin(input);
+  }
+  const configured = await getCurrentBranchConfiguredPushTarget(cwd, storedBranchName, context);
+  if (configured) {
+    return { kind: "configured", ...configured };
+  }
+  // In a checkout that has origin, Push has always followed the upstream, whatever the upstream
+  // branch is called.
+  const upstream = await getCurrentBranchUpstreamPushTarget(cwd, storedBranchName, context);
+  if (upstream) {
+    return { kind: "upstream", ...upstream };
+  }
+  return resolvePublish(input);
+}
+
+// Without origin, Push follows the upstream only when the upstream branch has the branch's own
+// name and plain `git push` would update that same branch. A differently named upstream is often
+// a shared base branch, as with `feature` tracking `upstream/main`. Git's own push settings
+// (branch.<name>.pushRemote, remote.pushDefault, remote.<name>.push, push.default) can send the
+// branch elsewhere, and then the push is left to the user.
+async function resolvePushWithoutOrigin(
+  input: ResolvePushTargetInput,
+): Promise<PushTarget | PushRefusal> {
+  const { cwd, storedBranchName, context } = input;
+  const jagentdeskWorktree =
+    input.jagentdeskWorktree ?? (await getJAgentDeskWorktreeForCwd(cwd, { context }));
+  if (jagentdeskWorktree.isJAgentDeskOwnedWorktree) {
+    // JAgentDesk writes this configuration for a PR checkout, so its push reaches the PR's branch.
+    const configured = await getCurrentBranchConfiguredPushTarget(cwd, storedBranchName, context);
+    if (configured) {
+      return { kind: "configured", ...configured };
+    }
+  }
+  const upstream = await getCurrentBranchUpstreamPushTarget(cwd, storedBranchName, context);
+  if (!upstream) {
+    return { kind: "refused", reason: `Remote '${PUBLISH_REMOTE}' is not configured.` };
+  }
+  const upstreamName = `${upstream.remoteName}/${upstream.headRef}`;
+  if (upstream.headRef !== storedBranchName) {
+    return {
+      kind: "refused",
+      reason: `Push did not send '${storedBranchName}' to '${upstreamName}' because the branch names differ. Push it from a terminal instead.`,
+    };
+  }
+  const gitPushUpdatesUpstream = await doesGitPushUpdateUpstream({
+    cwd,
+    storedBranchName,
+    upstreamRemoteName: upstream.remoteName,
+    context,
+  });
+  if (!gitPushUpdatesUpstream) {
+    return {
+      kind: "refused",
+      reason: `Push did not send '${storedBranchName}' to '${upstreamName}' because Git's push settings do not confirm that destination. Push it from a terminal instead.`,
+    };
+  }
+  return { kind: "upstream", ...upstream };
+}
+
+// Whether plain `git push` on this branch updates the branch's upstream. Git resolves its push
+// destination from its own settings and reports none when it cannot name a single one. The
+// remote is compared by name as well, because two remotes can map onto one remote-tracking ref.
+// Matching mode is left to the user: Git then sends the branch only when the remote still has
+// it, and the checkout's remote-tracking refs can outlive a branch deleted on the remote.
+async function doesGitPushUpdateUpstream(input: {
+  cwd: string;
+  storedBranchName: string;
+  upstreamRemoteName: string;
+  context?: CheckoutContext;
+}): Promise<boolean> {
+  if ((await getGitConfigValue(input.cwd, "push.default", input.context)) === "matching") {
+    return false;
+  }
+  try {
+    const { stdout } = await getRunGitCommand(input.context)(
+      [
+        "for-each-ref",
+        "--format=%(push:remotename)%00%(push)%00%(upstream)",
+        `refs/heads/${input.storedBranchName}`,
+      ],
+      { cwd: input.cwd, envOverlay: READ_ONLY_GIT_ENV },
+    );
+    const [pushRemoteName, pushRef, upstreamRef] = stdout.trim().split("\0");
+    return (
+      pushRemoteName === input.upstreamRemoteName && Boolean(pushRef) && pushRef === upstreamRef
+    );
+  } catch {
+    return false;
+  }
+}
+
+// Publishing sends the branch to origin. A regular checkout needs git to push the branch there
+// too, so that a fork setup is not published to origin. JAgentDesk worktrees always publish to origin.
+async function resolvePublish(input: ResolvePushTargetInput): Promise<PushTarget | PushRefusal> {
+  const { cwd, storedBranchName, context } = input;
+  const publish: PushTarget = { kind: "publish", remoteName: PUBLISH_REMOTE };
   const [branchRemoteName, branchMergeRef] = await Promise.all([
     getGitConfigValue(cwd, `branch.${storedBranchName}.remote`, context),
     getGitConfigValue(cwd, `branch.${storedBranchName}.merge`, context),
   ]);
   // A branch with a configured upstream gets here when that upstream is not a remote branch, as
-  // when it tracks a local branch. That is not a first push, and it goes to origin as before.
+  // when it tracks a local branch. It goes to origin as before.
   if (branchRemoteName !== null && branchMergeRef !== null) {
-    return;
+    return publish;
   }
-  const jagentdeskWorktree = await getJAgentDeskWorktreeForCwd(cwd, { context });
+  const jagentdeskWorktree =
+    input.jagentdeskWorktree ?? (await getJAgentDeskWorktreeForCwd(cwd, { context }));
   if (jagentdeskWorktree.isJAgentDeskOwnedWorktree) {
-    return;
+    return publish;
   }
   const gitPushRemote = await readGitPushRemote({
     cwd,
@@ -4353,24 +4493,29 @@ async function requireFirstPushAgreesWithGit(
     branchRemoteName,
     context,
   });
-  if (gitPushRemote !== FIRST_PUSH_REMOTE) {
-    throw new Error(
-      `Git is set to push this branch to '${gitPushRemote}', so Push did not publish it to '${FIRST_PUSH_REMOTE}'. Push it from a terminal instead.`,
-    );
+  if (gitPushRemote !== PUBLISH_REMOTE) {
+    return {
+      kind: "refused",
+      reason: `Git is set to push this branch to '${gitPushRemote}', so Push did not publish it to '${PUBLISH_REMOTE}'. Push it from a terminal instead.`,
+    };
   }
+  return publish;
 }
 
 async function getCurrentBranchConfiguredPushTarget(
   cwd: string,
   currentBranch: string,
+  context?: CheckoutContext,
 ): Promise<{ remoteName: string; headRef: string } | null> {
-  const remoteName = await getGitConfigValue(cwd, `branch.${currentBranch}.pushRemote`);
-  const pushRefspec = remoteName ? await getGitConfigValue(cwd, `remote.${remoteName}.push`) : null;
+  const remoteName = await getGitConfigValue(cwd, `branch.${currentBranch}.pushRemote`, context);
+  const pushRefspec = remoteName
+    ? await getGitConfigValue(cwd, `remote.${remoteName}.push`, context)
+    : null;
   const headRef = parseHeadPushRefspec(pushRefspec);
   if (!remoteName || !headRef) {
     return null;
   }
-  const remoteUrl = await getGitConfigValue(cwd, `remote.${remoteName}.url`);
+  const remoteUrl = await getGitConfigValue(cwd, `remote.${remoteName}.url`, context);
   return remoteUrl ? { remoteName, headRef } : null;
 }
 
@@ -4437,16 +4582,17 @@ async function updateRemoteTrackingRef(
 async function getCurrentBranchUpstreamPushTarget(
   cwd: string,
   currentBranch: string,
+  context?: CheckoutContext,
 ): Promise<{ remoteName: string; headRef: string } | null> {
-  const remoteName = await getGitConfigValue(cwd, `branch.${currentBranch}.remote`);
+  const remoteName = await getGitConfigValue(cwd, `branch.${currentBranch}.remote`, context);
   const mergeRef = remoteName
-    ? await getGitConfigValue(cwd, `branch.${currentBranch}.merge`)
+    ? await getGitConfigValue(cwd, `branch.${currentBranch}.merge`, context)
     : null;
   const headRef = parseBranchMergeHeadRef(mergeRef);
   if (!remoteName || !headRef) {
     return null;
   }
-  const remoteUrl = await getGitConfigValue(cwd, `remote.${remoteName}.url`);
+  const remoteUrl = await getGitConfigValue(cwd, `remote.${remoteName}.url`, context);
   return remoteUrl ? { remoteName, headRef } : null;
 }
 

@@ -168,7 +168,7 @@ function createCheckoutSnapshotFacts(cwd: string): CheckoutSnapshotFacts {
     branchRemoteName: "origin",
     branchMergeRef: "refs/heads/main",
     upstreamStatus: { state: "none" },
-    firstPushRemote: null,
+    pushTarget: null,
     pullRequestLookupTarget: { headRef: "main" },
   };
 }

@@ -71,7 +71,7 @@ function createCheckoutFacts(cwd: string): CheckoutSnapshotFacts {
     branchRemoteName: null,
     branchMergeRef: null,
     upstreamStatus: { state: "none" },
-    firstPushRemote: null,
+    pushTarget: null,
     pullRequestLookupTarget: { headRef: "main" },
   };
 }
@@ -1012,7 +1012,7 @@ describe("WorkspaceGitService checkout observation", () => {
       branchRemoteName: null,
       branchMergeRef: null,
       upstreamStatus: { state: "none" },
-      firstPushRemote: null,
+      pushTarget: null,
     }));
     const service = createService(watcher, { getCheckoutSnapshotFacts });
     const subscription = service.registerWorkspace({ cwd: REPO_CWD }, vi.fn());
@@ -1145,7 +1145,7 @@ describe("WorkspaceGitService checkout observation", () => {
         branchRemoteName: "origin",
         branchMergeRef: `refs/heads/${branch}`,
         upstreamStatus: { state: "none" },
-        firstPushRemote: null,
+        pushTarget: null,
       } satisfies CheckoutSnapshotFacts;
     });
     const getCheckoutStatus = vi.fn(async (cwd: string) =>

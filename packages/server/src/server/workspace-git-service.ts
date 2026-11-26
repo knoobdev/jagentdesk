@@ -183,6 +183,8 @@ export interface WorkspaceGitRuntimeSnapshot {
     behindOfOrigin: number | null;
     upstreamState: UpstreamState;
     hasRemote: boolean;
+    pullRemote: string | null;
+    pushRemote: string | null;
     firstPushRemote: string | null;
     diffStat: { additions: number; deletions: number } | null;
   };
@@ -3731,6 +3733,8 @@ export class WorkspaceGitServiceImpl implements WorkspaceGitService {
       behindOfOrigin: checkoutStatus.behindOfOrigin,
       upstreamState: checkoutStatus.upstreamState,
       hasRemote: checkoutStatus.hasRemote,
+      pullRemote: checkoutStatus.pullRemote,
+      pushRemote: checkoutStatus.pushRemote,
       firstPushRemote: checkoutStatus.firstPushRemote,
       diffStat,
     };
@@ -4388,6 +4392,8 @@ function buildNotGitSnapshot(cwd: string): WorkspaceGitRuntimeSnapshot {
       behindOfOrigin: null,
       upstreamState: "none",
       hasRemote: false,
+      pullRemote: null,
+      pushRemote: null,
       firstPushRemote: null,
       diffStat: null,
     },

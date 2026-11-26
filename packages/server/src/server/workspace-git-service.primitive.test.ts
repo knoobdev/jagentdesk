@@ -78,7 +78,7 @@ function createCheckoutFacts(
     branchRemoteName: null,
     branchMergeRef: null,
     upstreamStatus: { state: "none" },
-    firstPushRemote: null,
+    pushTarget: null,
     pullRequestLookupTarget: { headRef: "main" },
     ...overrides,
   };
