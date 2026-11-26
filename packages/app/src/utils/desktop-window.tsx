@@ -278,3 +278,18 @@ export function WindowChromeSafeArea({
   const combinedStyle = useMemo(() => [style, safeAreaStyle], [safeAreaStyle, style]);
   return <View {...props} style={combinedStyle} />;
 }
+
+/**
+ * Vertical offset of the macOS traffic lights from their 14 px base. The classic top bar
+ * centres them at 0.5 (lifted by 5 in workspace focus mode). The Gumloop shell has no top
+ * bar: its 60 px sidebar brand row is the title row, so the lights sit 8 px lower to share
+ * its centre line with the logo (spec 38 §4.1, A38.4h).
+ */
+export function resolveTrafficLightOffsetY(input: {
+  gumloopShell: boolean;
+  liftTrafficLights: boolean;
+}): number {
+  if (input.gumloopShell) return GUMLOOP_TRAFFIC_LIGHT_OFFSET_Y;
+  return input.liftTrafficLights ? -5 : 0.5;
+}
+const GUMLOOP_TRAFFIC_LIGHT_OFFSET_Y = 8;

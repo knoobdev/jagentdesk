@@ -148,6 +148,7 @@ import { GumloopSidebar } from "@/components/gumloop-shell/sidebar";
 
 import { useGumloopDesktopShell } from "@/components/gumloop-shell/use-gumloop-chrome";
 import {
+  resolveTrafficLightOffsetY,
   useHasWindowChromeObstruction,
   WindowChromeProvider,
   WindowChromeRegion,
@@ -823,17 +824,18 @@ function DesktopWindowControlsSync({ enabled }: { enabled: boolean }) {
     getIsElectronRuntimeMac() &&
     isFocusModeEnabled &&
     parseHostWorkspaceRouteFromPathname(pathname) !== null;
+  const gumloopShell = useGumloopDesktopShell(true);
 
   useEffect(() => {
     if (!enabled || isNative) return;
     void updateDesktopWindowControls({
       backgroundColor: surface0,
       foregroundColor: foreground,
-      trafficLightOffsetY: liftTrafficLights ? -5 : 0.5,
+      trafficLightOffsetY: resolveTrafficLightOffsetY({ gumloopShell, liftTrafficLights }),
     }).catch((error) => {
       console.warn("[DesktopWindow] Failed to update window controls overlay", error);
     });
-  }, [enabled, surface0, foreground, liftTrafficLights]);
+  }, [enabled, surface0, foreground, liftTrafficLights, gumloopShell]);
 
   return null;
 }

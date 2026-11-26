@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import type { Theme } from "@/styles/theme";
+import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { CompactBackButton } from "./compact-back-button";
 import { PageHeaderActionContext } from "./page-header-context";
 
@@ -68,6 +69,9 @@ export function PageHeader({
     return (
       <View style={containerStyle} testID={testID}>
         <View style={description ? styles.gumloopRowWithDescription : styles.gumloopRow}>
+          {/* No window title bar in this shell: the title row drags the window and a double
+              click zooms it, like the sidebar's brand row (spec 38 §4.1, A38.4h). */}
+          <TitlebarDragRegion />
           <View style={styles.gumloopTitleBlock}>
             <Text style={styles.gumloopTitle} numberOfLines={1} testID="page-header-title">
               {title}
