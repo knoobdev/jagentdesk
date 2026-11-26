@@ -103,7 +103,7 @@ import {
   useDetachSubagent,
   useSubagentsForParent,
 } from "@/subagents";
-import { BackgroundWorkTrack, createHostBackgroundWorkModel } from "@/background-work";
+import { BackgroundWorkTrack } from "@/background-work";
 import { SubagentsTrack } from "@/subagents/track";
 import type { PendingPermission } from "@/types/shared";
 import type { StreamItem } from "@/types/stream";
@@ -1525,10 +1525,6 @@ function ActiveAgentComposer({
   const closeWorkspaceTab = useWorkspaceLayoutStore((state) => state.closeTab);
   const hideWorkspaceAgent = useWorkspaceLayoutStore((state) => state.hideAgent);
   const unpinWorkspaceAgent = useWorkspaceLayoutStore((state) => state.unpinAgent);
-  const backgroundWorkModel = useMemo(
-    () => createHostBackgroundWorkModel(serverId, agentId),
-    [serverId, agentId],
-  );
   const backgroundWorkCount = useSessionStore(
     (state) => state.sessions[serverId]?.agents.get(agentId)?.backgroundWork?.count ?? 0,
   );
@@ -1699,7 +1695,7 @@ function ActiveAgentComposer({
       {isSupervisorThread ? (
         <OrchestrationLeadPlanCard serverId={serverId} workspaceId={workspaceId} />
       ) : null}
-      <BackgroundWorkTrack model={backgroundWorkModel} count={backgroundWorkCount} />
+      <BackgroundWorkTrack serverId={serverId} agentId={agentId} count={backgroundWorkCount} />
       {parentAgentId ? <ParentAgentPill serverId={serverId} parentAgentId={parentAgentId} /> : null}
       <SubagentsTrack
         serverId={serverId}

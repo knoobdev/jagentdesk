@@ -156,7 +156,8 @@ test("recreates a failed observation on retry and resumes live updates", async (
   await Promise.resolve();
   expect(model.getSnapshot()).toEqual({ status: "ready", items: [item] });
   observation.update([]);
-  expect(model.getSnapshot()).toEqual({ status: "ready", items: [] });
+  // The task that left the live list is kept as finished until dismissed.
+  expect(model.getSnapshot()).toMatchObject({ status: "ready", items: [] });
   unsubscribe();
 });
 
@@ -229,5 +230,31 @@ test("ignores a stop response from a disconnected generation", async () => {
   await pending;
   expect(model.getSnapshot().items).toEqual([replacement]);
   expect(model.getSnapshot().stops?.first).toEqual({ status: "error", item: first });
+  unsubscribe();
+});
+
+test("keeps work that left the list as finished until it is dismissed", async () => {
+  const item = { id: "1", kind: "shell", description: "sleep", startedAt: "2026-01-01T00:00:00Z" };
+  let update!: (items: (typeof item)[]) => void;
+  let snapshot!: () => void;
+  const model = createBackgroundWorkModel({
+    list: () => Promise.resolve([item]),
+    observe: (callbacks) => {
+      snapshot = callbacks.snapshot;
+      update = callbacks.update;
+      return () => {};
+    },
+  });
+  const unsubscribe = model.subscribe(() => {});
+  snapshot();
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(model.getSnapshot().items).toEqual([item]);
+  expect(model.getSnapshot().finished).toBeUndefined();
+  update([]);
+  expect(model.getSnapshot().items).toEqual([]);
+  expect(Object.keys(model.getSnapshot().finished ?? {})).toEqual(["1"]);
+  model.dismissFinished("1");
+  expect(model.getSnapshot().finished).toEqual({});
   unsubscribe();
 });

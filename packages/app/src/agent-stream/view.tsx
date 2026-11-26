@@ -9,6 +9,8 @@ import { GumloopAgentHeader } from "@/components/gumloop-shell/chat-headers";
 import { GUMLOOP_MESSAGE_INDENT } from "@/components/gumloop-shell/chat-layout";
 import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { indexBackgroundStarts, readBackgroundTimelineEvent } from "@/background-work/timeline";
+import { BackgroundTaskTimelineRow } from "@/background-work/timeline-row";
 import React, {
   forwardRef,
   memo,
@@ -820,6 +822,11 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       [resolvedServerId],
     );
 
+    const backgroundStarts = useMemo(
+      () => indexBackgroundStarts(effectiveStreamItems, effectiveStreamHead),
+      [effectiveStreamItems, effectiveStreamHead],
+    );
+    const lookupBackgroundStart = useStableEvent((callId: string) => backgroundStarts.get(callId));
     const renderSingleToolCallItem = useCallback(
       (
         item: Extract<StreamItem, { kind: "tool_call" }>,
@@ -830,6 +837,9 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
 
         if (payload.source === "agent") {
           const data = payload.data;
+
+          const backgroundEvent = readBackgroundTimelineEvent(item, lookupBackgroundStart);
+          if (backgroundEvent) return <BackgroundTaskTimelineRow event={backgroundEvent} />;
 
           if (
             data.name === "speak" &&
@@ -904,6 +914,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         setInlineDetailsExpanded,
         handleToolCallOpenFile,
         handleOpenMessageSender,
+        lookupBackgroundStart,
       ],
     );
 

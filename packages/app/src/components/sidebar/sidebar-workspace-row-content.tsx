@@ -38,6 +38,9 @@ import { openExternalUrl } from "@/utils/open-external-url";
 import { resolveSidebarWorkspacePrimaryLabel } from "@/components/sidebar/sidebar-workspace-title";
 import { useWorkspacePrimaryAgentTitle } from "@/hooks/use-workspace-primary-agent-title";
 import { SidebarWorkspaceArchiveButton } from "@/components/sidebar/sidebar-workspace-menu";
+import { BackgroundWorkLine } from "@/background-work/sidebar-line";
+import { BackgroundWorkStatusTooltip } from "@/background-work/status-tooltip";
+import { useWorkspaceBackgroundWork } from "@/background-work/use-workspace-background-work";
 
 // The scrim spans more than the kebab so the fade starts left of the diff stat. Solid from
 // SCRIM_SOLID_OFFSET rightward, which keeps the kebab itself off the gradient entirely.
@@ -223,12 +226,14 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
             testID={`sidebar-row-project-icon-${workspace.workspaceKey}`}
           />
         ) : (
-          <WorkspaceStatusIndicator
-            bucket={workspace.statusBucket}
-            workspaceKind={workspace.workspaceKind}
-            loading={isLoading}
-            reserveIdleSpace={reserveIdleStatusIndicatorSpace}
-          />
+          <WorkspaceBackgroundStatusTooltip workspace={workspace}>
+            <WorkspaceStatusIndicator
+              bucket={workspace.statusBucket}
+              workspaceKind={workspace.workspaceKind}
+              loading={isLoading}
+              reserveIdleSpace={reserveIdleStatusIndicatorSpace}
+            />
+          </WorkspaceBackgroundStatusTooltip>
         )}
         <View style={styles.workspaceContentColumn}>
           <View style={styles.workspaceTitleRow}>
@@ -257,6 +262,7 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
             </View>
             <View style={sidebarWorkspaceRowStyles.rowRight}>{children}</View>
           </View>
+          <WorkspaceBackgroundLine workspace={workspace} />
           <View style={styles.pluginBadges}>
             <PluginWorkspaceRowBadgeItems
               serverId={workspace.serverId}
@@ -273,6 +279,35 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
     </View>
   );
 });
+
+/** Spec 38 §4.4b: the busy dot explains itself when only background work keeps it busy. */
+function WorkspaceBackgroundStatusTooltip({
+  workspace,
+  children,
+}: {
+  workspace: SidebarWorkspaceEntry;
+  children: ReactNode;
+}) {
+  const background = useWorkspaceBackgroundWork(workspace.serverId, workspace.workspaceId);
+  return (
+    <BackgroundWorkStatusTooltip active={Boolean(background?.onlyBackground)}>
+      {children}
+    </BackgroundWorkStatusTooltip>
+  );
+}
+
+function WorkspaceBackgroundLine({ workspace }: { workspace: SidebarWorkspaceEntry }) {
+  const background = useWorkspaceBackgroundWork(workspace.serverId, workspace.workspaceId);
+  if (!background) return null;
+  return (
+    <BackgroundWorkLine
+      serverId={workspace.serverId}
+      agentId={background.agentId}
+      totalCount={background.totalCount}
+      testID={`sidebar-workspace-background-${workspace.workspaceKey}`}
+    />
+  );
+}
 
 function WorkspaceScriptIcon({ kind }: { kind: SidebarWorkspaceScriptIconKind }) {
   return (
