@@ -21,6 +21,8 @@ export interface MemoryRowProps {
   onEdit: (memory: MemoryRecordWire) => void;
   /** Extra line under the text (the inspector shows why it was used). */
   note?: string;
+  /** Two-line rows regardless of form factor (narrow hosts such as the inspector). */
+  dense?: boolean;
 }
 
 /** The agent's title, or a placeholder when the agent was deleted. */
@@ -43,10 +45,9 @@ export const MemoryRow = memo(function MemoryRow({
   serverId,
   memory,
   onEdit,
-  note,
-}: MemoryRowProps) {
+  note, dense }: MemoryRowProps) {
   const { t } = useTranslation();
-  const compact = useIsCompactFormFactor();
+  const compact = useIsCompactFormFactor() || dense === true;
   const client = useHostRuntimeClient(serverId);
   const toast = useToast();
   const sourceLabel = useSourceLabel(serverId, memory);

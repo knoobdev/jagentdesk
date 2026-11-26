@@ -37,7 +37,13 @@ export function MemoryInspectorTab({ serverId, agentId }: { serverId: string; ag
         <View style={styles.section}>
           <Text style={styles.heading}>{t("memory.inspector.created")}</Text>
           {created.map((memory) => (
-            <MemoryRow key={memory.id} serverId={serverId} memory={memory} onEdit={setEditing} />
+            <MemoryRow
+              key={memory.id}
+              serverId={serverId}
+              memory={memory}
+              onEdit={setEditing}
+              dense
+            />
           ))}
         </View>
       ) : null}
@@ -46,6 +52,7 @@ export function MemoryInspectorTab({ serverId, agentId }: { serverId: string; ag
           <Text style={styles.heading}>{t("memory.inspector.used")}</Text>
           {used.map((use) => (
             <MemoryRow
+              dense
               key={use.memory.id}
               serverId={serverId}
               memory={use.memory}

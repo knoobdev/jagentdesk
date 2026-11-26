@@ -7,6 +7,7 @@ import { usePaneContext } from "@/panels/pane-context";
 import type { PanelRegistration } from "@/panels/panel-registry";
 import { useBuiltinInspectorTabs } from "@/plugins/builtin/surfaces";
 import {
+  collectAllPanes,
   collectAllTabs,
   findPaneById,
   useWorkspaceLayoutStore,
@@ -27,7 +28,11 @@ export function resolveInspectedAgentId(layout: WorkspaceLayout | undefined): st
   };
   const focused = agentOf(findPaneById(layout.root, layout.focusedPaneId)?.focusedTabId);
   if (focused) return focused;
-  for (const tab of tabs) if (tab.target.kind === "agent") return tab.target.agentId;
+  // Focus is on the inspector itself: the agent each chat pane shows, in layout order.
+  for (const pane of collectAllPanes(layout.root)) {
+    const shown = agentOf(pane.focusedTabId);
+    if (shown) return shown;
+  }
   return null;
 }
 
