@@ -1,9 +1,34 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.10.1`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.11.0`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.11.0 — 2026-11-26
+
+Agents that keep their context across providers, compactions and sessions. Full notes:
+[docs/releases/v0.11.0.md](docs/releases/v0.11.0.md).
+
+### Changes
+
+- Switch an agent to another provider mid-conversation with a structured handoff (session ledger), and resume a provider's own
+  session when switching back.
+- Failover to the next provider when one hits its usage limit, with push notifications; child agents on other providers.
+- Memory (project + global) with automatic recall, "Used N memories", and Remember this.
+- Re-grounding after compaction, ledger reminder at 80 %, cited lessons with validation and expiry, project rules from lessons,
+  Rollover and Capture lessons.
+- Native fork for Claude; forks never archive the source.
+
+### Fixes
+
+- Phone pairing over the relay (QR replaced on connection change, re-pair of a known device, empty device signature on iOS);
+  relay Worker close handling and log volume.
+- JAgentDesk tools recomputed every turn and self-healing for every provider; browser agent stays in the app; agents use
+  JAgentDesk's Jira tools; Jira key chips in the composer.
+- Provider refresh no longer piles up OpenCode/Claude helper processes; reopening long agents is fast.
+- Archive shortcut ignored while typing (Undo 8 s); background-task track, rows and Recents line; Settings descriptions, scroll
+  divider and empty states; paired devices list with Revoke.
 
 ## v0.10.1 — 2026-11-26
 

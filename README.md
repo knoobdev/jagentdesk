@@ -47,13 +47,13 @@ Jira, Argo CD, forges and devices, Bots, and connected hosts.
 
 ---
 
-## 🩹 v0.10.1
+## ✨ New in v0.11.0
 
-A fix release: the iOS app opens again, desktop plugins load, and Docker no longer piles up `docker events`
-processes. First run is simpler — the desktop connects to its own daemon, and a phone pairs by **Scan QR
-code** or **Paste pairing link** through the encrypted relay, with Tailscale optional. Bots can be created
-without an identity, have searchable model pickers and explain themselves in the app. Details:
-**[docs/releases/v0.10.1.md](docs/releases/v0.10.1.md)**.
+Agents that keep their context: switch an agent between Claude, Codex, OpenCode and other providers without losing what it
+knows, fail over automatically when a provider hits its usage limit, give agents a **Memory** you can read and edit, and keep long
+agents sharp after compaction with cited lessons that can become project rules. Phone pairing over the relay, mid-session tools,
+the browser agent and slow opening of long agents are fixed. Details:
+**[docs/releases/v0.11.0.md](docs/releases/v0.11.0.md)**.
 
 ## ✨ New in v0.10.0
 
@@ -289,7 +289,7 @@ GitHub release. To cut one:
 ```bash
 # set "version" in the root package.json, then sync every workspace:
 npm run version:sync-internal
-git tag v0.10.1
+git tag v0.11.0
 git push origin main --tags
 ```
 
