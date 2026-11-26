@@ -72,7 +72,8 @@ export const styles = StyleSheet.create((theme) => ({
     minWidth: 0,
     paddingHorizontal: GUMLOOP_PAGE_GUTTER - theme.spacing[4],
   },
-  permissions: { maxHeight: "40%", flexShrink: 1 },
+  /** Needs you permission cards sit in the Items flow, above the item rows. */
+  needsYou: { gap: theme.spacing[2] },
   composer: { paddingHorizontal: theme.spacing[3], gap: theme.spacing[2] },
   message: { padding: theme.spacing[3], gap: theme.spacing[1] },
   userMessage: { backgroundColor: theme.colors.surface2, borderRadius: theme.borderRadius.md },

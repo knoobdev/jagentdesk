@@ -27,7 +27,7 @@ import { styles } from "./styles";
 import { QueryNotice, ErrorNotice } from "./ui";
 import { CreateBotSheet, BotForm } from "./bot-form";
 import { BotChat } from "./chat";
-import { BotItems, WorkerPermissions } from "./items";
+import { BotItems, useBotPermissions } from "./items";
 import { HomeFiles } from "./home-files";
 import { BotSlackSettings } from "./slack";
 import { BotSchedules } from "./schedules";
@@ -148,7 +148,9 @@ function BotView({ serverId, bot, onBack }: { serverId: string; bot: Bot; onBack
   const setTab = useCallback((value: BotTab) => router.setParams({ tab: value }), []);
   const items = useItems(serverId, bot.id);
   const { connected } = useBotsConnection(serverId);
-  const needsYou = items.data?.filter((item) => item.status === "needs_you").length ?? 0;
+  const permissions = useBotPermissions(serverId, bot, items.data ?? []);
+  const needsYou =
+    (items.data?.filter((item) => item.status === "needs_you").length ?? 0) + permissions.length;
   const actions = useMemo(
     () => (
       <>
@@ -205,12 +207,6 @@ function BotView({ serverId, bot, onBack }: { serverId: string; bot: Bot; onBack
       <View style={gumloop ? styles.gumloopBody : styles.column}>
         {!connected ? <Alert title={t("bots.offline")} /> : null}
         {bot.paused ? <Alert title={t("bots.paused")} /> : null}
-        <WorkerPermissions
-          serverId={serverId}
-          bot={bot}
-          items={items.data ?? []}
-          includeSupervisor={tab !== "chat"}
-        />
         {body}
       </View>
     </View>
