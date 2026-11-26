@@ -6,7 +6,7 @@ import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome
 import { showNativeToast } from "./native-toast";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Animated, Easing, Text, View } from "react-native";
+import { Animated, Easing, Text, View, type LayoutChangeEvent } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
@@ -62,6 +62,8 @@ export interface ToastApi {
 type ToastViewportPlacement = "app-shell" | "panel" | "sidebar";
 
 const DEFAULT_DURATION_MS = 2200;
+/** The sidebar toasts sit this far above the region's bottom edge (`sidebarContainer.bottom`). */
+const SIDEBAR_TOAST_INSET = 8;
 
 export function useToastHost(): {
   api: ToastApi;
@@ -143,12 +145,15 @@ export function ToastViewport({
   persistentToast = null,
   onDismiss,
   placement = "app-shell",
+  onBottomCoverageChange,
 }: {
   toast: ToastState | null;
   /** Sidebar placement: a persistent bar (such as select mode) that stays below transient toasts. */
   persistentToast?: ToastState | null;
   onDismiss: () => void;
   placement?: ToastViewportPlacement;
+  /** Sidebar placement: the distance the toasts cover above the region's bottom edge. */
+  onBottomCoverageChange?: (height: number) => void;
 }) {
   const gumloop = useIsGumloopTheme();
   const { theme } = useUnistyles();
@@ -282,9 +287,12 @@ export function ToastViewport({
   );
 
   const persistentCard = renderPersistentToast(placement, persistentToast, gumloop);
+  const handleSidebarLayout = onBottomCoverageChange
+    ? (event: LayoutChangeEvent) => reportSidebarCoverage(event, onBottomCoverageChange)
+    : undefined;
 
   if (!toast) {
-    return renderPersistentToastOnly(persistentCard);
+    return renderPersistentToastOnly(persistentCard, handleSidebarLayout);
   }
 
   const icon = toast.icon ?? defaultToastIcon(toast.variant, theme);
@@ -293,6 +301,7 @@ export function ToastViewport({
     <View
       style={placement === "sidebar" ? styles.sidebarContainer : styles.container}
       pointerEvents="box-none"
+      onLayout={placement === "sidebar" ? handleSidebarLayout : undefined}
     >
       <Animated.View
         testID={toast.testID ?? "app-toast"}
@@ -384,13 +393,22 @@ function renderPersistentToast(
   return <PersistentToastCard toast={toast} gumloop={gumloop} />;
 }
 
-function renderPersistentToastOnly(card: ReactNode): ReactNode {
+function renderPersistentToastOnly(
+  card: ReactNode,
+  onLayout: ((event: LayoutChangeEvent) => void) | undefined,
+): ReactNode {
   if (!card) return null;
   return (
-    <View style={styles.sidebarContainer} pointerEvents="box-none">
+    <View style={styles.sidebarContainer} pointerEvents="box-none" onLayout={onLayout}>
       {card}
     </View>
   );
+}
+
+/** The toasts' top edge, measured from the region's bottom: their height plus the bottom inset. */
+function reportSidebarCoverage(event: LayoutChangeEvent, report: (height: number) => void) {
+  const height = event.nativeEvent.layout.height;
+  if (height > 0) report(height + SIDEBAR_TOAST_INSET);
 }
 
 /** The sidebar's persistent bar: no timer and no entry motion, so it reads as part of the list. */

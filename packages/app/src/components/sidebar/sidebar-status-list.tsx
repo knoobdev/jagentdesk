@@ -21,6 +21,7 @@ import {
 } from "lucide-react-native";
 import { DiffStat } from "@/components/diff-stat";
 import { useToast } from "@/contexts/toast-context";
+import { SidebarToastClearance } from "@/components/sidebar/sidebar-toast-region";
 import { useMutation } from "@tanstack/react-query";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { AdaptiveRenameModal } from "@/components/rename-modal";
@@ -194,6 +195,7 @@ export function SidebarStatusWorkspaceList({
         supportsPinningByServerId={supportsPinningByServerId}
         onToggleWorkspacePin={onToggleWorkspacePin}
       />
+      <SidebarToastClearance />
     </>
   );
 

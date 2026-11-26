@@ -1,5 +1,6 @@
 import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { getSidebarRowBackdrop } from "@/components/sidebar/sidebar-row-backdrop";
+import { SidebarToastClearance } from "@/components/sidebar/sidebar-toast-region";
 import { selectSidebarGroupVisibility } from "@/components/sidebar/sidebar-group-visibility";
 import { useCompactTimeAgo } from "@/hooks/use-time-ago";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
@@ -2526,6 +2527,7 @@ function ProjectModeList({
         />
       )}
       {listFooterComponent}
+      <SidebarToastClearance />
     </>
   );
 

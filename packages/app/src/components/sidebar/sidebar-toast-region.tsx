@@ -1,5 +1,6 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -8,6 +9,12 @@ import {
   type ReactNode,
 } from "react";
 import { View } from "react-native";
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+  type SharedValue,
+} from "react-native-reanimated";
 import { StyleSheet } from "react-native-unistyles";
 import {
   ToastViewport,
@@ -17,6 +24,16 @@ import {
 } from "@/components/toast-host";
 import { ToastApiProvider, useToast } from "@/contexts/toast-context";
 
+interface SidebarToastCoverage {
+  toastVisible: boolean;
+  /** Distance from the region's bottom edge to the toast's top edge, as last laid out. */
+  height: SharedValue<number>;
+}
+
+/** How long a sidebar toast takes to fade (the toast host's animation). */
+const TOAST_FADE_MS = 140;
+
+const SidebarToastCoverageContext = createContext<SidebarToastCoverage | null>(null);
 const SidebarPersistentToastContext = createContext<((toast: ToastState | null) => void) | null>(
   null,
 );
@@ -34,6 +51,8 @@ export function SidebarToastRegion({ active, children }: { active: boolean; chil
   const { api: sidebarToast, toast, dismiss } = useToastHost();
   const [persistentToast, setPersistentToast] = useState<ToastState | null>(null);
   const activeRef = useRef(active);
+  const coverageHeight = useSharedValue(0);
+  const toastVisible = toast !== null || persistentToast !== null;
 
   useEffect(() => {
     activeRef.current = active;
@@ -54,12 +73,25 @@ export function SidebarToastRegion({ active, children }: { active: boolean; chil
     };
   }, [appToast, sidebarToast]);
 
+  const coverage = useMemo<SidebarToastCoverage>(
+    () => ({ toastVisible, height: coverageHeight }),
+    [toastVisible, coverageHeight],
+  );
+  const handleCoverageChange = useCallback(
+    (height: number) => {
+      coverageHeight.value = height;
+    },
+    [coverageHeight],
+  );
+
   return (
     <View style={styles.region}>
       <ToastApiProvider api={api}>
         <SidebarAppToastContext.Provider value={appToast}>
           <SidebarPersistentToastContext.Provider value={setPersistentToast}>
-            {children}
+            <SidebarToastCoverageContext.Provider value={coverage}>
+              {children}
+            </SidebarToastCoverageContext.Provider>
           </SidebarPersistentToastContext.Provider>
         </SidebarAppToastContext.Provider>
         <ToastViewport
@@ -67,6 +99,7 @@ export function SidebarToastRegion({ active, children }: { active: boolean; chil
           persistentToast={persistentToast}
           onDismiss={dismiss}
           placement="sidebar"
+          onBottomCoverageChange={handleCoverageChange}
         />
       </ToastApiProvider>
     </View>
@@ -93,6 +126,32 @@ export function useSidebarPersistentToast(toast: ToastState | null): void {
       setPersistentToast?.(null);
     };
   }, [setPersistentToast]);
+}
+
+/**
+ * Space at the end of a sidebar list that matches the toast covering it, so the last row can
+ * scroll clear of the toast. It sits below every row, so growing it moves nothing. It shrinks
+ * with the toast's fade, so a list scrolled to its end settles back with the toast instead of
+ * jumping.
+ */
+export function SidebarToastClearance() {
+  const coverage = useContext(SidebarToastCoverageContext);
+  return coverage ? <AnimatedClearance coverage={coverage} /> : null;
+}
+
+function AnimatedClearance({ coverage }: { coverage: SidebarToastCoverage }) {
+  const { toastVisible, height } = coverage;
+  const style = useAnimatedStyle(() => ({
+    height: withTiming(toastVisible ? height.value : 0, { duration: TOAST_FADE_MS }),
+  }));
+  return (
+    <Animated.View
+      style={style}
+      pointerEvents="none"
+      testID="sidebar-toast-clearance"
+      aria-hidden
+    />
+  );
 }
 
 const styles = StyleSheet.create({
