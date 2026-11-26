@@ -37,12 +37,13 @@ release notes live in [`releases/`](releases/v0.10.1.md).
 
 ## Features
 
-- [builtin-plugins.md](builtin-plugins.md) — the 17 built-in features in `plugins/<id>/`, switches and host APIs.
+- [builtin-plugins.md](builtin-plugins.md) — the 18 built-in features in `plugins/<id>/`, switches and host APIs.
 - [plugins.md](plugins.md) — local and bundled plugins: manifest, sources, RPCs, surfaces.
 - [providers.md](providers.md) — adding an agent provider end to end.
 - [custom-providers.md](custom-providers.md) — custom provider config, API providers, profiles, ACP agents.
 - [forge-providers.md](forge-providers.md) — adding a git forge.
 - [skills.md](skills.md) — the skills hub.
+- [memory.md](memory.md) — the Memory built-in: storage, auto-inject and its threshold, tools, chip.
 - [docker.md](docker.md) — running the daemon and web UI in Docker.
 - [kubernetes.md](kubernetes.md) — the Clusters built-in.
 - [databases.md](databases.md) — the Databases built-in.
