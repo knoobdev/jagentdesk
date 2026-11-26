@@ -1,6 +1,6 @@
 import type { AgentMetric } from "@jagentdesk/protocol/agent-types";
 import type { TurnTiming } from "@/timeline/turn-time";
-import type { StreamItem } from "@/types/stream";
+import { getAssistantReply, type StreamItem } from "@/types/stream";
 import { getAssistantMessageSpacing, getGapBetweenStreamItems } from "./spacing";
 import type { StreamFrameChildOrder, StreamStrategy } from "./strategy";
 import { continuesResponse, continuesTurn, isResponseBoundary } from "./turn-membership";
@@ -71,12 +71,15 @@ function createTurnFooterHost(input: {
   index: number;
   timingByItemId: Map<string, TurnTiming>;
 }): TurnFooterHost {
+  // A plugin that replaced a tool call keeps that call's stats through its source row.
+  const toolCall =
+    input.item.kind === "plugin" && input.item.source?.kind === "tool_call"
+      ? input.item.source
+      : input.item;
   const turnMetrics =
-    input.item.kind === "assistant_message" ||
-    input.item.kind === "tool_call" ||
-    input.item.kind === "plugin"
-      ? input.item.turnMetrics
-      : undefined;
+    toolCall.kind === "tool_call"
+      ? toolCall.turnMetrics
+      : getAssistantReply(input.item)?.turnMetrics;
   return {
     itemId: input.item.id,
     items: input.items,
@@ -95,7 +98,7 @@ function findTurnFooterSource(input: {
 }): TurnFooterSource | null {
   const last = input.items[input.startIndex];
   const toolFallback: TurnFooterSource | null =
-    last?.kind === "tool_call" || (last?.kind === "plugin" && last.sourceKind === "tool_call")
+    last?.kind === "tool_call" || (last?.kind === "plugin" && last.source?.kind === "tool_call")
       ? { item: last, items: input.items, index: input.startIndex }
       : null;
   let items = input.items;
@@ -113,10 +116,7 @@ function findTurnFooterSource(input: {
       if (!item || (laterItem && !continuesResponse(item, laterItem))) {
         return toolFallback;
       }
-      if (
-        item.kind === "assistant_message" ||
-        (item.kind === "plugin" && item.sourceKind === "assistant_message")
-      ) {
+      if (getAssistantReply(item)) {
         return { item, items, index };
       }
       laterItem = item;

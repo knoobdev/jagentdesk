@@ -109,10 +109,13 @@ Native and compact layouts open that panel in the workspace. Dragging a plugin t
 between web hosts must respect its declared locations; do not infer host support from
 the generic plugin panel manifest.
 
-Timeline transformers receive immutable source items before display grouping. Plugin rows retain
-the source identity for outline navigation and find; a plugin-rendered final reply stays visible
-when its completed turn folds. Client renderers run inside the installation's existing runtime,
-including its translations and state source.
+Timeline transformers receive immutable source items before display grouping. Each plugin row keeps
+the row it replaced as `source`, which outline navigation, find and turn logic read. A reply split
+into several cards stays one reply: turn folding keeps every card visible, and the turn footer hangs
+under the last card, copies the original reply text once, forks at its message, and shows its
+duration and stats. Read a reply with `getAssistantReply` (`packages/app/src/types/stream.ts`)
+instead of checking `kind === "assistant_message"`. Client renderers run inside the installation's
+existing runtime, including its translations and state source.
 
 ## Bundled plugins
 
