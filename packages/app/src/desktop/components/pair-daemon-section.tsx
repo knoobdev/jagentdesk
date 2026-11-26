@@ -1,7 +1,7 @@
 import { useSasKeyboard } from "@/pairing/use-sas-keyboard";
 import * as QRCode from "qrcode";
 import { SvgXml } from "react-native-svg";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Text, TextInput, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -32,8 +32,51 @@ export function isLoopbackOnlyPairingLink(link: string): boolean {
   }
 }
 
+/** Host-side wording for why the other device's attempt ended. */
+function describeCancelledAttempt(state: SasState | null): string {
+  switch (state?.reason) {
+    case "connection_lost":
+      return "The other device's connection dropped before pairing finished. Generate a new code and try again.";
+    case "client_cancelled":
+      return "The other device cancelled pairing.";
+    case "host_cancelled":
+      return "Pairing was cancelled on this computer.";
+    case "daemon_stopped":
+      return "JAgentDesk stopped on this computer. Generate a new code.";
+    default:
+      return "Generate a new code and try again.";
+  }
+}
+
+/** A completed attempt, including a device whose key the host already had. */
+function PairedSummary({ state }: { state: SasState }) {
+  if (state.repaired)
+    return (
+      <>
+        <Text style={styles.title}>Device paired again</Text>
+        <Text style={styles.text}>
+          {state.label || "This device"} was already paired with this host. Its pairing was renewed.
+        </Text>
+      </>
+    );
+  return (
+    <>
+      <Text style={styles.title}>Device paired</Text>
+      <Text style={styles.text}>{state.label ?? "The device"} can now control this host.</Text>
+    </>
+  );
+}
+
 export function PairDaemonSection({ serverId, onClose }: { serverId: string; onClose(): void }) {
   const client = useHostRuntimeClient(serverId);
+  // The host runtime swaps its client when it changes connection. The attempt
+  // lives on the daemon, so a swap must not begin a new one: that replaced the
+  // link a phone had already scanned.
+  const clientRef = useRef(client);
+  const pkRef = useRef<string | undefined>(undefined);
+  /** The attempt completed or was cancelled; closing the panel has nothing to end. */
+  const endedRef = useRef(false);
+  const [hasClient, setHasClient] = useState(client !== null);
   const [qr, setQr] = useState<string | null>(null);
   const [offer, setOffer] = useState<{ link: string; pk: string; expiresAt: number } | null>(null);
   const [state, setState] = useState<SasState | null>(null);
@@ -49,24 +92,35 @@ export function PairDaemonSection({ serverId, onClose }: { serverId: string; onC
     router.push("/tailscale-login" as Href);
   }, [onClose, router]);
   useEffect(() => {
+    clientRef.current = client;
+    if (client) setHasClient(true);
+  }, [client]);
+  useEffect(() => {
     if (!client) return;
+    return client.subscribeRawMessages((message) => {
+      if (message.type !== "pairing.sas.changed" || message.payload.pk !== pkRef.current) return;
+      if (message.payload.state === "completed" || message.payload.state === "cancelled")
+        endedRef.current = true;
+      setState((previous) => ({ ...previous, ...message.payload }));
+    });
+  }, [client]);
+  useEffect(() => {
+    const beginClient = clientRef.current;
+    if (!hasClient || !beginClient) return;
     let active = true;
     let pk: string | undefined;
-    let completed = false;
+    pkRef.current = undefined;
+    endedRef.current = false;
     setOffer(null);
     setState(null);
     setError(null);
     setConfirmed(false);
-    const stop = client.subscribeRawMessages((message) => {
-      if (message.type !== "pairing.sas.changed" || message.payload.pk !== pk) return;
-      completed = message.payload.state === "completed";
-      if (active) setState((previous) => ({ ...previous, ...message.payload }));
-    });
-    void client
+    void beginClient
       .beginSasPairing()
       .then((result) => {
         pk = result.pk;
         if (active) {
+          pkRef.current = result.pk;
           setOffer(result);
           setDeadline(performance.now() + Math.max(0, result.expiresAt - Date.now()));
           void QRCode.toString(result.link, { type: "svg", errorCorrectionLevel: "M", margin: 4 })
@@ -77,7 +131,7 @@ export function PairDaemonSection({ serverId, onClose }: { serverId: string; onC
             .catch(() => {
               if (active) setError("Unable to generate pairing QR code");
             });
-        } else void client.confirmSasPairing(pk, false).catch(() => {});
+        } else void beginClient.confirmSasPairing(result.pk, false).catch(() => {});
         return undefined;
       })
       .catch((reason) => {
@@ -85,24 +139,26 @@ export function PairDaemonSection({ serverId, onClose }: { serverId: string; onC
       });
     return () => {
       active = false;
-      stop();
-      if (pk && !completed) void client.confirmSasPairing(pk, false).catch(() => {});
+      // Closing the panel or generating a new code ends this attempt.
+      if (pk && !endedRef.current)
+        void clientRef.current?.confirmSasPairing(pk, false).catch(() => {});
     };
-  }, [client, generation]);
+  }, [hasClient, generation]);
   useEffect(() => {
     const timer = setInterval(() => setNow(performance.now()), 1000);
     return () => clearInterval(timer);
   }, []);
   const expired = deadline !== null && now >= deadline;
   const confirm = useCallback(async () => {
-    if (!client || !offer) return;
+    const current = clientRef.current;
+    if (!current || !offer) return;
     try {
-      await client.confirmSasPairing(offer.pk, true);
+      await current.confirmSasPairing(offer.pk, true);
       setConfirmed(true);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     }
-  }, [client, offer]);
+  }, [offer]);
   const confirmPress = useCallback(() => {
     void confirm();
   }, [confirm]);
@@ -116,8 +172,7 @@ export function PairDaemonSection({ serverId, onClose }: { serverId: string; onC
   if (state?.state === "completed")
     return (
       <View ref={setSasScope} style={styles.content}>
-        <Text style={styles.title}>Device paired</Text>
-        <Text style={styles.text}>{state.label ?? "The device"} can now control this host.</Text>
+        <PairedSummary state={state} />
         <Button onPress={onClose}>Done</Button>
       </View>
     );
@@ -127,7 +182,7 @@ export function PairDaemonSection({ serverId, onClose }: { serverId: string; onC
         <Alert
           variant="warning"
           title={expired ? "Pairing code expired" : "Pairing unavailable"}
-          description={error ?? "Generate a new code and try again."}
+          description={error ?? describeCancelledAttempt(state)}
         />
         <Button onPress={generate}>Generate a new code</Button>
         <Button variant="outline" onPress={onClose}>

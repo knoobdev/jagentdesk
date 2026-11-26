@@ -842,6 +842,14 @@ function DesktopWindowControlsSync({ enabled }: { enabled: boolean }) {
   return null;
 }
 
+/**
+ * Offer links this app already opened. `getInitialURL` returns the launch URL
+ * for the life of the process, and iOS can deliver a link both as the launch
+ * URL and as a `url` event; each extra push opened a second pairing exchange
+ * for the same link, which the host refuses.
+ */
+const openedOfferLinks = new Set<string>();
+
 function OfferLinkListener() {
   const router = useRouter();
 
@@ -850,7 +858,9 @@ function OfferLinkListener() {
     const handleUrl = (url: string | null) => {
       if (!url) return;
       if (!url.includes("#offer=") && !url.startsWith("jagentdesk://pair#")) return;
-      if (!cancelled) router.push(`/pair-verify?offer=${encodeURIComponent(url)}` as Href);
+      if (cancelled || openedOfferLinks.has(url)) return;
+      openedOfferLinks.add(url);
+      router.push(`/pair-verify?offer=${encodeURIComponent(url)}` as Href);
     };
 
     void Linking.getInitialURL()

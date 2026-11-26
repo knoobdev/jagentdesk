@@ -1,5 +1,5 @@
 import { createHostLogger } from "@/runtime/host-logger";
-import { connectToDaemon } from "./test-daemon-connection";
+import { connectToDaemon, describeConnectTimeout } from "./test-daemon-connection";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DaemonClientConfig } from "@jagentdesk/client/internal/daemon-client";
 import type { DaemonConnectionDependencies, DaemonProbeClient } from "./test-daemon-connection";
@@ -250,5 +250,31 @@ describe("test-daemon-connection connectToDaemon", () => {
 
     await expect(attempt).rejects.toMatchObject({ message: "Connection attempt cancelled" });
     expect(probe.closedClients).toHaveLength(1);
+  });
+});
+
+describe("describeConnectTimeout", () => {
+  it("names the stage a timed-out attempt stopped at", () => {
+    expect(describeConnectTimeout({ connectStage: "challenged", lastError: null })).toBe(
+      "Connection timed out: this device did not answer the host's sign-in challenge.",
+    );
+    expect(describeConnectTimeout({ connectStage: "hello_sent", lastError: null })).toBe(
+      "Connection timed out waiting for the host to accept this device.",
+    );
+  });
+
+  it("adds the error recorded during the attempt", () => {
+    expect(
+      describeConnectTimeout({
+        connectStage: "opened",
+        lastError: "Failed to handle a message from the host: boom",
+      }),
+    ).toBe(
+      "Connection timed out: the host did not ask this device to sign in. (Failed to handle a message from the host: boom)",
+    );
+  });
+
+  it("keeps the plain sentence for a client that reports no stage", () => {
+    expect(describeConnectTimeout({ lastError: null })).toBe("Connection timed out");
   });
 });

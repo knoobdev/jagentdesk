@@ -449,6 +449,14 @@ const consoleLogger: Logger = {
   error: (obj, msg) => console.error(msg, obj),
 };
 
+/**
+ * How far a connection attempt got before it connected or failed: the socket is
+ * still opening (for relay: the encrypted channel is being set up), it opened,
+ * the host's challenge arrived, the device key is signing it, or the hello was
+ * sent and the host has not answered yet.
+ */
+export type DaemonConnectStage = "connecting" | "opened" | "challenged" | "signing" | "hello_sent";
+
 const perfNow: () => number =
   typeof performance !== "undefined" && typeof performance.now === "function"
     ? () => performance.now()
@@ -2491,6 +2499,7 @@ export class DaemonClient {
   private challengeWaitTimeout: ReturnType<typeof setTimeout> | null = null;
 
   private registeredThisConnection = false;
+  private connectStageValue: DaemonConnectStage = "connecting";
 
   private reconnectAttempt = 0;
 
@@ -2744,6 +2753,7 @@ export class DaemonClient {
       this.lastServerInfoMessage = null;
       this.owned.disconnected();
       this.registeredThisConnection = false;
+      this.connectStageValue = "connecting";
 
       this.updateConnectionState(
         {
@@ -2774,6 +2784,7 @@ export class DaemonClient {
             this.pendingGenericTransportErrorTimeout = null;
           }
           this.lastErrorValue = null;
+          this.connectStageValue = "opened";
           if (this.config.expectChallenge) {
             this.startChallengeWaitFallback();
           } else {
@@ -2851,7 +2862,14 @@ export class DaemonClient {
               this.chunkedTransport!.receive(typeof data === "string" ? data : bytes!);
             else this.handleTransportMessage(data);
           } catch (error) {
-            if (!(error instanceof ChunkedTransportProtocolError)) throw error;
+            if (!(error instanceof ChunkedTransportProtocolError)) {
+              // Transports swallow listener errors; keep the reason for the caller.
+              this.lastErrorValue = `Failed to handle a message from the host: ${
+                error instanceof Error ? error.message : String(error)
+              }`;
+              this.logger.warn({ err: error }, "transport_message_handler_failed");
+              throw error;
+            }
             transport.close(4003, "Invalid chunked transport");
           }
         }),
@@ -3208,6 +3226,11 @@ export class DaemonClient {
 
   get isConnecting(): boolean {
     return this.connectionState.status === "connecting";
+  }
+
+  /** How far the current connection attempt got; see {@link DaemonConnectStage}. */
+  get connectStage(): DaemonConnectStage {
+    return this.connectStageValue;
   }
 
   get lastError(): string | null {
@@ -12486,6 +12509,7 @@ export class DaemonClient {
           ...(extra?.devicePublicKeyB64 ? { devicePublicKeyB64: extra.devicePublicKeyB64 } : {}),
         }),
       );
+      this.connectStageValue = "hello_sent";
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to send hello message";
       this.lastErrorValue = message;
@@ -12529,6 +12553,7 @@ export class DaemonClient {
   }
 
   private handleChallenge(nonce: string): void {
+    this.connectStageValue = "challenged";
     if (this.challengeWaitTimeout) {
       clearTimeout(this.challengeWaitTimeout);
       this.challengeWaitTimeout = null;
@@ -12676,9 +12701,11 @@ export class DaemonClient {
 
   private sendSignedHello(nonce: string): void {
     const { devicePublicKeyB64, signNonce } = this.config.deviceSigning!;
+    this.connectStageValue = "signing";
     try {
       const signed = signNonce(nonce);
       if (typeof signed === "string") {
+        if (!signed) throw new Error("This device's key returned an empty signature");
         // Preserve the synchronous path used by native key stores and the
         // existing client handshake tests. Electron's IPC-backed signer
         // takes the Promise branch below.
@@ -12687,6 +12714,7 @@ export class DaemonClient {
       }
       void signed
         .then((signature) => {
+          if (!signature) throw new Error("This device's key returned an empty signature");
           return this.sendHelloMessage({ nonce, signature, devicePublicKeyB64 });
         })
         .catch((error) => {

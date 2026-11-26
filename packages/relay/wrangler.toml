@@ -5,6 +5,15 @@ compatibility_date = "2024-12-01"
 [observability]
 enabled = true
 
+# Every WebSocket frame wakes the relay Durable Object, and Workers Logs records
+# each wake as an invocation event: one relay session produced about 1000 events.
+# Keep the console lines (connect, disconnect, ownership, errors) and drop the
+# per-invocation records.
+[observability.logs]
+enabled = true
+invocation_logs = false
+head_sampling_rate = 1
+
 [[durable_objects.bindings]]
 name = "RELAY"
 class_name = "RelayDurableObject"

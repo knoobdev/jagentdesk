@@ -4,6 +4,7 @@ import type pino from "pino";
 import { buildRelayWebSocketUrl } from "@jagentdesk/protocol/daemon-endpoints";
 import type { ExternalSocketMetadata } from "./websocket-server.js";
 import { createRelayOwnershipGuard } from "./relay-ownership.js";
+import { tallyRelayFrames, type RelayFrameTally } from "./relay-frame-tally.js";
 import type { RelayOwnershipSigner } from "./daemon-keypair.js";
 
 export interface RelayControlHandler {
@@ -161,9 +162,13 @@ export function startRelayTransport({
       controlWs = null;
       controlHandler?.closed();
     }
+    // Terminate, not close: the relay does not answer a close frame, so `ws`
+    // would report the close only after its 30 s timeout. Until then the daemon
+    // treats every session on that socket as alive; a pairing attempt stayed
+    // open and the host could confirm a device that was already gone.
     for (const ws of rawDataSockets.values()) {
       try {
-        ws.close();
+        ws.terminate();
       } catch {
         // ignore
       }
@@ -390,6 +395,7 @@ export function startRelayTransport({
     rawDataSockets.set(connectionId, socket);
 
     let attached = false;
+    let tally: RelayFrameTally | null = null;
     const openTimeout = setTimeout(() => {
       if (stopped) return;
       if (socket.readyState === WebSocket.OPEN) return;
@@ -406,6 +412,7 @@ export function startRelayTransport({
       relayLogger.info({ connectionId }, "relay_data_connected");
       if (attached) return;
       attached = true;
+      tally = tallyRelayFrames(socket);
       const externalMetadata: ExternalSocketMetadata = {
         transport: "relay",
         externalSessionKey: `session:${connectionId}`,
@@ -427,6 +434,8 @@ export function startRelayTransport({
         { code, reason: reason?.toString?.(), url, connectionId },
         "relay_data_disconnected",
       );
+      // One line per relay client: whether it finished the handshake and sent anything after.
+      if (tally) relayLogger.info({ connectionId, code, ...tally.summary() }, "relay_data_summary");
       if (rawDataSockets.get(connectionId) === socket) {
         rawDataSockets.delete(connectionId);
         dataSockets.delete(connectionId);
