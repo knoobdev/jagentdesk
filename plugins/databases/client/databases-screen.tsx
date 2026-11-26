@@ -1,3 +1,4 @@
+import { useGumloopPageGutterStyle } from "../../../packages/app/src/plugins/builtin/host-api";
 import { useRouter } from "../../../packages/app/src/plugins/builtin/host-api";
 import type { ComponentProps } from "react";
 import { Button } from "../../../packages/app/src/plugins/builtin/host-api";
@@ -258,9 +259,10 @@ export function DatabasesScreen({ serverId }: { serverId: string }) {
   const clearLastDatabase = useDatabaseNavStore((s) => s.clearLastDatabase);
   const router = useRouter();
 
+  const gutter = useGumloopPageGutterStyle();
   const contentContainerStyle = useMemo(
-    () => [styles.contentContainer, styles.contentBelowHeader],
-    [],
+    () => [styles.contentContainer, styles.contentBelowHeader, gutter],
+    [gutter],
   );
 
   const [databases, setDatabases] = useState<DatabaseInfo[]>([]);

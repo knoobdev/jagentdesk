@@ -1,3 +1,4 @@
+import { useGumloopPageGutterStyle } from "../../../../packages/app/src/plugins/builtin/host-api";
 import { useCallback, useMemo, useState } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { KeyRound, Plus } from "lucide-react-native";
@@ -90,8 +91,9 @@ export function AccountsSection({
     [accountList],
   );
 
+  const gutter = useGumloopPageGutterStyle();
   return (
-    <ScrollView contentContainerStyle={styles.section} testID="sideload-accounts">
+    <ScrollView contentContainerStyle={[styles.section, gutter]} testID="sideload-accounts">
       <View style={styles.sectionHead}>
         <Text style={styles.sectionTitle}>Apple accounts</Text>
         <View style={styles.headActions}>

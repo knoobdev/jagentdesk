@@ -9,6 +9,7 @@ import {
   useSimChatStore,
   Gesture,
   useIsGumloopTheme,
+  useGumloopPageGutterStyle,
   SegmentedControl,
   useSessionStore,
 } from "../../../packages/app/src/plugins/builtin/host-api";
@@ -382,16 +383,17 @@ function FleetHeader({
 }
 
 function FleetBanners({ error, unavailable }: { error: string | null; unavailable: boolean }) {
+  const gutter = useGumloopPageGutterStyle();
   return (
     <>
       {error ? (
-        <View style={styles.errorBar}>
+        <View style={[styles.errorBar, gutter]}>
           <ThemedAlert size={14} uniProps={red600} />
           <Text style={styles.errorText}>{error}</Text>
         </View>
       ) : null}
       {unavailable ? (
-        <View style={styles.notice}>
+        <View style={[styles.notice, gutter]}>
           <Text style={styles.noticeText}>
             No simulators or device tools on this host. iOS simulators need macOS with Xcode;
             Android phones need adb (Android SDK Platform-Tools); iPhones and iPads need go-ios.
@@ -430,15 +432,17 @@ function FleetGrid({
   onBoot: (udid: string) => void;
   onAdd: () => void;
 }) {
+  const gutter = useGumloopPageGutterStyle();
+  const gridStyle = useMemo(() => [styles.grid, gutter], [gutter]);
   if (loading) {
     return (
-      <ScrollView style={styles.gridScroll} contentContainerStyle={styles.grid}>
+      <ScrollView style={styles.gridScroll} contentContainerStyle={gridStyle}>
         <SkeletonGrid />
       </ScrollView>
     );
   }
   return (
-    <ScrollView style={styles.gridScroll} contentContainerStyle={styles.grid}>
+    <ScrollView style={styles.gridScroll} contentContainerStyle={gridStyle}>
       {available ? <AddTile onPress={onAdd} /> : null}
       {(available || hasDeviceTools) && devices.length === 0 ? (
         <Text style={styles.empty}>
@@ -544,8 +548,9 @@ export function SimFleetScreen({ serverId }: { serverId: string }) {
 }
 
 function FleetTabs({ value, onChange }: { value: FleetTab; onChange: (tab: FleetTab) => void }) {
+  const gutter = useGumloopPageGutterStyle();
   return (
-    <View style={styles.tabs}>
+    <View style={[styles.tabs, gutter]}>
       <SegmentedControl options={FLEET_TABS} value={value} onValueChange={onChange} size="sm" />
     </View>
   );

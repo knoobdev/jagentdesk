@@ -1,3 +1,4 @@
+import { useGumloopPageGutterStyle } from "../../../../packages/app/src/plugins/builtin/host-api";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { RefreshCw } from "lucide-react-native";
@@ -134,8 +135,9 @@ export function InstallSection({
     (state) => state.sessions[serverId]?.serverInfo?.features?.sideloadHostBrowse === true,
   );
 
+  const gutter = useGumloopPageGutterStyle();
   return (
-    <ScrollView contentContainerStyle={styles.section} testID="sideload-install">
+    <ScrollView contentContainerStyle={[styles.section, gutter]} testID="sideload-install">
       <View style={styles.card}>
         <View style={styles.rowBetween}>
           <Text style={styles.label}>Device</Text>

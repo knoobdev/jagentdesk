@@ -1,3 +1,4 @@
+import { useGumloopPageGutterStyle } from "../../../packages/app/src/plugins/builtin/host-api";
 import { useRouter } from "../../../packages/app/src/plugins/builtin/host-api";
 import { PageHeader } from "../../../packages/app/src/plugins/builtin/host-api";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -115,9 +116,10 @@ export function ClustersScreen({ serverId }: { serverId: string }) {
 
   // Phones render this screen with no native header, so pad past the status
   // bar / notch. 0 on desktop, real inset on iOS + Android.
+  const gutter = useGumloopPageGutterStyle();
   const contentContainerStyle = useMemo(
-    () => [styles.contentContainer, styles.contentBelowHeader],
-    [],
+    () => [styles.contentContainer, styles.contentBelowHeader, gutter],
+    [gutter],
   );
 
   const [contexts, setContexts] = useState<KubeContextInfo[]>([]);

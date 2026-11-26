@@ -9,6 +9,8 @@ import {
   PageHeader,
   useHostRuntimeClient,
   Clipboard,
+  GUMLOOP_PAGE_GUTTER,
+  useGumloopDesktopShell,
 } from "../../../packages/app/src/plugins/builtin/host-api";
 import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
 import { ProxyChatDock } from "./proxy-chat-dock";
@@ -67,6 +69,7 @@ const MAX_ROWS = 5000;
 export function ProxyScreen({ serverId }: { serverId: string }) {
   const client = useHostRuntimeClient(serverId);
   const isCompact = useIsCompactFormFactor();
+  const gumloopDesktop = useGumloopDesktopShell(true);
 
   const chatOpen = useProxyChatStore((s) => s.open);
   const showChat = useProxyChatStore((s) => s.showChat);
@@ -237,7 +240,7 @@ export function ProxyScreen({ serverId }: { serverId: string }) {
         actions={headerActions}
       />
       <TabBar tab={tab} onSelect={setTab} />
-      <View style={styles.main}>
+      <View style={[styles.main, gumloopDesktop && styles.mainGumloop]}>
         <View style={styles.body}>
           {tab === "captures" ? (
             <CapturesPanel
@@ -423,12 +426,13 @@ function ProxySubTab({
 }
 
 function TabBar({ tab, onSelect }: { tab: WorkbenchTab; onSelect: (t: WorkbenchTab) => void }) {
+  const gumloopDesktop = useGumloopDesktopShell(true);
   return (
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
       style={styles.tabBar}
-      contentContainerStyle={styles.tabBarContent}
+      contentContainerStyle={gumloopDesktop ? styles.tabBarContentGumloop : styles.tabBarContent}
     >
       {WORKBENCH_TABS.map((def) => (
         <WorkbenchTabButton key={def.key} def={def} active={def.key === tab} onSelect={onSelect} />
@@ -477,6 +481,8 @@ const styles = StyleSheet.create((theme: Theme) => ({
     backgroundColor: theme.colors.surface1,
   },
   tabBarContent: { paddingHorizontal: theme.spacing[2] },
+  // Gumloop: tab labels and panels sit on the shared page gutter (spec 38 §4.1, A38.4i).
+  tabBarContentGumloop: { paddingHorizontal: GUMLOOP_PAGE_GUTTER - theme.spacing[3] },
   tab: {
     flexDirection: "row",
     alignItems: "center",
@@ -508,6 +514,9 @@ const styles = StyleSheet.create((theme: Theme) => ({
     backgroundColor: theme.colors.foregroundExtraMuted,
   },
   main: { flex: 1, flexDirection: "row", minHeight: 0 },
+  // Panels pad their content by 12 px, so it lands on the gutter; the agent dock stays flush right
+  // like other inspectors.
+  mainGumloop: { paddingLeft: GUMLOOP_PAGE_GUTTER - theme.spacing[3] },
   body: { flex: 1, minHeight: 0 },
   subTabs: {
     flexDirection: "row",

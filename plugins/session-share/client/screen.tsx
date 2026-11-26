@@ -1,3 +1,4 @@
+import { useGumloopPageGutterStyle } from "../../../packages/app/src/plugins/builtin/host-api";
 import {
   PageHeader,
   useHosts,
@@ -14,6 +15,7 @@ import { SessionSharesCard } from "./shares-card";
 // hosts from the main menu — outside a specific agent chat and outside Settings. Each host renders a
 // SessionSharesCard (which self-hides when the host is disconnected or doesn't support sharing).
 export function SharedSessionsScreen({ focused }: { focused?: boolean }): ReactElement {
+  const gutter = useGumloopPageGutterStyle();
   const hosts = useHosts();
   const isGumloop = useIsGumloopTheme();
 
@@ -28,7 +30,7 @@ export function SharedSessionsScreen({ focused }: { focused?: boolean }): ReactE
         title="Shared sessions"
         description="Sessions you have shared with other people, per host. Revoke access at any time."
       />
-      <ScrollView contentContainerStyle={styles.body}>
+      <ScrollView contentContainerStyle={[styles.body, gutter]}>
         {hosts.length === 0 ? (
           <Text style={styles.empty}>Connect to a host to manage its shared sessions.</Text>
         ) : (

@@ -1,3 +1,4 @@
+import { useGumloopPageGutterStyle } from "../../../packages/app/src/plugins/builtin/host-api";
 import {
   PageHeader,
   useHostRuntimeClient,
@@ -301,7 +302,11 @@ export function InsightsScreen({ serverId }: { serverId: string }) {
     }
   }, [client, queryClient, serverId]);
 
-  const contentContainerStyle = useMemo(() => [styles.content, styles.contentBelowHeader], []);
+  const gutter = useGumloopPageGutterStyle();
+  const contentContainerStyle = useMemo(
+    () => [styles.content, styles.contentBelowHeader, gutter],
+    [gutter],
+  );
   const halfCard = useMemo(() => (isCompact ? styles.cardFull : styles.cardHalf), [isCompact]);
 
   const maxModelTokens = lifetimeModels.reduce((m, r) => Math.max(m, r.totalTokens), 0);

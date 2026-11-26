@@ -1,3 +1,4 @@
+import { useGumloopPageGutterStyle } from "../../../packages/app/src/plugins/builtin/host-api";
 import { useRouter } from "../../../packages/app/src/plugins/builtin/host-api";
 import { useCallback, useMemo, useReducer, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
@@ -62,6 +63,7 @@ function instanceSummary(instance: ArgoCdInstance): string {
 type FormTarget = { open: false } | { open: true; instance: ArgoCdInstance | null };
 
 export function ArgoCdInstancesScreen({ serverId }: { serverId: string }) {
+  const gutter = useGumloopPageGutterStyle();
   const { client, state, reload, upsert, remove } = useArgoCdInstances(serverId);
   const [form, setForm] = useState<FormTarget>({ open: false });
   const openCreate = useCallback(() => setForm({ open: true, instance: null }), []);
@@ -93,8 +95,8 @@ export function ArgoCdInstancesScreen({ serverId }: { serverId: string }) {
         description="Sign in to Argo CD, then browse and sync its applications."
         actions={headerActions}
       />
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
-        <View style={styles.column}>
+      <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, gutter]}>
+        <View style={[styles.column, gutter && styles.columnFull]}>
           <InstancesBody
             serverId={serverId}
             client={client}
@@ -517,6 +519,8 @@ const styles = StyleSheet.create((theme) => ({
     paddingBottom: theme.spacing[6],
     flexGrow: 1,
   },
+  // The Gumloop shell runs pages full width on the shared gutter (spec 38 §4.1).
+  columnFull: { maxWidth: "100%" },
   column: {
     width: "100%",
     maxWidth: 720,
