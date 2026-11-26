@@ -1124,6 +1124,7 @@ function createToolCatalog(
       description: config.description ?? name,
       inputSchema: config.inputSchema,
       outputSchema: config.outputSchema,
+      ...(config._meta ? { _meta: config._meta } : {}),
       handler: handler as JAgentDeskToolDefinition["handler"],
     });
   };

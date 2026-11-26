@@ -27,6 +27,7 @@ function setup(input: { groups: HostToolGroupState[]; response?: AgentPermission
   const permissions: PermissionCall[] = [];
   const turnedOn: string[] = [];
   let handler: ((input: { toolGroup: string }) => Promise<JAgentDeskToolResult>) | undefined;
+  let meta: Record<string, unknown> | undefined;
   registerHostToolGroupTools({
     callerAgentId: "agent-1",
     groups: {
@@ -39,8 +40,9 @@ function setup(input: { groups: HostToolGroupState[]; response?: AgentPermission
       permissions.push({ agentId, request });
       return input.response ?? { behavior: "allow", selectedActionId: "turn_on" };
     },
-    registerTool: (name, _config, registered) => {
+    registerTool: (name, config, registered) => {
       expect(name).toBe(TURN_ON_HOST_TOOLS_TOOL);
+      meta = config._meta;
       handler = (args) => registered(args, {});
     },
   });
@@ -50,10 +52,14 @@ function setup(input: { groups: HostToolGroupState[]; response?: AgentPermission
     const result = await call({ toolGroup });
     return { text: result.content.map((part) => part.text).join(""), isError: result.isError };
   };
-  return { run, permissions, turnedOn };
+  return { run, permissions, turnedOn, meta };
 }
 
 describe("turn_on_host_tools (spec 04 §27b.2)", () => {
+  test("stays loaded in Claude instead of hiding behind tool search", () => {
+    expect(setup({ groups: [] }).meta).toEqual({ "anthropic/alwaysLoad": true });
+  });
+
   test("shows the Turn on card even in an unattended mode, then turns the group on", async () => {
     const { run, permissions, turnedOn } = setup({ groups: [group({ id: "browser-tools" })] });
     const result = await run("browser-tools");

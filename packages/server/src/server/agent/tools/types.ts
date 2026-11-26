@@ -28,6 +28,8 @@ export interface JAgentDeskToolConfig {
   description?: string;
   inputSchema?: z.ZodRawShape | z.ZodType;
   outputSchema?: z.ZodRawShape;
+  /** MCP tool `_meta`, passed through to MCP clients. */
+  _meta?: Record<string, unknown>;
 }
 
 export interface JAgentDeskToolDefinition extends JAgentDeskToolConfig {

@@ -64,8 +64,8 @@ export function buildHostToolInstructions(groups: HostToolGroupState[]): string[
     instructions.push(
       [
         `JAgentDesk tool groups that are off for this conversation: ${listGroups(off)}.`,
-        `When the user asks for something one of them does (for example "use the browser" or "browser agent" for Browser tools), call \`${TURN_ON_HOST_TOOLS_TOOL}\` with its id. The user gets a card to turn it on, and its tools reach this same conversation with the user's next message.`,
-        "Never tell the user to open a new session, chat or agent to get tools.",
+        `When the user asks for something one of them does (for example "use the browser", "open this page" or "browser agent" for Browser tools), call the JAgentDesk tool \`${TURN_ON_HOST_TOOLS_TOOL}\` with its id right away; if your tools are deferred, find it with tool search first. The user gets a card to turn the group on, and its tools reach this same conversation with the user's next message.`,
+        "Do not just say the tools are unavailable or ask the user to turn them on in Settings; the card does that. Never tell the user to open a new session, chat or agent to get tools.",
         browserOn
           ? ""
           : "While Browser tools are off, do not open web pages in the system browser instead (no `open`, `xdg-open`, `start` or `Start-Process` with a URL).",
@@ -134,6 +134,9 @@ export function registerHostToolGroupTools(input: {
           .min(1)
           .describe("Tool group id from the system instructions, for example browser-tools."),
       },
+      // Claude Code defers MCP tools behind tool search; a model that cannot see this tool
+      // tells the user the tools are unavailable instead of offering the card.
+      _meta: { "anthropic/alwaysLoad": true },
     },
     async ({ toolGroup }) => {
       const all = groups.list(callerAgentId);
