@@ -10,6 +10,10 @@ import {
 } from "@/workspace-tabs/sheets";
 export type { SheetTab, WorkspaceLayoutMode } from "@/workspace-tabs/sheets";
 import { z } from "zod";
+import {
+  syncPaneTabFocusHistory,
+  type PaneTabFocusHistory,
+} from "@/stores/workspace-tab-focus-policy";
 import type { JsonValue } from "@jagentdesk/protocol/agent-types";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useEffect, useLayoutEffect, useState } from "react";
@@ -24,6 +28,7 @@ import {
   clampNormalizedSizes,
   closeTabInLayout,
   collectAllPanes,
+  collectAllPanesIncludingHidden,
   collectAllTabs,
   convertDraftToAgentInLayout,
   createDefaultLayout,
@@ -109,6 +114,8 @@ interface WorkspaceLayoutStore {
   pendingAgentIdsByWorkspace: Record<string, Set<string>>;
   hiddenAgentIdsByWorkspace: Record<string, Set<string>>;
   focusRestorationByWorkspace: Record<string, WorkspaceFocusRestorationState>;
+  /** Per-pane tab focus recency; in memory only, so reload falls back to the parent tab. */
+  paneTabFocusHistoryByWorkspace: Record<string, PaneTabFocusHistory>;
   explorerPaneIdByWorkspace: Record<string, string | null>;
   acknowledgedPullRequestByWorkspace: Record<string, string>;
   openTabFocused: (workspaceKey: string, target: WorkspaceTabTarget) => string | null;
@@ -244,6 +251,35 @@ function withoutFocusRestoration(
   return { focusRestorationByWorkspace };
 }
 
+function withUpdatedWorkspaceLayout(
+  state: Pick<WorkspaceLayoutStore, "layoutByWorkspace" | "paneTabFocusHistoryByWorkspace">,
+  workspaceKey: string,
+  nextLayout: WorkspaceLayout,
+  renamedTab?: { from: string; to: string } | null,
+): Pick<WorkspaceLayoutStore, "layoutByWorkspace" | "paneTabFocusHistoryByWorkspace"> {
+  const previousLayout = state.layoutByWorkspace[workspaceKey] ?? null;
+  const previousHistory = state.paneTabFocusHistoryByWorkspace[workspaceKey];
+  const nextHistory = syncPaneTabFocusHistory({
+    previousHistory,
+    previousPanes: previousLayout ? collectAllPanesIncludingHidden(previousLayout.root) : [],
+    nextPanes: collectAllPanesIncludingHidden(nextLayout.root),
+    renamedTab,
+  });
+  return {
+    layoutByWorkspace: {
+      ...state.layoutByWorkspace,
+      [workspaceKey]: nextLayout,
+    },
+    paneTabFocusHistoryByWorkspace:
+      nextHistory === previousHistory
+        ? state.paneTabFocusHistoryByWorkspace
+        : {
+            ...state.paneTabFocusHistoryByWorkspace,
+            [workspaceKey]: nextHistory,
+          },
+  };
+}
+
 function attachParentTab(input: {
   layout: WorkspaceLayout;
   childTabId: string | null;
@@ -366,7 +402,7 @@ export function createWorkspaceLayoutStore(
           if (!layout) return null;
           set((state) => ({
             ...withoutSheet(state, workspaceKey, tabId),
-            layoutByWorkspace: { ...state.layoutByWorkspace, [workspaceKey]: layout },
+            ...withUpdatedWorkspaceLayout(state, workspaceKey, layout),
           }));
           return sheet.tab.tabId;
         },
@@ -420,6 +456,7 @@ export function createWorkspaceLayoutStore(
         pendingAgentIdsByWorkspace: {},
         hiddenAgentIdsByWorkspace: {},
         focusRestorationByWorkspace: {},
+        paneTabFocusHistoryByWorkspace: {},
         explorerPaneIdByWorkspace: {},
         acknowledgedPullRequestByWorkspace: {},
         openTabFocused: (workspaceKey, target) => {
@@ -457,10 +494,7 @@ export function createWorkspaceLayoutStore(
                     normalizedWorkspaceKey,
                     normalizedTarget.agentId,
                   ),
-            layoutByWorkspace: {
-              ...state.layoutByWorkspace,
-              [normalizedWorkspaceKey]: result.layout,
-            },
+            ...withUpdatedWorkspaceLayout(state, normalizedWorkspaceKey, result.layout),
           }));
 
           if (normalizedTarget.kind === "file" || normalizedTarget.kind === "plugin") {
@@ -519,10 +553,7 @@ export function createWorkspaceLayoutStore(
                       normalizedWorkspaceKey,
                       normalizedTarget.agentId,
                     ),
-              layoutByWorkspace: {
-                ...state.layoutByWorkspace,
-                [normalizedWorkspaceKey]: layout,
-              },
+              ...withUpdatedWorkspaceLayout(state, normalizedWorkspaceKey, layout),
             };
           });
 
@@ -563,10 +594,7 @@ export function createWorkspaceLayoutStore(
                     normalizedWorkspaceKey,
                     normalizedTarget.agentId,
                   ),
-            layoutByWorkspace: {
-              ...state.layoutByWorkspace,
-              [normalizedWorkspaceKey]: result.layout,
-            },
+            ...withUpdatedWorkspaceLayout(state, normalizedWorkspaceKey, result.layout),
           }));
 
           if (normalizedTarget.kind === "file" || normalizedTarget.kind === "plugin") {
@@ -675,10 +703,7 @@ export function createWorkspaceLayoutStore(
                 ...state.acknowledgedPullRequestByWorkspace,
                 [normalizedWorkspaceKey]: normalizedIdentity,
               },
-              layoutByWorkspace: {
-                ...state.layoutByWorkspace,
-                [normalizedWorkspaceKey]: result.layout,
-              },
+              ...withUpdatedWorkspaceLayout(state, normalizedWorkspaceKey, result.layout),
             };
           });
         },
@@ -704,10 +729,7 @@ export function createWorkspaceLayoutStore(
 
             return {
               ...withoutFocusRestoration(state, normalizedWorkspaceKey),
-              layoutByWorkspace: {
-                ...state.layoutByWorkspace,
-                [normalizedWorkspaceKey]: nextLayout,
-              },
+              ...withUpdatedWorkspaceLayout(state, normalizedWorkspaceKey, nextLayout),
             };
           });
         },
@@ -735,12 +757,9 @@ export function createWorkspaceLayoutStore(
             return {
               focusRequest: { workspaceKey: normalizedWorkspaceKey, tabId: normalizedTabId },
               ...withoutFocusRestoration(state, normalizedWorkspaceKey),
-              layoutByWorkspace: nextLayout
-                ? {
-                    ...state.layoutByWorkspace,
-                    [normalizedWorkspaceKey]: nextLayout,
-                  }
-                : state.layoutByWorkspace,
+              ...(nextLayout
+                ? withUpdatedWorkspaceLayout(state, normalizedWorkspaceKey, nextLayout)
+                : {}),
             };
           });
         },
@@ -770,6 +789,8 @@ export function createWorkspaceLayoutStore(
             return null;
           }
 
+          const renamedTab =
+            result.tabId !== normalizedTabId ? { from: normalizedTabId, to: result.tabId } : null;
           set((state) => ({
             ...(result.layout.focusedPaneId !== null
               ? (withoutFocusRestoration(state, normalizedWorkspaceKey) ?? {})
@@ -782,10 +803,7 @@ export function createWorkspaceLayoutStore(
                     normalizedWorkspaceKey,
                     normalizedTarget.agentId,
                   ),
-            layoutByWorkspace: {
-              ...state.layoutByWorkspace,
-              [normalizedWorkspaceKey]: result.layout,
-            },
+            ...withUpdatedWorkspaceLayout(state, normalizedWorkspaceKey, result.layout, renamedTab),
           }));
 
           if (normalizedTarget.kind === "file" || normalizedTarget.kind === "plugin") {
@@ -820,6 +838,8 @@ export function createWorkspaceLayoutStore(
             return null;
           }
 
+          const renamedTab =
+            result.tabId !== normalizedTabId ? { from: normalizedTabId, to: result.tabId } : null;
           set((state) => ({
             ...(result.layout.focusedPaneId !== null
               ? (withoutFocusRestoration(state, normalizedWorkspaceKey) ?? {})
@@ -829,10 +849,7 @@ export function createWorkspaceLayoutStore(
               normalizedWorkspaceKey,
               normalizedAgentId,
             ),
-            layoutByWorkspace: {
-              ...state.layoutByWorkspace,
-              [normalizedWorkspaceKey]: result.layout,
-            },
+            ...withUpdatedWorkspaceLayout(state, normalizedWorkspaceKey, result.layout, renamedTab),
           }));
 
           return result.tabId;
@@ -875,10 +892,7 @@ export function createWorkspaceLayoutStore(
 
             return {
               pinnedAgentIdsByWorkspace,
-              layoutByWorkspace: {
-                ...state.layoutByWorkspace,
-                [normalizedWorkspaceKey]: nextState.layout,
-              },
+              ...withUpdatedWorkspaceLayout(state, normalizedWorkspaceKey, nextState.layout),
             };
           });
         },
@@ -917,10 +931,7 @@ export function createWorkspaceLayoutStore(
             }
 
             return {
-              layoutByWorkspace: {
-                ...state.layoutByWorkspace,
-                [normalizedWorkspaceKey]: nextLayout,
-              },
+              ...withUpdatedWorkspaceLayout(state, normalizedWorkspaceKey, nextLayout),
             };
           });
         },
@@ -948,6 +959,7 @@ export function createWorkspaceLayoutStore(
             position: input.position,
             maxTreeDepth: MAX_TREE_DEPTH,
             createNodeId: ids.createNodeId,
+            paneFocusHistory: get().paneTabFocusHistoryByWorkspace[normalizedWorkspaceKey],
           });
           if (!result) {
             return null;
@@ -955,10 +967,7 @@ export function createWorkspaceLayoutStore(
 
           set((state) => ({
             ...withoutFocusRestoration(state, normalizedWorkspaceKey),
-            layoutByWorkspace: {
-              ...state.layoutByWorkspace,
-              [normalizedWorkspaceKey]: result.layout,
-            },
+            ...withUpdatedWorkspaceLayout(state, normalizedWorkspaceKey, result.layout),
           }));
 
           return result.paneId;
@@ -983,10 +992,7 @@ export function createWorkspaceLayoutStore(
 
           set((state) => ({
             ...withoutFocusRestoration(state, normalizedWorkspaceKey),
-            layoutByWorkspace: {
-              ...state.layoutByWorkspace,
-              [normalizedWorkspaceKey]: result.layout,
-            },
+            ...withUpdatedWorkspaceLayout(state, normalizedWorkspaceKey, result.layout),
           }));
 
           return result.paneId;
@@ -1004,6 +1010,7 @@ export function createWorkspaceLayoutStore(
               layout: getWorkspaceLayout(state.layoutByWorkspace, normalizedWorkspaceKey),
               tabId: normalizedTabId,
               toPaneId: normalizedToPaneId,
+              paneFocusHistory: state.paneTabFocusHistoryByWorkspace[normalizedWorkspaceKey],
             });
             if (!nextLayout) {
               return state;
@@ -1011,10 +1018,7 @@ export function createWorkspaceLayoutStore(
 
             return {
               ...withoutFocusRestoration(state, normalizedWorkspaceKey),
-              layoutByWorkspace: {
-                ...state.layoutByWorkspace,
-                [normalizedWorkspaceKey]: nextLayout,
-              },
+              ...withUpdatedWorkspaceLayout(state, normalizedWorkspaceKey, nextLayout),
             };
           });
         },
@@ -1045,12 +1049,9 @@ export function createWorkspaceLayoutStore(
                 ? { workspaceKey: normalizedWorkspaceKey, tabId: pane.focusedTabId }
                 : null,
               ...withoutFocusRestoration(state, normalizedWorkspaceKey),
-              layoutByWorkspace: nextLayout
-                ? {
-                    ...state.layoutByWorkspace,
-                    [normalizedWorkspaceKey]: nextLayout,
-                  }
-                : state.layoutByWorkspace,
+              ...(nextLayout
+                ? withUpdatedWorkspaceLayout(state, normalizedWorkspaceKey, nextLayout)
+                : {}),
             };
           });
         },
@@ -1072,10 +1073,7 @@ export function createWorkspaceLayoutStore(
             }
             return {
               ...withoutFocusRestoration(state, normalizedWorkspaceKey),
-              layoutByWorkspace: {
-                ...state.layoutByWorkspace,
-                [normalizedWorkspaceKey]: nextLayout,
-              },
+              ...withUpdatedWorkspaceLayout(state, normalizedWorkspaceKey, nextLayout),
             };
           });
         },
@@ -1096,10 +1094,7 @@ export function createWorkspaceLayoutStore(
               return state;
             }
             return {
-              layoutByWorkspace: {
-                ...state.layoutByWorkspace,
-                [normalizedWorkspaceKey]: nextLayout,
-              },
+              ...withUpdatedWorkspaceLayout(state, normalizedWorkspaceKey, nextLayout),
             };
           });
         },
@@ -1135,11 +1130,11 @@ export function createWorkspaceLayoutStore(
                   tokens: [...(currentRestoration?.tokens ?? []), token],
                 },
               },
-              layoutByWorkspace: {
-                ...state.layoutByWorkspace,
-                [normalizedWorkspaceKey]:
-                  layout.focusedPaneId === null ? layout : { ...layout, focusedPaneId: null },
-              },
+              ...withUpdatedWorkspaceLayout(
+                state,
+                normalizedWorkspaceKey,
+                layout.focusedPaneId === null ? layout : { ...layout, focusedPaneId: null },
+              ),
             };
           });
           return token;
@@ -1190,13 +1185,10 @@ export function createWorkspaceLayoutStore(
 
             return {
               focusRestorationByWorkspace: remainingRestorations,
-              layoutByWorkspace: {
-                ...state.layoutByWorkspace,
-                [normalizedWorkspaceKey]: {
-                  ...layout,
-                  focusedPaneId: restorePaneId,
-                },
-              },
+              ...withUpdatedWorkspaceLayout(state, normalizedWorkspaceKey, {
+                ...layout,
+                focusedPaneId: restorePaneId,
+              }),
             };
           });
         },
@@ -1236,10 +1228,7 @@ export function createWorkspaceLayoutStore(
 
             return {
               ...withoutFocusRestoration(state, normalizedWorkspaceKey),
-              layoutByWorkspace: {
-                ...state.layoutByWorkspace,
-                [normalizedWorkspaceKey]: nextLayout,
-              },
+              ...withUpdatedWorkspaceLayout(state, normalizedWorkspaceKey, nextLayout),
             };
           });
         },
@@ -1387,6 +1376,7 @@ export function createWorkspaceLayoutStore(
               normalizedWorkspaceKey in state.pendingAgentIdsByWorkspace ||
               normalizedWorkspaceKey in state.hiddenAgentIdsByWorkspace ||
               normalizedWorkspaceKey in state.focusRestorationByWorkspace ||
+              normalizedWorkspaceKey in state.paneTabFocusHistoryByWorkspace ||
               normalizedWorkspaceKey in state.explorerPaneIdByWorkspace ||
               normalizedWorkspaceKey in state.acknowledgedPullRequestByWorkspace;
             if (!hasAny) {
@@ -1406,6 +1396,8 @@ export function createWorkspaceLayoutStore(
               state.hiddenAgentIdsByWorkspace;
             const { [normalizedWorkspaceKey]: _restoration, ...focusRestorationByWorkspace } =
               state.focusRestorationByWorkspace;
+            const { [normalizedWorkspaceKey]: _focusHistory, ...paneTabFocusHistoryByWorkspace } =
+              state.paneTabFocusHistoryByWorkspace;
             const { [normalizedWorkspaceKey]: _panelState, ...panelStateByWorkspace } =
               state.panelStateByWorkspace;
             const { [normalizedWorkspaceKey]: _panelRevisions, ...panelRevisionByWorkspace } =
@@ -1426,6 +1418,7 @@ export function createWorkspaceLayoutStore(
               pendingAgentIdsByWorkspace,
               hiddenAgentIdsByWorkspace,
               focusRestorationByWorkspace,
+              paneTabFocusHistoryByWorkspace,
               explorerPaneIdByWorkspace,
               acknowledgedPullRequestByWorkspace,
             };

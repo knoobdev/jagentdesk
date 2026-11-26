@@ -2072,3 +2072,183 @@ it("publishes restored pinned intents as Sets to synchronous subscribers", async
   expect(observations.length).toBeGreaterThan(0);
   expect(observations.every(Boolean)).toBe(true);
 });
+
+describe("tab departure focus policy", () => {
+  it("splitPane returns the source pane to the most recently focused tab instead of the rightmost tab", () => {
+    const store = createWorkspaceLayoutStore(workspaceLayoutIds);
+    const workspaceKey = "server:split-recency";
+    const tabA = store
+      .getState()
+      .openTabFocused(workspaceKey, { kind: "agent", agentId: "agent-a" })!;
+    const tabB = store
+      .getState()
+      .openTabFocused(workspaceKey, { kind: "agent", agentId: "agent-b" })!;
+    // Open FILE while B is active (parentTabId = B) to prove focus recency wins over birth parent.
+    const tabFile = store
+      .getState()
+      .openChildTabFocused(workspaceKey, { kind: "file", path: "/repo/notes.md" }, tabB)!;
+
+    store.getState().focusTab(workspaceKey, tabA);
+    store.getState().focusTab(workspaceKey, tabFile);
+
+    const newPaneId = store.getState().splitPane(workspaceKey, {
+      tabId: tabFile,
+      targetPaneId: "main",
+      position: "right",
+    });
+
+    const layout = store.getState().layoutByWorkspace[workspaceKey]!;
+    expect(newPaneId).toBeTruthy();
+    expect(layout.focusedPaneId).toBe(newPaneId);
+    expect(findPaneById(layout.root, newPaneId)?.focusedTabId).toBe(tabFile);
+    expect(findPaneById(layout.root, "main")?.tabIds).toEqual([tabA, tabB]);
+    expect(findPaneById(layout.root, "main")?.focusedTabId).toBe(tabA);
+  });
+
+  it("moveTabToPane returns the source pane to the most recently focused remaining tab", () => {
+    const store = createWorkspaceLayoutStore(workspaceLayoutIds);
+    const workspaceKey = "server:move-recency";
+    const tabA = store
+      .getState()
+      .openTabFocused(workspaceKey, { kind: "agent", agentId: "agent-a" })!;
+    const tabB = store
+      .getState()
+      .openTabFocused(workspaceKey, { kind: "agent", agentId: "agent-b" })!;
+    const tabFile = store
+      .getState()
+      .openTabFocused(workspaceKey, { kind: "file", path: "/repo/notes.md" })!;
+    const sidePaneId = store.getState().splitPaneEmpty(workspaceKey, {
+      targetPaneId: "main",
+      position: "right",
+    })!;
+
+    store.getState().focusTab(workspaceKey, tabA);
+    store.getState().focusTab(workspaceKey, tabFile);
+    store.getState().moveTabToPane(workspaceKey, tabFile, sidePaneId);
+
+    const layout = store.getState().layoutByWorkspace[workspaceKey]!;
+    expect(layout.focusedPaneId).toBe(sidePaneId);
+    expect(findPaneById(layout.root, sidePaneId)?.focusedTabId).toBe(tabFile);
+    expect(findPaneById(layout.root, "main")?.tabIds).toEqual([tabA, tabB]);
+    expect(findPaneById(layout.root, "main")?.focusedTabId).toBe(tabA);
+  });
+
+  it("seeds focus recency from a hydrated layout on the first tab switch", () => {
+    const store = createWorkspaceLayoutStore(workspaceLayoutIds);
+    const workspaceKey = "server:hydrated-recency";
+    store.setState((state) => ({
+      ...state,
+      layoutByWorkspace: {
+        ...state.layoutByWorkspace,
+        [workspaceKey]: {
+          root: createPane({
+            id: "main",
+            tabIds: ["agent_a", "agent_b", "file_/repo/notes.md"],
+            focusedTabId: "agent_a",
+          }),
+          focusedPaneId: "main",
+        },
+      },
+    }));
+
+    store.getState().focusTab(workspaceKey, "file_/repo/notes.md");
+    store.getState().splitPane(workspaceKey, {
+      tabId: "file_/repo/notes.md",
+      targetPaneId: "main",
+      position: "right",
+    });
+
+    const layout = store.getState().layoutByWorkspace[workspaceKey]!;
+    expect(findPaneById(layout.root, "main")?.focusedTabId).toBe("agent_a");
+  });
+
+  it("falls back to a same-pane parent tab when relocating immediately after hydration", () => {
+    const store = createWorkspaceLayoutStore(workspaceLayoutIds);
+    const workspaceKey = "server:hydrated-parent-fallback";
+    store.setState((state) => ({
+      ...state,
+      layoutByWorkspace: {
+        ...state.layoutByWorkspace,
+        [workspaceKey]: {
+          root: createPane({
+            id: "main",
+            tabIds: ["agent_a", "agent_b", "file_/repo/notes.md"],
+            focusedTabId: "file_/repo/notes.md",
+          }),
+          focusedPaneId: "main",
+          parentTabIdByTabId: { "file_/repo/notes.md": "agent_a" },
+        },
+      },
+    }));
+
+    store.getState().splitPane(workspaceKey, {
+      tabId: "file_/repo/notes.md",
+      targetPaneId: "main",
+      position: "right",
+    });
+
+    const layout = store.getState().layoutByWorkspace[workspaceKey]!;
+    expect(findPaneById(layout.root, "main")?.focusedTabId).toBe("agent_a");
+  });
+
+  it("tracks multi-step recency and preserves history across convertDraftToAgent", () => {
+    const store = createWorkspaceLayoutStore(workspaceLayoutIds);
+    const workspaceKey = "server:multi-step-recency";
+    const tabA = store
+      .getState()
+      .openTabFocused(workspaceKey, { kind: "draft", draftId: "draft-a" })!;
+    const tabB = store
+      .getState()
+      .openTabFocused(workspaceKey, { kind: "agent", agentId: "agent-b" })!;
+    const tabFile = store
+      .getState()
+      .openTabFocused(workspaceKey, { kind: "file", path: "/repo/notes.md" })!;
+
+    store.getState().focusTab(workspaceKey, tabB);
+    store.getState().focusTab(workspaceKey, tabA);
+    store.getState().focusTab(workspaceKey, tabFile);
+    const convertedA = store.getState().convertDraftToAgent(workspaceKey, tabA, "agent-a")!;
+
+    store.getState().splitPane(workspaceKey, {
+      tabId: tabFile,
+      targetPaneId: "main",
+      position: "right",
+    });
+    expect(
+      findPaneById(store.getState().layoutByWorkspace[workspaceKey]!.root, "main")?.focusedTabId,
+    ).toBe(convertedA);
+
+    store.getState().focusTab(workspaceKey, convertedA);
+    store.getState().splitPane(workspaceKey, {
+      tabId: convertedA,
+      targetPaneId: "main",
+      position: "bottom",
+    });
+    expect(
+      findPaneById(store.getState().layoutByWorkspace[workspaceKey]!.root, "main")?.focusedTabId,
+    ).toBe(tabB);
+  });
+
+  it("keeps the source pane focused tab unchanged when dragging an unfocused tab", () => {
+    const store = createWorkspaceLayoutStore(workspaceLayoutIds);
+    const workspaceKey = "server:unfocused-drag";
+    const tabA = store
+      .getState()
+      .openTabFocused(workspaceKey, { kind: "agent", agentId: "agent-a" })!;
+    store.getState().openTabFocused(workspaceKey, { kind: "agent", agentId: "agent-b" });
+    const tabFile = store
+      .getState()
+      .openTabFocused(workspaceKey, { kind: "file", path: "/repo/notes.md" })!;
+
+    store.getState().focusTab(workspaceKey, tabA);
+    store.getState().splitPane(workspaceKey, {
+      tabId: tabFile,
+      targetPaneId: "main",
+      position: "right",
+    });
+
+    expect(
+      findPaneById(store.getState().layoutByWorkspace[workspaceKey]!.root, "main")?.focusedTabId,
+    ).toBe(tabA);
+  });
+});
