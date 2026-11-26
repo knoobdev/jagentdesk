@@ -1,12 +1,23 @@
-import { type FormInfo, type FormValue } from "@opencode/client";
+import {
+  isFormAlreadySettledError,
+  isFormNotFoundError,
+  isPermissionNotFoundError,
+  isSessionNotFoundError,
+  type FormInfo,
+  type FormValue,
+  type PermissionRequest,
+} from "@opencode/client";
 import { type V2Api } from "./api.js";
 import {
   type AgentPermissionRequest,
   type AgentPermissionResponse,
   type AgentSessionConfig,
   type AgentStreamEvent,
+  type ToolCallDetail,
 } from "../../../agent-sdk-types.js";
+import { PermissionNotPendingError } from "../../../permission-not-pending-error.js";
 import { splitMultiSelectAnswer } from "../../question-card-answer.js";
+import { OpenCodeHttpError } from "../http-error.js";
 
 export class SessionPermissions {
   private readonly pending = new Map<string, AgentPermissionRequest>();
@@ -40,6 +51,19 @@ export class SessionPermissions {
     );
   }
   async respondToPermission(requestId: string, response: AgentPermissionResponse) {
+    try {
+      await this.reply(requestId, response);
+    } catch (error) {
+      if (!isNoLongerPending(error)) throw error;
+      // OpenCode forgot the request: it was answered elsewhere, cancelled with its turn, or lost
+      // when the server restarted. Retrying can never succeed, so the card goes away.
+      const notPending = new PermissionNotPendingError(requestId, { cause: error });
+      this.expire(requestId, notPending.message);
+      throw notPending;
+    }
+    this.resolvePending(requestId, response);
+  }
+  private async reply(requestId: string, response: AgentPermissionResponse) {
     const form = this.forms.get(requestId);
     if (form) {
       if (response.behavior === "deny")
@@ -72,31 +96,25 @@ export class SessionPermissions {
           : {}),
       });
     }
-    this.resolvePending(requestId, response);
   }
   async reconcile(sessionID: string) {
     const [permissions, forms] = await Promise.all([
       this.getClient().permission.list({ sessionID }),
       this.getClient().session.form.list({ sessionID }),
     ]);
+    // A card OpenCode no longer lists can never be answered (the server restarted, or the
+    // request was answered or cancelled while the event stream was away).
+    const live = new Set([...permissions, ...forms].map((request) => request.id));
+    for (const requestId of this.pending.keys())
+      if (this.ownerOf(requestId) === sessionID && !live.has(requestId))
+        this.expire(requestId, new PermissionNotPendingError(requestId).message);
     for (const request of permissions) {
       if (this.pending.has(request.id)) continue;
-      const pending: AgentPermissionRequest = {
-        id: request.id,
-        provider: "opencode",
-        kind: "tool",
-        name: request.action,
-        description: request.message ?? request.resources.join("\n"),
-        actions: [
-          { id: "once", label: "Allow once", behavior: "allow" },
-          { id: "always", label: "Always allow", behavior: "allow" },
-          { id: "reject", label: "Deny", behavior: "deny" },
-        ],
-      };
+      const pending = toolPermissionRequest(request);
       this.pending.set(request.id, pending);
       this.permissionOwners.set(request.id, sessionID);
       if (!this.config.toolPolicy && this.config.providerOptions?.["auto_accept"] === true)
-        await this.respondToPermission(request.id, { behavior: "allow" });
+        await this.respondToPermission(request.id, { behavior: "allow" }).catch(ignoreNotPending);
       else this.emit({ type: "permission_requested", provider: "opencode", request: pending });
     }
     for (const form of forms) {
@@ -122,12 +140,87 @@ export class SessionPermissions {
       this.emit({ type: "permission_requested", provider: "opencode", request: pending });
     }
   }
-  resolvePending(requestId: string, resolution: AgentPermissionResponse) {
+  resolvePending(requestId: string, resolution: AgentPermissionResponse, expired = false) {
     if (!this.pending.delete(requestId)) return;
     this.forms.delete(requestId);
     this.permissionOwners.delete(requestId);
-    this.emit({ type: "permission_resolved", provider: "opencode", requestId, resolution });
+    this.emit({
+      type: "permission_resolved",
+      provider: "opencode",
+      requestId,
+      resolution,
+      ...(expired ? { expired: true } : {}),
+    });
   }
+  private expire(requestId: string, message: string) {
+    this.resolvePending(requestId, { behavior: "deny", message }, true);
+  }
+  private ownerOf(requestId: string) {
+    return this.forms.get(requestId)?.sessionID ?? this.permissionOwners.get(requestId);
+  }
+}
+
+/** A request that expired while being answered has already been dropped and announced. */
+export function ignoreNotPending(error: unknown): void {
+  if (!(error instanceof PermissionNotPendingError)) throw error;
+}
+
+function isNoLongerPending(error: unknown): boolean {
+  return (
+    (error instanceof OpenCodeHttpError && error.status === 404) ||
+    isPermissionNotFoundError(error) ||
+    isFormNotFoundError(error) ||
+    isFormAlreadySettledError(error) ||
+    isSessionNotFoundError(error)
+  );
+}
+
+const TOOL_PERMISSION_TITLES: Record<string, string> = {
+  external_directory: "Access external directory",
+  shell: "Run shell command",
+  read: "Read files",
+  edit: "Edit files",
+  write: "Write files",
+};
+
+/** Spec 33.7: a permission card always shows what it asks for, never an empty detail. */
+function toolPermissionRequest(request: PermissionRequest): AgentPermissionRequest {
+  const input: Record<string, unknown> = {
+    action: request.action,
+    resources: request.resources,
+    ...(request.metadata && Object.keys(request.metadata).length > 0
+      ? { metadata: request.metadata }
+      : {}),
+  };
+  const title = TOOL_PERMISSION_TITLES[request.action];
+  return {
+    id: request.id,
+    provider: "opencode",
+    kind: "tool",
+    name: request.action,
+    ...(title ? { title } : {}),
+    ...(request.message ? { description: request.message } : {}),
+    input,
+    detail: toolPermissionDetail(request, input),
+    actions: [
+      { id: "once", label: "Allow once", behavior: "allow" },
+      { id: "always", label: "Always allow", behavior: "allow" },
+      { id: "reject", label: "Deny", behavior: "deny" },
+    ],
+  };
+}
+
+function toolPermissionDetail(
+  request: PermissionRequest,
+  input: Record<string, unknown>,
+): ToolCallDetail {
+  // OpenCode asks for the directory patterns the tool reaches outside the project.
+  if (request.action === "external_directory" && request.resources.length > 0)
+    return { type: "plain_text", text: request.resources.join("\n") };
+  const command: unknown = request.metadata?.["command"];
+  if (request.action === "shell" && typeof command === "string" && command)
+    return { type: "shell", command };
+  return { type: "unknown", input, output: null };
 }
 
 function permissionReply(response: AgentPermissionResponse): "reject" | "once" | "always" {

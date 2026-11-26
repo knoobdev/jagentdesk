@@ -4,7 +4,9 @@ import { createTestLogger } from "../../../../../test-utils/test-logger.js";
 import type { V2Api } from "./api.js";
 import { OpenCodeV2AgentClient } from "./agent.js";
 import { V2Harness } from "../test-utils/v2-harness.js";
-import type { AgentPermissionResponse } from "../../../agent-sdk-types.js";
+import type { AgentPermissionResponse, AgentStreamEvent } from "../../../agent-sdk-types.js";
+import { PermissionNotPendingError } from "../../../permission-not-pending-error.js";
+import { OpenCodeHttpError } from "../http-error.js";
 
 describe("OpenCode v2 denial reasons", () => {
   test.each<{
@@ -375,6 +377,128 @@ describe("OpenCode v2 permission routing", () => {
         data: { sessionID: "session", requestID: "approval", reply: "once" },
       });
       await expect.poll(() => session.getPendingPermissions()).toEqual([]);
+    } finally {
+      await session.close();
+    }
+  });
+});
+
+describe("OpenCode v2 permissions OpenCode no longer has", () => {
+  async function pendingExternalDirectory(harness: V2Harness) {
+    let listed = true;
+    harness.api.permission.list = async () =>
+      listed
+        ? [
+            {
+              id: "per_external",
+              sessionID: "session",
+              action: "external_directory",
+              resources: ["/private/var/folders/T/opencode/*"],
+              save: ["/private/var/folders/T/opencode/*"],
+            },
+          ]
+        : [];
+    const client = new OpenCodeV2AgentClient({
+      logger: createTestLogger(),
+      runtime: harness.runtime,
+    });
+    const session = await client.createSession({ provider: "opencode", cwd: "/tmp/project" });
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+    return {
+      session,
+      events,
+      forget: () => {
+        listed = false;
+      },
+    };
+  }
+
+  test("a reply OpenCode answers with 404 drops the card as expired", async () => {
+    const harness = new V2Harness();
+    const { session, events } = await pendingExternalDirectory(harness);
+    harness.api.permission.reply = async (input) => {
+      throw new OpenCodeHttpError(
+        `/api/session/${input.sessionID}/permission/${input.requestID}/reply`,
+        404,
+        false,
+      );
+    };
+    try {
+      expect(session.getPendingPermissions().map((request) => request.id)).toEqual([
+        "per_external",
+      ]);
+      await expect(
+        session.respondToPermission("per_external", {
+          behavior: "allow",
+          selectedActionId: "once",
+        }),
+      ).rejects.toBeInstanceOf(PermissionNotPendingError);
+      expect(session.getPendingPermissions()).toEqual([]);
+      expect(events).toContainEqual({
+        type: "permission_resolved",
+        provider: "opencode",
+        requestId: "per_external",
+        resolution: { behavior: "deny", message: "This request is no longer pending" },
+        expired: true,
+      });
+    } finally {
+      await session.close();
+    }
+  });
+
+  test("other reply failures keep the card answerable", async () => {
+    const harness = new V2Harness();
+    const { session } = await pendingExternalDirectory(harness);
+    harness.api.permission.reply = async () => {
+      throw new OpenCodeHttpError("/api/session/session/permission/per_external/reply", 500, false);
+    };
+    try {
+      await expect(
+        session.respondToPermission("per_external", { behavior: "allow" }),
+      ).rejects.toBeInstanceOf(OpenCodeHttpError);
+      expect(session.getPendingPermissions().map((request) => request.id)).toEqual([
+        "per_external",
+      ]);
+    } finally {
+      await session.close();
+    }
+  });
+
+  test("a reconnect to a restarted server drops cards it no longer lists", async () => {
+    const harness = new V2Harness();
+    const { session, events, forget } = await pendingExternalDirectory(harness);
+    try {
+      expect(session.getPendingPermissions()).toHaveLength(1);
+      forget();
+      harness.push({ id: "reconnect", created: 3, type: "server.connected", data: {} });
+      await expect.poll(() => session.getPendingPermissions()).toEqual([]);
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "permission_resolved",
+          requestId: "per_external",
+          expired: true,
+        }),
+      );
+    } finally {
+      await session.close();
+    }
+  });
+
+  test("an external_directory card shows the directory patterns it asks for", async () => {
+    const harness = new V2Harness();
+    const { session } = await pendingExternalDirectory(harness);
+    try {
+      const [request] = session.getPendingPermissions();
+      expect(request).toMatchObject({
+        name: "external_directory",
+        title: "Access external directory",
+        input: {
+          action: "external_directory",
+          resources: ["/private/var/folders/T/opencode/*"],
+        },
+        detail: { type: "plain_text", text: "/private/var/folders/T/opencode/*" },
+      });
     } finally {
       await session.close();
     }

@@ -493,6 +493,8 @@ export type AgentStreamEvent =
       provider: AgentProvider;
       requestId: string;
       resolution: AgentPermissionResponse;
+      /** The provider no longer had the request, so nobody answered it. */
+      expired?: boolean;
       turnId?: string;
     }
   | {

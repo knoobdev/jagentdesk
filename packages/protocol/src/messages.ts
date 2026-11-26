@@ -1143,6 +1143,7 @@ export const AgentStreamEventPayloadSchema = z.discriminatedUnion("type", [
     provider: AgentProviderSchema,
     requestId: z.string(),
     resolution: AgentPermissionResponseSchema,
+    expired: z.boolean().optional(),
   }),
   z.object({
     type: z.literal("attention_required"),
@@ -7129,6 +7130,8 @@ export const AgentPermissionResolvedMessageSchema = z.object({
     agentId: z.string(),
     requestId: z.string(),
     resolution: AgentPermissionResponseSchema,
+    /** The provider no longer had the request; the card is gone without an answer. */
+    expired: z.boolean().optional(),
   }),
 });
 

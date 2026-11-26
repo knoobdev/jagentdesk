@@ -172,6 +172,7 @@ import {
 import { BackgroundWorkTimeline } from "./background-work/timeline.js";
 import { extractAttention, buildSessionConfig } from "../persistence-hooks.js";
 import { ProviderOptionsValidationError } from "./provider-options.js";
+import { PermissionNotPendingError } from "./permission-not-pending-error.js";
 import { applyRecordPatch } from "../record-patch.js";
 import {
   applyProviderOptionsPatch,
@@ -5082,7 +5083,14 @@ export class AgentManager {
     agent.inFlightPermissionResponses.add(requestId);
 
     try {
-      const result = await agent.session.respondToPermission(requestId, response);
+      let result: AgentPermissionResult | void;
+      try {
+        result = await agent.session.respondToPermission(requestId, response);
+      } catch (error) {
+        if (!(error instanceof PermissionNotPendingError)) throw error;
+        await this.dropUnanswerablePermission(agent, requestId, error);
+        return;
+      }
       agent.pendingPermissions.delete(requestId);
 
       try {
@@ -5106,6 +5114,35 @@ export class AgentManager {
       agent.inFlightPermissionResponses.delete(requestId);
       agent.bufferedPermissionResolutions.delete(requestId);
     }
+  }
+
+  /**
+   * The provider no longer has the request (answered elsewhere, cancelled, or lost with a
+   * restarted provider server). Drop the card everywhere and tell clients it expired; a retry
+   * could never succeed.
+   */
+  private async dropUnanswerablePermission(
+    agent: ActiveManagedAgent,
+    requestId: string,
+    error: PermissionNotPendingError,
+  ): Promise<void> {
+    this.logger.info(
+      { agentId: agent.id, requestId, err: error.cause },
+      "Dropped a permission request the provider no longer has",
+    );
+    agent.pendingPermissions.delete(requestId);
+    agent.inFlightPermissionResponses.delete(requestId);
+    agent.bufferedPermissionResolutions.delete(requestId);
+    this.dispatchStream(agent.id, {
+      type: "permission_resolved",
+      provider: agent.session.provider,
+      requestId,
+      resolution: { behavior: "deny", message: error.message },
+      expired: true,
+    });
+    this.touchUpdatedAt(agent);
+    await this.persistSnapshot(agent);
+    this.emitState(agent);
   }
 
   async requestHostToolPermission(
