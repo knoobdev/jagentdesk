@@ -7,6 +7,10 @@ import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { Database as DatabaseIcon, CircleAlert, Plus, Trash2 } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useHostRuntimeClient } from "../../../packages/app/src/plugins/builtin/host-api";
+import {
+  gumloopListStyles,
+  useIsGumloopTheme,
+} from "../../../packages/app/src/plugins/builtin/host-api";
 import { Skeleton, useSkeletonPulse } from "../../../packages/app/src/plugins/builtin/host-api";
 import { DatabaseStatusDot } from "./database-dot";
 import { buildDatabaseBrowseRoute } from "../../../packages/app/src/plugins/builtin/host-api";
@@ -98,9 +102,10 @@ function ConnectionRow({
   let connectLabel = "Connect";
   if (working) connectLabel = "Connecting…";
   else if (errored) connectLabel = "Retry";
+  const isGumloop = useIsGumloopTheme();
 
   return (
-    <View style={styles.row}>
+    <View style={connectionRowStyle(isGumloop)}>
       <View style={styles.rowHeader}>
         <DatabaseStatusDot state={db.state} />
         <View style={styles.rowInfo}>
@@ -608,6 +613,11 @@ const redColorMapping = (theme: Theme) => ({ color: theme.colors.palette.red[500
 const placeholderColorMapping = (theme: Theme) => ({
   placeholderTextColor: theme.colors.foregroundMuted,
 });
+
+/** Two-line connection row: 56px in Gumloop (spec 38 §4.6). */
+function connectionRowStyle(isGumloop: boolean) {
+  return isGumloop ? [styles.row, gumloopListStyles.row, gumloopListStyles.rowTwoLine] : styles.row;
+}
 
 const styles = StyleSheet.create((theme) => ({
   container: {

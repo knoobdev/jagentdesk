@@ -16,7 +16,9 @@ import type { ClusterInfo, KubeContextInfo } from "@jagentdesk/protocol/cluster/
 
 /** Context rows: Gumloop's hairline divider color instead of the classic border. */
 function contextRowStyle(isGumloop: boolean) {
-  return isGumloop ? [styles.contextRow, gumloopListStyles.row] : styles.contextRow;
+  return isGumloop
+    ? [styles.contextRow, gumloopListStyles.row, gumloopListStyles.rowTwoLine]
+    : styles.contextRow;
 }
 
 function ContextRow({

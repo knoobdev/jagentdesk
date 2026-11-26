@@ -2708,12 +2708,13 @@ const styles = StyleSheet.create((theme) => ({
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
   },
+  // Gumloop: the compose project label sits within 8px of its first row (spec 38 A38.4g).
   groupHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
     paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[2],
+    paddingVertical: theme.chrome.tableRowPaddingVertical,
     backgroundColor: theme.colors.surface1,
   },
   groupTitleBtn: {
@@ -2733,13 +2734,14 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.xs,
     color: theme.colors.foregroundMuted,
   },
+  // Gumloop rows are exactly 44px: no vertical padding around the 28px action buttons.
   trow: {
     minHeight: theme.chrome.tableRowHeight,
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
     paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[2],
+    paddingVertical: theme.chrome.tableRowPaddingVertical,
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
   },

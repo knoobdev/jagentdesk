@@ -118,15 +118,18 @@ export const sshStyles = StyleSheet.create((theme: Theme) => ({
     color: theme.colors.foreground,
   },
   noticeBody: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
+  // Gumloop rows are 44px, two-line rows 56px (spec 38 §4.6); classic keeps its content height.
   trow: {
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
+    minHeight: theme.chrome.tableRowMinHeight,
     paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[2],
+    paddingVertical: theme.chrome.tableRowPaddingVertical,
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
   },
+  trowTwoLine: { minHeight: theme.chrome.tableRowTwoLineMinHeight },
   groupTitleBtn: {
     flex: 1,
     flexDirection: "row",
