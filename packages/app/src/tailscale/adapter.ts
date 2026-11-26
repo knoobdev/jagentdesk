@@ -52,7 +52,7 @@ export interface TailscaleLoginAdapter {
 const AUTH_KEY_REQUIRED_ERROR = "An auth key is required.";
 const TAILSCALE_IOS_UNAVAILABLE_ERROR = "Tailscale is not available on this device.";
 const TAILSCALE_ANDROID_UNAVAILABLE_ERROR =
-  "Tailscale support is not included in this Android build. Choose Local or use the iOS build.";
+  "Tailscale support is not included in this Android build. Pair with a pairing link instead.";
 const TAILSCALE_LOGIN_FAILED_ERROR = "Tailscale login failed.";
 
 // Electron's public device key is learned from the same real IPC health

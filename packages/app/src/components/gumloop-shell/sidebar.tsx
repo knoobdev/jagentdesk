@@ -34,6 +34,8 @@ import {
 } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { HostPicker } from "@/components/hosts/host-picker";
+import { useTranslation } from "react-i18next";
+import { hostTransportLabelKey } from "@/types/host-connection";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -205,6 +207,7 @@ function HostRow({ serverId }: { serverId: string }) {
 }
 
 function ConnectionFooter({ serverId, onNavigate }: { serverId: string; onNavigate: () => void }) {
+  const { t } = useTranslation();
   const pathname = usePathname();
   const settingsSelected = resolveSidebarDrillIn(pathname)?.kind === "settings";
   const hosts = useHosts();
@@ -229,10 +232,9 @@ function ConnectionFooter({ serverId, onNavigate }: { serverId: string; onNaviga
     onNavigate();
     router.push(buildSettingsSectionRoute("general"));
   }, [onNavigate]);
-  const transport = snapshot?.activeConnection?.type;
-  let transportLabel = "Direct";
-  if (transport === "relay") transportLabel = "Relay";
-  if (transport === "tailnet") transportLabel = "Tailscale";
+  // Same transport label as the host picker and Settings: Local, Tailscale or
+  // Relay (spec 05.1.2; the desktop's bundled daemon reads "Local", ADR-0056).
+  const transportLabel = t(hostTransportLabelKey(snapshot?.activeConnection?.type ?? "directTcp"));
   return (
     <View style={styles.footer} testID="gumloop-sidebar-footer">
       <UsageSidebarItem sources={sources} onNavigate={onNavigate} />

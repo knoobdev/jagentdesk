@@ -16,10 +16,11 @@ import { getRelayDeviceSigning, prepareRelayDeviceSigning } from "@/utils/relay-
 import { getMobileDeviceName } from "@/utils/device-identity";
 import { connectionsFromOffer, relayConnectionFromOffer } from "@/types/host-connection";
 import {
+  getTailnetMode,
   getTailscaleLoginAdapter,
-  isTailscaleReady,
-  setConnectionMode,
-  shouldRoutePairVerifyToTailscaleLogin,
+  resolvePairVerifyDecision,
+  setTailnetMode,
+  tailnetModeAfterPairing,
   useTailscaleLoginStatus,
 } from "@/tailscale";
 import {
@@ -76,11 +77,14 @@ export default function PairVerifyScreen() {
     }
     const { offer, pk, local } = parsed;
     setHostLabel(offer.tailnetAddress ?? offer.serverId);
-    if (!local && !offer.relay && !isTailscaleReady(status)) {
-      if (shouldRoutePairVerifyToTailscaleLogin(status))
-        router.replace("/tailscale-login?returnTo=pair-verify" as Href);
+    const decision = resolvePairVerifyDecision({ hasRelay: !!offer.relay, local, status });
+    if (decision.kind === "tailscale-login") {
+      // ADR-0056: a tailnet-only link needs this device on the tailnet; sign-in returns here.
+      router.replace("/tailscale-login?returnTo=pair-verify" as Href);
       return;
     }
+    if (decision.kind === "wait") return;
+    const route = decision.route;
     started.current = true;
     const controller = new AbortController();
     abort.current = controller;
@@ -139,7 +143,7 @@ export default function PairVerifyScreen() {
       } finally {
         await result.client.close();
       }
-      await setConnectionMode(offer.relay || local ? "local" : "tailscale");
+      await setTailnetMode(tailnetModeAfterPairing({ route, current: await getTailnetMode() }));
       const profile = await upsertConnectionFromOffer(offer, undefined);
       await clearPendingPairingOffer();
       router.replace(

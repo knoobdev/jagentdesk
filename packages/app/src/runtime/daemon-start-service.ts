@@ -5,8 +5,9 @@ import {
   type DesktopDaemonStatus,
 } from "@/desktop/daemon/desktop-daemon";
 import { connectionFromListen } from "@/types/host-connection";
-import type { ConnectionMode } from "@/tailscale";
+import type { TailnetMode } from "@/tailscale";
 import type { HostRuntimeStore } from "@/runtime/host-runtime";
+import { rememberDesktopSignedLocalHost } from "@/runtime/desktop-signed-local-hosts";
 
 export type DaemonStartResult = { ok: true } | { ok: false; error: string };
 export type DaemonStartCondition = boolean | (() => boolean | Promise<boolean>);
@@ -24,67 +25,86 @@ export interface DaemonStartServiceDeps {
   store: DaemonConnectionStore;
   startDesktopDaemon?: (options?: DesktopDaemonStartOptions) => Promise<DesktopDaemonStatus>;
   getDesktopDaemonStatus?: () => Promise<DesktopDaemonStatus>;
-  getConnectionMode?: () => Promise<ConnectionMode | null>;
+  getTailnetMode?: () => Promise<TailnetMode | null>;
 }
 
+/**
+ * Registers the bundled desktop daemon (spec `05.2.5`, ADR-0056). The desktop
+ * always reaches its own daemon over the loopback listen address — badge
+ * "Local" — whether or not Tailscale is signed in, so a signed-out or offline
+ * tailnet never locks the desktop out of its own host. When the daemon has
+ * joined the tailnet (`"tailnet"` mode), its verified tailnet route is added
+ * next to it.
+ */
 export async function upsertDesktopDaemonConnection(
   store: DaemonConnectionStore,
   daemon: DesktopDaemonStatus,
-  connectionMode: ConnectionMode | null = "local",
+  tailnetMode: TailnetMode | null = "off",
 ): Promise<DaemonStartResult> {
   const serverId = daemon.serverId.trim();
   if (!serverId) {
     return { ok: false, error: "Desktop daemon did not return a server id." };
   }
 
-  if (connectionMode === null) {
-    // First-run desktop startup must not create a localhost host before the
-    // user chooses Local or authenticates Tailscale.
-    return { ok: true };
+  const localResult = await upsertDesktopLocalConnection(store, daemon, serverId);
+  if (!localResult.ok || tailnetMode !== "tailnet") {
+    return localResult;
   }
 
+  const tailnetAddress = daemon.tailnetAddress?.trim() ?? "";
+  const daemonPublicKeyB64 = daemon.daemonPublicKeyB64?.trim() ?? "";
+  if (!daemon.tailscaleConnected || !tailnetAddress || !daemonPublicKeyB64) {
+    // The daemon can be running while Tailscale is still signing in. That is
+    // not a startup failure; the Local connection already serves the desktop.
+    return { ok: true };
+  }
+  if (!store.upsertTailnetConnection) {
+    return { ok: false, error: "Host runtime cannot store a Tailscale connection." };
+  }
+  await store.upsertTailnetConnection({
+    serverId,
+    tailnetAddress,
+    useTls: false,
+    daemonPublicKeyB64,
+    label: daemon.hostname ?? undefined,
+  });
+  return { ok: true };
+}
+
+async function upsertDesktopLocalConnection(
+  store: DaemonConnectionStore,
+  daemon: DesktopDaemonStatus,
+  serverId: string,
+): Promise<DaemonStartResult> {
   const existingHost = store.getHosts().find((host) => host.serverId === serverId);
-
-  if (connectionMode === "tailscale") {
-    const tailnetAddress = daemon.tailnetAddress?.trim() ?? "";
-    const daemonPublicKeyB64 = daemon.daemonPublicKeyB64?.trim() ?? "";
-    if (!daemon.tailscaleConnected || !tailnetAddress || !daemonPublicKeyB64) {
-      // The daemon can be running while the user is still on the Tailscale
-      // login screen. That is not a startup failure and must not produce a
-      // fake Local fallback.
-      return { ok: true };
-    }
-    if (!store.upsertTailnetConnection) {
-      return { ok: false, error: "Host runtime cannot store a Tailscale connection." };
-    }
-    await store.upsertTailnetConnection({
-      serverId,
-      tailnetAddress,
-      useTls: false,
-      daemonPublicKeyB64,
-      label: daemon.hostname ?? undefined,
-    });
-    return { ok: true };
-  }
-
-  if (existingHost) {
-    // The saved registry already knows this server. Desktop bootstrap must not
-    // re-register a local connection that could clobber the user's active
-    // choice. Tailscale mode is handled above because an existing local host
-    // still needs its verified tailnet connection added.
-    return { ok: true };
-  }
-
   const listenAddress = daemon.listen?.trim() ?? "";
   if (!listenAddress) {
-    return { ok: false, error: "Desktop daemon did not return a listen address." };
+    // Tailscale sign-in reports the daemon without its listen address; the
+    // Local connection was registered when the daemon started.
+    return existingHost
+      ? { ok: true }
+      : { ok: false, error: "Desktop daemon did not return a listen address." };
   }
-  if (!connectionFromListen(listenAddress)) {
+  const connection = connectionFromListen(listenAddress);
+  if (!connection) {
     return {
       ok: false,
       error: `Desktop daemon returned an unsupported listen address: ${listenAddress}`,
     };
   }
+  if (daemon.desktopManaged) {
+    // This daemon got the desktop device key from the supervisor, so the Local
+    // connection signs its hello (ADR-0010). Record it before the host exists
+    // so the first connection is already signed.
+    await rememberDesktopSignedLocalHost(serverId);
+  }
+  if (existingHost?.connections.some((existing) => existing.id === connection.id)) {
+    // Already registered; re-upserting must not reorder the user's connections.
+    return { ok: true };
+  }
+  // A v0.10.0 desktop in Tailscale mode saved only the tailnet route to its own
+  // daemon. Adding the loopback route here keeps that install reachable while
+  // the tailnet is signed out.
   await store.upsertConnectionFromListen({
     listenAddress,
     serverId,
@@ -99,7 +119,7 @@ export class DaemonStartService {
     options?: DesktopDaemonStartOptions,
   ) => Promise<DesktopDaemonStatus>;
   private readonly invokeGetDesktopDaemonStatus: () => Promise<DesktopDaemonStatus>;
-  private readonly resolveConnectionMode: () => Promise<ConnectionMode | null>;
+  private readonly resolveTailnetMode: () => Promise<TailnetMode | null>;
   private readonly listeners = new Set<() => void>();
   private lastError: string | null = null;
   private inFlightCount = 0;
@@ -109,9 +129,9 @@ export class DaemonStartService {
     this.store = deps.store;
     this.invokeStartDesktopDaemon = deps.startDesktopDaemon ?? startDesktopDaemon;
     this.invokeGetDesktopDaemonStatus = deps.getDesktopDaemonStatus ?? getDesktopDaemonStatus;
-    // Unit-test callers historically modelled the pre-Tailscale local daemon;
-    // production wiring passes the persisted mode explicitly.
-    this.resolveConnectionMode = deps.getConnectionMode ?? (async () => "local");
+    // Unit-test callers model a daemon without Tailscale; production wiring
+    // passes the persisted mode explicitly.
+    this.resolveTailnetMode = deps.getTailnetMode ?? (async () => "off");
   }
 
   async start(): Promise<DaemonStartResult> {
@@ -154,10 +174,10 @@ export class DaemonStartService {
         return { ok: true };
       }
 
-      const connectionMode = await this.resolveConnectionMode();
+      const tailnetMode = await this.resolveTailnetMode();
       const storeReady = input.storeReady ?? Promise.resolve();
       const daemon = await this.invokeStartDesktopDaemon({
-        enableTailscale: connectionMode === "tailscale",
+        enableTailscale: tailnetMode === "tailnet",
         waitForReady: false,
       });
       if (daemon.status === "starting") {
@@ -165,11 +185,11 @@ export class DaemonStartService {
         // daemon can take tens of seconds to initialize its registries and
         // Tailscale bridge; reconcile its identity after the first window is
         // already usable.
-        void this.reconcileWhenReady(connectionMode, storeReady);
+        void this.reconcileWhenReady(tailnetMode, storeReady);
         return { ok: true };
       }
       await storeReady;
-      const result = await upsertDesktopDaemonConnection(this.store, daemon, connectionMode);
+      const result = await upsertDesktopDaemonConnection(this.store, daemon, tailnetMode);
       return result.ok ? result : this.fail(result.error);
     } catch (error) {
       return this.fail(error instanceof Error ? error.message : String(error));
@@ -179,7 +199,7 @@ export class DaemonStartService {
   }
 
   private async reconcileWhenReady(
-    connectionMode: ConnectionMode | null,
+    tailnetMode: TailnetMode | null,
     storeReady: Promise<void>,
   ): Promise<void> {
     const deadline = Date.now() + 120_000;
@@ -188,7 +208,7 @@ export class DaemonStartService {
         const daemon = await this.invokeGetDesktopDaemonStatus();
         if (daemon.status === "running") {
           await storeReady;
-          const result = await upsertDesktopDaemonConnection(this.store, daemon, connectionMode);
+          const result = await upsertDesktopDaemonConnection(this.store, daemon, tailnetMode);
           if (!result.ok) {
             this.fail(result.error);
           }

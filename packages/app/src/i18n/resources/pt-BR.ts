@@ -1089,10 +1089,6 @@ export const ptBR: TranslationResources = {
     },
   },
   connection: {
-    localMode: {
-      mobileWarning:
-        "O modo Local está ativado. Dispositivos móveis não conseguem se conectar a este computador via Tailscale até você voltar ao modo Tailscale.",
-    },
     timingOut: {
       tailnet: {
         title: "{{hostName}} não conectou",
@@ -1552,6 +1548,11 @@ export const ptBR: TranslationResources = {
   onboarding: {
     title: "Bem-vindo ao JAgentDesk",
     subtitle: "Conecte seu computador para começar",
+    welcomeDescription:
+      "Controle deste dispositivo os agentes de código que rodam na sua estação de trabalho.",
+    getStarted: "Começar",
+    connectTitle: "Conecte sua estação de trabalho",
+    connectFooter: "Na sua estação de trabalho, abra JAgentDesk → Pair a device.",
     actions: {
       settings: "Configurações",
     },
@@ -1660,11 +1661,15 @@ export const ptBR: TranslationResources = {
       },
       scanQr: {
         title: "Escanear QR code",
-        description: "Conexão via tailnet.",
+        description: "Conexão criptografada via relay.",
       },
       pasteLink: {
         title: "Colar link de pareamento",
-        description: "Conexão via tailnet.",
+        description: "Conexão criptografada via relay.",
+      },
+      tailscale: {
+        title: "Entrar no Tailscale",
+        description: "Entre na sua tailnet para uma conexão direta.",
       },
     },
     direct: {

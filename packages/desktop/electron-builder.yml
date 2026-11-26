@@ -46,6 +46,8 @@ asarUnpack:
   - node_modules/@jagentdesk/server/dist/server/terminal/shell-integration/**/*
   # scrcpy-server is pushed to Android devices by adb, a separate process (spec 27.1).
   - node_modules/@jagentdesk/server/dist/server/vendor/scrcpy/**/*
+  # Built-in plugin sources are compiled by esbuild, a native binary that cannot read app.asar.
+  - node_modules/@jagentdesk/server/dist/server/builtin-plugins/**/*
   # Native add-ons cannot be dlopen'd from inside the asar — unpack them.
   - "**/*.node"
   - node_modules/better-sqlite3/**

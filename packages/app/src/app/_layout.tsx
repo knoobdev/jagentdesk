@@ -114,13 +114,11 @@ import { useAppSettings } from "@/hooks/use-settings";
 import { useOpenAgentListGesture } from "@/mobile-panels/gestures";
 import { MobilePanelsProvider } from "@/mobile-panels/provider";
 import { PairDeviceModal } from "@/desktop/components/pair-device-modal";
-import { shouldRedirectToDesktopTailscaleLogin } from "@/navigation/desktop-connection-gate";
 import {
-  getConnectionMode,
+  getTailnetMode,
   refreshTailscaleStatus,
   reviveTailnetHosts,
-  useConnectionMode,
-  useTailscaleLoginStatus,
+  useTailnetMode,
 } from "@/tailscale";
 import { keyboardActionDispatcher } from "@/keyboard/keyboard-action-dispatcher";
 import { polyfillCrypto } from "@/polyfills/crypto";
@@ -130,11 +128,9 @@ import {
   hasConfiguredLocalDaemonOverride,
   useHostRegistryLoaded,
   useHostRuntimeClient,
-  useHostRuntimeConnectionStatuses,
   useHostRuntimeSnapshot,
   useHosts,
 } from "@/runtime/host-runtime";
-import { hostHasTailnetConnection } from "@/types/host-connection";
 import { getDaemonStartService } from "@/runtime/daemon-start-service";
 import { ConnectionNotifications } from "@/runtime/connection-notifications";
 import { applyAppearance } from "@/screens/settings/appearance/apply-appearance";
@@ -238,7 +234,7 @@ export function useEarliestOnlineHostServerId(): string | null {
 function useDaemonStartLastError(): string | null {
   const service = getDaemonStartService({
     store: getHostRuntimeStore(),
-    getConnectionMode,
+    getTailnetMode,
   });
   return useSyncExternalStore(
     (listener) => service.subscribe(listener),
@@ -250,7 +246,7 @@ function useDaemonStartLastError(): string | null {
 function useDaemonStartIsRunning(): boolean {
   const service = getDaemonStartService({
     store: getHostRuntimeStore(),
-    getConnectionMode,
+    getTailnetMode,
   });
   return useSyncExternalStore(
     (listener) => service.subscribe(listener),
@@ -268,33 +264,27 @@ async function shouldStartBuiltInDaemon(): Promise<boolean> {
   if (hasConfiguredLocalDaemonOverride()) {
     return false;
   }
-  // A fresh desktop install must land on the Tailscale gate without first
-  // starting a Local daemon. Starting Local here forced the login action to
-  // perform a slow stop/restart and made the app appear to choose Local by
-  // itself.
-  const connectionMode = await getConnectionMode();
-  if (connectionMode === null) {
-    return false;
-  }
+  // ADR-0056: a fresh desktop starts its bundled daemon right away and lands
+  // on it as the "Local" host; Tailscale sign-in is optional (Settings).
   const settings = await loadDesktopSettings();
   return settings.daemon.manageBuiltInDaemon;
 }
 
 function HostRuntimeBootstrapProvider({ children }: { children: ReactNode }) {
-  const { mode: connectionMode, loaded: connectionModeLoaded } = useConnectionMode();
+  const { mode: tailnetMode, loaded: tailnetModeLoaded } = useTailnetMode();
 
   useEffect(() => {
-    if (!connectionModeLoaded) {
+    if (!tailnetModeLoaded) {
       return;
     }
     const store = getHostRuntimeStore();
-    const daemonStartService = getDaemonStartService({ store, getConnectionMode });
+    const daemonStartService = getDaemonStartService({ store, getTailnetMode });
     startHostRuntimeBootstrap({
       store,
       daemonStartService,
       shouldStartDaemon: shouldStartBuiltInDaemon,
     });
-  }, [connectionMode, connectionModeLoaded]);
+  }, [tailnetMode, tailnetModeLoaded]);
 
   const anyOnlineHostServerId = useEarliestOnlineHostServerId();
   const daemonStartError = useDaemonStartLastError();
@@ -332,7 +322,7 @@ function HostRuntimeBootstrapProvider({ children }: { children: ReactNode }) {
   const retry = useCallback(() => {
     const daemonStartService = getDaemonStartService({
       store: getHostRuntimeStore(),
-      getConnectionMode,
+      getTailnetMode,
     });
     void daemonStartService.startIfEnabled({ shouldStart: shouldStartBuiltInDaemon });
   }, []);
@@ -1073,8 +1063,7 @@ function isPairingRoute(pathname: string): boolean {
 
 function RootStack() {
   const storeReady = useStoreReady();
-  const { mode: connectionMode } = useConnectionMode();
-  const desktopRuntime = shouldUseDesktopDaemon();
+  const { mode: tailnetMode } = useTailnetMode();
   return (
     <ThemedStack screenOptions={ROOT_STACK_SCREEN_OPTIONS}>
       <Stack.Screen name="index" />
@@ -1091,14 +1080,9 @@ function RootStack() {
       <Stack.Screen name="pair-scan" />
       <Stack.Screen name="pair-link" />
       <Stack.Screen name="pair-verify" />
-      <Stack.Protected
-        guard={
-          storeReady &&
-          ((!desktopRuntime && (isWeb || !isNative)) ||
-            connectionMode === "local" ||
-            connectionMode === "tailscale")
-        }
-      >
+      {/* A phone reaches the main screens once it has paired (which records a
+          tailnet mode); the desktop and the browser never wait for onboarding. */}
+      <Stack.Protected guard={storeReady && (!isNative || tailnetMode !== null)}>
         <Stack.Screen name="welcome" />
         <Stack.Screen name="settings/index" />
         <Stack.Screen name="settings/[section]" />
@@ -1131,7 +1115,6 @@ function AppShell() {
   return (
     <MobilePanelsProvider>
       <HorizontalScrollProvider>
-        <DesktopConnectionGate />
         <OpenProjectListener />
         <ReverseMigrationListener />
         <AgentNavigationListener />
@@ -1142,55 +1125,6 @@ function AppShell() {
       </HorizontalScrollProvider>
     </MobilePanelsProvider>
   );
-}
-
-function DesktopConnectionGate() {
-  const pathname = usePathname();
-  const router = useRouter();
-  const desktopRuntime = shouldUseDesktopDaemon();
-  const { mode, loaded } = useConnectionMode();
-  const loginStatus = useTailscaleLoginStatus();
-  const hosts = useHosts();
-  const serverIds = useMemo(() => hosts.map((host) => host.serverId), [hosts]);
-  const connectionStatuses = useHostRuntimeConnectionStatuses(serverIds);
-  // A Tailscale host whose live connection has settled into "error" (retries
-  // exhausted, not merely "connecting") has timed out and will not self-recover.
-  const hasRelayHost = hosts.some((host) =>
-    host.connections.some((connection) => connection.type === "relay"),
-  );
-  const tailscaleTimedOut =
-    mode === "tailscale" &&
-    hosts.some(
-      (host) => hostHasTailnetConnection(host) && connectionStatuses.get(host.serverId) === "error",
-    );
-
-  useEffect(() => {
-    if (
-      hasRelayHost ||
-      !shouldRedirectToDesktopTailscaleLogin({
-        desktopRuntime,
-        connectionModeLoaded: loaded,
-        pathname,
-        mode,
-        loginStatusKind: loginStatus.kind,
-        tailscaleTimedOut,
-      })
-    ) {
-      return;
-    }
-    router.replace("/tailscale-login");
-  }, [
-    desktopRuntime,
-    loaded,
-    loginStatus.kind,
-    mode,
-    pathname,
-    router,
-    tailscaleTimedOut,
-    hasRelayHost,
-  ]);
-
-  return null;
 }
 
 function RuntimeProviders({ children }: { children: ReactNode }) {
@@ -1208,11 +1142,14 @@ function RuntimeProviders({ children }: { children: ReactNode }) {
 }
 
 function TailscaleHealthMonitor() {
-  const { mode } = useConnectionMode();
+  const { mode } = useTailnetMode();
   const pathname = usePathname();
+  // The desktop always has its Local host to keep connected; a phone starts
+  // once pairing recorded a mode.
+  const active = mode !== null || shouldUseDesktopDaemon();
 
   useEffect(() => {
-    if (mode === null || pathname === "/tailscale-login" || isPairingRoute(pathname)) {
+    if (!active || pathname === "/tailscale-login" || isPairingRoute(pathname)) {
       return;
     }
 
@@ -1245,7 +1182,7 @@ function TailscaleHealthMonitor() {
       clearInterval(timer);
       appStateSubscription.remove();
     };
-  }, [mode, pathname]);
+  }, [active, pathname]);
 
   return null;
 }

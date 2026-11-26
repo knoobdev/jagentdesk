@@ -1102,10 +1102,6 @@ export const ar: TranslationResources = {
     },
   },
   connection: {
-    localMode: {
-      mobileWarning:
-        "الوضع المحلي مُفعَّل. لا يمكن للأجهزة المحمولة الاتصال بهذا الكمبيوتر عبر Tailscale حتى تعود إلى وضع Tailscale.",
-    },
     timingOut: {
       tailnet: {
         title: "تعذّر اتصال {{hostName}}",
@@ -1572,6 +1568,10 @@ export const ar: TranslationResources = {
   onboarding: {
     title: "مرحبا بكم في JAgentDesk",
     subtitle: "قم بتوصيل جهاز الكمبيوتر الخاص بك للبدء",
+    welcomeDescription: "تحكّم من هذا الجهاز في وكلاء البرمجة الذين يعملون على محطة عملك.",
+    getStarted: "ابدأ",
+    connectTitle: "اربط محطة عملك",
+    connectFooter: "على محطة عملك، افتح JAgentDesk → Pair a device.",
     actions: {
       settings: "إعدادات",
     },
@@ -1680,11 +1680,15 @@ export const ar: TranslationResources = {
       },
       scanQr: {
         title: "مسح رمز QR",
-        description: "اتصال عبر Tailnet.",
+        description: "اتصال مشفّر عبر relay.",
       },
       pasteLink: {
         title: "الصق رابط الاقتران",
-        description: "اتصال عبر Tailnet.",
+        description: "اتصال مشفّر عبر relay.",
+      },
+      tailscale: {
+        title: "تسجيل الدخول إلى Tailscale",
+        description: "انضم إلى tailnet الخاص بك لاتصال مباشر.",
       },
     },
     direct: {

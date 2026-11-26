@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   classifyPairingCodeEntry,
   isTailscaleReady,
+  resolvePairVerifyDecision,
   shouldRoutePairVerifyToTailscaleLogin,
+  tailnetModeAfterPairing,
 } from "./login-gate";
 
 describe("isTailscaleReady", () => {
@@ -74,5 +76,55 @@ describe("classifyPairingCodeEntry", () => {
         hasLiveAttempt: true,
       }),
     ).toBe("wait");
+  });
+});
+
+describe("resolvePairVerifyDecision", () => {
+  it("pairs a relay link over relay while the device is off the tailnet", () => {
+    for (const kind of ["needs-login", "unavailable", "connecting", "unknown"] as const) {
+      expect(resolvePairVerifyDecision({ hasRelay: true, local: false, status: { kind } })).toEqual(
+        { kind: "pair", route: "relay" },
+      );
+    }
+  });
+
+  it("sends a tailnet-only link to Tailscale sign-in when the device is not on the tailnet", () => {
+    expect(
+      resolvePairVerifyDecision({ hasRelay: false, local: false, status: { kind: "needs-login" } }),
+    ).toEqual({ kind: "tailscale-login" });
+    expect(
+      resolvePairVerifyDecision({ hasRelay: false, local: false, status: { kind: "unavailable" } }),
+    ).toEqual({ kind: "tailscale-login" });
+  });
+
+  it("waits for the Tailscale status before deciding a tailnet-only link", () => {
+    expect(
+      resolvePairVerifyDecision({ hasRelay: false, local: false, status: { kind: "unknown" } }),
+    ).toEqual({ kind: "wait" });
+  });
+
+  it("pairs a tailnet-only link over the tailnet once connected", () => {
+    expect(
+      resolvePairVerifyDecision({ hasRelay: false, local: false, status: { kind: "connected" } }),
+    ).toEqual({ kind: "pair", route: "tailnet" });
+  });
+
+  it("pairs a loopback link without the tailnet", () => {
+    expect(
+      resolvePairVerifyDecision({ hasRelay: false, local: true, status: { kind: "needs-login" } }),
+    ).toEqual({ kind: "pair", route: "local" });
+  });
+});
+
+describe("tailnetModeAfterPairing", () => {
+  it("records tailnet after a tailnet pairing", () => {
+    expect(tailnetModeAfterPairing({ route: "tailnet", current: null })).toBe("tailnet");
+    expect(tailnetModeAfterPairing({ route: "tailnet", current: "off" })).toBe("tailnet");
+  });
+
+  it("records off for a first relay pairing and keeps an existing sign-in", () => {
+    expect(tailnetModeAfterPairing({ route: "relay", current: null })).toBe("off");
+    expect(tailnetModeAfterPairing({ route: "relay", current: "tailnet" })).toBe("tailnet");
+    expect(tailnetModeAfterPairing({ route: "local", current: "off" })).toBe("off");
   });
 });

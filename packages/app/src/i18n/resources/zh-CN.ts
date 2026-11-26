@@ -1058,10 +1058,6 @@ export const zhCN: TranslationResources = {
     },
   },
   connection: {
-    localMode: {
-      mobileWarning:
-        "已开启本地模式。在切换回 Tailscale 模式之前，移动设备无法通过 Tailscale 连接到这台电脑。",
-    },
     timingOut: {
       tailnet: {
         title: "{{hostName}} 无法连接",
@@ -1508,6 +1504,10 @@ export const zhCN: TranslationResources = {
   onboarding: {
     title: "欢迎使用 JAgentDesk",
     subtitle: "连接你的电脑即可开始",
+    welcomeDescription: "在这台设备上控制运行在你工作站上的编码 agent。",
+    getStarted: "开始使用",
+    connectTitle: "连接你的工作站",
+    connectFooter: "在你的工作站上打开 JAgentDesk → Pair a device。",
     actions: {
       settings: "设置",
     },
@@ -1616,11 +1616,15 @@ export const zhCN: TranslationResources = {
       },
       scanQr: {
         title: "扫描二维码",
-        description: "Tailnet 连接。",
+        description: "加密的 relay 连接。",
       },
       pasteLink: {
         title: "粘贴配对链接",
-        description: "Tailnet 连接。",
+        description: "加密的 relay 连接。",
+      },
+      tailscale: {
+        title: "登录 Tailscale",
+        description: "加入你的 tailnet 以直接连接。",
       },
     },
     direct: {

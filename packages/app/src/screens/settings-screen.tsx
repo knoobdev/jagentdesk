@@ -96,7 +96,7 @@ import { DesktopPermissionsSection } from "@/desktop/components/desktop-permissi
 import { BrowserDataSection } from "@/desktop/browser/settings/browser-data-section";
 import { IntegrationsSection } from "@/desktop/components/integrations-section";
 import { isElectronRuntime } from "@/desktop/host";
-import { setConnectionMode, useConnectionMode } from "@/tailscale";
+import { getSnapshot as getTailscaleSnapshot, setTailnetModeIfUnset } from "@/tailscale";
 import { useAppDiagnosticStore } from "@/diagnostics/store";
 import { settingsStyles } from "@/styles/settings";
 import { THINKING_TONE_NATIVE_PCM_BASE64 } from "@/utils/thinking-tone.native-pcm";
@@ -819,8 +819,8 @@ function SettingsSidebar({
   const { t } = useTranslation();
   const hosts = useHosts();
   const localServerId = useLocalDaemonServerId();
-  const { mode: connectionMode } = useConnectionMode();
-  const localServerIdForOrdering = connectionMode === "local" ? localServerId : null;
+  // The desktop always reaches its bundled daemon locally, so it sorts first.
+  const localServerIdForOrdering = localServerId;
   const sortedHosts = useSortedHosts(hosts, localServerIdForOrdering);
   const hasHosts = sortedHosts.length > 0;
   const enableBuiltInDaemonOption = useEnableBuiltInDaemonOption();
@@ -987,8 +987,8 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   const insetBottomStyle = useMemo(() => ({ paddingBottom: insets.bottom }), [insets.bottom]);
   const hosts = useHosts();
   const localServerId = useLocalDaemonServerId();
-  const { mode: connectionMode } = useConnectionMode();
-  const localServerIdForOrdering = connectionMode === "local" ? localServerId : null;
+  // The desktop always reaches its bundled daemon locally, so it sorts first.
+  const localServerIdForOrdering = localServerId;
   const sortedHosts = useSortedHosts(hosts, localServerIdForOrdering);
   const selectedSettingsHostServerId = useSettingsHostSelection();
 
@@ -1088,17 +1088,16 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   }, [handleAddHost, openAddHostIntent]);
 
   const handleSelectDirectConnection = useCallback(() => {
-    // Selecting the direct form is an explicit Local choice. Persist it before
-    // probing so a successful direct connection cannot be stored while the
-    // runtime is still filtering for Tailscale connections.
-    void setConnectionMode("local")
+    // An unpaired device dials relay only. Record a mode before probing so the
+    // direct connection is dialed once saved; an existing sign-in is kept.
+    void setTailnetModeIfUnset("off")
       .then(() => {
         setIsAddHostMethodVisible(false);
         setIsDirectHostVisible(true);
         return undefined;
       })
       .catch(() => {
-        Alert.alert("Connection setup failed", "JAgentDesk could not save Local connection mode.");
+        Alert.alert("Connection setup failed", "JAgentDesk could not save the connection setting.");
       });
   }, []);
 
@@ -1110,24 +1109,13 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
 
   const handleSelectTailscale = useCallback(() => {
     setIsAddHostMethodVisible(false);
-    // A tailnet offer already contains the daemon address and public key.
-    // Never ask users to manually copy protocol fields; mobile obtains them
-    // from the desktop QR/deep-link and only asks for the six-digit proof.
-    if (isNative) {
-      router.push({ pathname: "/pair-scan", params: { source: "settings" } });
-      return;
-    }
-    // Desktop is the offer source, not a QR scanner. Open its real pairing
-    // screen so it generates the QR/deep-link and six-digit proof.
-    if (activeHostServerId) {
-      router.replace(buildSettingsHostSectionRoute(activeHostServerId, "pair-device"));
-      return;
-    }
-    // On a fresh desktop there is no host yet. The explicit login gate starts
-    // the app-owned daemon, joins Tailscale, and then the runtime creates the
-    // first tailnet host from its verified status. Do not silently no-op.
-    router.replace("/tailscale-login");
-  }, [activeHostServerId, router]);
+    // ADR-0056: "Sign in to Tailscale" joins this device to the tailnet so
+    // tailnet-only pairing links work. Pairing itself stays on Scan/Paste.
+    router.push({
+      pathname: "/tailscale-login",
+      params: getTailscaleSnapshot().kind === "connected" ? { manage: "true" } : {},
+    });
+  }, [router]);
 
   const handleHostAdded = useCallback(
     ({ serverId }: { serverId: string }) => {
@@ -1205,9 +1193,9 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   }, [closeAddConnectionFlow, router]);
 
   const handleHostRemoved = useCallback(() => {
-    // Removing a host must never silently switch transport to Local. Return to
-    // the explicit connection chooser so the user chooses Local or Tailscale.
-    router.replace(isNative ? "/pair-start" : "/tailscale-login");
+    // A phone with no host goes back to "Connect your workstation"; the desktop
+    // and the browser go back through the startup route.
+    router.replace(isNative ? "/pair-start?step=connect" : "/");
   }, [router]);
 
   const handleBackToRoot = useCallback(() => {

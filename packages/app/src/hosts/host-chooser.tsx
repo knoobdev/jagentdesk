@@ -18,7 +18,6 @@ import { HostStatusDotSlot } from "@/components/hosts/host-picker";
 import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
 import { OverlayLayerProvider, useGlobalOverlayLayer } from "@/lib/overlay-root";
 import { useHosts } from "@/runtime/host-runtime";
-import { useConnectionMode } from "@/tailscale";
 import { orderHostsLocalFirst, type HostProfile } from "@/types/host-connection";
 import { buildSettingsAddHostRoute } from "@/utils/host-routes";
 
@@ -67,8 +66,8 @@ function matchesHostQuery(host: HostProfile, query: string): boolean {
 export function useHostChooser() {
   const hosts = useHosts();
   const localServerId = useLocalDaemonServerId();
-  const { mode: connectionMode } = useConnectionMode();
-  const localServerIdForOrdering = connectionMode === "local" ? localServerId : null;
+  // The desktop always reaches its bundled daemon locally, so it sorts first.
+  const localServerIdForOrdering = localServerId;
   const open = useHostChooserStore((state) => state.open);
 
   return useCallback(

@@ -6,6 +6,8 @@ import { Text, TextInput, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { SessionOutboundMessage } from "@jagentdesk/protocol/messages";
+import { parseHostTarget } from "@jagentdesk/protocol/host-target";
+import { useRouter, type Href } from "expo-router";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -16,6 +18,20 @@ const spinnerProps = (theme: import("@/styles/theme").Theme) => ({
   color: theme.colors.foregroundMuted,
 });
 type SasState = Extract<SessionOutboundMessage, { type: "pairing.sas.changed" }>["payload"];
+
+/**
+ * True when the link reaches the daemon only over loopback: relay is off and
+ * the daemon is not on the tailnet. Another daemon on this computer can still
+ * use it; a phone cannot (spec `05.2.5`).
+ */
+export function isLoopbackOnlyPairingLink(link: string): boolean {
+  try {
+    return parseHostTarget(link).via === "local";
+  } catch {
+    return false;
+  }
+}
+
 export function PairDaemonSection({ serverId, onClose }: { serverId: string; onClose(): void }) {
   const client = useHostRuntimeClient(serverId);
   const [qr, setQr] = useState<string | null>(null);
@@ -27,6 +43,11 @@ export function PairDaemonSection({ serverId, onClose }: { serverId: string; onC
   const [now, setNow] = useState(performance.now());
   const [deadline, setDeadline] = useState<number | null>(null);
   const [generation, setGeneration] = useState(0);
+  const router = useRouter();
+  const openTailscaleSignIn = useCallback(() => {
+    onClose();
+    router.push("/tailscale-login" as Href);
+  }, [onClose, router]);
   useEffect(() => {
     if (!client) return;
     let active = true;
@@ -157,6 +178,7 @@ export function PairDaemonSection({ serverId, onClose }: { serverId: string; onC
         Scan the QR code or paste this link on the other device. Both devices must confirm the same
         verification code.
       </Text>
+      <LoopbackPairingWarning link={offer.link} onSignIn={openTailscaleSignIn} />
       {qr ? (
         <View style={styles.qr}>
           <SvgXml xml={qr} width={240} height={240} />
@@ -173,6 +195,22 @@ export function PairDaemonSection({ serverId, onClose }: { serverId: string; onC
     </View>
   );
 }
+function LoopbackPairingWarning({ link, onSignIn }: { link: string; onSignIn(): void }) {
+  if (!isLoopbackOnlyPairingLink(link)) return null;
+  return (
+    <>
+      <Alert
+        variant="warning"
+        title="This link only works on this computer"
+        description="Relay is off and this computer is not on your tailnet. To pair a phone, sign in to Tailscale or turn relay on."
+      />
+      <Button variant="secondary" onPress={onSignIn}>
+        Sign in to Tailscale
+      </Button>
+    </>
+  );
+}
+
 const styles = StyleSheet.create((theme) => ({
   qr: { alignSelf: "center", backgroundColor: "#ffffff" },
   content: { gap: theme.spacing[3], padding: theme.spacing[4] },
