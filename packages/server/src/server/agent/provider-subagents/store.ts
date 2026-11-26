@@ -1,6 +1,6 @@
 import type { AgentProvider, AgentTimelineItem } from "../agent-sdk-types.js";
 import { limitAgentTimelineItemContent } from "../agent-timeline-content.js";
-import { InMemoryAgentTimelineStore } from "../agent-timeline-store.js";
+import { InMemoryAgentTimelineStore, type AgentTimelineSnapshot } from "../agent-timeline-store.js";
 import type {
   AgentTimelineFetchOptions,
   AgentTimelineFetchResult,
@@ -61,6 +61,11 @@ export type ProviderSubagentStoreEvent =
       epoch: string;
     }
   | { type: "remove"; parentAgentId: string; subagentId: string };
+
+export interface ProviderSubagentSnapshot {
+  subagent: ProviderSubagentDescriptor;
+  timeline: AgentTimelineSnapshot | null;
+}
 
 function storeKey(parentAgentId: string, subagentId: string): string {
   return `${parentAgentId}\0${subagentId}`;
@@ -151,6 +156,33 @@ export class ProviderSubagentStore {
     options?: AgentTimelineFetchOptions,
   ): AgentTimelineFetchResult {
     return this.timelines.fetch(storeKey(parentAgentId, subagentId), options);
+  }
+
+  snapshotParent(parentAgentId: string): ProviderSubagentSnapshot[] {
+    return this.list(parentAgentId).map((subagent) => {
+      const key = storeKey(parentAgentId, subagent.id);
+      return {
+        subagent: { ...subagent },
+        timeline: this.timelines.has(key) ? this.timelines.snapshot(key) : null,
+      };
+    });
+  }
+
+  /** Replaces a parent's subagents with a snapshot and returns the upserts that announce them. */
+  restoreParent(
+    parentAgentId: string,
+    snapshots: readonly ProviderSubagentSnapshot[],
+  ): ProviderSubagentStoreEvent[] {
+    const events = this.deleteParent(parentAgentId);
+    for (const { subagent, timeline } of snapshots) {
+      const key = storeKey(parentAgentId, subagent.id);
+      const restored = { ...subagent, parentAgentId };
+      this.descriptors.set(key, restored);
+      if (timeline) this.timelines.restore(key, timeline);
+      else this.timelines.initialize(key);
+      events.push({ type: "upsert", subagent: restored });
+    }
+    return events;
   }
 
   deleteParent(parentAgentId: string): ProviderSubagentStoreEvent[] {

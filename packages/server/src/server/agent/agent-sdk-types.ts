@@ -798,6 +798,19 @@ export interface AgentSession {
 
   streamHistory(): AsyncGenerator<AgentStreamEvent>;
 
+  /**
+   * A cheap token that changes whenever the provider's stored history for this session changes
+   * (a file's size and mtime, a session's update time). Null when it cannot be read. Providers
+   * without one always replay their history when an agent is reopened.
+   */
+  readHistoryVersion?(): Promise<string | null>;
+
+  /**
+   * The host already holds this session's projected timeline and will not call streamHistory for
+   * it. History the session reads later, to index turns or rewind targets, must not be retained.
+   */
+  discardHistoryReplay?(): void;
+
   getRuntimeInfo(): Promise<AgentRuntimeInfo>;
 
   getAvailableModes(): Promise<AgentMode[]>;

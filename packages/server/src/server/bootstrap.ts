@@ -174,6 +174,7 @@ import type { RequestedSpeechProviders } from "./speech/speech-types.js";
 import { createSpeechService } from "./speech/speech-runtime.js";
 import { createSpeechSettingsOwner } from "./speech/speech-settings.js";
 import { AgentManager } from "./agent/agent-manager.js";
+import { AgentTimelineSnapshots } from "./agent/agent-timeline-snapshots.js";
 import { AgentStorage } from "./agent/agent-storage.js";
 import { attachAgentStoragePersistence } from "./persistence-hooks.js";
 import { createAgentMcpServer } from "./agent/mcp-server.js";
@@ -1104,8 +1105,13 @@ export async function createJAgentDeskDaemon(
     claudeSpawnEnv: (providerId) => customProviderService.materializeClaudeEnv(providerId),
   });
   const initialAgentManagerState = providerSnapshotManager.getAgentManagerProviderState();
+  const timelineSnapshots = new AgentTimelineSnapshots({
+    directory: path.join(config.jagentdeskHome, "agent-timelines"),
+    logger,
+  });
   const agentManager: AgentManager = new AgentManager({
     pluginLifecycle: pluginRuntime,
+    timelineSnapshots,
     resolveJAgentDeskToolPolicy: (provider) =>
       resolveJAgentDeskToolPolicy(provider, daemonConfigStore.get().providers),
     pluginAgentTools: pluginRuntime,
@@ -2355,6 +2361,7 @@ export async function createJAgentDeskDaemon(
     agentManager.prepareForShutdown();
     await restartRecovery.captureRunningAgents();
     await closeAllAgents(logger, agentManager);
+    timelineSnapshots.dispose();
     await withTimeout({
       promise: pluginRuntime.drainEvents(),
       timeoutMs: 5_000,

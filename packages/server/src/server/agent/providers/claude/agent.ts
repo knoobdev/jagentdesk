@@ -1792,7 +1792,8 @@ export class ClaudeAgentClient implements AgentClient {
       resolveBinary: this.resolveBinary,
       rewindSdk: this.rewindSdk,
     });
-    await session.ensureHistoryReady();
+    // History is read when it is first needed: replaying it, a turn, a rewind. An agent whose
+    // projected timeline the daemon already holds opens without parsing its transcript.
     return session;
   }
 
@@ -2608,6 +2609,9 @@ class ClaudeAgentSession implements AgentSession {
   // Readiness never rejects; history/rebind failures are logged at their owning boundary.
   private historyReady: Promise<void> | null = null;
 
+  // The host holds the projected timeline; the first history read only indexes it.
+  private discardInitialHistory = false;
+
   private historySessionId: string | null = null;
 
   private replayingHistory = false;
@@ -3378,7 +3382,8 @@ class ClaudeAgentSession implements AgentSession {
       "provider.claude.session_close.start",
     );
     this.closed = true;
-    await this.ensureHistoryReady();
+    // Wait for a history read in progress; closing never starts one.
+    await this.historyReady;
     this.rejectAllPendingPermissions(new Error("Claude session closed"));
     // AgentManager settles the run after runtime release. Preserve cleanup records
     // without reporting this closure as an explicit turn cancellation.
@@ -5873,11 +5878,72 @@ class ClaudeAgentSession implements AgentSession {
 
   ensureHistoryReady(): Promise<void> {
     if (!this.historyReady) {
-      this.historyReady = this.historySessionId
+      const load = this.historySessionId
         ? this.loadPersistedHistory(this.historySessionId)
         : Promise.resolve();
+      this.historyReady = this.discardInitialHistory ? this.indexHistoryOnly(load) : load;
     }
     return this.historyReady;
+  }
+
+  private async indexHistoryOnly(load: Promise<void>): Promise<void> {
+    await load;
+    this.discardInitialHistory = false;
+    this.dropPendingHistory();
+  }
+
+  discardHistoryReplay(): void {
+    if (!this.historyReady) {
+      this.discardInitialHistory = true;
+      return;
+    }
+    void this.historyReady.then(() => {
+      this.dropPendingHistory();
+      return undefined;
+    });
+  }
+
+  private dropPendingHistory(): void {
+    this.persistedHistory = [];
+    this.persistedProviderSubagentEvents = [];
+    this.historyPending = false;
+  }
+
+  /** The transcript and its subagent transcripts, by size and modification time. */
+  async readHistoryVersion(): Promise<string | null> {
+    const sessionId = this.claudeSessionId;
+    if (!sessionId) return null;
+    const historyPath = await this.resolveHistoryPath(sessionId);
+    if (!historyPath) return null;
+    let transcript: fs.Stats;
+    try {
+      transcript = await promises.stat(historyPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return `${sessionId}:none`;
+      throw error;
+    }
+    const subagentsDir = path.join(path.dirname(historyPath), sessionId, "subagents");
+    let subagentFiles = 0;
+    let subagentBytes = 0;
+    let subagentMtimeMs = 0;
+    const names = await promises.readdir(subagentsDir).catch(() => [] as string[]);
+    await Promise.all(
+      names.map(async (name) => {
+        const stats = await promises.stat(path.join(subagentsDir, name)).catch(() => null);
+        if (!stats?.isFile()) return;
+        subagentFiles += 1;
+        subagentBytes += stats.size;
+        subagentMtimeMs = Math.max(subagentMtimeMs, stats.mtimeMs);
+      }),
+    );
+    return [
+      sessionId,
+      transcript.size,
+      transcript.mtimeMs,
+      subagentFiles,
+      subagentBytes,
+      subagentMtimeMs,
+    ].join(":");
   }
 
   private async loadPersistedHistory(sessionId: string): Promise<void> {

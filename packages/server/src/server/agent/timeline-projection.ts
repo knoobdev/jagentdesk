@@ -344,6 +344,36 @@ export class TimelineProjection {
     this.sourceRanges.sort((a, b) => a.startSeq - b.startSeq);
   }
 
+  /**
+   * Rebuilds the projection from rows an earlier projection produced. The rows are taken as they
+   * are: re-projecting them would merge neighbours that were kept apart when they were projected.
+   */
+  static fromProjectedRows(rows: readonly ProjectedTimelineRow[]): TimelineProjection {
+    const projection = new TimelineProjection();
+    projection.restoreProjected(rows);
+    return projection;
+  }
+
+  private restoreProjected(rows: readonly ProjectedTimelineRow[]): void {
+    for (const row of rows) {
+      const index = this.rows.length;
+      row.seq = row.seqEnd;
+      this.rows.push(row);
+      const identity = timelineItemIdentity(row.item);
+      if (identity !== null) this.identities.set(identity, index);
+      if (row.item.type === "assistant_message") this.lastAssistantRowIndex = index;
+      const last = this.spans.at(-1);
+      if (last && last.endSeq >= row.seqStart) {
+        last.endSeq = Math.max(last.endSeq, row.seqEnd);
+      } else {
+        this.spans.push({ start: index, endSeq: row.seqEnd });
+      }
+      for (const range of row.sourceSeqRanges)
+        this.sourceRanges.push({ ...range, rowIndex: index });
+    }
+    this.sourceRanges.sort((a, b) => a.startSeq - b.startSeq);
+  }
+
   append(row: AgentTimelineRow): ProjectedTimelineRow {
     const rowIndex = this.appendProjected(row);
     const last = this.sourceRanges.at(-1);
