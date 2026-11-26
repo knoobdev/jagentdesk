@@ -204,10 +204,12 @@ import { createAgentMcpServer } from "./agent/mcp-server.js";
 import { createAgentMcpProtocolNormalizer } from "./agent/mcp-protocol.js";
 import {
   createJAgentDeskToolCatalog,
+  createJAgentDeskAgentToolManifest,
   type JAgentDeskToolHostDependencies,
 } from "./agent/tools/jagentdesk-tools.js";
 import type { JAgentDeskToolRuntimeContext } from "./agent/tools/types.js";
-import { ProviderSnapshotManager } from "./agent/provider-snapshot-manager.js";
+import type { ProviderSnapshotManager } from "./agent/provider-snapshot-manager.js";
+import { createAgentProviderRuntime } from "./agent/provider-runtime.js";
 import { bootstrapWorkspaceRegistries } from "./workspace-registry-bootstrap.js";
 import { WorkspaceReconciliationService } from "./workspace-reconciliation-service.js";
 import {
@@ -1150,21 +1152,26 @@ export async function createJAgentDeskDaemon(
     reloadRegistry: (removeProviders, changedProviders) =>
       reloadProviderRegistry(removeProviders, changedProviders),
   });
-  const providerSnapshotLogger = logger.child({ module: "provider-snapshot-manager" });
-  const providerSnapshotManager = new ProviderSnapshotManager({
-    backgroundRefresh: { intervalMs: PROVIDER_BACKGROUND_REFRESH_INTERVAL_MS },
-    logger: providerSnapshotLogger,
-    runtimeSettings: config.agentProviderSettings,
-    providerOverrides: config.providerOverrides,
-    workspaceGitService,
-    managedProcesses,
-    isDev: config.isDev === true,
-    extraClients: config.agentClients,
-    openCodeProviderInjection: (providerId) =>
-      customProviderService.materializeOpenCodeProvider(providerId),
-    claudeSpawnEnv: (providerId) => customProviderService.materializeClaudeEnv(providerId),
-    checkApiProviderEndpoint: (providerId) => customProviderService.checkEndpoint(providerId),
+  // The OpenCode tool bridge gives OpenCode agents JAgentDesk's tools and, on servers that report
+  // `features.mcpTools`, their own MCP servers without a server of their own (spec 33.7).
+  const agentProviderRuntime = await createAgentProviderRuntime({
+    jagentdeskHome: config.jagentdeskHome,
+    logger,
+    snapshotManager: {
+      backgroundRefresh: { intervalMs: PROVIDER_BACKGROUND_REFRESH_INTERVAL_MS },
+      runtimeSettings: config.agentProviderSettings,
+      providerOverrides: config.providerOverrides,
+      workspaceGitService,
+      managedProcesses,
+      isDev: config.isDev === true,
+      extraClients: config.agentClients,
+      openCodeProviderInjection: (providerId) =>
+        customProviderService.materializeOpenCodeProvider(providerId),
+      claudeSpawnEnv: (providerId) => customProviderService.materializeClaudeEnv(providerId),
+      checkApiProviderEndpoint: (providerId) => customProviderService.checkEndpoint(providerId),
+    },
   });
+  const providerSnapshotManager = agentProviderRuntime.snapshotManager;
   const initialAgentManagerState = providerSnapshotManager.getAgentManagerProviderState();
   const timelineSnapshots = new AgentTimelineSnapshots({
     directory: path.join(config.jagentdeskHome, "agent-timelines"),
@@ -2033,8 +2040,14 @@ export async function createJAgentDeskDaemon(
   });
   const createAgentToolCatalog = (runtime: JAgentDeskToolRuntimeContext) =>
     createJAgentDeskToolCatalog(createAgentToolHostDependencies(runtime));
+  const setAgentProviderToolsEnabled = (enabled: boolean) => {
+    agentProviderRuntime.setJAgentDeskToolCatalog(
+      enabled ? createJAgentDeskAgentToolManifest(createAgentToolHostDependencies({})) : null,
+    );
+  };
   agentManager.setJAgentDeskToolCatalogFactory(createAgentToolCatalog);
   agentManager.setJAgentDeskToolsEnabled(config.mcpInjectIntoAgents !== false);
+  setAgentProviderToolsEnabled(config.mcpEnabled !== false && config.mcpInjectIntoAgents !== false);
 
   const mcpEnabled = config.mcpEnabled ?? true;
   let agentMcpBaseUrl: string | null = null;
@@ -2226,6 +2239,7 @@ export async function createJAgentDeskDaemon(
             daemonConfigStore.onFieldChange("mcp.injectIntoAgents", (value) => {
               agentManager.setMcpBaseUrl(value ? mcpBaseUrl : null);
               agentManager.setJAgentDeskToolsEnabled(value !== false);
+              setAgentProviderToolsEnabled(mcpEnabled && value !== false);
             });
             daemonConfigStore.onFieldChange("appendSystemPrompt", (value) => {
               agentManager.setAppendSystemPrompt(typeof value === "string" ? value : "");
@@ -2464,6 +2478,7 @@ export async function createJAgentDeskDaemon(
       unsubscribePluginSessionChanges();
       await pluginRuntime.stopAllPlugins().catch(() => undefined);
       await serviceProxy.stopStandalone().catch(() => undefined);
+      await agentProviderRuntime.shutdown().catch(() => undefined);
       if (mainStarted) {
         httpServer.closeAllConnections();
         await new Promise<void>((resolve) => httpServer.close(() => resolve()));
@@ -2512,7 +2527,8 @@ export async function createJAgentDeskDaemon(
     await agentStorage.flush().catch(() => undefined);
     // Spec 34: loopback forwards of api providers die with the daemon.
     customProviderService.closeAll();
-    await providerSnapshotManager.shutdown();
+    // Stops the provider snapshot manager, then the OpenCode tool bridge.
+    await agentProviderRuntime.shutdown();
     if (shutdownFlushTimedOut) {
       await withTimeout({
         promise: agentManager.flushForShutdown(),

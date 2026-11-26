@@ -1,5 +1,8 @@
 import { once } from "node:events";
+import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import type { FormInfo, ModelInfo, SessionInfo, SessionMessageInfo } from "@opencode/client";
 import { describe, expect, test } from "vitest";
 
@@ -9,7 +12,9 @@ import { ProviderSubagentStore } from "../../../provider-subagents/store.js";
 import { OpenCodeV2AgentClient } from "./agent.js";
 import { V2Harness } from "../test-utils/v2-harness.js";
 import type { V2Api } from "./api.js";
-import { V2Runtime } from "./runtime.js";
+import { V2Runtime, type V2RuntimeAcquireOptions } from "./runtime.js";
+import { OpenCodeBridge } from "../bridge.js";
+import { writeStdioMcpFixture } from "../test-utils/mcp-fixtures.js";
 
 function terminalEvents(events: AgentStreamEvent[]) {
   return events.filter(
@@ -840,11 +845,7 @@ describe("OpenCode v2 session lifecycle", () => {
       second.prompts.push(input.text);
     };
     const session = await client.createSession(
-      {
-        provider: "opencode",
-        cwd: "/tmp/project",
-        mcpServers: { tools: { type: "stdio", command: "tools" } },
-      },
+      { provider: "opencode", cwd: "/tmp/project" },
       { env: { TOKEN: "test" } },
     );
     const running = session.run("before exit");
@@ -855,7 +856,6 @@ describe("OpenCode v2 session lifecycle", () => {
     try {
       expect((await session.run("after exit")).finalText).toBe("recovered");
       expect(second.prompts).toEqual(["after exit"]);
-      expect(second.mcpAdds).toEqual(["tools"]);
       expect(second.environments).toMatchObject([
         { sessionID: "session", variables: { TOKEN: "test", PATH: process.env.PATH } },
       ]);
@@ -1181,12 +1181,12 @@ describe("OpenCode v2 session lifecycle", () => {
     }
   });
 
-  test("reuses the shared helper for sessions whose env is only agent identity", async () => {
+  test("shares the server for a launch environment, which reaches the session only", async () => {
     const harness = new V2Harness();
-    const acquires: Array<{ env?: Record<string, string>; dedicated?: boolean }> = [];
+    let acquisitions = 0;
     const runtime = {
-      acquire: async (input: { env?: Record<string, string>; dedicated?: boolean } = {}) => {
-        acquires.push(input);
+      acquire: async () => {
+        acquisitions += 1;
         return harness.connection;
       },
       shutdown: async () => undefined,
@@ -1194,49 +1194,188 @@ describe("OpenCode v2 session lifecycle", () => {
     const client = new OpenCodeV2AgentClient({ logger: createTestLogger(), runtime });
     const session = await client.createSession(
       { provider: "opencode", cwd: "/tmp/project" },
-      {
-        agentId: "agent",
-        env: { JAGENTDESK_AGENT_ID: "agent", JAGENTDESK_AGENT_CWD: "/tmp/project" },
-      },
+      { agentId: "agent", env: { HUB_SECRET: "secret", JAGENTDESK_AGENT_ID: "agent" } },
     );
     try {
-      expect(acquires).toEqual([{}]);
+      expect(acquisitions).toBe(1);
       expect(harness.environments).toMatchObject([
-        {
-          sessionID: "session",
-          variables: { JAGENTDESK_AGENT_ID: "agent", JAGENTDESK_AGENT_CWD: "/tmp/project" },
-        },
+        { sessionID: "session", variables: { HUB_SECRET: "secret", JAGENTDESK_AGENT_ID: "agent" } },
       ]);
     } finally {
       await session.close();
     }
   });
 
-  test("starts a dedicated helper when the session carries custom MCP", async () => {
+  test("runs MCP servers on the shared server when it reports features.mcpTools", async () => {
     const harness = new V2Harness();
-    const acquires: Array<{ env?: Record<string, string>; dedicated?: boolean }> = [];
+    harness.mcpPathResult = "session";
+    const home = await mkdtemp(path.join(tmpdir(), "jagentdesk-v2-session-mcp-"));
+    const fixture = await writeStdioMcpFixture(home);
+    const bridge = new OpenCodeBridge({ jagentdeskHome: home, logger: createTestLogger() });
+    const acquires: Array<V2RuntimeAcquireOptions | undefined> = [];
     const runtime = {
-      acquire: async (input: { env?: Record<string, string>; dedicated?: boolean } = {}) => {
+      acquire: async (input?: V2RuntimeAcquireOptions) => {
+        acquires.push(input);
+        return harness.connection;
+      },
+      shutdown: async () => undefined,
+    };
+    const client = new OpenCodeV2AgentClient({ logger: createTestLogger(), runtime, bridge });
+    const session = await client.createSession(
+      {
+        provider: "opencode",
+        // A stdio server starts in the agent's directory, which must exist.
+        cwd: home,
+        mcpServers: { local: { type: "stdio", command: process.execPath, args: [fixture.script] } },
+      },
+      { agentId: "agent", env: { HUB_SECRET: "secret", JAGENTDESK_AGENT_ID: "agent" } },
+    );
+    try {
+      expect(acquires).toEqual([undefined]);
+      expect(harness.mcpAdds).toEqual([]);
+      expect(bridge.hasMcpTools("session")).toBe(true);
+      expect(harness.environments).toMatchObject([
+        { sessionID: "session", variables: { HUB_SECRET: "secret", JAGENTDESK_AGENT_ID: "agent" } },
+      ]);
+    } finally {
+      await session.close();
+      await rm(home, { recursive: true, force: true });
+    }
+    expect(bridge.hasMcpTools("session")).toBe(false);
+  });
+
+  test("keeps mcp.add on a server of the agent's own when the server lacks features.mcpTools", async () => {
+    const harness = new V2Harness();
+    harness.mcpPathResult = "legacy";
+    const acquires: Array<V2RuntimeAcquireOptions | undefined> = [];
+    const runtime = {
+      acquire: async (input?: V2RuntimeAcquireOptions) => {
         acquires.push(input);
         return harness.connection;
       },
       shutdown: async () => undefined,
     };
     const client = new OpenCodeV2AgentClient({ logger: createTestLogger(), runtime });
+    const env = { HUB_SECRET: "secret", JAGENTDESK_AGENT_ID: "agent" };
     const session = await client.createSession(
       {
         provider: "opencode",
         cwd: "/tmp/project",
-        mcpServers: { custom: { type: "stdio", command: "custom", args: [] } },
+        mcpServers: { custom: { type: "stdio", command: "custom", args: ["--flag"] } },
       },
-      {
-        agentId: "agent",
-        env: { JAGENTDESK_AGENT_ID: "agent", JAGENTDESK_AGENT_CWD: "/tmp/project" },
-      },
+      { agentId: "agent", env },
     );
     try {
-      expect(acquires).toHaveLength(1);
-      expect(acquires[0]?.dedicated).toBe(true);
+      // The shared server decides the path; the session runs on a dedicated one.
+      expect(acquires).toEqual([undefined, { env, dedicated: true }]);
+      expect(harness.releases).toBe(1);
+      expect(harness.mcpAddInputs).toEqual([
+        {
+          server: "custom",
+          location: { directory: "/tmp/project" },
+          config: {
+            type: "local",
+            command: ["custom", "--flag"],
+            environment: undefined,
+            codemode: false,
+          },
+        },
+      ]);
+      expect(harness.environments).toMatchObject([{ sessionID: "session", variables: env }]);
+    } finally {
+      await session.close();
+    }
+  });
+
+  test("checks the session's MCP tools in the plugin on the session path", async () => {
+    const harness = new V2Harness();
+    const home = await mkdtemp(path.join(tmpdir(), "jagentdesk-v2-session-health-"));
+    const fixture = await writeStdioMcpFixture(home);
+    const bridge = new OpenCodeBridge({ jagentdeskHome: home, logger: createTestLogger() });
+    let tools: string[] = [];
+    let binds = 0;
+    const connection = {
+      ...harness.connection,
+      bindSession: async () => {
+        binds += 1;
+      },
+      sessionToolsStatus: async () => ({ bound: true, tools }),
+    };
+    const client = new OpenCodeV2AgentClient({
+      logger: createTestLogger(),
+      runtime: { acquire: async () => connection, shutdown: async () => undefined },
+      bridge,
+    });
+    const session = await client.createSession({
+      provider: "opencode",
+      cwd: home,
+      mcpServers: { local: { type: "stdio", command: process.execPath, args: [fixture.script] } },
+    });
+    try {
+      const signal = new AbortController().signal;
+      const before = binds;
+      await expect(session.checkJAgentDeskTools!({ signal })).resolves.toEqual({
+        status: "missing",
+        reason: "the JAgentDesk plugin in OpenCode is missing this session's MCP tools: local_env",
+      });
+      // One re-bind was tried before reporting.
+      expect(binds - before).toBe(1);
+      tools = ["mcp:local_env"];
+      await expect(session.checkJAgentDeskTools!({ signal })).resolves.toEqual({ status: "ok" });
+    } finally {
+      await session.close();
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  test("checks mcp.list for the internal jagentdesk server on the legacy path", async () => {
+    const harness = new V2Harness();
+    harness.mcpPathResult = "legacy";
+    const client = new OpenCodeV2AgentClient({
+      logger: createTestLogger(),
+      runtime: harness.runtime,
+    });
+    const session = await client.createSession({
+      provider: "opencode",
+      cwd: "/tmp/project",
+      mcpServers: {
+        jagentdesk: { type: "http", url: "http://127.0.0.1:1/mcp/agents" },
+      },
+    });
+    try {
+      const signal = new AbortController().signal;
+      await expect(session.checkJAgentDeskTools!({ signal })).resolves.toEqual({ status: "ok" });
+      harness.mcpAdds.length = 0;
+      await expect(session.checkJAgentDeskTools!({ signal })).resolves.toEqual({
+        status: "missing",
+        reason: "the jagentdesk MCP server is not loaded in OpenCode",
+      });
+    } finally {
+      await session.close();
+    }
+  });
+
+  test("never asks for the MCP path when the agent has no MCP servers or process env", async () => {
+    const harness = new V2Harness();
+    let asked = 0;
+    const connection = {
+      ...harness.connection,
+      mcpPath: async () => {
+        asked += 1;
+        return "legacy" as const;
+      },
+    };
+    const client = new OpenCodeV2AgentClient({
+      logger: createTestLogger(),
+      runtime: { acquire: async () => connection, shutdown: async () => undefined },
+    });
+    const session = await client.createSession(
+      { provider: "opencode", cwd: "/tmp/project" },
+      { agentId: "agent", env: { JAGENTDESK_AGENT_ID: "agent" } },
+    );
+    try {
+      expect(asked).toBe(0);
+      expect(harness.mcpAdds).toEqual([]);
     } finally {
       await session.close();
     }

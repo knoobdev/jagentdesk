@@ -15,7 +15,8 @@ interface ChildrenOptions {
   id: string;
   emit(event: AgentStreamEvent): void;
   reconcilePermissions(id: string): Promise<void>;
-  bindChild?: (id: string) => void;
+  /** Prepares a descendant session for the current connection. */
+  adoptChild?: (id: string) => Promise<void>;
 }
 interface Child {
   parentID: string;
@@ -25,6 +26,18 @@ interface Child {
 export class SessionChildren {
   private readonly children = new Map<string, Child>();
   constructor(private readonly options: ChildrenOptions) {}
+  async restoreAdoptions() {
+    const { adoptChild } = this.options;
+    if (!adoptChild) return;
+    for (const id of this.children.keys()) {
+      try {
+        await adoptChild(id);
+      } catch (error) {
+        if (!isSessionNotFoundError(error)) throw error;
+        this.remove(id);
+      }
+    }
+  }
   async observe(event: import("@opencode/client").OpenCodeEvent) {
     if (event.type === "session.deleted") {
       this.remove(event.data.sessionID);
@@ -92,9 +105,9 @@ export class SessionChildren {
     await this.options.reconcilePermissions(info.id);
     let child = this.children.get(info.id);
     if (!child) {
-      child = { parentID, timeline: new V2Timeline() };
+      await this.options.adoptChild?.(info.id);
+      child = this.children.get(info.id) ?? { parentID, timeline: new V2Timeline() };
       this.children.set(info.id, child);
-      this.options.bindChild?.(info.id);
     }
     const active = await this.options.client().session.active();
     let status: "running" | "failed" | "canceled" | "completed" = "completed";

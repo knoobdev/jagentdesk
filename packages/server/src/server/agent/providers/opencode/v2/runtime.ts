@@ -21,10 +21,15 @@ import {
   type OpenCodeProviderInjection,
 } from "../../../../custom-providers/materialization.js";
 import { resolveExternalOpenCodeServer, type ExternalOpenCodeServer } from "./external-server.js";
-import { selectOpenCodeService, type OpenCodeServiceSelection } from "./service-selection.js";
+import {
+  processEnvironmentOverrides,
+  selectOpenCodeService,
+  type OpenCodeServiceSelection,
+} from "./service-selection.js";
 import {
   bridgeBindings,
   connectSharedService,
+  type OpenCodeMcpPath,
   type OpenCodeSessionToolsStatus,
 } from "./shared-service.js";
 import {
@@ -45,6 +50,8 @@ export interface V2Connection {
   refreshLocation(cwd: string, signal?: AbortSignal): Promise<void>;
   /** Spec 04 §27b.0: the bridge plugin's tools for one session; null when the plugin cannot tell. */
   sessionToolsStatus(sessionId: string, cwd: string): Promise<OpenCodeSessionToolsStatus | null>;
+  /** Spec 33.7: how this server runs an agent's own MCP servers, decided once per server. */
+  mcpPath(cwd: string): Promise<OpenCodeMcpPath>;
   readonly exited: Promise<Error>;
 }
 interface Generation {
@@ -57,6 +64,7 @@ interface Generation {
   refreshLocation(cwd: string, signal?: AbortSignal): Promise<void>;
   /** Spec 04 §27b.0: the bridge plugin's tools for one session; null when the plugin cannot tell. */
   sessionToolsStatus(sessionId: string, cwd: string): Promise<OpenCodeSessionToolsStatus | null>;
+  mcpPath(cwd: string): Promise<OpenCodeMcpPath>;
 }
 export interface V2RuntimeOptions {
   logger: Logger;
@@ -72,6 +80,10 @@ export interface V2RuntimeOptions {
 
 export interface V2RuntimeAcquireOptions {
   fresh?: boolean;
+  /**
+   * Spec 33.7 legacy path: a server of the agent's own, for its `mcp.add` servers and process
+   * env, when the shared server does not report `features.mcpTools`.
+   */
   dedicated?: boolean;
   env?: Record<string, string>;
   signal?: AbortSignal;
@@ -110,16 +122,7 @@ export class V2Runtime {
     input.signal?.throwIfAborted();
     this.assertBridgePort();
     const selected = await raceProviderRefreshAbort(input.signal, this.selection);
-    const selection: OpenCodeServiceSelection = this.requiresOwnedServer(input, selected)
-      ? { kind: "owned" }
-      : selected;
-    let pending: Promise<Generation>;
-    if (input.env || input.dedicated) {
-      pending = this.startTracked(selection, input.env);
-    } else {
-      if (!this.current) this.current = this.startTracked(selection);
-      pending = this.current;
-    }
+    const pending = this.pendingGeneration(input, selected);
     let generation: Generation;
     try {
       generation = await raceProviderRefreshAbort(input.signal, pending);
@@ -155,6 +158,18 @@ export class V2Runtime {
     return connection;
   }
 
+  private pendingGeneration(
+    input: V2RuntimeAcquireOptions,
+    selected: OpenCodeServiceSelection,
+  ): Promise<Generation> {
+    // Spec 33.7 legacy path: a server of the agent's own, never the shared one.
+    if (input.env || input.dedicated) return this.startTracked({ kind: "owned" }, input.env ?? {});
+    this.current ??= this.startTracked(
+      this.requiresOwnedServer(selected) ? { kind: "owned" } : selected,
+    );
+    return this.current;
+  }
+
   private assertBridgePort(): void {
     const port = this.options.settings?.env?.JAGENTDESK_OPENCODE_BRIDGE_PORT;
     if (!port || !this.options.bridge) return;
@@ -165,23 +180,11 @@ export class V2Runtime {
       );
   }
 
-  private requiresOwnedServer(
-    input: V2RuntimeAcquireOptions,
-    selection: OpenCodeServiceSelection,
-  ): boolean {
-    if (selection.kind === "owned" || input.env || input.dedicated) return true;
-    const connectionEnv = new Set([
-      "JAGENTDESK_OPENCODE_SERVER_URL",
-      "JAGENTDESK_OPENCODE_SERVER_PASSWORD",
-      "JAGENTDESK_OPENCODE_BRIDGE_URL",
-      "JAGENTDESK_OPENCODE_BRIDGE_PORT",
-    ]);
-    if (selection.kind === "discovered") {
-      connectionEnv.add("XDG_CONFIG_HOME");
-      connectionEnv.add("XDG_STATE_HOME");
-      connectionEnv.add("OPENCODE_CONFIG_DIR");
-    }
-    return Object.keys(this.options.settings?.env ?? {}).some((key) => !connectionEnv.has(key));
+  // JAgentDesk starts its own server, instead of refusing, when the provider env configures the
+  // OpenCode process: an existing server cannot honor it.
+  private requiresOwnedServer(selection: OpenCodeServiceSelection): boolean {
+    if (selection.kind === "owned") return true;
+    return processEnvironmentOverrides(this.options.settings?.env, selection.kind).length > 0;
   }
 
   private lease(generation: Generation, pending: Promise<Generation>): V2Connection {
@@ -206,6 +209,7 @@ export class V2Runtime {
       unbindSession: generation.unbindSession,
       refreshLocation: generation.refreshLocation,
       sessionToolsStatus: generation.sessionToolsStatus,
+      mcpPath: generation.mcpPath,
       exited: generation.exited,
     };
   }
@@ -237,9 +241,9 @@ export class V2Runtime {
 
   private startTracked(
     selection: OpenCodeServiceSelection,
-    env?: Record<string, string>,
+    dedicatedEnv?: Record<string, string>,
   ): Promise<Generation> {
-    const pending = this.start(selection, env);
+    const pending = this.start(selection, dedicatedEnv);
     this.starts.add(pending);
     void pending.then(
       (generation) =>
@@ -258,7 +262,7 @@ export class V2Runtime {
 
   private async start(
     selection: OpenCodeServiceSelection,
-    env: Record<string, string> = {},
+    dedicatedEnv?: Record<string, string>,
   ): Promise<Generation> {
     if (selection.kind !== "owned") {
       const generation: Generation = {
@@ -281,7 +285,7 @@ export class V2Runtime {
     let configured: Record<string, string> = {
       ...(inheritedConfig ? { OPENCODE_CONFIG_CONTENT: inheritedConfig } : {}),
       ...settings?.env,
-      ...env,
+      ...dedicatedEnv,
     };
     const injection = this.options.providerConfigInjection
       ? await this.options.providerConfigInjection()
@@ -400,13 +404,19 @@ export class V2Runtime {
           return validateOpenCodeResponse(request, response);
         },
       });
-      await client.server.info({ signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())) });
+      const info = await client.server.info({
+        signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
+      });
       const generation: Generation = {
         client,
         users: 0,
         stop,
         exited,
-        ...bridgeBindings(client, bridge),
+        ...bridgeBindings(client, bridge, undefined, undefined, {
+          logger,
+          version: info.version,
+          dedicated: dedicatedEnv !== undefined,
+        }),
       };
       this.generations.add(generation);
       process.once("exit", () => {
