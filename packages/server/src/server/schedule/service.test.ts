@@ -169,6 +169,8 @@ function createScheduleService(options: TestScheduleServiceOptions): ScheduleSer
           markWorkspaceArchiving: () => {},
           clearWorkspaceArchiving: () => {},
           killTerminalsForWorkspace: async () => {},
+          assertWorkspaceAutomationAllowed: async () => {},
+          isCheckoutUntrusted: async () => false,
           sessionLogger: options.logger,
         },
         {
@@ -273,6 +275,8 @@ async function createRegistryBackedScheduleWorkspaceDeps(rootDir: string): Promi
               markWorkspaceArchiving: () => {},
               clearWorkspaceArchiving: () => {},
               killTerminalsForWorkspace: async () => {},
+              assertWorkspaceAutomationAllowed: async () => {},
+              isCheckoutUntrusted: async () => false,
               sessionLogger: logger,
             },
             {

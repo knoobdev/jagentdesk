@@ -14,6 +14,13 @@ const ChangeRequestLookupTargetSchema = z.object({
   localBranchName: z.string().min(1).optional(),
 });
 
+const UntrustedWorktreeSourceSchema = z.object({
+  kind: z.literal("change_request"),
+  forge: z.string().min(1),
+  number: z.number().int().positive(),
+  headRepository: z.string().min(1),
+});
+
 // baseRefName is the display name; baseRef is the checkout's current exact base
 // ("refs/remotes/upstream/main"). baseRef is optional because worktrees written before it
 // existed only have the name — there are no migrations, so readers fall back.
@@ -23,6 +30,7 @@ const JAgentDeskWorktreeMetadataV1Schema = z.object({
   baseRef: z.string().min(1).optional(),
   changeRequestLookupTarget: ChangeRequestLookupTargetSchema.optional(),
   worktreeManagerPluginId: z.string().min(1).optional(),
+  untrustedSource: UntrustedWorktreeSourceSchema.optional(),
 });
 
 const JAgentDeskWorktreeMetadataV2Schema = z.object({
@@ -31,6 +39,7 @@ const JAgentDeskWorktreeMetadataV2Schema = z.object({
   baseRef: z.string().min(1).optional(),
   changeRequestLookupTarget: ChangeRequestLookupTargetSchema.optional(),
   worktreeManagerPluginId: z.string().min(1).optional(),
+  untrustedSource: UntrustedWorktreeSourceSchema.optional(),
   firstAgentBranchAutoName: z
     .discriminatedUnion("status", [
       z.object({
@@ -58,6 +67,7 @@ const JAgentDeskWorktreeMetadataSchema = z.union([
 
 export type JAgentDeskWorktreeMetadata = z.infer<typeof JAgentDeskWorktreeMetadataSchema>;
 export type JAgentDeskWorktreeChangeRequestHint = z.infer<typeof ChangeRequestLookupTargetSchema>;
+export type JAgentDeskWorktreeUntrustedSource = z.infer<typeof UntrustedWorktreeSourceSchema>;
 
 export function createJAgentDeskWorktreeChangeRequestHint(
   input: JAgentDeskWorktreeChangeRequestHint,
@@ -230,6 +240,7 @@ export async function writeJAgentDeskWorktreeMetadata(
     baseRef?: string;
     changeRequestLookupTarget?: JAgentDeskWorktreeChangeRequestHint;
     worktreeManagerPluginId?: string;
+    untrustedSource?: JAgentDeskWorktreeUntrustedSource;
   },
 ): Promise<void> {
   return mutateMetadata(worktreeRoot, async (root) => {
@@ -250,8 +261,38 @@ export async function writeJAgentDeskWorktreeMetadata(
       ...(options.worktreeManagerPluginId
         ? { worktreeManagerPluginId: options.worktreeManagerPluginId }
         : {}),
+      ...(options.untrustedSource ? { untrustedSource: options.untrustedSource } : {}),
     };
     await writeJAgentDeskWorktreeMetadataFile(root, metadata);
+  });
+}
+
+export async function setJAgentDeskWorktreeUntrustedSource(
+  worktreeRoot: string,
+  untrustedSource: JAgentDeskWorktreeUntrustedSource | null,
+): Promise<boolean> {
+  return mutateMetadata(worktreeRoot, async (root) => {
+    let current: JAgentDeskWorktreeMetadata | null;
+    try {
+      current = await readMetadataFile(root);
+    } catch (error) {
+      const cause = (error as { cause?: NodeJS.ErrnoException }).cause;
+      if ((error as NodeJS.ErrnoException).code === "ENOENT" || cause?.code === "ENOENT") {
+        return false;
+      }
+      throw error;
+    }
+    if (!current) {
+      return false;
+    }
+    const hadUntrustedSource = Boolean(current.untrustedSource);
+    if (!untrustedSource && !hadUntrustedSource) {
+      return false;
+    }
+    const { untrustedSource: _previous, ...rest } = current;
+    const next: JAgentDeskWorktreeMetadata = untrustedSource ? { ...rest, untrustedSource } : rest;
+    await writeJAgentDeskWorktreeMetadataFile(root, next);
+    return untrustedSource ? true : hadUntrustedSource;
   });
 }
 

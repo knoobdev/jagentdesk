@@ -1868,6 +1868,8 @@ describe("handleJAgentDeskWorktreeArchiveRequest worktree scope", () => {
         markWorkspaceArchiving: vi.fn(),
         clearWorkspaceArchiving: vi.fn(),
         killTerminalsForWorkspace: vi.fn(async () => {}),
+        assertWorkspaceAutomationAllowed: async () => {},
+        isCheckoutUntrusted: async () => false,
         sessionLogger: createLogger(),
       },
       {
@@ -1944,6 +1946,8 @@ describe("handleJAgentDeskWorktreeArchiveRequest worktree scope", () => {
         markWorkspaceArchiving: vi.fn(),
         clearWorkspaceArchiving: vi.fn(),
         killTerminalsForWorkspace: vi.fn(async () => {}),
+        assertWorkspaceAutomationAllowed: async () => {},
+        isCheckoutUntrusted: async () => false,
         sessionLogger: createLogger(),
       },
       {
@@ -2021,6 +2025,8 @@ describe("handleJAgentDeskWorktreeArchiveRequest worktree scope", () => {
         markWorkspaceArchiving: vi.fn(),
         clearWorkspaceArchiving: vi.fn(),
         killTerminalsForWorkspace: vi.fn(async () => {}),
+        assertWorkspaceAutomationAllowed: async () => {},
+        isCheckoutUntrusted: async () => false,
         sessionLogger: createLogger(),
       },
       {
@@ -2094,6 +2100,8 @@ describe("handleJAgentDeskWorktreeArchiveRequest worktree scope", () => {
       markWorkspaceArchiving: vi.fn(),
       clearWorkspaceArchiving: vi.fn(),
       killTerminalsForWorkspace: vi.fn(async () => {}),
+      assertWorkspaceAutomationAllowed: async () => {},
+      isCheckoutUntrusted: async () => false,
       sessionLogger: createLogger(),
     };
 

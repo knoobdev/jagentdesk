@@ -226,7 +226,10 @@ import {
   type ActiveWorkspaceRef,
 } from "./workspace-archive-service.js";
 import { setupAutoArchiveOnMerge } from "./auto-archive-on-merge/index.js";
-import { isCheckoutUntrusted } from "./workspace-automation-gate.js";
+import {
+  assertWorkspaceAutomationAllowedForWorkspace,
+  isCheckoutUntrusted,
+} from "./workspace-automation-gate.js";
 import { wrapSessionMessage, type SessionOutboundMessage } from "./messages.js";
 import type { TerminalManager } from "../terminal/terminal-manager.js";
 import { startWorkerTerminalManager } from "../terminal/worker-terminal-manager.js";
@@ -1418,6 +1421,8 @@ export async function createJAgentDeskDaemon(
     logger,
     findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
     getWorkspace: (workspaceId) => workspaceRegistry.get(workspaceId),
+    assertWorkspaceAutomationAllowed: (guardedWorkspaceId) =>
+      assertWorkspaceAutomationAllowedForWorkspace(workspaceRegistry, guardedWorkspaceId),
     isCheckoutUntrusted: (checkoutPath) => isCheckoutUntrusted(workspaceRegistry, checkoutPath),
     listActiveWorkspaces: listActiveWorkspacesExternal,
     getAutoArchivedChangeRequestUrl: async (workspaceId) =>
@@ -1504,6 +1509,8 @@ export async function createJAgentDeskDaemon(
         agentStorage,
         findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
         getWorkspace: (workspaceIdToRead) => workspaceRegistry.get(workspaceIdToRead),
+        assertWorkspaceAutomationAllowed: (guardedWorkspaceId) =>
+          assertWorkspaceAutomationAllowedForWorkspace(workspaceRegistry, guardedWorkspaceId),
         isCheckoutUntrusted: (checkoutPath) => isCheckoutUntrusted(workspaceRegistry, checkoutPath),
         listActiveWorkspaces: listActiveWorkspacesExternal,
         archiveWorkspaceRecord: (workspaceIdToArchive, archivedAt) =>
@@ -1523,6 +1530,8 @@ export async function createJAgentDeskDaemon(
     worktreeManagers: pluginRuntime,
     workspaceArchiveOperations,
     getWorkspace: (workspaceId) => workspaceRegistry.get(workspaceId),
+    assertWorkspaceAutomationAllowed: (guardedWorkspaceId) =>
+      assertWorkspaceAutomationAllowedForWorkspace(workspaceRegistry, guardedWorkspaceId),
     isCheckoutUntrusted: (checkoutPath) => isCheckoutUntrusted(workspaceRegistry, checkoutPath),
     agentManager,
     agentStorage,
@@ -1667,6 +1676,8 @@ export async function createJAgentDeskDaemon(
         agentStorage,
         findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
         getWorkspace: (workspaceIdToRead) => workspaceRegistry.get(workspaceIdToRead),
+        assertWorkspaceAutomationAllowed: (guardedWorkspaceId) =>
+          assertWorkspaceAutomationAllowedForWorkspace(workspaceRegistry, guardedWorkspaceId),
         isCheckoutUntrusted: (checkoutPath) => isCheckoutUntrusted(workspaceRegistry, checkoutPath),
         listActiveWorkspaces: listActiveWorkspacesExternal,
         archiveWorkspaceRecord: (workspaceIdToArchive, archivedAt) =>
@@ -1916,6 +1927,8 @@ export async function createJAgentDeskDaemon(
     workspaceGitService,
     worktreeManagers: pluginRuntime,
     workspaceArchiveOperations,
+    assertWorkspaceAutomationAllowed: (guardedWorkspaceId) =>
+      assertWorkspaceAutomationAllowedForWorkspace(workspaceRegistry, guardedWorkspaceId),
     isCheckoutUntrusted: (checkoutPath) => isCheckoutUntrusted(workspaceRegistry, checkoutPath),
     findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
     listActiveWorkspaces: listActiveWorkspacesExternal,
