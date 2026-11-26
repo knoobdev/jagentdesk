@@ -3,6 +3,7 @@ import {
   buildHostWorkspaceRoute,
   buildOpenProjectRoute,
   buildSettingsRoute,
+  buildSettingsHostSectionRoute,
   buildSettingsSectionRoute,
 } from "@/utils/host-routes";
 import { gotoAppShell, openSettings } from "../support/helpers/app";
@@ -38,6 +39,11 @@ import {
   expectSettingsHostPickerLabel,
   openSettingsHostSection,
   removeCurrentHostFromSettings,
+  openSidebarHostPicker,
+  sidebarHostSettingsButton,
+  expectStandaloneSidebarHostSettingsButton,
+  activateSidebarHostSettingsWithKeyboard,
+  bindCommandCenterToEnter,
 } from "../support/helpers/settings";
 import { getServerId } from "../support/helpers/server-id";
 import { expectAppRoute } from "../support/helpers/route-assertions";
@@ -51,6 +57,26 @@ async function openWorkspace(
 }
 
 test.describe("Settings sidebar navigation", () => {
+  test("the sidebar host gear opens Overview in one click", async ({ page, withWorkspace }) => {
+    const workspace = await withWorkspace({ prefix: "sidebar-host-settings-" });
+    await openWorkspace(page, workspace);
+    await openSidebarHostPicker(page);
+    await expectStandaloneSidebarHostSettingsButton(page);
+    await sidebarHostSettingsButton(page).click();
+
+    await expectAppRoute(page, buildSettingsHostSectionRoute(getServerId(), "host"));
+  });
+
+  test("Enter opens the focused sidebar host gear", async ({ page, withWorkspace }) => {
+    await bindCommandCenterToEnter(page);
+    const workspace = await withWorkspace({ prefix: "keyboard-host-settings-" });
+    await openWorkspace(page, workspace);
+    await openSidebarHostPicker(page);
+    await activateSidebarHostSettingsWithKeyboard(page);
+
+    await expectAppRoute(page, buildSettingsHostSectionRoute(getServerId(), "host"));
+  });
+
   test("clicking a sidebar section updates the URL and renders the section", async ({ page }) => {
     await gotoAppShell(page);
     await openSettings(page);
@@ -89,7 +115,10 @@ test.describe("Settings sidebar navigation", () => {
     await selectHostConnectionType(page, "direct");
 
     await toggleHostAdvanced(page);
-    await fillDirectHostUri(page, "tcp://example.jagentdesk.test:7443?ssl=true&password=shared-secret");
+    await fillDirectHostUri(
+      page,
+      "tcp://example.jagentdesk.test:7443?ssl=true&password=shared-secret",
+    );
     await toggleHostAdvanced(page);
 
     await expectDirectHostFormValues(page, {
