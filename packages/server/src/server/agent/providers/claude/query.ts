@@ -7,6 +7,7 @@ import {
 } from "../../provider-launch-config.js";
 import { buildSelfNodeCommand, createExternalProcessEnv } from "../../../jagentdesk-env.js";
 import { spawnProcess } from "../../../../utils/spawn.js";
+import type { AgentLaunchContext } from "../../agent-sdk-types.js";
 
 // Keep the raw SDK query import in this module only. Claude process launch behavior
 // must stay shared between production and tests so Windows .cmd/.bat handling cannot
@@ -19,6 +20,8 @@ export type ClaudeQueryFactory = (input: ClaudeQueryInput) => Query;
 export interface ClaudeQueryContext {
   runtimeSettings?: ProviderRuntimeSettings;
   launchEnv?: Record<string, string>;
+  /** Start Claude Code as `[...wrap, command, ...args]`. */
+  wrap?: AgentLaunchContext["wrap"];
   queryFactory?: ClaudeQueryFactory;
   /** Called with the spawned child process so the caller can tree-kill it on close. */
   onChildProcess?: (child: ChildProcess) => void;
@@ -57,7 +60,7 @@ function applyRuntimeSettingsToClaudeOptions(
   options: ClaudeOptions,
   context: ClaudeQueryContext,
 ): ClaudeOptions {
-  const { runtimeSettings, launchEnv, onChildProcess } = context;
+  const { runtimeSettings, launchEnv, onChildProcess, wrap } = context;
   return {
     ...options,
     spawnClaudeCodeProcess: (spawnOptions) => {
@@ -83,6 +86,7 @@ function applyRuntimeSettingsToClaudeOptions(
       const command = selfNodeCommand?.command ?? resolved.command;
       const args = selfNodeCommand?.args ?? resolved.args;
       const child = spawnProcess(command, args, {
+        wrap,
         cwd: spawnOptions.cwd,
         ...(selfNodeCommand
           ? { env: selfNodeCommand.env, envMode: "internal" as const }

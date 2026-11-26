@@ -1089,6 +1089,11 @@ export class Session {
 
   private readonly pluginRuntime: SessionOptions["pluginRuntime"];
 
+  // What worktree setup and teardown commands run through: the plugins' hooks, or none.
+  private get commandLifecycle(): NonNullable<SessionOptions["pluginRuntime"]> | null {
+    return this.pluginRuntime ?? null;
+  }
+
   private unsubscribePluginChanges: (() => void) | null = null;
 
   private registryMutationQueue: Promise<void> = Promise.resolve();
@@ -1586,6 +1591,7 @@ export class Session {
     });
     this.workspaceArchiveOperations = resolveWorkspaceArchiveOperations(workspaceArchiveOperations);
     this.createAgentLifecycleDispatch = new CreateAgentLifecycleDispatch({
+      lifecycle: this.commandLifecycle,
       jagentdeskHome: this.jagentdeskHome,
       worktreesRoot: this.worktreesRoot,
       worktreeManagers: pluginRuntime ?? undefined,
@@ -6248,6 +6254,7 @@ export class Session {
   ): Promise<void> {
     return handleWorktreeArchiveRequest(
       {
+        lifecycle: this.commandLifecycle,
         jagentdeskHome: this.jagentdeskHome,
         jagentdeskWorktreesBaseRoot: this.worktreesRoot,
         worktreeManagers: this.pluginRuntime,
@@ -8370,6 +8377,7 @@ export class Session {
   ): Promise<CreateJAgentDeskWorktreeWorkflowResult> {
     return createWorktreeWorkflow(
       {
+        lifecycle: this.commandLifecycle,
         jagentdeskHome: this.jagentdeskHome,
         worktreesRoot: this.worktreesRoot,
         createJAgentDeskWorktree: (workflowInput, serviceOptions) =>
@@ -8428,6 +8436,7 @@ export class Session {
           }
           return archiveByScope(
             {
+              lifecycle: this.commandLifecycle,
               jagentdeskHome: this.jagentdeskHome,
               jagentdeskWorktreesBaseRoot: this.worktreesRoot,
               worktreeManagers: this.pluginRuntime,

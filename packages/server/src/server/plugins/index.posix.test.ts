@@ -18,6 +18,7 @@ import pino from "pino";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { DaemonConfigStore } from "../daemon-config-store.js";
 import { PluginService } from "./index.js";
+import { PluginAgentClientRegistry } from "../agent/plugin-provider.js";
 import { BuiltinPluginLoader } from "./builtin/index.js";
 import { ManagedPluginSources } from "./managed-source.js";
 import type { PluginProviderMetadata } from "./plugin-process-protocol.js";
@@ -539,6 +540,35 @@ describe("PluginService", () => {
       await provider.getCatalogCacheKey!({ scope: "workspace", cwd: "/project-b", force: true }),
     ).toBe("runtime:/project-b");
     expect(await provider.getCatalogCacheKey!({ scope: "global" })).toBeUndefined();
+  });
+
+  it("carries a provider's launch-wrap declaration from the plugin process to its definition", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "jagentdesk-plugin-home-"));
+    roots.push(home);
+    const directory = await createPlugin(
+      "provider-launch-wrap",
+      `import { runAcpProvider } from "@jagentdesk/plugin/server/acp";
+export default function contribute(server) {
+  server.registerProvider(runAcpProvider({ id: "wrapped-agent", label: "Wrapped", command: ["agent", "acp"] }));
+  server.registerProvider(runAcpProvider({ id: "connector-agent", label: "Connector", connector() { throw new Error("not opened by this test"); } }));
+  return () => {};
+}`,
+    );
+    const service = createService(home);
+
+    await service.start();
+    try {
+      await service.installDirectory({ path: directory });
+      const registrations = service.getProviderRegistrations();
+      expect(registrations.find(({ id }) => id === "wrapped-agent")?.launchWrap).toBe(true);
+      expect(registrations.find(({ id }) => id === "connector-agent")?.launchWrap).toBeUndefined();
+      const registry = new PluginAgentClientRegistry(pino({ level: "silent" }));
+      registry.replace(registrations);
+      expect(registry.definitions()["wrapped-agent"]?.supportsLaunchWrap).toBe(true);
+      expect(registry.definitions()["connector-agent"]?.supportsLaunchWrap).toBe(false);
+    } finally {
+      await service.stopAllPlugins();
+    }
   });
 
   it("publishes provider registrations only while their plugin is running", async () => {

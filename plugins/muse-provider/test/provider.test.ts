@@ -155,6 +155,52 @@ test("registration exposes Muse with a daemon-resolved command", () => {
     icon: "icon.svg",
   });
 });
+test("a session's launch wrap starts Muse serve and the session runs through it", async () => {
+  const h = await harness();
+  const launcher = path.join(h.root, "launcher.mjs");
+  const marker = path.join(h.root, "wrapped.json");
+  await writeFile(
+    launcher,
+    [
+      'import { spawn } from "node:child_process";',
+      'import { writeFileSync } from "node:fs";',
+      "const [command, ...args] = process.argv.slice(2);",
+      "writeFileSync(process.env.MUSE_TEST_WRAP_MARKER, JSON.stringify([command, ...args]));",
+      'const child = spawn(command, args, { stdio: "inherit" });',
+      'child.on("exit", (code) => process.exit(code ?? 1));',
+      "",
+    ].join("\n"),
+  );
+  const from = await h.send({
+    type: "session.open",
+    requestId: "open",
+    sessionId: "jagentdesk-session",
+    config: {
+      cwd: h.root,
+      env: { MUSE_TEST_WRAP_MARKER: marker },
+      settings: {},
+      mcpServers: {},
+      persist: true,
+      mode: "onRequest",
+      model: "meta/muse-spark-1.3",
+      systemPrompt: "Test instructions",
+      wrap: [process.execPath, launcher],
+    },
+    history: "replay",
+  });
+  expect(
+    await h.wait(
+      (event) => event.type === "session.ready" || event.type === "request.failed",
+      from,
+    ),
+  ).toMatchObject({ type: "session.ready" });
+  const wrapped = JSON.parse(await readFile(marker, "utf8")) as string[];
+  expect(wrapped.slice(0, h.launch.args.length + 2)).toEqual([
+    h.launch.command,
+    ...h.launch.args,
+    "serve",
+  ]);
+});
 test("catalog uses model effort variants, modes, and bounded cached discovery", async () => {
   const h = await harness("catalog-controls");
   await h.send({ type: "catalog", requestId: "catalog-1" });

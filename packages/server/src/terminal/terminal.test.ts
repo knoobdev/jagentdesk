@@ -1,3 +1,4 @@
+import { resolveDefaultTerminalShell } from "./default-terminal-shell.js";
 import { TerminalInputModeTracker } from "@jagentdesk/protocol/terminal-input-mode";
 import { createTerminalSerializer } from "./terminal-serializer.js";
 import { readTerminalState } from "./test-utils/terminal-state.js";
@@ -9,7 +10,6 @@ import {
   assertTerminalCommandCanStart,
   createTerminal,
   ensureNodePtySpawnHelperExecutableForCurrentPlatform,
-  resolveDefaultTerminalShell,
   resolveTerminalSpawnCommand,
   humanizeProcessTitle,
   normalizeProcessTitle,
@@ -244,9 +244,70 @@ describe("createTerminal", () => {
       resolveExecutable: async () => "C:\\npm\\claude.cmd",
     });
 
+    // The `.cmd` branch hands node-pty one cmd.exe command line (a string) instead of an argv
+    // array, so node-pty's own array quoting never runs over it. An argument without a cmd.exe
+    // metacharacter stays as given.
     expect(resolved).toEqual({
       command: "C:\\Windows\\System32\\cmd.exe",
-      args: ["/c", "C:\\npm\\claude.cmd", "--foo"],
+      args: '/d /s /c "C:\\npm\\claude.cmd --foo"',
+    });
+  });
+
+  // The escaping itself is the SDK's shared cmd.exe dialect, tested in
+  // packages/plugin/src/server/process-internal/windows-command.test.ts. These cases pin what a
+  // terminal adds: a prompt line break becomes a space, and a `.cmd` shim counts as a batch script.
+  describe(".cmd shim argument escaping on Windows", () => {
+    async function resolveCmdShimArgs(promptArg: string): Promise<string> {
+      const resolved = await resolveTerminalSpawnCommand("claude", [promptArg], {
+        platform: "win32",
+        env: { ComSpec: "C:\\Windows\\System32\\cmd.exe" },
+        resolveExecutable: async () => "C:\\npm\\claude.cmd",
+      });
+      const { args } = resolved;
+      if (typeof args !== "string") {
+        throw new Error(`expected a cmd.exe command line, got ${JSON.stringify(args)}`);
+      }
+      return args;
+    }
+
+    it("escapes cmd.exe metacharacters so they reach the shim as text", async () => {
+      expect(await resolveCmdShimArgs("a & b | c")).toBe(
+        '/d /s /c "C:\\npm\\claude.cmd ^"a^ ^&^ b^ ^|^ c^""',
+      );
+      // A caret before each `%` keeps cmd.exe from expanding %PATH%.
+      expect(await resolveCmdShimArgs("100% done %PATH%")).toBe(
+        '/d /s /c "C:\\npm\\claude.cmd ^"100^%^ done^ ^%PATH^%^""',
+      );
+      expect(await resolveCmdShimArgs("a^b")).toBe('/d /s /c "C:\\npm\\claude.cmd ^"a^^b^""');
+    });
+
+    // The shim reads its arguments again when it forwards `%*`, so an argument with a quote is
+    // escaped twice; its quotes would otherwise leave the rest of the line outside a quoted region.
+    it("escapes an argument with a double quote twice for the shim", async () => {
+      expect(await resolveCmdShimArgs('say "hello" now')).toBe(
+        '/d /s /c "C:\\npm\\claude.cmd ^^^"say^^^ \\^^^"hello\\^^^"^^^ now^^^""',
+      );
+      expect(await resolveCmdShimArgs('C:\\path\\ "quoted"')).toBe(
+        '/d /s /c "C:\\npm\\claude.cmd ^^^"C:\\path\\^^^ \\^^^"quoted\\^^^"^^^""',
+      );
+    });
+
+    // cmd.exe ends a command at a line break whatever the quoting. A terminal prompt often has
+    // several lines, so the terminal starts with each line break as a space instead of refusing.
+    it("joins the lines of a prompt with spaces", async () => {
+      expect(await resolveCmdShimArgs("line one\nline two")).toBe(
+        '/d /s /c "C:\\npm\\claude.cmd ^"line^ one^ line^ two^""',
+      );
+      expect(await resolveCmdShimArgs("line one\r\nline two")).toBe(
+        '/d /s /c "C:\\npm\\claude.cmd ^"line^ one^ line^ two^""',
+      );
+    });
+
+    it("handles a multi-line prompt combining quotes, backslashes, and every cmd.exe metacharacter", async () => {
+      const prompt = 'multi\nline "quoted \\path\\" & piped | percent %VAR% ^caret';
+      expect(await resolveCmdShimArgs(prompt)).toBe(
+        '/d /s /c "C:\\npm\\claude.cmd ^^^"multi^^^ line^^^ \\^^^"quoted^^^ \\path\\\\\\^^^"^^^ ^^^&^^^ piped^^^ ^^^|^^^ percent^^^ ^^^%VAR^^^%^^^ ^^^^caret^^^""',
+      );
     });
   });
 

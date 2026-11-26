@@ -1,3 +1,5 @@
+import { commandRunHook } from "./command-run-hook.js";
+import type { PluginLifecycle } from "./plugins/lifecycle/index.js";
 import { resolve } from "node:path";
 
 import type { Logger } from "pino";
@@ -67,6 +69,8 @@ export interface ArchiveDependencies {
   assertWorkspaceAutomationAllowed: (workspaceId: string) => Promise<void>;
   isCheckoutUntrusted: (checkoutPath: string) => Promise<boolean>;
   sessionLogger?: Logger;
+  /** Plugins' lifecycle, for `command.run.before` on teardown commands. */
+  lifecycle: Pick<PluginLifecycle, "before"> | null;
 }
 
 export interface KillTerminalsForWorkspaceDependencies {
@@ -547,6 +551,15 @@ async function maybeRemoveDirectory(
         worktreePath: backing.path,
         teardownCwd,
         repoRootPath: backing.mainRepoRoot ?? undefined,
+        // Targets that share a directory run its teardown once, as the first of them.
+        prepareCommand: commandRunHook(dependencies.lifecycle, {
+          workspaceId:
+            teardownPlan.allowedTargets.find(
+              (teardownTarget) => uniqueFilesystemPaths([teardownTarget.cwd])[0] === teardownCwd,
+            )?.workspaceId ?? null,
+          cwd: teardownCwd,
+          purpose: "teardown",
+        }),
       });
     }
   } catch (error) {

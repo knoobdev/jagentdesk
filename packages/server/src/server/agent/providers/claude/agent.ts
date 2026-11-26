@@ -555,6 +555,7 @@ interface ClaudeAgentSessionOptions {
   handle?: AgentPersistenceHandle;
   agentId?: string;
   launchEnv?: Record<string, string>;
+  wrap?: AgentLaunchContext["wrap"];
   /** JAgentDesk browser tools are on for this launch (spec 04 §27b.3). */
   inAppBrowser?: boolean;
   /** Provider connectors JAgentDesk tools replace in this launch (spec 29.4). */
@@ -1813,6 +1814,7 @@ export class ClaudeAgentClient implements AgentClient {
       runtimeSettings: this.runtimeSettings,
       agentId: launchContext?.agentId,
       launchEnv: launchContext?.env,
+      wrap: launchContext?.wrap,
       compactionHooks: launchContext?.compactionHooks,
       inAppBrowser: launchContext?.inAppBrowser,
       hideProviderConnectors: launchContext?.hideProviderConnectors,
@@ -1847,6 +1849,7 @@ export class ClaudeAgentClient implements AgentClient {
       handle,
       agentId: launchContext?.agentId,
       launchEnv: launchContext?.env,
+      wrap: launchContext?.wrap,
       compactionHooks: launchContext?.compactionHooks,
       inAppBrowser: launchContext?.inAppBrowser,
       hideProviderConnectors: launchContext?.hideProviderConnectors,
@@ -2600,6 +2603,7 @@ class ClaudeAgentSession implements AgentSession {
   private readonly config: ClaudeAgentConfig;
 
   private readonly launchEnv?: Record<string, string>;
+  private readonly wrap?: AgentLaunchContext["wrap"];
 
   private readonly agentId?: string;
   private readonly compactionHooks?: AgentCompactionHooks;
@@ -2813,6 +2817,7 @@ class ClaudeAgentSession implements AgentSession {
     this.config = config;
     assertClaudeThinkingOptionSupported(config.model, config.thinkingOptionId);
     this.launchEnv = options.launchEnv;
+    this.wrap = options.wrap;
     this.agentId = options.agentId;
     this.inAppBrowser = options.inAppBrowser === true;
     this.hideProviderConnectors = options.hideProviderConnectors ?? [];
@@ -4111,6 +4116,7 @@ class ClaudeAgentSession implements AgentSession {
       {
         runtimeSettings: this.runtimeSettings,
         launchEnv: this.launchEnv,
+        wrap: this.wrap,
         queryFactory: this.queryFactory,
         onChildProcess: (child) => {
           this.childProcess = child;

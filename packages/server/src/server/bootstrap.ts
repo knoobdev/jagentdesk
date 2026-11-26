@@ -233,6 +233,7 @@ import {
 import { wrapSessionMessage, type SessionOutboundMessage } from "./messages.js";
 import type { TerminalManager } from "../terminal/terminal-manager.js";
 import { startWorkerTerminalManager } from "../terminal/worker-terminal-manager.js";
+import { withTerminalCreateHook } from "../terminal/terminal-create-hook.js";
 import { createSshTerminalManager } from "../terminal/ssh-terminal-manager.js";
 import { SshService } from "./ssh/ssh-service.js";
 import { removeRetiredFigmaData } from "./retired-figma-data.js";
@@ -832,7 +833,12 @@ export async function createJAgentDeskDaemon(
     logger,
     getTerminalActivityUrl: () => createTerminalActivityUrl(boundListenTarget),
   });
-  const terminalManager = createSshTerminalManager(localTerminalManager, () => sshService);
+  // SSH terminals run on the remote host, where a plugin's launch wrap does not exist; only local
+  // terminals run through terminal.create.before.
+  const terminalManager = createSshTerminalManager(
+    withTerminalCreateHook(localTerminalManager, pluginRuntime),
+    () => sshService,
+  );
   applyTerminalAgentHookSetting({ store: daemonConfigStore, logger });
 
   const serviceProxyPublicBaseUrl = config.serviceProxy?.publicBaseUrl
@@ -1404,6 +1410,7 @@ export async function createJAgentDeskDaemon(
   });
 
   setupAutoArchiveOnMerge({
+    lifecycle: pluginRuntime,
     jagentdeskHome: config.jagentdeskHome,
     jagentdeskWorktreesBaseRoot: config.worktreesRoot,
     worktreeManagers: pluginRuntime,
@@ -1435,6 +1442,7 @@ export async function createJAgentDeskDaemon(
   ) => {
     return createJAgentDeskWorktreeWorkflow(
       {
+        lifecycle: pluginRuntime,
         jagentdeskHome: config.jagentdeskHome,
         worktreesRoot: config.worktreesRoot,
         createJAgentDeskWorktree: async (workflowInput, workflowOptions) => {
@@ -1495,6 +1503,7 @@ export async function createJAgentDeskDaemon(
   const archiveWorkspaceByIdExternal = (workspaceId: string, requestId: string) =>
     archiveByScope(
       {
+        lifecycle: pluginRuntime,
         jagentdeskHome: config.jagentdeskHome,
         jagentdeskWorktreesBaseRoot: config.worktreesRoot,
         worktreeManagers: pluginRuntime,
@@ -1521,6 +1530,7 @@ export async function createJAgentDeskDaemon(
       { scope: { kind: "workspace", workspaceId }, requestId },
     );
   const hubAgentLifecycle = new CreateAgentLifecycleDispatch({
+    lifecycle: pluginRuntime,
     jagentdeskHome: config.jagentdeskHome,
     worktreesRoot: config.worktreesRoot,
     worktreeManagers: pluginRuntime,
@@ -1662,6 +1672,7 @@ export async function createJAgentDeskDaemon(
   const archiveScheduleWorkspaceExternal = async (workspaceId: string) => {
     await archiveByScope(
       {
+        lifecycle: pluginRuntime,
         jagentdeskHome: config.jagentdeskHome,
         jagentdeskWorktreesBaseRoot: config.worktreesRoot,
         worktreeManagers: pluginRuntime,
@@ -1930,6 +1941,7 @@ export async function createJAgentDeskDaemon(
     listActiveWorkspaces: listActiveWorkspacesExternal,
     archiveWorkspaceRecord: (workspaceId, archivedAt) =>
       archiveWorkspaceRecordExternal(workspaceId, undefined, archivedAt),
+    lifecycle: pluginRuntime,
     emitWorkspaceUpdatesForWorkspaceIds: emitWorkspaceUpdatesExternal,
     workspaceRegistry,
     projectRegistry,

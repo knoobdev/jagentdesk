@@ -8320,6 +8320,7 @@ export class CodexAppServerAgentClient implements AgentClient {
     agentId?: string;
     inAppBrowser?: boolean;
     hideProviderConnectors?: string[];
+    wrap?: AgentLaunchContext["wrap"];
   }): Promise<() => ChildProcessWithoutNullStreams> {
     const processPort = this.deps.appServerProcess ?? defaultCodexAppServerProcess;
     const launchPrefix = await processPort.resolvePrefix({ runtimeSettings: this.runtimeSettings });
@@ -8338,14 +8339,17 @@ export class CodexAppServerAgentClient implements AgentClient {
           agentId: options.agentId,
           provider: CODEX_PROVIDER,
           launchPrefix,
+          wrap: options.wrap,
           goalsEnabled: options.goalsEnabled === true,
         },
         "provider.codex.spawn",
       );
+      // Every spawn from this closure, including reconnects and startup retries, carries the wrap.
       const child = processPort.spawn({
         command: launchPrefix.command,
         args,
         options: {
+          wrap: options.wrap,
           detached: process.platform !== "win32",
           stdio: ["pipe", "pipe", "pipe"],
           baseEnv: options.environment,
@@ -8394,6 +8398,7 @@ export class CodexAppServerAgentClient implements AgentClient {
       agentId: launchContext?.agentId,
       inAppBrowser: launchContext?.inAppBrowser,
       hideProviderConnectors: launchContext?.hideProviderConnectors,
+      wrap: launchContext?.wrap,
     });
     const session = new CodexAppServerAgentSession(
       sessionConfig,
@@ -8432,6 +8437,7 @@ export class CodexAppServerAgentClient implements AgentClient {
       agentId: launchContext?.agentId,
       inAppBrowser: launchContext?.inAppBrowser,
       hideProviderConnectors: launchContext?.hideProviderConnectors,
+      wrap: launchContext?.wrap,
     });
     const session = new CodexAppServerAgentSession(
       merged,

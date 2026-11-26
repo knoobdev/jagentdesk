@@ -833,6 +833,7 @@ export class PluginService {
           description: provider.description,
           docsUrl: provider.docsUrl,
           command: provider.command,
+          launchWrap: provider.launchWrap,
           // Bundled opt-in providers are activated by the per-host Built-in switch.
           requiresConfiguration: this.builtinPluginIds.has(pluginId)
             ? false

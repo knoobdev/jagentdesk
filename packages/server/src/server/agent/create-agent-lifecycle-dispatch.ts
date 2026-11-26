@@ -1,3 +1,4 @@
+import type { PluginLifecycle } from "../plugins/lifecycle/index.js";
 import { randomUUID } from "node:crypto";
 import pino from "pino";
 import { type ForgeService } from "../../services/forge-service.js";
@@ -46,6 +47,7 @@ interface CreateAgentLifecycleDispatchDependencies {
   clearWorkspaceArchiving: (workspaceIds: Iterable<string>) => void;
   killTerminalsForWorkspace: (workspaceId: string) => Promise<void>;
   logger: pino.Logger;
+  lifecycle: Pick<PluginLifecycle, "before"> | null;
 }
 
 export interface LifecycleRegistration {
@@ -191,6 +193,7 @@ export class CreateAgentLifecycleDispatch {
 
     await archiveByScope(
       {
+        lifecycle: this.dependencies.lifecycle,
         jagentdeskHome: this.dependencies.jagentdeskHome,
         jagentdeskWorktreesBaseRoot: this.dependencies.worktreesRoot,
         worktreeManagers: this.dependencies.worktreeManagers,

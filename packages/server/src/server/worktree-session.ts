@@ -1,3 +1,5 @@
+import { commandRunHook } from "./command-run-hook.js";
+import type { PluginLifecycle } from "./plugins/lifecycle/index.js";
 import type { Logger } from "pino";
 import { basename } from "node:path";
 
@@ -109,6 +111,8 @@ interface CreateJAgentDeskWorktreeInBackgroundDependencies {
   getDaemonTcpHost: (() => string | null) | null;
   serviceProxyPublicBaseUrl?: string | null;
   onScriptsChanged: ((workspaceId: string, workspaceDirectory: string) => void) | null;
+  /** Plugins' lifecycle, for `command.run.before` on setup commands. */
+  lifecycle: Pick<PluginLifecycle, "before"> | null;
 }
 
 interface CreateJAgentDeskWorktreeWorkflowDependencies extends CreateJAgentDeskWorktreeInBackgroundDependencies {
@@ -751,6 +755,11 @@ export async function runWorktreeSetupInBackground(
               applyWorktreeSetupProgressEvent(progressAccumulator, event);
               emitSetupProgress("running", null);
             },
+            prepareCommand: commandRunHook(dependencies.lifecycle, {
+              workspaceId,
+              cwd: workspaceCwd,
+              purpose: "setup",
+            }),
           });
           emitSetupProgress("completed", null);
         }

@@ -6,6 +6,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { Logger } from "pino";
 import type { McpServerConfig } from "../../agent-sdk-types.js";
+import { applyLaunchWrap, type LaunchWrap } from "../../../../utils/launch-wrap.js";
 import type { JAgentDeskToolResult } from "../../tools/types.js";
 import type { OmpRpcHostToolDefinition } from "./rpc-types.js";
 
@@ -28,18 +29,21 @@ export class OmpMcpBridge {
   private readonly clients: Client[] = [];
   private closed = false;
 
-  static async connect(
-    servers: Record<string, McpServerConfig> | undefined,
-    cwd: string,
-    logger: Logger,
-    env: NodeJS.ProcessEnv,
-  ): Promise<OmpMcpBridge> {
+  static async connect(input: {
+    servers: Record<string, McpServerConfig> | undefined;
+    cwd: string;
+    logger: Logger;
+    env: NodeJS.ProcessEnv;
+    /** Start each stdio server as `[...wrap, command, ...args]`. */
+    wrap?: readonly [string, ...string[]];
+  }): Promise<OmpMcpBridge> {
+    const { servers, cwd, logger, env, wrap } = input;
     const bridge = new OmpMcpBridge();
     const connections = await Promise.all(
       Object.entries(servers ?? {}).map(async ([serverName, config]) => {
         const client = new Client({ name: "jagentdesk-omp-mcp", version: "1.0.0" });
         try {
-          const transport = makeTransport(config, cwd, env);
+          const transport = makeTransport(config, cwd, env, wrap);
           await client.connect(transport, { timeout: SERVER_TIMEOUT_MS });
           const listed = await client.listTools(undefined, { timeout: SERVER_TIMEOUT_MS });
           return { serverName, client, tools: listed.tools };
@@ -108,11 +112,17 @@ export class OmpMcpBridge {
   }
 }
 
-function makeTransport(config: McpServerConfig, cwd: string, env: NodeJS.ProcessEnv) {
+function makeTransport(
+  config: McpServerConfig,
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  wrap: LaunchWrap | undefined,
+) {
   if (config.type === "stdio") {
+    const launch = applyLaunchWrap({ command: config.command, args: config.args ?? [] }, wrap);
     return new StdioClientTransport({
-      command: config.command,
-      args: config.args,
+      command: launch.command,
+      args: launch.args,
       cwd,
       env: { ...env, ...config.env } as Record<string, string>,
       stderr: "ignore",
