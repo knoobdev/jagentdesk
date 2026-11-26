@@ -1006,6 +1006,8 @@ export class AgentManager {
 
   private readonly inFlightAgentCloses = new Map<string, Promise<void>>();
 
+  private readonly reloadedSessionCloses = new WeakMap<AgentSession, Promise<void>>();
+
   private readonly historySessions = new WeakSet<AgentSession>();
 
   private readonly runtimeCleanupIdentities = new WeakMap<
@@ -1658,6 +1660,8 @@ export class AgentManager {
   }
 
   async waitForAgentClose(agentId: string): Promise<void> {
+    // Loading during a reload must wait for the replacement, not resume another writer.
+    await this.lifecycleMutationTails.get(agentId)?.catch(() => undefined);
     await this.inFlightAgentCloses?.get(agentId)?.catch(() => undefined);
     if (this.collectingRuntimes.has(agentId))
       await this.lifecycleMutationTails.get(agentId)?.catch(() => undefined);
@@ -2116,7 +2120,9 @@ export class AgentManager {
     options?: { rehydrateFromDisk?: boolean },
   ): Promise<ManagedAgent> {
     return this.trackAgentRegistrationOperation(
-      this.reloadAgentSessionInternal(agentId, overrides, options),
+      this.runLifecycleMutation(agentId, () =>
+        this.reloadAgentSessionInternal(agentId, overrides, options),
+      ),
     );
   }
 
@@ -2166,23 +2172,37 @@ export class AgentManager {
     );
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
 
-    const launchedOptions = this.launchOptionsFor({ client, own: storedConfig.providerOptions });
-    const session = handle
-      ? await client.resumeSession(handle, providerLaunchConfig, launchContext)
-      : await client.createSession(providerLaunchConfig, launchContext);
-    await this.requireExternalMcpSupport(session, providerLaunchConfig, launchContext);
+    // Refuse before releasing the live runtime: the replacement would be refused anyway.
+    if (
+      Object.keys(stripInternalJAgentDeskMcpServer(providerLaunchConfig).mcpServers ?? {}).length >
+        0 &&
+      existing.session.capabilities.supportsMcpServers !== true
+    ) {
+      this.detachPluginTools(agentId);
+      throw this.unsupportedMcpError(providerLaunchConfig, launchContext);
+    }
 
+    const launchedOptions = this.launchOptionsFor({ client, own: storedConfig.providerOptions });
+    let session: AgentSession | undefined;
+    let closedExisting: ManagedAgentClosed | undefined;
     let handedToRegistration = false;
     try {
+      // Paseo #4353: a persisted thread has one writer even while its turn is idle (Codex
+      // refuses a second one with "thread … already has an active writer"), so the old
+      // runtime is released before the same session is resumed.
+      await this.closeReloadedSession(existing.session, agentId);
+      await this.drainSessionEvents(agentId);
+      this.cancelRunningProviderSubagents(agentId);
+      this.clearProviderBackgroundWork(agentId);
+      closedExisting = this.prepareAgentForClosure(existing, "agent reloaded");
+      await this.persistSnapshot(closedExisting);
       this.assertAcceptingAgentRegistrations();
 
-      this.cancelRunningProviderSubagents(agentId);
-      const closedExisting = this.prepareAgentForClosure(existing, "agent reloaded");
-      try {
-        await this.persistSnapshot(closedExisting);
-      } finally {
-        await this.closeReloadedSession(existing.session, agentId);
-      }
+      session = handle
+        ? await client.resumeSession(handle, providerLaunchConfig, launchContext)
+        : await client.createSession(providerLaunchConfig, launchContext);
+      await this.requireExternalMcpSupport(session, providerLaunchConfig, launchContext);
+      this.assertAcceptingAgentRegistrations();
 
       if (rehydrateFromDisk) {
         // Wipe the in-memory timeline so registerSession mints a new epoch and
@@ -2214,34 +2234,44 @@ export class AgentManager {
         attention: preservedAttention,
         restoring: true,
       });
+    } catch (error) {
+      if (closedExisting) {
+        this.emitClosedAgent(closedExisting, { persist: false });
+      } else if (this.agents.get(agentId) === existing) {
+        existing.lifecycle = "error";
+        existing.lastError = error instanceof Error ? error.message : String(error);
+        this.emitState(existing);
+      }
+      throw error;
     } finally {
       if (!handedToRegistration) {
-        await this.closeUnregisteredSession(session);
+        this.detachPluginTools(agentId);
+        if (session) await this.closeUnregisteredSession(session);
       }
     }
   }
 
   private async closeReloadedSession(session: AgentSession, agentId: string): Promise<void> {
-    try {
-      const result = await this.waitWithTimeout({
-        operation: session.close(),
-        timeoutMs: this.rescueTimeouts.reloadSessionCloseMs,
-        onLateError: (error) => {
-          this.logger.warn(
-            { err: error, agentId },
-            "Previous session close failed after refresh timeout",
-          );
-        },
-      });
-
-      if (result === "timed_out") {
+    let operation = this.reloadedSessionCloses.get(session);
+    if (!operation) {
+      operation = session.close();
+      this.reloadedSessionCloses.set(session, operation);
+      // Keep pending closes across request timeouts; a retry must await the same release.
+      void operation.catch(() => this.reloadedSessionCloses.delete(session));
+    }
+    const result = await this.waitWithTimeout({
+      operation,
+      timeoutMs: this.rescueTimeouts.reloadSessionCloseMs,
+      onLateError: (error) => {
         this.logger.warn(
-          { agentId, timeoutMs: this.rescueTimeouts.reloadSessionCloseMs },
-          "Timed out closing previous session during refresh",
+          { err: error, agentId },
+          "Previous session close failed after refresh timeout",
         );
-      }
-    } catch (error) {
-      this.logger.warn({ err: error, agentId }, "Failed to close previous session during refresh");
+      },
+    });
+    // A timeout must not authorize a second writer on the same session.
+    if (result === "timed_out") {
+      throw new Error("Timed out closing previous session during refresh");
     }
   }
 

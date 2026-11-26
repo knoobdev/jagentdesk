@@ -100,13 +100,18 @@ class TurnSession implements AgentSession {
 
   async interrupt(): Promise<void> {}
 
-  async close(): Promise<void> {}
+  closed = false;
+
+  async close(): Promise<void> {
+    this.closed = true;
+  }
 }
 
 class RecordingClient implements AgentClient {
   readonly provider = "codex" as const;
   readonly capabilities = CAPABILITIES;
   readonly created: AgentSessionConfig[] = [];
+  private current: TurnSession | undefined;
   readonly resumed: Array<{
     handle: AgentPersistenceHandle;
     config?: Partial<AgentSessionConfig>;
@@ -124,7 +129,8 @@ class RecordingClient implements AgentClient {
 
   async createSession(config: AgentSessionConfig): Promise<AgentSession> {
     this.created.push(config);
-    return new TurnSession(config, this.resumable);
+    this.current = new TurnSession(config, this.resumable);
+    return this.current;
   }
 
   async resumeSession(
@@ -132,8 +138,12 @@ class RecordingClient implements AgentClient {
     config?: Partial<AgentSessionConfig>,
     _launchContext?: AgentLaunchContext,
   ): Promise<AgentSession> {
+    // Like Codex: a persisted thread accepts one writer at a time.
+    if (this.current && !this.current.closed)
+      throw new Error("thread already has an active writer");
     this.resumed.push({ handle, config });
-    return new TurnSession(config ?? {}, this.resumable);
+    this.current = new TurnSession(config ?? {}, this.resumable);
+    return this.current;
   }
 }
 
