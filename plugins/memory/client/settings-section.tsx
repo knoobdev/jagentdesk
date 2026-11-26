@@ -69,7 +69,10 @@ export function MemorySettingsSection({ serverId }: { serverId: string }) {
         </SettingRow>
         <SettingRow title={t("memory.settings.tokenCap")} bordered>
           <FormTextInput
+            initialValue={tokenCap}
             value={tokenCap}
+            webControlled
+            resetKey={settings?.tokenCap}
             onChangeText={setTokenCap}
             onBlur={commitTokenCap}
             onSubmitEditing={commitTokenCap}

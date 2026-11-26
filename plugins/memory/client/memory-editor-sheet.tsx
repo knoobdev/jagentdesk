@@ -44,10 +44,13 @@ export function MemoryEditorSheet({
   const { t } = useTranslation();
   const client = useHostRuntimeClient(serverId);
   const editing = target.kind === "edit" ? target.memory : null;
-  const [text, setText] = useState(
+  // AdaptiveTextInput is uncontrolled on native: it reads initialValue once.
+  const [initialText] = useState(
     editing?.text ?? (target.kind === "create" ? (target.text ?? "") : ""),
   );
-  const [tags, setTags] = useState(editing?.tags.join(", ") ?? "");
+  const [initialTags] = useState(editing?.tags.join(", ") ?? "");
+  const [text, setText] = useState(initialText);
+  const [tags, setTags] = useState(initialTags);
   const [pinned, setPinned] = useState(editing?.pinned ?? false);
   const [scope, setScope] = useState<MemoryScope>(
     editing?.scope ?? (target.kind === "create" ? target.scope : "project"),
@@ -138,7 +141,9 @@ export function MemoryEditorSheet({
         )}
         <Field label={t("memory.editor.text")} hint={t("memory.editor.textHint")} error={error}>
           <FormTextInput
+            initialValue={initialText}
             value={text}
+            webControlled
             onChangeText={setText}
             multiline
             autoFocus
@@ -151,7 +156,13 @@ export function MemoryEditorSheet({
           {text.length}/{TEXT_LIMIT}
         </Text>
         <Field label={t("memory.editor.tags")} hint={t("memory.editor.tagsHint")}>
-          <FormTextInput value={tags} onChangeText={setTags} testID="memory-editor-tags" />
+          <FormTextInput
+            initialValue={initialTags}
+            value={tags}
+            webControlled
+            onChangeText={setTags}
+            testID="memory-editor-tags"
+          />
         </Field>
         <View style={styles.switchRow}>
           <Text style={styles.switchLabel}>{t("memory.editor.pinned")}</Text>
