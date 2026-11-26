@@ -941,6 +941,8 @@ export const ptBR: TranslationResources = {
         },
         archiveWarning: {
           title: 'Arquivar "{{workspaceName}}"?',
+          bulkTitle: "Arquivar {{count}} workspaces?",
+          bulkWorkspaceReason: "{{workspaceName}}: {{reason}}",
           confirm: "Arquivar",
           cancel: "Cancelar",
           uncommittedChanges: "Alterações sem commit",
@@ -1230,6 +1232,7 @@ export const ptBR: TranslationResources = {
         rename: "Renomear workspace",
         pin: "Fixar no topo",
         unpin: "Desafixar",
+        select: "Selecionar",
         archive: "Arquivar",
         archiveWorkspace: "Arquivar workspace",
         hideFromSidebar: "Ocultar da barra lateral",
@@ -1248,6 +1251,10 @@ export const ptBR: TranslationResources = {
         submit: "Renomear",
         invalidBranchName: "Nome de branch inválido",
       },
+      selection: {
+        count: "{{count}} selecionados",
+        exit: "Sair da seleção",
+      },
       toasts: {
         workspacePathUnavailable: "Caminho do workspace indisponível",
         pathCopied: "Caminho copiado",
@@ -1255,7 +1262,9 @@ export const ptBR: TranslationResources = {
         hostDisconnected: "Host não está conectado",
         hideFailed: "Falha ao ocultar workspace",
         archiveFailed: "Falha ao arquivar workspace",
+        archiveMultipleFailed: "Falha ao arquivar {{count}} workspaces",
         archived: "Workspace arquivado",
+        archivedCount: "{{count}} workspaces arquivados",
         undoArchive: "Desfazer",
         undoArchiveFailed: "Não foi possível desfazer o arquivamento",
       },

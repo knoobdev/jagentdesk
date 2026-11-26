@@ -925,6 +925,8 @@ export const en = {
         },
         archiveWarning: {
           title: 'Archive "{{workspaceName}}"?',
+          bulkTitle: "Archive {{count}} workspaces?",
+          bulkWorkspaceReason: "{{workspaceName}}: {{reason}}",
           confirm: "Archive",
           cancel: "Cancel",
           uncommittedChanges: "Uncommitted changes",
@@ -1226,6 +1228,7 @@ export const en = {
         rename: "Rename workspace",
         pin: "Pin to top",
         unpin: "Unpin",
+        select: "Select",
         archive: "Archive",
         archiveWorkspace: "Archive workspace",
         hideFromSidebar: "Hide from sidebar",
@@ -1244,6 +1247,10 @@ export const en = {
         submit: "Rename",
         invalidBranchName: "Invalid branch name",
       },
+      selection: {
+        count: "{{count}} selected",
+        exit: "Exit selection",
+      },
       toasts: {
         workspacePathUnavailable: "Workspace path not available",
         pathCopied: "Path copied",
@@ -1251,7 +1258,9 @@ export const en = {
         hostDisconnected: "Host is not connected",
         hideFailed: "Failed to hide workspace",
         archiveFailed: "Failed to archive workspace",
+        archiveMultipleFailed: "Failed to archive {{count}} workspaces",
         archived: "Workspace archived",
+        archivedCount: "{{count}} workspaces archived",
         undoArchive: "Undo",
         undoArchiveFailed: "Couldn't undo the archive",
       },

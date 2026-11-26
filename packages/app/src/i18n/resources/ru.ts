@@ -967,6 +967,8 @@ export const ru: TranslationResources = {
         },
         archiveWarning: {
           title: 'Архив "{{workspaceName}}"?',
+          bulkTitle: "Архивировать рабочие пространства ({{count}})?",
+          bulkWorkspaceReason: "{{workspaceName}}: {{reason}}",
           confirm: "Архив",
           cancel: "Отмена",
           uncommittedChanges: "Незафиксированные изменения",
@@ -1278,6 +1280,7 @@ export const ru: TranslationResources = {
         rename: "Переименовать рабочую область",
         pin: "Закрепить вверху",
         unpin: "Открепить",
+        select: "Выбрать",
         archive: "Архив",
         archiveWorkspace: "Архивировать рабочее пространство",
         hideFromSidebar: "Скрыть с боковой панели",
@@ -1296,6 +1299,10 @@ export const ru: TranslationResources = {
         submit: "Переименовать",
         invalidBranchName: "Неверное название ветки",
       },
+      selection: {
+        count: "Выбрано: {{count}}",
+        exit: "Выйти из выбора",
+      },
       toasts: {
         workspacePathUnavailable: "Путь Workspace недоступен",
         pathCopied: "Путь скопирован",
@@ -1303,7 +1310,9 @@ export const ru: TranslationResources = {
         hostDisconnected: "Host не подключен",
         hideFailed: "Не удалось скрыть рабочую область.",
         archiveFailed: "Не удалось заархивировать рабочее пространство.",
+        archiveMultipleFailed: "Не удалось архивировать рабочие пространства ({{count}})",
         archived: "Рабочее пространство архивировано",
+        archivedCount: "Архивировано рабочих пространств: {{count}}",
         undoArchive: "Отменить",
         undoArchiveFailed: "Не удалось отменить архивацию",
       },

@@ -60,6 +60,7 @@ import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome
 import { PluginSidebarItems } from "@/plugins";
 import { SidebarDisplayPreferencesMenu } from "@/components/sidebar/sidebar-display-preferences-menu";
 import { SidebarToastRegion } from "@/components/sidebar/sidebar-toast-region";
+import { SidebarSelectionHost } from "@/sidebar-selection";
 import { SidebarHelpMenu } from "@/components/sidebar/sidebar-help-menu";
 import { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
 import { Shortcut } from "@/components/ui/shortcut";
@@ -860,6 +861,10 @@ function MobileSidebar({
           builtinPanelRoute,
           <SidebarToastRegion active={dragGestureHostPresented}>
             {mobileWorkspaceBody}
+            <SidebarSelectionHost
+              active={dragGestureHostPresented}
+              workspaceEntriesByKey={workspaceEntriesByKey}
+            />
           </SidebarToastRegion>,
         )}
 
@@ -1082,7 +1087,10 @@ function DesktopSidebar({
 
         {resolveSidebarNavBody(
           builtinPanelRoute,
-          <SidebarToastRegion active={active}>{workspaceListElement}</SidebarToastRegion>,
+          <SidebarToastRegion active={active}>
+            {workspaceListElement}
+            <SidebarSelectionHost active={active} workspaceEntriesByKey={workspaceEntriesByKey} />
+          </SidebarToastRegion>,
           sectionRoute,
         )}
 

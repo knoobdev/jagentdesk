@@ -1,8 +1,26 @@
-import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { ToastViewport, useToastHost, type ToastApi } from "@/components/toast-host";
+import {
+  ToastViewport,
+  useToastHost,
+  type ToastApi,
+  type ToastState,
+} from "@/components/toast-host";
 import { ToastApiProvider, useToast } from "@/contexts/toast-context";
+
+const SidebarPersistentToastContext = createContext<((toast: ToastState | null) => void) | null>(
+  null,
+);
+const SidebarAppToastContext = createContext<ToastApi | null>(null);
 
 /**
  * Shows toasts raised by the sidebar's list over its bottom edge, just above the footer.
@@ -14,6 +32,7 @@ import { ToastApiProvider, useToast } from "@/contexts/toast-context";
 export function SidebarToastRegion({ active, children }: { active: boolean; children: ReactNode }) {
   const appToast = useToast();
   const { api: sidebarToast, toast, dismiss } = useToastHost();
+  const [persistentToast, setPersistentToast] = useState<ToastState | null>(null);
   const activeRef = useRef(active);
 
   useEffect(() => {
@@ -37,10 +56,43 @@ export function SidebarToastRegion({ active, children }: { active: boolean; chil
 
   return (
     <View style={styles.region}>
-      <ToastApiProvider api={api}>{children}</ToastApiProvider>
-      <ToastViewport toast={toast} onDismiss={dismiss} placement="sidebar" />
+      <ToastApiProvider api={api}>
+        <SidebarAppToastContext.Provider value={appToast}>
+          <SidebarPersistentToastContext.Provider value={setPersistentToast}>
+            {children}
+          </SidebarPersistentToastContext.Provider>
+        </SidebarAppToastContext.Provider>
+        <ToastViewport
+          toast={toast}
+          persistentToast={persistentToast}
+          onDismiss={dismiss}
+          placement="sidebar"
+        />
+      </ToastApiProvider>
     </View>
   );
+}
+
+/** Returns the enclosing app-level toast API so sidebar callers can report errors without displacing an active sidebar undo toast. */
+export function useSidebarAppToast(): ToastApi {
+  const fallbackToast = useToast();
+  return useContext(SidebarAppToastContext) ?? fallbackToast;
+}
+
+/**
+ * Displays a persistent toast in the enclosing `SidebarToastRegion`, stacked below any active
+ * transient toast so controls stay reachable while a previous toast is up.
+ */
+export function useSidebarPersistentToast(toast: ToastState | null): void {
+  const setPersistentToast = useContext(SidebarPersistentToastContext);
+  useEffect(() => {
+    setPersistentToast?.(toast);
+  }, [setPersistentToast, toast]);
+  useEffect(() => {
+    return () => {
+      setPersistentToast?.(null);
+    };
+  }, [setPersistentToast]);
 }
 
 const styles = StyleSheet.create({
