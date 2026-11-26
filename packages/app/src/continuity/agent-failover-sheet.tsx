@@ -115,6 +115,7 @@ function FailoverSheet({
                 serverId={serverId}
                 value={draft.order}
                 onChange={setOrder}
+                reorderable
                 testIDPrefix="agent-failover"
               />
             </>

@@ -7,7 +7,14 @@ import {
   formatUsageAccountName,
 } from "./format";
 import { displayPercent, resolveUsageSnapshot } from "./model";
-import { effectiveUsagePins, usageReportsOn, type UsagePreferences } from "./preferences";
+import {
+  arrangeUsageReports,
+  defaultUsagePins,
+  effectiveUsagePins,
+  usageReportsOn,
+  type UsagePin,
+  type UsagePreferences,
+} from "./preferences";
 import { windowTone } from "./tone";
 import type { UsageReportEntry, UsageTone } from "./types";
 
@@ -103,6 +110,63 @@ function describe(entry: UsageReportEntry, windowLabel: string): string {
   return `${formatUsageAccountName(entry)} ${windowLabel}`;
 }
 
+function reportsWindow(
+  reports: readonly UsageReportEntry[],
+  pin: UsagePin,
+  preferences: UsagePreferences,
+): boolean {
+  return reports.some((entry) => {
+    if (entry.sourceId !== pin.sourceId) return false;
+    const snapshot = resolveUsageSnapshot(entry);
+    return (
+      snapshot?.report.windows.some(
+        (window) =>
+          window.id === pin.windowId && displayPercent(window, preferences.displayAs) !== null,
+      ) ?? false
+    );
+  });
+}
+
+/**
+ * The windows the summary shows (spec 38 §4.2): the pins whose source still reports them with
+ * data, or, when none does (a source dropped a pinned window, or nothing is pinned), the default
+ * pins. The summary is empty only when no shown source has a window with data.
+ */
+export function summaryUsagePins(
+  reports: readonly UsageReportEntry[],
+  preferences: UsagePreferences,
+): UsagePin[] {
+  const live = effectiveUsagePins(preferences, reports).filter((pin) =>
+    reportsWindow(reports, pin, preferences),
+  );
+  return live.length > 0 ? live : defaultUsagePins(preferences.displayAs, reports);
+}
+
+function hasData(entry: UsageReportEntry, preferences: UsagePreferences): boolean {
+  const snapshot = resolveUsageSnapshot(entry);
+  return (
+    snapshot?.report.windows.some(
+      (window) => displayPercent(window, preferences.displayAs) !== null,
+    ) ?? false
+  );
+}
+
+/**
+ * The reports the summary reads: the cards that are on. When none of them has data, every report
+ * the user has not turned off themselves, so the host's default-off hint (a source whose provider
+ * the daemon did not find active) never empties the summary while a source reports numbers.
+ */
+function summaryReports(
+  reports: readonly UsageReportEntry[],
+  preferences: UsagePreferences,
+): UsageReportEntry[] {
+  const on = usageReportsOn(reports, preferences);
+  if (on.some((entry) => hasData(entry, preferences))) return on;
+  return arrangeUsageReports(reports, preferences).filter(
+    (entry) => preferences.cardVisibility[entry.id] !== false,
+  );
+}
+
 /**
  * The sidebar Usage item's summary: one group per account in card order, each with its windows in
  * its report's order. Accounts turned off or with nothing to show are left out.
@@ -112,8 +176,9 @@ export function resolvePinnedUsage(
   preferences: UsagePreferences,
   t: TFunction = i18n.t,
 ): PinnedUsageSource[] {
-  const pins = effectiveUsagePins(preferences, reports);
-  return usageReportsOn(reports, preferences).flatMap((entry) => {
+  const shown = summaryReports(reports, preferences);
+  const pins = summaryUsagePins(shown, preferences);
+  return shown.flatMap((entry) => {
     const snapshot = resolveUsageSnapshot(entry);
     if (!snapshot) return [];
     const windows = snapshot.report.windows

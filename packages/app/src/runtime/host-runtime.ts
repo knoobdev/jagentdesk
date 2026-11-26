@@ -57,7 +57,10 @@ import {
   normalizeHostPort,
 } from "@/utils/daemon-endpoints";
 import { getRelayDeviceSigning, prepareRelayDeviceSigning } from "@/utils/relay-device-signing";
-import { loadDesktopSignedLocalHosts } from "@/runtime/desktop-signed-local-hosts";
+import {
+  isDesktopSignedLocalHost,
+  loadDesktopSignedLocalHosts,
+} from "@/runtime/desktop-signed-local-hosts";
 import { directTcpClientConfig } from "@/runtime/direct-tcp-client-config";
 import { resolveAppVersion } from "@/utils/app-version";
 import { ConnectionOfferSchema, type ConnectionOffer } from "@jagentdesk/protocol/connection-offer";
@@ -506,16 +509,25 @@ function toSnapshotConnectionPatch(
   };
 }
 
+const LOOPBACK_ENDPOINT_PATTERN = /^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\]):\d+$/i;
+
+/** A route that stays on this machine: a socket, a pipe, or TCP to a loopback address. */
+export function isLocalRoute(connection: HostConnection): boolean {
+  if (connection.type === "directSocket" || connection.type === "directPipe") return true;
+  return connection.type === "directTcp" && LOOPBACK_ENDPOINT_PATTERN.test(connection.endpoint);
+}
+
 export function buildConnectionCandidates(
   host: HostProfile,
   tailnetMode: TailnetMode | null = isWeb ? "off" : null,
+  options: { preferLocal?: boolean } = {},
 ): ConnectionCandidate[] {
   // A phone that has not paired yet (`null`) dials relay only; it must not
   // touch localhost or a tailnet it never joined.
   const connections = host.connections.filter(
     (connection) => tailnetMode !== null || connection.type === "relay",
   );
-  const rank = (connection: HostConnection): number => {
+  const rankWithin = (connection: HostConnection): number => {
     if (connection.id === host.preferredConnectionId) return 0;
     if (connection.id === host.lastConnectionId) return 1;
     if (connection.type === "directSocket" || connection.type === "directPipe") return 2;
@@ -524,6 +536,12 @@ export function buildConnectionCandidates(
       return /^(?:\d{1,3}\.){3}\d{1,3}:|^\[/.test(connection.tailnetAddress) ? 5 : 4;
     return 6;
   };
+  // The desktop's bundled daemon (ADR-0056 §2) is dialed on this machine first, whatever route a
+  // pairing link or an earlier session left as preferred; relay and tailnet stay as fallbacks.
+  const rank = (connection: HostConnection): number =>
+    options.preferLocal && !isLocalRoute(connection)
+      ? 10 + rankWithin(connection)
+      : rankWithin(connection);
   return connections
     .sort((a, b) => rank(a) - rank(b))
     .map((connection) => ({
@@ -1097,7 +1115,8 @@ export class HostRuntimeController {
 
   private async runProbeCycle(): Promise<void> {
     const requestVersion = ++this.probeRequestVersion;
-    const candidates = buildConnectionCandidates(this.host, this.tailnetMode);
+    const preferLocal = this.prefersLocalRoute();
+    const candidates = buildConnectionCandidates(this.host, this.tailnetMode, { preferLocal });
     const activeId = this.snapshot.activeConnectionId;
     const activeAllowed = candidates.some((candidate) => candidate.connectionId === activeId);
     if (!activeAllowed && activeId) {
@@ -1118,6 +1137,7 @@ export class HostRuntimeController {
       return;
     }
     const online = activeAllowed && this.snapshot.connectionStatus === "online";
+    const upgradingToLocal = online && preferLocal && this.isOnNonLocalRoute(activeId);
     const probes = new Map(this.snapshot.probeByConnectionId);
     let sampledInactive = false;
     // A disconnected active socket gets one reconnect round. If that fails,
@@ -1132,31 +1152,59 @@ export class HostRuntimeController {
     for (const { connectionId, connection } of ordered) {
       if (!this.isCurrentProbeRequest(requestVersion)) return;
       const now = performance.now();
-      const lastProbed = this.connectionLastProbedAt.get(connectionId);
-      if (
-        online &&
-        lastProbed !== undefined &&
-        now - lastProbed <
-          (connectionId === activeId ? PROBE_STEADY_MS : this.inactiveOnlineProbeIntervalMs())
-      )
+      const upgrade = upgradingToLocal && isLocalRoute(connection);
+      if (online && !this.isProbeDue(connectionId, now, connectionId === activeId || upgrade))
         continue;
-      if (online && connectionId !== activeId) sampledInactive = true;
+      if (online && connectionId !== activeId && !upgrade) sampledInactive = true;
       this.connectionLastProbedAt.set(connectionId, now);
       probes.set(connectionId, { status: "pending", latencyMs: null });
       this.updateSnapshot({ probeByConnectionId: new Map(probes) });
-      if (await this.probeConnection({ connection, online, activeId, requestVersion, probes }))
+      if (
+        await this.probeConnection({
+          connection,
+          online,
+          upgrade,
+          activeId,
+          requestVersion,
+          probes,
+        })
+      )
         return;
     }
-    // Ordered routing keeps a healthy socket selected. Back off diagnostic probes
-    // only while that same socket stayed online throughout this cycle.
+    if (sampledInactive) this.backOffInactiveProbes(requestVersion, activeId);
+  }
+
+  // Ordered routing keeps a healthy socket selected. Back off diagnostic probes
+  // only while that same socket stayed online throughout this cycle.
+  private backOffInactiveProbes(requestVersion: number, activeId: string | null): void {
     if (
-      sampledInactive &&
       this.isCurrentProbeRequest(requestVersion) &&
       this.snapshot.connectionStatus === "online" &&
       this.snapshot.activeConnectionId === activeId
     ) {
       this.advanceInactiveOnlineProbeBackoff();
     }
+  }
+
+  /** The desktop's bundled daemon, which this app always reaches on this machine first. */
+  private prefersLocalRoute(): boolean {
+    return isDesktopSignedLocalHost(this.host.serverId);
+  }
+
+  /**
+   * Online over relay or the tailnet to the bundled daemon: the local route is sampled at the
+   * steady pace and takes over as soon as it answers.
+   */
+  private isOnNonLocalRoute(activeId: string | null): boolean {
+    const active = findConnectionById(this.host, activeId);
+    return active !== null && !isLocalRoute(active);
+  }
+
+  /** While online, the active route (`steady`) is sampled every 10 s, others on a backoff. */
+  private isProbeDue(connectionId: string, now: number, steady: boolean): boolean {
+    const lastProbed = this.connectionLastProbedAt.get(connectionId);
+    if (lastProbed === undefined) return true;
+    return now - lastProbed >= (steady ? PROBE_STEADY_MS : this.inactiveOnlineProbeIntervalMs());
   }
 
   private inactiveOnlineProbeIntervalMs(): number {
@@ -1176,11 +1224,13 @@ export class HostRuntimeController {
   private async probeConnection(input: {
     connection: HostConnection;
     online: boolean;
+    /** Online on another route, but this one should take over once it answers. */
+    upgrade?: boolean;
     activeId: string | null;
     requestVersion: number;
     probes: Map<string, ConnectionProbeState>;
   }): Promise<boolean> {
-    const { connection, online, activeId, requestVersion, probes } = input;
+    const { connection, online, upgrade = false, activeId, requestVersion, probes } = input;
     const connectionId = connection.id;
     let client: DaemonClient | null = null;
     let retained = false;
@@ -1203,7 +1253,7 @@ export class HostRuntimeController {
         return true;
       }
       probes.set(connectionId, { status: "available", latencyMs: 0 });
-      if (!online) {
+      if (!online || upgrade) {
         await this.switchToConnection({
           connectionId,
           existingClient: client,

@@ -1,212 +1,183 @@
 import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Pressable, Text, View } from "react-native";
-import { StyleSheet } from "react-native-unistyles";
+import { Text, View } from "react-native";
+import { GripVertical, X } from "lucide-react-native";
+import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { ProviderModelRef } from "@jagentdesk/protocol/messages";
-import { AdaptiveModalSheet } from "@/components/adaptive-modal-sheet";
+import { DraggableList, DraggableListHandle } from "@/components/draggable-list";
+import type { DraggableRenderItemInfo } from "@/components/draggable-list.types";
 import { Button } from "@/components/ui/button";
+import { extraMutedIconColorMapping } from "@/components/ui/icon-button-chrome";
+import { paneContentToolbarIconSize, ToolbarButton } from "@/components/ui/pane-content-toolbar";
+import { useIsCompactFormFactor } from "@/constants/layout";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
-import { filterSelectableModels } from "@/provider-selection/model-catalog";
-import { providerDisplayLabel } from "./use-agent-ledger";
+import { AddProviderModelSheet, ProviderGlyph } from "./add-provider-model-sheet";
+import { describeProviderModel, providerDisplayLabel } from "./provider-model-choices";
 
-interface PickerOption {
-  key: string;
-  ref: ProviderModelRef;
-  label: string;
-}
-
-/** Enabled providers with their default model first, then each selectable model. */
-function usePickerOptions(serverId: string): PickerOption[] {
-  const { t } = useTranslation();
-  const { entries } = useProvidersSnapshot(serverId);
-  return useMemo(() => {
-    const options: PickerOption[] = [];
-    for (const entry of entries ?? []) {
-      if (!entry.enabled || entry.status === "unavailable") continue;
-      const label = entry.label ?? providerDisplayLabel(entry.provider);
-      options.push({
-        key: `${entry.provider}:`,
-        ref: { provider: entry.provider, model: null },
-        label: `${label} · ${t("continuity.ledger.defaultModel")}`,
-      });
-      for (const model of filterSelectableModels(entry.models ?? null) ?? []) {
-        options.push({
-          key: `${entry.provider}:${model.id}`,
-          ref: { provider: entry.provider, model: model.id },
-          label: `${label} · ${model.label}`,
-        });
-      }
-    }
-    return options;
-  }, [entries, t]);
-}
+const ThemedGripVertical = withUnistyles(GripVertical);
+const ThemedX = withUnistyles(X);
+const DRAG_GRIP_SIZE = 14;
 
 export function formatProviderModel(ref: ProviderModelRef, defaultLabel: string): string {
   return `${providerDisplayLabel(ref.provider)} · ${ref.model ?? defaultLabel}`;
 }
 
-function PickerRow({
-  option,
-  onPick,
-}: {
-  option: PickerOption;
-  onPick: (ref: ProviderModelRef) => void;
-}) {
-  const handlePress = useCallback(() => onPick(option.ref), [onPick, option.ref]);
-  return (
-    <Pressable
-      style={styles.pickerRow}
-      onPress={handlePress}
-      testID={`provider-model-option-${option.key}`}
-    >
-      <Text style={styles.rowText}>{option.label}</Text>
-    </Pressable>
-  );
-}
-
-function ProviderModelPickerSheet({
-  serverId,
-  onPick,
-  onClose,
-}: {
-  serverId: string;
-  onPick: (ref: ProviderModelRef) => void;
-  onClose: () => void;
-}) {
-  const { t } = useTranslation();
-  const options = usePickerOptions(serverId);
-  const header = useMemo(() => ({ title: t("continuity.settings.addProvider") }), [t]);
-  return (
-    <AdaptiveModalSheet
-      header={header}
-      visible
-      onClose={onClose}
-      desktopMaxWidth={520}
-      testID="provider-model-picker"
-    >
-      <View>
-        {options.map((option) => (
-          <PickerRow key={option.key} option={option} onPick={onPick} />
-        ))}
-      </View>
-    </AdaptiveModalSheet>
-  );
+function entryKey(entry: ProviderModelRef): string {
+  return `${entry.provider}:${entry.model ?? ""}`;
 }
 
 function EntryRow({
   entry,
-  index,
-  count,
-  onMove,
+  label,
+  reorderable,
   onRemove,
-  testIDPrefix,
+  testID,
 }: {
   entry: ProviderModelRef;
-  index: number;
-  count: number;
-  onMove: (index: number, delta: -1 | 1) => void;
-  onRemove: (index: number) => void;
-  testIDPrefix: string;
+  label: string;
+  reorderable: boolean;
+  onRemove: (entry: ProviderModelRef) => void;
+  testID: string;
 }) {
   const { t } = useTranslation();
-  const moveUp = useCallback(() => onMove(index, -1), [index, onMove]);
-  const moveDown = useCallback(() => onMove(index, 1), [index, onMove]);
-  const remove = useCallback(() => onRemove(index), [index, onRemove]);
+  const compact = useIsCompactFormFactor();
+  const remove = useCallback(() => onRemove(entry), [entry, onRemove]);
   return (
-    <View style={styles.entryRow} testID={`${testIDPrefix}-entry-${index}`}>
+    <View style={styles.entryRow} testID={testID}>
+      {reorderable ? (
+        <DraggableListHandle
+          accessibilityLabel={t("continuity.settings.reorder", { entry: label })}
+          style={styles.dragHandle}
+          testID={`${testID}-drag`}
+        >
+          <ThemedGripVertical size={DRAG_GRIP_SIZE} uniProps={extraMutedIconColorMapping} />
+        </DraggableListHandle>
+      ) : null}
+      <ProviderGlyph provider={entry.provider} />
       <Text style={styles.rowText} numberOfLines={1}>
-        {index + 1}. {formatProviderModel(entry, t("continuity.ledger.defaultModel"))}
+        {label}
       </Text>
-      <View style={styles.entryActions}>
-        <Button size="sm" variant="ghost" onPress={moveUp} disabled={index === 0}>
-          {t("continuity.settings.moveUp")}
-        </Button>
-        <Button size="sm" variant="ghost" onPress={moveDown} disabled={index === count - 1}>
-          {t("continuity.settings.moveDown")}
-        </Button>
-        <Button size="sm" variant="ghost" onPress={remove}>
-          {t("continuity.settings.remove")}
-        </Button>
-      </View>
+      <ToolbarButton
+        label={t("continuity.settings.removeEntry", { entry: label })}
+        compact={compact}
+        onPress={remove}
+        testID={`${testID}-remove`}
+      >
+        <ThemedX size={paneContentToolbarIconSize(compact)} uniProps={extraMutedIconColorMapping} />
+      </ToolbarButton>
     </View>
   );
 }
 
-/** An ordered list of provider/model entries (failover order, allowed child providers). */
+/**
+ * An ordered list of provider/model entries: the failover order (`reorderable`, dragged by its
+ * handles) or the providers child agents may use. "Add provider" opens the two-field form.
+ */
 export function ProviderModelListEditor({
   serverId,
   value,
   onChange,
   disabled = false,
+  reorderable = false,
   testIDPrefix,
 }: {
   serverId: string;
   value: readonly ProviderModelRef[];
   onChange: (next: ProviderModelRef[]) => void;
   disabled?: boolean;
+  reorderable?: boolean;
   testIDPrefix: string;
 }) {
   const { t } = useTranslation();
-  const [picking, setPicking] = useState(false);
-  const openPicker = useCallback(() => setPicking(true), []);
-  const closePicker = useCallback(() => setPicking(false), []);
-  const handlePick = useCallback(
+  const { entries } = useProvidersSnapshot(serverId);
+  const defaultLabel = t("continuity.settings.defaultModel");
+  const [adding, setAdding] = useState(false);
+  const openAdd = useCallback(() => setAdding(true), []);
+  const closeAdd = useCallback(() => setAdding(false), []);
+  const data = useMemo(() => [...value], [value]);
+  const labels = useMemo(
+    () =>
+      new Map(
+        value.map((entry) => {
+          const { providerLabel, modelLabel } = describeProviderModel(entry, entries, defaultLabel);
+          return [entryKey(entry), `${providerLabel} · ${modelLabel}`] as const;
+        }),
+      ),
+    [defaultLabel, entries, value],
+  );
+  const handleAdd = useCallback(
     (ref: ProviderModelRef) => {
-      setPicking(false);
-      if (value.some((entry) => entry.provider === ref.provider && entry.model === ref.model)) {
-        return;
-      }
+      setAdding(false);
+      if (value.some((entry) => entryKey(entry) === entryKey(ref))) return;
       onChange([...value, ref]);
     },
     [onChange, value],
   );
-  const handleMove = useCallback(
-    (index: number, delta: -1 | 1) => {
-      const target = index + delta;
-      if (target < 0 || target >= value.length) return;
-      const next = [...value];
-      const moved = next[index];
-      const other = next[target];
-      if (!moved || !other) return;
-      next[index] = other;
-      next[target] = moved;
-      onChange(next);
-    },
+  const handleRemove = useCallback(
+    (removed: ProviderModelRef) =>
+      onChange(value.filter((entry) => entryKey(entry) !== entryKey(removed))),
     [onChange, value],
   );
-  const handleRemove = useCallback(
-    (index: number) => onChange(value.filter((_, position) => position !== index)),
-    [onChange, value],
+  const handleDragEnd = useCallback((next: ProviderModelRef[]) => onChange(next), [onChange]);
+  const renderRow = useCallback(
+    (entry: ProviderModelRef, index: number) => (
+      <EntryRow
+        entry={entry}
+        label={labels.get(entryKey(entry)) ?? formatProviderModel(entry, defaultLabel)}
+        reorderable={reorderable}
+        onRemove={handleRemove}
+        testID={`${testIDPrefix}-entry-${index}`}
+      />
+    ),
+    [defaultLabel, handleRemove, labels, reorderable, testIDPrefix],
+  );
+  const renderItem = useCallback(
+    ({ item, index }: DraggableRenderItemInfo<ProviderModelRef>) => renderRow(item, index),
+    [renderRow],
   );
   return (
     <View style={styles.list}>
       {value.length === 0 ? (
         <Text style={styles.muted}>{t("continuity.settings.emptyList")}</Text>
       ) : null}
-      {value.map((entry, index) => (
-        <EntryRow
-          key={`${entry.provider}:${entry.model ?? ""}`}
-          entry={entry}
-          index={index}
-          count={value.length}
-          onMove={handleMove}
-          onRemove={handleRemove}
-          testIDPrefix={testIDPrefix}
+      {value.length > 0 && reorderable ? (
+        <DraggableList
+          data={data}
+          keyExtractor={entryKey}
+          renderItem={renderItem}
+          onDragEnd={handleDragEnd}
+          extraData={labels}
+          scrollEnabled={false}
+          useDragHandle
+          testID={`${testIDPrefix}-list`}
         />
-      ))}
+      ) : null}
+      {value.length > 0 && !reorderable ? (
+        <View testID={`${testIDPrefix}-list`}>
+          {data.map((entry, index) => (
+            <View key={entryKey(entry)}>{renderRow(entry, index)}</View>
+          ))}
+        </View>
+      ) : null}
       <View style={styles.addRow}>
         <Button
           size="sm"
           variant="outline"
-          onPress={openPicker}
+          onPress={openAdd}
           disabled={disabled}
           testID={`${testIDPrefix}-add`}
         >
           {t("continuity.settings.addProvider")}
         </Button>
       </View>
-      {picking ? (
-        <ProviderModelPickerSheet serverId={serverId} onPick={handlePick} onClose={closePicker} />
+      {adding ? (
+        <AddProviderModelSheet
+          serverId={serverId}
+          listed={value}
+          onAdd={handleAdd}
+          onClose={closeAdd}
+          testIDPrefix={testIDPrefix}
+        />
       ) : null}
     </View>
   );
@@ -217,24 +188,23 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[2],
   },
   entryRow: {
+    minHeight: 44,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
     gap: theme.spacing[2],
   },
-  entryActions: {
-    flexDirection: "row",
-    gap: theme.spacing[1],
+  dragHandle: {
+    alignItems: "center",
+    justifyContent: "center",
+    width: theme.spacing[4],
+    alignSelf: "stretch",
   },
   addRow: {
     flexDirection: "row",
   },
-  pickerRow: {
-    paddingVertical: theme.spacing[2],
-    paddingHorizontal: theme.spacing[1],
-  },
   rowText: {
-    flexShrink: 1,
+    flex: 1,
+    minWidth: 0,
     color: theme.colors.foreground,
     fontSize: theme.fontSize.sm,
   },
