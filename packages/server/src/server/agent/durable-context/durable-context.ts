@@ -42,6 +42,8 @@ import {
 /** Claude's PostCompact summary is attached to a compaction seen this recently. */
 const SUMMARY_ATTACH_WINDOW_MS = 5 * 60_000;
 const MAX_SUMMARY_CHARS = 40_000;
+/** The Context compacted row waits at most this long for the size after the compaction. */
+const PENDING_ROW_FLUSH_MS = 15_000;
 
 export interface DurableAgentView {
   id: string;
@@ -261,6 +263,13 @@ export class DurableContext {
       await this.appendCompactionRow(agentId, compaction);
     } else {
       this.pendingRows.set(agentId, { compactionId: compaction.id, provider: detected.provider });
+      // A provider that never reports a smaller size still gets its row.
+      const timer = setTimeout(() => {
+        if (this.pendingRows.get(agentId)?.compactionId === compaction.id) {
+          this.enqueue(agentId, () => this.flushRow(agentId, null));
+        }
+      }, PENDING_ROW_FLUSH_MS);
+      timer.unref?.();
     }
   }
 

@@ -6600,13 +6600,14 @@ export class AgentManager {
       },
       "agent.manager.turn.completed",
     );
+    // An out-of-band turn (Codex /compact) ends as stale; its compaction row still shows now.
+    this.durable.onTurnEnded(agent.id);
     if (terminalDisposition === "stale") return;
     if (event.usage) {
       this.durable.observeUsage(this.durableView(agent), event.usage);
       agent.lastUsage = { ...agent.lastUsage, ...event.usage };
       this.accumulateUsageTotals(agent, event.usage);
     }
-    this.durable.onTurnEnded(agent.id);
     // The turn reached a clean end: its usage (if any) is now billed via
     // `event.usage`, so drop the per-turn tracker to avoid re-billing it if a
     // stray canceled/failed event arrives for the same turn.
