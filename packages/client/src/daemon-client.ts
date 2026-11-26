@@ -131,6 +131,10 @@ import {
   type RefreshProvidersSnapshotResponseMessage,
   type ProviderDiagnosticResponseMessage,
   type ProviderUsageListResponseMessage,
+  type AgentLedgerGetPayload,
+  type AgentContinuityGetPayload,
+  type AgentFailoverConfig,
+  type CrossProviderChildrenConfig,
   type DaemonGetStatusResponse,
   type DaemonGetPairingOfferResponse,
   type PairingDeviceListResponse,
@@ -5285,6 +5289,7 @@ export class DaemonClient {
     agentId: string,
     provider: AgentProvider,
     modelId: string | null,
+    options?: { whenBusy?: "wait" | "interrupt" },
   ): Promise<void> {
     const requestId = this.createRequestId();
     const message = SessionInboundMessageSchema.parse({
@@ -5292,6 +5297,7 @@ export class DaemonClient {
       agentId,
       provider,
       modelId,
+      ...(options?.whenBusy ? { whenBusy: options.whenBusy } : {}),
       requestId,
     });
     const payload = await this.sendRequest({
@@ -8741,6 +8747,58 @@ export class DaemonClient {
       active = false;
       unsubscribe();
     }
+  }
+
+  /** Host failover/child-provider settings and this agent's overrides (spec 40 §4–§5). */
+  async getAgentContinuity(
+    agentId: string,
+    options?: { requestId?: string },
+  ): Promise<AgentContinuityGetPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"agent.continuity.get.response">({
+      requestId: options?.requestId,
+      message: { type: "agent.continuity.get.request", agentId },
+    });
+  }
+
+  /** `null` clears an override back to the host setting; an omitted key is left alone. */
+  async setAgentContinuity(
+    agentId: string,
+    patch: {
+      failover?: AgentFailoverConfig | null;
+      crossProviderChildren?: CrossProviderChildrenConfig | null;
+    },
+  ): Promise<void> {
+    const payload =
+      await this.sendNamespacedCorrelatedSessionRequest<"agent.continuity.set.response">({
+        message: { type: "agent.continuity.set.request", agentId, ...patch },
+      });
+    if (payload.error) throw new Error(payload.error);
+  }
+
+  /** "Continue with …" after a usage limit: switch and resend the failed turn's message. */
+  async continueAgentWithProvider(
+    agentId: string,
+    target: { provider: string; model: string | null },
+  ): Promise<void> {
+    const payload =
+      await this.sendNamespacedCorrelatedSessionRequest<"agent.failover.continue.response">({
+        message: { type: "agent.failover.continue.request", agentId, ...target },
+      });
+    if (!payload.accepted) throw new Error(payload.error ?? "Continue with provider failed");
+  }
+
+  /** The session ledger of an agent (spec 40 §2), with its handoffs and provider sessions. */
+  async getAgentLedger(
+    agentId: string,
+    options?: { requestId?: string },
+  ): Promise<AgentLedgerGetPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"agent.ledger.get.response">({
+      requestId: options?.requestId,
+      message: {
+        type: "agent.ledger.get.request",
+        agentId,
+      },
+    });
   }
 
   async listProviderUsage(options?: { requestId?: string }): Promise<ProviderUsageListPayload> {

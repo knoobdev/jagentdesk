@@ -16,6 +16,7 @@ release notes live in [`releases/`](releases/v0.10.1.md).
 - [data-model.md](data-model.md) — files under `$JAGENTDESK_HOME`, schemas, atomic writes, config keys.
 - [agent-lifecycle.md](agent-lifecycle.md) — agent states, parents and children, archive, idle release, background work.
 - [orchestration.md](orchestration.md) — Supervisor → Lead → Peer (ORC).
+- [cross-provider-continuity.md](cross-provider-continuity.md) — session ledger, provider switches, usage-limit failover, children on other providers.
 - [bots.md](bots.md) — Bots: daemon lifecycle, storage, permissions, triggers, Slack.
 - [timeline-sync.md](timeline-sync.md) — how chat reaches clients and the replica cache.
 - [terminal-worker.md](terminal-worker.md) — the persistent terminal worker.

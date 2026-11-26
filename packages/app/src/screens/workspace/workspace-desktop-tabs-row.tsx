@@ -1,3 +1,4 @@
+import { useHostFeature } from "@/runtime/host-features";
 import { getPanelManifest, panelCanLaunchInPane } from "@/panels/panel-manifest";
 import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
 import { buildWorkspaceTabPersistenceKey, type WorkspaceTabTarget } from "@/workspace-tabs/model";
@@ -876,6 +877,7 @@ export function WorkspaceDesktopTabsRow({
       closeOthers: t("workspace.tabs.menu.closeOthers"),
       reloadAgent: t("workspace.tabs.menu.reloadAgent"),
       reloadAgentTooltip: t("workspace.tabs.menu.reloadAgentTooltip"),
+      failover: t("continuity.failover.menu"),
       close: t("workspace.tabs.menu.close"),
     }),
     [t],
@@ -1501,12 +1503,16 @@ function ExplorerAddTabMenu({
   const { t } = useTranslation();
   const plugins = useInstalledPlugins();
   const inspectorTabs = useBuiltinInspectorTabs(serverId);
+  const ledgerSupported = useHostFeature(serverId, "crossProviderContinuity");
   const workspaceKey = buildWorkspaceTabPersistenceKey({ serverId, workspaceId })!;
   const items = useMemo(
     () => [
       { target: { kind: "files" } as const, label: t("workspace.tabs.explorer.files") },
       { target: { kind: "changes_tree" } as const, label: t("workspace.tabs.explorer.changes") },
       { target: { kind: "pull_request" } as const, label: t("panels.pullRequest.label") },
+      ...(ledgerSupported
+        ? [{ target: { kind: "ledger" } as const, label: t("continuity.ledger.tab") }]
+        : []),
       { target: { kind: "working_diff" } as const, label: t("panels.diff.changesSubtitle") },
       ...inspectorTabs.map((tab) => ({
         target: { kind: "builtin_inspector", tabId: tab.id } as const,
@@ -1531,7 +1537,7 @@ function ExplorerAddTabMenu({
             })),
         ),
     ],
-    [inspectorTabs, plugins, serverId, t],
+    [inspectorTabs, ledgerSupported, plugins, serverId, t],
   );
   const kinds = tabs.map((item) => item.tab.kind);
   return (

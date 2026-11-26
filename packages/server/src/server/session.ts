@@ -1458,8 +1458,9 @@ export class Session {
         setMode: async (agentId, modeId) =>
           (await setAgentModeCommand({ agentManager }, { agentId, modeId })).notice,
         setModel: (agentId, modelId) => agentManager.setAgentModel(agentId, modelId),
-        switchProvider: (agentId, provider, modelId) =>
-          agentManager.switchAgentProvider(agentId, provider, modelId),
+        switchProvider: async (agentId, provider, modelId, switchOptions) => {
+          await agentManager.switchAgentProvider(agentId, provider, modelId, switchOptions);
+        },
         setOptions: (agentId, patch) => agentManager.setAgentOptions(agentId, patch),
         setThinking: (agentId, thinkingOptionId) =>
           agentManager.setAgentThinkingOption(agentId, thinkingOptionId),
@@ -3884,6 +3885,14 @@ export class Session {
         return this.usageSession.handleListReports(msg);
       case "provider.usage.list.request":
         return this.providerCatalogSession.handleProviderUsageListRequest(msg);
+      case "agent.ledger.get.request":
+        return this.handleAgentLedgerGetRequest(msg);
+      case "agent.continuity.get.request":
+        return this.handleAgentContinuityGetRequest(msg);
+      case "agent.continuity.set.request":
+        return this.handleAgentContinuitySetRequest(msg);
+      case "agent.failover.continue.request":
+        return this.handleAgentFailoverContinueRequest(msg);
       default:
         return undefined;
     }
@@ -4995,13 +5004,7 @@ export class Session {
     );
 
     const promptText = options?.spokenInput ? wrapSpokenInput(text) : text;
-    // If the agent just switched provider, prepend the prior conversation (staged
-    // as a chat-history attachment) so the new provider opens with full context.
-    const providerSwitchSeed = this.agentManager.consumeProviderSwitchSeed(agentId);
-    const effectiveAttachments = providerSwitchSeed
-      ? [providerSwitchSeed, ...(attachments ?? [])]
-      : attachments;
-    const prompt = buildAgentPrompt(promptText, images, effectiveAttachments);
+    const prompt = buildAgentPrompt(promptText, images, attachments);
 
     try {
       await sendPromptToAgent({
@@ -9037,6 +9040,121 @@ export class Session {
         },
         source,
       );
+    }
+  }
+
+  private async handleAgentContinuityGetRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.continuity.get.request" }>,
+  ): Promise<void> {
+    try {
+      await this.ensureContinuityAgentLoaded(msg.agentId);
+      const override = await this.agentManager.getAgentContinuityOverrides(msg.agentId);
+      this.emit({
+        type: "agent.continuity.get.response",
+        payload: {
+          requestId: msg.requestId,
+          agentId: msg.agentId,
+          host: this.agentManager.getHostContinuityConfig(),
+          override: {
+            failover: override.failover ?? null,
+            crossProviderChildren: override.crossProviderChildren ?? null,
+          },
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emit({
+        type: "agent.continuity.get.response",
+        payload: {
+          requestId: msg.requestId,
+          agentId: msg.agentId,
+          host: null,
+          override: null,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+
+  private async handleAgentContinuitySetRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.continuity.set.request" }>,
+  ): Promise<void> {
+    let error: string | null = null;
+    try {
+      await this.ensureContinuityAgentLoaded(msg.agentId);
+      await this.agentManager.setAgentContinuityOverrides(msg.agentId, {
+        ...(msg.failover !== undefined ? { failover: msg.failover } : {}),
+        ...(msg.crossProviderChildren !== undefined
+          ? { crossProviderChildren: msg.crossProviderChildren }
+          : {}),
+      });
+    } catch (caught) {
+      error = caught instanceof Error ? caught.message : String(caught);
+    }
+    this.emit({
+      type: "agent.continuity.set.response",
+      payload: { requestId: msg.requestId, agentId: msg.agentId, error },
+    });
+  }
+
+  private async handleAgentFailoverContinueRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.failover.continue.request" }>,
+  ): Promise<void> {
+    let error: string | null = null;
+    try {
+      await this.ensureContinuityAgentLoaded(msg.agentId);
+      await this.agentManager.continueAfterUsageLimit(msg.agentId, {
+        provider: msg.provider,
+        model: msg.model,
+      });
+    } catch (caught) {
+      error = caught instanceof Error ? caught.message : String(caught);
+      this.sessionLogger.error({ err: caught, agentId: msg.agentId }, "Continue with failed");
+    }
+    this.emit({
+      type: "agent.failover.continue.response",
+      payload: { requestId: msg.requestId, agentId: msg.agentId, accepted: error === null, error },
+    });
+  }
+
+  private async ensureContinuityAgentLoaded(agentId: string): Promise<void> {
+    await ensureAgentLoaded(agentId, {
+      agentManager: this.agentManager,
+      agentStorage: this.agentStorage,
+      logger: this.sessionLogger,
+    });
+  }
+
+  private async handleAgentLedgerGetRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.ledger.get.request" }>,
+  ): Promise<void> {
+    try {
+      await ensureAgentLoaded(msg.agentId, {
+        agentManager: this.agentManager,
+        agentStorage: this.agentStorage,
+        logger: this.sessionLogger,
+      });
+      const { agentId: _agentId, ...ledger } = await this.agentManager.getSessionLedger(
+        msg.agentId,
+      );
+      this.emit({
+        type: "agent.ledger.get.response",
+        payload: { requestId: msg.requestId, agentId: msg.agentId, ledger, error: null },
+      });
+    } catch (error) {
+      this.sessionLogger.error(
+        { err: error, agentId: msg.agentId },
+        "Failed to handle agent.ledger.get.request",
+      );
+      this.emit({
+        type: "agent.ledger.get.response",
+        payload: {
+          requestId: msg.requestId,
+          agentId: msg.agentId,
+          ledger: null,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
     }
   }
 

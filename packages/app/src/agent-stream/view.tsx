@@ -1,3 +1,6 @@
+import { ProviderSwitchRow } from "@/continuity/provider-switch-row";
+import { buildProviderSegments } from "@/continuity/provider-segments";
+import { UsageLimitRow } from "@/continuity/usage-limit-row";
 import { useChatOutlineRail } from "@/chat-rail";
 import { MessageActionsAgentContext } from "./message-actions-context";
 import { isGuestShareMode } from "@/screens/share/guest-share-mode";
@@ -1008,6 +1011,27 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             );
 
           case "activity_log":
+            if (item.usageLimit) {
+              return (
+                <UsageLimitRow
+                  serverId={resolvedServerId}
+                  agentId={agentId}
+                  message={item.message}
+                  notice={item.usageLimit}
+                />
+              );
+            }
+            if (item.providerSwitch) {
+              return (
+                <ProviderSwitchRow
+                  serverId={resolvedServerId}
+                  agentId={agentId}
+                  message={item.message}
+                  timestamp={item.timestamp.getTime()}
+                  notice={item.providerSwitch}
+                />
+              );
+            }
             return (
               <ActivityLog
                 type={item.activityType}
@@ -1046,17 +1070,23 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
 
     const bottomTurnFooterHost = streamLayout.auxiliaryTurnFooter;
 
+    // Rows written before a provider switch keep the provider that wrote them.
+    const providerSegments = useMemo(
+      () => buildProviderSegments(effectiveStreamItems),
+      [effectiveStreamItems],
+    );
     const renderStreamItem = useCallback<RenderStreamItem>(
       (item, originalLayoutItem) => {
         const layoutItem =
           originalLayoutItem.item === item ? originalLayoutItem : { ...originalLayoutItem, item };
         const rawContent = renderStreamItemContent(layoutItem);
+        const segment = providerSegments.get(item.id);
         const content = isGumloop
           ? wrapGumloopAgentItem({
               layoutItem,
               content: rawContent,
-              provider: context.provider,
-              model: agentModelLabel(context),
+              provider: segment?.provider ?? context.provider,
+              model: segment ? segment.model : agentModelLabel(context),
             })
           : rawContent;
         return renderStreamItemWithTurnFooter({
@@ -1073,6 +1103,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         getTurnIndent,
         handleForkAssistantTurn,
         isGumloop,
+        providerSegments,
         readOnly,
         renderStreamItemContent,
         streamRenderStrategy,

@@ -223,6 +223,18 @@ export interface ModelBrowserState {
   drillDown: (providerId: string, providerLabel: string) => void;
 }
 
+/**
+ * The provider of a live agent whose composer opened this browser. Rows of every other provider
+ * then read "Switch provider": picking one moves the agent to that provider (spec 40 §6).
+ */
+export const ModelBrowserSwitchFromContext = createContext<string | null>(null);
+
+function useSwitchProviderHint(provider: string): string | undefined {
+  const { t } = useTranslation();
+  const switchFrom = useContext(ModelBrowserSwitchFromContext);
+  return switchFrom && switchFrom !== provider ? t("modelSelector.switchProvider") : undefined;
+}
+
 interface ModelBrowserProps {
   state: ModelBrowserState;
   onSelect: (provider: string, modelId: string) => void;
@@ -723,7 +735,14 @@ function ModelRow({
     [row.provider, serverId],
   );
 
-  const description = showProviderLabel ? buildProviderQualifiedDescription(row) : row.description;
+  const switchHint = useSwitchProviderHint(row.provider);
+  const baseDescription = showProviderLabel
+    ? buildProviderQualifiedDescription(row)
+    : row.description;
+  const description =
+    switchHint && baseDescription
+      ? `${baseDescription} · ${switchHint}`
+      : (switchHint ?? baseDescription);
   const primary = profiledRows[profiledRows.length - 1];
 
   const handleCreateProfile = useCallback(() => {
@@ -1013,6 +1032,7 @@ function GroupProviderButton({
   onDrillDown: (providerId: string, providerLabel: string) => void;
 }) {
   const { t } = useTranslation();
+  const switchHint = useSwitchProviderHint(provider.id);
   const selection = provider.modelSelection;
   const handlePress = useCallback(() => {
     onDrillDown(provider.id, provider.label);
@@ -1063,6 +1083,7 @@ function GroupProviderButton({
   return (
     <ModelBrowserRow
       label={provider.label}
+      description={switchHint}
       leadingSlot={leadingSlot}
       trailingSlot={trailingSlot}
       tone="drillDown"

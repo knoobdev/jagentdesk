@@ -41,6 +41,8 @@ export type WorkspaceTabTarget =
   | { kind: "files" }
   | { kind: "changes_tree" }
   | { kind: "pull_request" }
+  /** Spec 40 §2: the focused agent's session ledger, in the inspector. */
+  | { kind: "ledger" }
   | WorkspaceFileTabTarget
   | WorkspaceWorkingDiffTabTarget
   | PluginWorkspaceTabTarget

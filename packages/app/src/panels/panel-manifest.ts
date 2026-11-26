@@ -98,6 +98,14 @@ const manifests = {
     compactSheet: null,
     resourceKey: (target) => target.tabId,
   },
+  ledger: {
+    kind: "ledger",
+    supportedHosts: ["explorer"],
+    showCloseButton: true,
+    singleton: true,
+    compactSheet: null,
+    resourceKey: () => "ledger",
+  },
   files: {
     kind: "files",
     supportedHosts: ["explorer"],

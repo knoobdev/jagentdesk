@@ -1,3 +1,5 @@
+import { LedgerPane } from "@/continuity/ledger-pane";
+import { useHostFeature } from "@/runtime/host-features";
 import { Portal } from "@gorhom/portal";
 import { useBuiltinInspectorTabs } from "@/plugins/builtin/surfaces";
 import type { BuiltinInspectorTab } from "@/plugins/builtin/host";
@@ -375,6 +377,19 @@ function ExplorerTabButton<T extends string>({
   );
 }
 
+function resolveVisibleExplorerTab(input: {
+  requestedTab: ExplorerTab;
+  showPrTab: boolean;
+  ledgerSupported: boolean;
+  isGit: boolean;
+}): ExplorerTab {
+  if (input.requestedTab === "pr" && !input.showPrTab) return "changes";
+  if (input.requestedTab === "ledger" && !input.ledgerSupported) {
+    return input.isGit ? "changes" : "files";
+  }
+  return input.requestedTab;
+}
+
 interface SidebarContentProps {
   activeTab: ExplorerTab;
   onTabPress: (tab: ExplorerTab) => void;
@@ -415,7 +430,13 @@ function ExplorerSidebarContent({
   const showPrTab = hasPullRequest || (activeTab === "pr" && prPane.isLoading);
   const requestedTab: ExplorerTab =
     !isGit && (activeTab === "changes" || activeTab === "pr") ? "files" : activeTab;
-  const resolvedTab: ExplorerTab = requestedTab === "pr" && !showPrTab ? "changes" : requestedTab;
+  const ledgerSupported = useHostFeature(serverId, "crossProviderContinuity");
+  const resolvedTab = resolveVisibleExplorerTab({
+    requestedTab,
+    showPrTab,
+    ledgerSupported,
+    isGit,
+  });
   const prTabLabel = formatPrTabLabel(prPane.prNumber);
   const refreshGitActions = useCheckoutGitActionsStore((s) => s.refresh);
   const handlePrRetry = useCallback(() => {
@@ -457,6 +478,15 @@ function ExplorerSidebarContent({
             onTabPress={handleCoreTabPress}
             testID="explorer-tab-files"
           />
+          {ledgerSupported && (
+            <ExplorerTabButton
+              tab="ledger"
+              active={coreTab === "ledger"}
+              label={t("continuity.ledger.tab")}
+              onTabPress={handleCoreTabPress}
+              testID="explorer-tab-ledger"
+            />
+          )}
           {isGit && showPrTab && (
             <ExplorerTabButton
               tab="pr"
@@ -521,6 +551,7 @@ function ExplorerSidebarContent({
             onOpenFile={onOpenFile}
           />
         )}
+        {coreTab === "ledger" && <LedgerPane serverId={serverId} workspaceId={workspaceId} />}
         {coreTab === "pr" && (
           <PrTabContent
             serverId={serverId}
