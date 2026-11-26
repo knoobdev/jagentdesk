@@ -25,6 +25,7 @@ import {
   normalizeBaseRefName,
   readJAgentDeskWorktreeMetadata,
 } from "../utils/worktree-metadata.js";
+import { runWithRepositoryRoot } from "../utils/git-repository-discovery.js";
 
 export interface CreateWorktreeCoreInput {
   cwd: string;
@@ -62,6 +63,16 @@ export async function createWorktreeCore(
   deps: CreateWorktreeCoreDeps,
 ): Promise<CreateWorktreeCoreResult> {
   const repoRoot = await resolveWorktreeRepoRoot(input, deps.workspaceGitService);
+  return runWithRepositoryRoot(repoRoot, () =>
+    createWorktreeAtRepositoryRoot(input, deps, repoRoot),
+  );
+}
+
+async function createWorktreeAtRepositoryRoot(
+  input: CreateWorktreeCoreInput,
+  deps: CreateWorktreeCoreDeps,
+  repoRoot: string,
+): Promise<CreateWorktreeCoreResult> {
   const requestedWorktreeSlug = input.worktreeSlug
     ? normalizeWorktreeSlug(input.worktreeSlug)
     : undefined;

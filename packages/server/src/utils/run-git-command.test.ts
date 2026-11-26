@@ -647,14 +647,16 @@ describe("runGitCommand", () => {
       { delayMs: 0, stdoutData: "fourth" },
     );
 
-    await expect(
-      Promise.all([
-        runGitCommand(["status"], { cwd: process.cwd() }),
-        runGitCommand(["status"], { cwd: process.cwd() }),
-      ]),
-    ).resolves.toEqual([
-      expect.objectContaining({ exitCode: 0, stdout: "third", truncated: false }),
-      expect.objectContaining({ exitCode: 0, stdout: "fourth", truncated: false }),
+    // The launch lookup reads the file system before spawning, so the two
+    // commands can claim the queued spawn behaviors in either order.
+    const later = await Promise.all([
+      runGitCommand(["status"], { cwd: process.cwd() }),
+      runGitCommand(["status"], { cwd: process.cwd() }),
+    ]);
+    expect(later.map((result) => result.stdout).sort()).toEqual(["fourth", "third"]);
+    expect(later).toEqual([
+      expect.objectContaining({ exitCode: 0, truncated: false }),
+      expect.objectContaining({ exitCode: 0, truncated: false }),
     ]);
   });
 });

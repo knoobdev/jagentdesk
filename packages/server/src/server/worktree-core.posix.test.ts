@@ -18,14 +18,16 @@ import { createGitLabService } from "../services/gitlab-service.js";
 import {
   getCheckoutSnapshotFacts,
   getCheckoutStatus,
+  getMainRepoRoot,
   pushCurrentBranch,
+  resolveRepositoryDefaultBranch,
 } from "../utils/checkout-git.js";
 import {
   getJAgentDeskWorktreeMetadataPath,
   readJAgentDeskWorktreeMetadata,
 } from "../utils/worktree-metadata.js";
 import { validateBeforeRequest, validateBeforeResult } from "./plugins/lifecycle/index.js";
-import { UnknownBranchError } from "../utils/worktree.js";
+import { createWorktree, UnknownBranchError } from "../utils/worktree.js";
 import { createWorktreeCore as createCoreWorktree } from "./worktree-core.js";
 import { isPlatform } from "../test-utils/platform.js";
 
@@ -82,11 +84,13 @@ function createGitHubServiceStub(): ForgeService {
 function createCoreDeps(options?: {
   github?: ForgeService;
   forge?: { forge: string; service: ForgeService };
+  resolveDefaultBranch?: (repoRoot: string) => Promise<string>;
+  resolveRepoRoot?: (cwd: string) => Promise<string>;
 }) {
   return {
     github: options?.github ?? createGitHubServiceStub(),
     workspaceGitService: {
-      resolveRepoRoot: async (cwd: string) => cwd,
+      resolveRepoRoot: options?.resolveRepoRoot ?? (async (cwd: string) => cwd),
       resolveForge: async () =>
         options?.forge
           ? {
@@ -96,7 +100,7 @@ function createCoreDeps(options?: {
             }
           : null,
     },
-    resolveDefaultBranch: async () => "main",
+    resolveDefaultBranch: options?.resolveDefaultBranch ?? (async () => "main"),
   };
 }
 
@@ -450,6 +454,39 @@ describe.skipIf(isPlatform("win32"))("worktree-core POSIX-only", () => {
       );
       expect(second.worktree.worktreePath).toBe(first.worktree.worktreePath + "-1");
       expect(existsSync(first.worktree.worktreePath)).toBe(true);
+    });
+
+    test("creates a workspace from a checkout of a bare repository that only JAgentDesk uses", async () => {
+      const { tempDir, repoDir, jagentdeskHome } = createGitRepo();
+      cleanupPaths.push(tempDir);
+      const bareRepo = path.join(tempDir, "repo.git");
+      execFileSync("git", ["clone", "--bare", "-q", repoDir, bareRepo], { stdio: "pipe" });
+      const first = await createWorktree({
+        cwd: bareRepo,
+        jagentdeskHome,
+        worktreeSlug: "first",
+        source: { kind: "branch-off", branchName: "first", baseBranch: "main" },
+      });
+      expect(await getMainRepoRoot(first.worktreePath, { jagentdeskHome })).toBe(bareRepo);
+
+      const result = await createCoreWorktree(
+        { cwd: first.worktreePath, worktreeSlug: "second", jagentdeskHome },
+        createCoreDeps({
+          resolveRepoRoot: (cwd) => getMainRepoRoot(cwd, { jagentdeskHome }),
+          resolveDefaultBranch: async (root) =>
+            (await resolveRepositoryDefaultBranch(root)) ?? "unresolved",
+        }),
+      );
+
+      expect(result.repoRoot).toBe(bareRepo);
+      expect(result.intent).toEqual({
+        kind: "branch-off",
+        baseBranch: "main",
+        branchName: "second",
+      });
+      expect(readFileSync(path.join(result.worktree.worktreePath, "README.md"), "utf8")).toBe(
+        "hello\n",
+      );
     });
 
     test("creates branch-off worktrees from origin main without tracking origin main", async () => {

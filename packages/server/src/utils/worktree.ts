@@ -34,6 +34,7 @@ import {
   writeJAgentDeskWorktreeMetadata,
   writeJAgentDeskWorktreeRuntimeMetadata,
 } from "./worktree-metadata.js";
+import { runWithRepositoryRoot } from "./git-repository-discovery.js";
 import { runGitCommand } from "./run-git-command.js";
 import { getCurrentBranch, resolveRepositoryDefaultBranch } from "./checkout-git.js";
 import { terminateWithTreeKill } from "./tree-kill.js";
@@ -1203,15 +1204,23 @@ export async function listGitWorktrees({ cwd }: { cwd: string }): Promise<GitWor
   return worktrees;
 }
 
-export async function listJAgentDeskWorktrees({
-  cwd,
-  jagentdeskHome,
-  worktreesRoot,
-}: {
+export interface ListJAgentDeskWorktreesOptions {
   cwd: string;
   jagentdeskHome?: string;
   worktreesRoot?: string;
-}): Promise<JAgentDeskWorktreeInfo[]> {
+}
+
+export function listJAgentDeskWorktrees(
+  options: ListJAgentDeskWorktreesOptions,
+): Promise<JAgentDeskWorktreeInfo[]> {
+  return runWithRepositoryRoot(options.cwd, () => listJAgentDeskWorktreesAtRepositoryRoot(options));
+}
+
+async function listJAgentDeskWorktreesAtRepositoryRoot({
+  cwd,
+  jagentdeskHome,
+  worktreesRoot,
+}: ListJAgentDeskWorktreesOptions): Promise<JAgentDeskWorktreeInfo[]> {
   const projectWorktreesRoot = await getJAgentDeskWorktreesRoot(cwd, jagentdeskHome, worktreesRoot);
   const { stdout } = await runGitCommand(["worktree", "list", "--porcelain"], {
     cwd,
@@ -1326,7 +1335,12 @@ export async function readWorktreeHeadReference(worktreePath: string): Promise<s
   }
 }
 
-export async function deleteJAgentDeskWorktree({
+export function deleteJAgentDeskWorktree(options: DeleteJAgentDeskWorktreeOptions): Promise<void> {
+  const operation = () => deleteJAgentDeskWorktreeAtRepositoryRoot(options);
+  return options.cwd ? runWithRepositoryRoot(options.cwd, operation) : operation();
+}
+
+async function deleteJAgentDeskWorktreeAtRepositoryRoot({
   cwd,
   worktreePath,
   teardownCwds,
@@ -1570,7 +1584,13 @@ export function createWorktree(
 export function createWorktree(
   options: CreateWorktreeOptions,
 ): Promise<Omit<CreatedWorktree, "branchName"> & { branchName: string | null }>;
-export async function createWorktree({
+export function createWorktree(
+  options: CreateWorktreeOptions,
+): Promise<Omit<CreatedWorktree, "branchName"> & { branchName: string | null }> {
+  return runWithRepositoryRoot(options.cwd, () => createWorktreeAtRepositoryRoot(options));
+}
+
+async function createWorktreeAtRepositoryRoot({
   cwd,
   source,
   worktreeSlug,
@@ -1903,11 +1923,19 @@ async function configureWorktreePushRemote(options: {
  * Fetches the first of `sources` a remote serves into the local ref `destination`, and returns
  * the name of that remote.
  */
-export async function fetchFirstAvailableRef(options: {
+export interface FetchFirstAvailableRefOptions {
   cwd: string;
   sources: WorktreeCheckoutRef[];
   destination: string;
-}): Promise<string> {
+}
+
+export function fetchFirstAvailableRef(options: FetchFirstAvailableRefOptions): Promise<string> {
+  return runWithRepositoryRoot(options.cwd, () => fetchFirstAvailableRefAtRepositoryRoot(options));
+}
+
+async function fetchFirstAvailableRefAtRepositoryRoot(
+  options: FetchFirstAvailableRefOptions,
+): Promise<string> {
   let lastResult:
     | Awaited<ReturnType<typeof runGitCommand>>
     | { stderr: string; stdout: string; exitCode: number | null }

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { basename } from "node:path";
 
 import { resolveRepositoryDefaultBranch } from "../../../utils/checkout-git.js";
+import { runWithRepositoryRoot } from "../../../utils/git-repository-discovery.js";
 import { createRealpathAwarePathMatcher } from "../../../utils/path.js";
 import { runGitCommand } from "../../../utils/run-git-command.js";
 import {
@@ -141,7 +142,10 @@ export function createWorkspaceRecoveryService(deps: {
     }
 
     if (resolved.kind === "restore") {
-      await recreateArchivedWorktree(resolved.workspace, resolved.sourceRepoRoot);
+      const { workspace, sourceRepoRoot } = resolved;
+      await runWithRepositoryRoot(sourceRepoRoot, () =>
+        recreateArchivedWorktree(workspace, sourceRepoRoot),
+      );
     }
     await deps.unarchiveWorkspace(resolved.workspace);
     return { workspaceId, action: resolved.kind };
