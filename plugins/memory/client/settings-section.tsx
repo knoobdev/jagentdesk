@@ -14,7 +14,26 @@ import {
 } from "../../../packages/app/src/plugins/builtin/host-api";
 import { useMemorySettings } from "./use-memory";
 
-/** Settings → host → Memory (spec 41 §3.4): Memory, auto-inject, and the token limit. */
+type DurableSwitch =
+  | "regroundAfterCompaction"
+  | "recitation"
+  | "ledgerNudge"
+  | "learnFromCorrections"
+  | "lessonExpiry";
+
+/** Spec 42 §8 switches, in the order the spec lists them. */
+const DURABLE_SWITCHES: readonly DurableSwitch[] = [
+  "regroundAfterCompaction",
+  "recitation",
+  "ledgerNudge",
+  "learnFromCorrections",
+  "lessonExpiry",
+];
+
+/**
+ * Settings → host → Memory (spec 41 §3.4, spec 42 §8): Memory, auto-inject, the token limit, and
+ * the durable-context switches.
+ */
 export function MemorySettingsSection({ serverId }: { serverId: string }) {
   const { t } = useTranslation();
   const toast = useToast();
@@ -67,6 +86,9 @@ export function MemorySettingsSection({ serverId }: { serverId: string }) {
             testID="memory-settings-auto-inject"
           />
         </SettingRow>
+        {DURABLE_SWITCHES.map((key) => (
+          <DurableSwitchRow key={key} switchKey={key} settings={settings} update={update} />
+        ))}
         <SettingRow title={t("memory.settings.tokenCap")} bordered>
           <FormTextInput
             initialValue={tokenCap}
@@ -85,6 +107,37 @@ export function MemorySettingsSection({ serverId }: { serverId: string }) {
         </SettingRow>
       </View>
     </SettingsSection>
+  );
+}
+
+function DurableSwitchRow({
+  switchKey,
+  settings,
+  update,
+}: {
+  switchKey: DurableSwitch;
+  settings: MemorySettingsWire | null;
+  update: (patch: Partial<MemorySettingsWire>) => void;
+}) {
+  const { t } = useTranslation();
+  const onChange = useCallback(
+    (value: boolean) => update({ [switchKey]: value }),
+    [switchKey, update],
+  );
+  return (
+    <SettingRow
+      title={t(`memory.settings.durable.${switchKey}`)}
+      hint={t(`memory.settings.durable.${switchKey}Hint`)}
+      bordered
+    >
+      <Switch
+        value={settings?.[switchKey] ?? true}
+        // Older hosts do not report these switches; they cannot change them either.
+        disabled={!settings || settings[switchKey] === undefined}
+        onValueChange={onChange}
+        testID={`memory-settings-${switchKey}`}
+      />
+    </SettingRow>
   );
 }
 

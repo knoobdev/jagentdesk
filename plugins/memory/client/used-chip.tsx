@@ -2,11 +2,13 @@ import { useCallback, useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
-import { Brain } from "lucide-react-native";
+import { Brain, ThumbsDown, ThumbsUp } from "lucide-react-native";
 import {
   AdaptiveModalSheet,
   navigateToAgent,
+  useHostRuntimeClient,
   useSessionStore,
+  useToast,
   type Theme,
 } from "../../../packages/app/src/plugins/builtin/host-api";
 import type { MemoryUsedEntry } from "../shared/types";
@@ -71,6 +73,7 @@ function UsedEntry({ serverId, entry }: { serverId: string; entry: MemoryUsedEnt
       ? t("memory.source.user")
       : (agentTitle ?? (agentId ? t("memory.source.unknownAgent") : t("memory.source.agent")));
   const meta = [
+    ...(entry.memoryKind === "lesson" ? [t("memory.kind.lesson")] : []),
     entry.scope === "global" ? t("memory.tabs.global") : t("memory.tabs.project"),
     entry.kind === "searched" ? t("memory.searched") : t("memory.injected"),
     ...(entry.score !== null
@@ -91,9 +94,60 @@ function UsedEntry({ serverId, entry }: { serverId: string; entry: MemoryUsedEnt
         >
           <Text style={[styles.meta, agentId ? styles.link : null]}>{source}</Text>
         </Pressable>
+        <View style={styles.spacer} />
+        <RateButtons serverId={serverId} memoryId={entry.id} />
       </View>
     </View>
   );
+}
+
+/** Spec 42 §4: 👍 keeps a memory alive; two 👎 (more than 👍) retire it. */
+function RateButtons({ serverId, memoryId }: { serverId: string; memoryId: string }) {
+  const { t } = useTranslation();
+  const toast = useToast();
+  const client = useHostRuntimeClient(serverId);
+  const [rated, setRated] = useState<"helpful" | "harmful" | null>(null);
+  const rate = useCallback(
+    (helpful: boolean) => {
+      if (!client) return;
+      client.rateMemory({ id: memoryId, helpful }).then(
+        () => {
+          setRated(helpful ? "helpful" : "harmful");
+          return undefined;
+        },
+        (error: unknown) => toast.error(error instanceof Error ? error.message : String(error)),
+      );
+    },
+    [client, memoryId, toast],
+  );
+  const up = useCallback(() => rate(true), [rate]);
+  const down = useCallback(() => rate(false), [rate]);
+  return (
+    <View style={styles.rate}>
+      <Pressable
+        onPress={up}
+        accessibilityRole="button"
+        accessibilityLabel={t("memory.rate.helpful")}
+        style={rateStyle}
+        testID="memory-rate-helpful"
+      >
+        <ThemedThumbsUp size={14} uniProps={rated === "helpful" ? activeColor : mutedColor} />
+      </Pressable>
+      <Pressable
+        onPress={down}
+        accessibilityRole="button"
+        accessibilityLabel={t("memory.rate.harmful")}
+        style={rateStyle}
+        testID="memory-rate-harmful"
+      >
+        <ThemedThumbsDown size={14} uniProps={rated === "harmful" ? activeColor : mutedColor} />
+      </Pressable>
+    </View>
+  );
+}
+
+function rateStyle({ hovered }: { hovered?: boolean }) {
+  return [styles.rateButton, hovered ? styles.chipHovered : null];
 }
 
 function chipStyle({ hovered }: { hovered?: boolean }) {
@@ -101,7 +155,10 @@ function chipStyle({ hovered }: { hovered?: boolean }) {
 }
 
 const ThemedBrain = withUnistyles(Brain);
+const ThemedThumbsUp = withUnistyles(ThumbsUp);
+const ThemedThumbsDown = withUnistyles(ThumbsDown);
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
+const activeColor = (theme: Theme) => ({ color: theme.colors.foreground });
 
 const styles = StyleSheet.create((theme: Theme) => ({
   wrapper: { flexDirection: "row", paddingVertical: theme.spacing[1] },
@@ -127,4 +184,13 @@ const styles = StyleSheet.create((theme: Theme) => ({
   entryMeta: { flexDirection: "row", flexWrap: "wrap", alignItems: "center" },
   meta: { fontSize: 13, color: theme.colors.foregroundMuted },
   link: { textDecorationLine: "underline" },
+  spacer: { flex: 1 },
+  rate: { flexDirection: "row", gap: 2 },
+  rateButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    alignItems: "center",
+    justifyContent: "center",
+  },
 }));

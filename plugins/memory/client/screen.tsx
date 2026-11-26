@@ -3,8 +3,13 @@ import { ScrollView, Text, TextInput, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
 import { Brain, Plus, Search } from "lucide-react-native";
-import type { MemoryProject, MemoryRecordWire } from "@jagentdesk/protocol/memory";
-import type { MemoryScope } from "../shared/types";
+import type {
+  MemoryKindWire,
+  MemoryProject,
+  MemoryRecordWire,
+  MemoryStatusWire,
+} from "@jagentdesk/protocol/memory";
+import { MEMORY_STATUSES, type MemoryScope } from "../shared/types";
 import {
   Alert,
   Button,
@@ -14,7 +19,9 @@ import {
   type SegmentedControlOption,
   useGumloopPageGutterStyle,
   useHostRuntimeIsConnected,
+  useHostRuntimeClient,
   useIsCompactFormFactor,
+  useToast,
   type Theme,
 } from "../../../packages/app/src/plugins/builtin/host-api";
 import { MemoryEditorSheet, type MemoryEditorTarget } from "./memory-editor-sheet";
@@ -33,8 +40,18 @@ export function MemoryScreen({ serverId }: { serverId: string }) {
   const [scope, setScope] = useState<MemoryScope>("project");
   const [projectId, setProjectId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [kind, setKind] = useState<KindFilter>("all");
+  const [status, setStatus] = useState<MemoryStatusWire | null>(null);
   const [editor, setEditor] = useState<MemoryEditorTarget | null>(null);
-  const list = useMemoryList(serverId, { scope, projectId, query });
+  const client = useHostRuntimeClient(serverId);
+  const toast = useToast();
+  const list = useMemoryList(serverId, {
+    scope,
+    projectId,
+    query,
+    kind: kind === "all" ? null : kind,
+    status,
+  });
   const data = list.status === "ready" ? list.data : null;
   const projects = data?.projects ?? EMPTY_PROJECTS;
 
@@ -53,20 +70,73 @@ export function MemoryScreen({ serverId }: { serverId: string }) {
   );
   const closeEditor = useCallback(() => setEditor(null), []);
 
+  // Spec 42 §8 "Validate now": re-checks every lesson's citations in this project.
+  const validateAll = useCallback(() => {
+    if (!client || !projectId) return;
+    client.validateMemories({ projectId }).then(
+      ({ memories: checked }) => {
+        const stale = checked.filter((memory) => memory.status === "stale").length;
+        toast.show(t("memory.lesson.validatedAll", { count: checked.length, stale }));
+        return undefined;
+      },
+      (error: unknown) => toast.error(error instanceof Error ? error.message : String(error)),
+    );
+  }, [client, projectId, t, toast]);
+
   const headerActions = useMemo(
     () => (
-      <Button
-        size="sm"
-        variant="default"
-        leftIcon={Plus}
-        onPress={openCreate}
-        disabled={!connected || (scope === "project" && !projectId)}
-        testID="memory-add"
-      >
-        {t("memory.add")}
-      </Button>
+      <View style={styles.headerActions}>
+        {scope === "project" ? (
+          <Button
+            size="sm"
+            variant="secondary"
+            onPress={validateAll}
+            disabled={!connected || !projectId}
+            testID="memory-validate-all"
+          >
+            {t("memory.lesson.validate")}
+          </Button>
+        ) : null}
+        <Button
+          size="sm"
+          variant="default"
+          leftIcon={Plus}
+          onPress={openCreate}
+          disabled={!connected || (scope === "project" && !projectId)}
+          testID="memory-add"
+        >
+          {t("memory.add")}
+        </Button>
+      </View>
     ),
-    [connected, openCreate, projectId, scope, t],
+    [connected, openCreate, projectId, scope, t, validateAll],
+  );
+  const kindOptions = useMemo<SegmentedControlOption<KindFilter>[]>(
+    () => [
+      { value: "all", label: t("memory.filters.all"), testID: "memory-kind-all" },
+      { value: "memory", label: t("memory.filters.memories"), testID: "memory-kind-memory" },
+      { value: "lesson", label: t("memory.filters.lessons"), testID: "memory-kind-lesson" },
+    ],
+    [t],
+  );
+  const statusOptions = useMemo(
+    () => [
+      { id: ANY_STATUS, value: ANY_STATUS as StatusFilter, label: t("memory.filters.anyStatus") },
+      ...MEMORY_STATUSES.map((value) => ({
+        id: value,
+        value: value as StatusFilter,
+        label: t(`memory.status.${value}`),
+      })),
+    ],
+    [t],
+  );
+  const changeStatus = useCallback(
+    (value: StatusFilter) => setStatus(value === ANY_STATUS ? null : value),
+    [],
+  );
+  const statusDisplay = useMemo(
+    () => ({ label: status ? t(`memory.status.${status}`) : t("memory.filters.anyStatus") }),
+    [status, t],
   );
 
   const projectOptions = useMemo(
@@ -101,6 +171,26 @@ export function MemoryScreen({ serverId }: { serverId: string }) {
           onValueChange={setScope}
           testID="memory-tabs"
         />
+        <SegmentedControl
+          options={kindOptions}
+          value={kind}
+          onValueChange={setKind}
+          testID="memory-kind-filter"
+        />
+        <View style={styles.statusSelect}>
+          <SelectField
+            label={t("memory.filters.status")}
+            value={status ?? ANY_STATUS}
+            selectedDisplay={statusDisplay}
+            options={statusOptions}
+            onChange={changeStatus}
+            placeholder={t("memory.filters.anyStatus")}
+            emptyText={t("memory.filters.anyStatus")}
+            field={false}
+            size="sm"
+            testID="memory-status-filter"
+          />
+        </View>
         {scope === "project" ? (
           <View style={styles.projectSelect}>
             <SelectField
@@ -119,10 +209,25 @@ export function MemoryScreen({ serverId }: { serverId: string }) {
         ) : null}
       </View>
     ),
-    [projectId, projectOptions, scope, scopeOptions, selectedDisplay, t],
+    [
+      kind,
+      kindOptions,
+      projectId,
+      projectOptions,
+      scope,
+      scopeOptions,
+      selectedDisplay,
+      status,
+      statusDisplay,
+      statusOptions,
+      changeStatus,
+      t,
+    ],
   );
 
-  const memories = data?.memories ?? EMPTY_MEMORIES;
+  const memories = useMemo(() => pendingFirst(data?.memories ?? EMPTY_MEMORIES), [data]);
+  const pendingCount = memories.filter((memory) => memory.status === "pending").length;
+  const projectRoot = scope === "project" ? (selectedProject?.rootPath ?? null) : null;
   return (
     <View style={styles.root} testID="memory-screen">
       <PageHeader
@@ -161,8 +266,23 @@ export function MemoryScreen({ serverId }: { serverId: string }) {
             <View style={styles.actionsColumn} />
           </View>
         )}
-        {memories.map((memory) => (
-          <MemoryRow key={memory.id} serverId={serverId} memory={memory} onEdit={openEdit} />
+        {memories.map((memory, index) => (
+          <View key={memory.id}>
+            {pendingCount > 0 && index === 0 && memory.status === "pending" ? (
+              <Text style={styles.sectionTitle} testID="memory-pending-heading">
+                {t("memory.lesson.pendingHeading", { count: pendingCount })}
+              </Text>
+            ) : null}
+            {pendingCount > 0 && index === pendingCount && memory.status !== "pending" ? (
+              <View style={styles.sectionGap} />
+            ) : null}
+            <MemoryRow
+              serverId={serverId}
+              memory={memory}
+              onEdit={openEdit}
+              projectRoot={projectRoot}
+            />
+          </View>
         ))}
         {list.status === "ready" && memories.length === 0 ? (
           <Text style={styles.empty} testID="memory-empty">
@@ -175,6 +295,17 @@ export function MemoryScreen({ serverId }: { serverId: string }) {
       ) : null}
     </View>
   );
+}
+
+type KindFilter = "all" | MemoryKindWire;
+const ANY_STATUS = "any";
+type StatusFilter = MemoryStatusWire | typeof ANY_STATUS;
+
+/** Spec 42 §7: pending lessons from Capture lessons sit on top until the user reviews them. */
+function pendingFirst(memories: MemoryRecordWire[]): MemoryRecordWire[] {
+  const pending = memories.filter((memory) => memory.status === "pending");
+  if (pending.length === 0) return memories;
+  return [...pending, ...memories.filter((memory) => memory.status !== "pending")];
 }
 
 const EMPTY_PROJECTS: MemoryProject[] = [];
@@ -193,6 +324,16 @@ const styles = StyleSheet.create((theme: Theme) => ({
     gap: theme.spacing[3],
   },
   projectSelect: { minWidth: 220, maxWidth: 360, flexGrow: 1 },
+  statusSelect: { minWidth: 160, maxWidth: 220 },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
+  sectionTitle: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: theme.colors.foregroundMuted,
+    paddingTop: theme.spacing[2],
+    paddingBottom: theme.spacing[1],
+  },
+  sectionGap: { height: theme.spacing[4] },
   content: { paddingTop: theme.spacing[4], paddingBottom: theme.spacing[8], gap: 0 },
   searchBox: {
     height: 46,

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
+  MemoryKindWire,
+  MemoryStatusWire,
   MemoryProject,
   MemoryRecordWire,
   MemorySettingsWire,
@@ -61,7 +63,13 @@ export interface MemoryListData {
 
 export function useMemoryList(
   serverId: string,
-  input: { scope: MemoryScope; projectId: string | null; query: string },
+  input: {
+    scope: MemoryScope;
+    projectId: string | null;
+    query: string;
+    kind: MemoryKindWire | null;
+    status: MemoryStatusWire | null;
+  },
 ): MemoryLoad<MemoryListData> {
   const client = useHostRuntimeClient(serverId);
   return useMemoryQuery(
@@ -71,8 +79,10 @@ export function useMemoryList(
         scope: input.scope,
         ...(input.projectId ? { projectId: input.projectId } : {}),
         ...(input.query.trim() ? { query: input.query.trim() } : {}),
+        ...(input.kind ? { kind: input.kind } : {}),
+        ...(input.status ? { status: input.status } : {}),
       }),
-    `list:${input.scope}:${input.projectId ?? ""}:${input.query}`,
+    `list:${input.scope}:${input.projectId ?? ""}:${input.query}:${input.kind ?? ""}:${input.status ?? ""}`,
   );
 }
 

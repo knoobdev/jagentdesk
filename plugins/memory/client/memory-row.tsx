@@ -14,6 +14,7 @@ import {
   useToast,
   type Theme,
 } from "../../../packages/app/src/plugins/builtin/host-api";
+import { LessonDetails } from "./lesson-details";
 
 export interface MemoryRowProps {
   serverId: string;
@@ -23,6 +24,8 @@ export interface MemoryRowProps {
   note?: string;
   /** Two-line rows regardless of form factor (narrow hosts such as the inspector). */
   dense?: boolean;
+  /** Where cited files resolve when a citation is opened. */
+  projectRoot?: string | null;
 }
 
 /** The agent's title, or a placeholder when the agent was deleted. */
@@ -45,7 +48,10 @@ export const MemoryRow = memo(function MemoryRow({
   serverId,
   memory,
   onEdit,
-  note, dense }: MemoryRowProps) {
+  note,
+  dense,
+  projectRoot = null,
+}: MemoryRowProps) {
   const { t } = useTranslation();
   const compact = useIsCompactFormFactor() || dense === true;
   const client = useHostRuntimeClient(serverId);
@@ -96,11 +102,7 @@ export const MemoryRow = memo(function MemoryRow({
           <ThemedPin size={16} uniProps={mutedColor} />
         )}
       </IconButton>
-      <IconButton
-        label={t("memory.actions.edit")}
-        onPress={edit}
-        testID="memory-row-edit"
-      >
+      <IconButton label={t("memory.actions.edit")} onPress={edit} testID="memory-row-edit">
         <ThemedPencil size={16} uniProps={mutedColor} />
       </IconButton>
       <IconButton
@@ -140,6 +142,7 @@ export const MemoryRow = memo(function MemoryRow({
         </View>
       ) : null}
       {note ? <Text style={styles.meta}>{note}</Text> : null}
+      <LessonDetails serverId={serverId} memory={memory} projectRoot={projectRoot} />
     </View>
   );
 
