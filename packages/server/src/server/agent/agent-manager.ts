@@ -47,6 +47,7 @@ import {
   type AgentSlashCommand,
   type AgentMode,
   type AgentPermissionRequest,
+  type AgentPermissionAction,
   type AgentPermissionResponse,
   type AgentPermissionResult,
   type AgentPersistenceHandle,
@@ -144,6 +145,12 @@ import {
 import { resolveCreateAgentTitles } from "./create-agent-title.js";
 import { type JAgentDeskToolCatalogFactory } from "./tools/types.js";
 import {
+  diffHostToolSets,
+  hostToolSetSignature,
+  type HostToolSetDiff,
+  type HostToolSetSource,
+} from "./host-tool-set.js";
+import {
   ProviderSubagentStore,
   type ProviderSubagentDescriptor,
   type ProviderSubagentStoreEvent,
@@ -216,6 +223,12 @@ export interface AgentForkOrigin {
 
 export const FORK_ORIGIN_PLUGIN_ID = "jagentdesk";
 export const FORK_ORIGIN_ITEM_KIND = "fork-origin";
+
+const JAGENTDESK_TOOLS_CHECK_TIMEOUT_MS = 20_000;
+
+function hostHintsSignature(instructions: readonly string[], hidden: readonly string[]): string {
+  return JSON.stringify({ instructions, hidden });
+}
 
 export class AgentManagerShuttingDownError extends Error {
   constructor() {
@@ -469,6 +482,10 @@ export interface AgentManagerOptions {
   ) => ProviderJAgentDeskToolsPolicy | undefined;
   jagentdeskToolsEnabled?: boolean;
   jagentdeskToolCatalogFactory?: JAgentDeskToolCatalogFactory;
+  /** Built-in tool groups the host has on; compared at the start of every turn (spec 04 §27b.1). */
+  hostToolSet?: HostToolSetSource;
+  /** Display name of a provider, for timeline rows. */
+  providerLabel?: (provider: AgentProvider) => string;
   appendSystemPrompt?: string;
   operatorContext?: string;
   /** Session ledgers (spec 40 §2); provider switches hand off through them. */
@@ -1166,6 +1183,8 @@ export class AgentManager {
 
   private readonly inFlightAgentCloses = new Map<string, Promise<void>>();
 
+  private readonly reloadedSessionCloses = new WeakMap<AgentSession, Promise<void>>();
+
   private readonly historySessions = new WeakSet<AgentSession>();
 
   private readonly runtimeCleanupIdentities = new WeakMap<
@@ -1188,6 +1207,20 @@ export class AgentManager {
   private sessionOpenGeneration = 0;
 
   private readonly sessionOpenGenerations = new Map<string, number>();
+
+  private hostToolSet: HostToolSetSource | null = null;
+
+  private providerLabel: (provider: AgentProvider) => string = (provider) => provider;
+
+  /** Tool-group instructions of the agent's latest launch; joined into the daemon prompt. */
+  private readonly hostToolInstructions = new Map<string, string[]>();
+
+  /** Last tool-set change a non-resumable session was told about, so the row is written once. */
+  private readonly unappliedHostToolSets = new Map<string, string>();
+  /** What the agent's runtime launched with from the host: instructions and hidden connectors. */
+  private readonly launchedHostHints = new Map<string, string>();
+  /** Last "JAgentDesk tools are unavailable" reason written to an agent's timeline. */
+  private readonly unavailableJAgentDeskTools = new Map<string, string>();
 
   private readonly attachedPluginTools = new Map<string, AttachedAgentTool[]>();
 
@@ -1312,6 +1345,23 @@ export class AgentManager {
   private configureJAgentDeskTools(options: AgentManagerOptions): void {
     this.jagentdeskToolsEnabled = options.jagentdeskToolsEnabled ?? true;
     this.jagentdeskToolCatalogFactory = options.jagentdeskToolCatalogFactory ?? null;
+    this.hostToolSet = options.hostToolSet ?? null;
+    if (options.providerLabel) this.providerLabel = options.providerLabel;
+  }
+
+  /** Spec 29.4 host setting: hide provider connectors that JAgentDesk tools replace. */
+  setHideProviderConnectors(read: () => boolean): void {
+    this.hideProviderConnectors = read;
+  }
+
+  private hideProviderConnectors: () => boolean = () => true;
+
+  setHostToolSet(source: HostToolSetSource | null): void {
+    this.hostToolSet = source;
+  }
+
+  setProviderLabel(label: (provider: AgentProvider) => string): void {
+    this.providerLabel = label;
   }
 
   registerClient(provider: AgentProvider, client: AgentClient): void {
@@ -1367,14 +1417,153 @@ export class AgentManager {
     this.sessionOpenGeneration++;
   }
 
+  /**
+   * Runs before every foreground turn. A plugin that changed what agents open with, or a
+   * built-in tool group turned on or off for the host (spec 04 §27b.1), restarts the runtime
+   * on the same native session so this turn already has the host's current tools.
+   */
   async reloadStalePluginSession(agentId: string): Promise<void> {
-    if (!this.needsPluginSessionReload(agentId)) return;
+    if (!this.needsPluginSessionReload(agentId) && !this.pendingHostToolSetDiff(agentId)) return;
     await this.trackAgentRegistrationOperation(
       this.runLifecycleMutation(agentId, async () => {
-        if (!this.needsPluginSessionReload(agentId)) return;
+        const pluginStale = this.needsPluginSessionReload(agentId);
+        const toolDiff = this.pendingHostToolSetDiff(agentId);
+        if (!pluginStale && !toolDiff) return;
+        if (toolDiff && !this.canResumeNativeSession(agentId)) {
+          // A fresh provider session would drop the conversation; keep the old tools.
+          await this.noteUnappliedHostToolSet(agentId, toolDiff);
+          if (!pluginStale) return;
+        }
+        if (toolDiff) {
+          this.logger.info(
+            { agentId, added: toolDiff.added, removed: toolDiff.removed },
+            "Host tool groups changed; resuming the agent's session with the new tools",
+          );
+        }
         await this.reloadAgentSessionInternal(agentId);
       }),
     );
+  }
+
+  /**
+   * Spec 04 §27b.0, runs before every foreground turn after `reloadStalePluginSession`. Asks the
+   * provider whether the JAgentDesk tools reached its runtime; when they did not, restarts the
+   * runtime on the same native session with a fresh MCP config once, then writes one timeline
+   * row with the reason instead of letting the agent tell the user its tools are gone.
+   */
+  async ensureJAgentDeskTools(agentId: string): Promise<void> {
+    const first = await this.checkJAgentDeskTools(agentId);
+    if (!first) return;
+    const agent = this.requireAgent(agentId);
+    let reason = first.reason;
+    if (this.canResumeNativeSession(agentId)) {
+      this.logger.warn(
+        { agentId, provider: agent.provider, reason },
+        "JAgentDesk tools are missing from the agent's runtime; restarting it with a fresh MCP config",
+      );
+      await this.trackAgentRegistrationOperation(
+        this.runLifecycleMutation(agentId, () => this.reloadAgentSessionInternal(agentId)),
+      );
+      const second = await this.checkJAgentDeskTools(agentId);
+      if (!second) {
+        this.logger.info({ agentId, provider: agent.provider }, "JAgentDesk tools restored");
+        return;
+      }
+      reason = second.reason;
+    }
+    this.logger.warn(
+      { agentId, provider: agent.provider, reason },
+      "JAgentDesk tools are unavailable for this agent",
+    );
+    if (this.unavailableJAgentDeskTools.get(agentId) === reason) return;
+    this.unavailableJAgentDeskTools.set(agentId, reason);
+    await this.appendTimelineItem(agentId, {
+      type: "notification",
+      level: "warning",
+      message: `JAgentDesk tools are unavailable for ${this.providerLabel(agent.provider)}: ${reason}`,
+    });
+  }
+
+  /** The missing-tools reason, or null when the tools are there or the provider cannot tell. */
+  private async checkJAgentDeskTools(agentId: string): Promise<{ reason: string } | null> {
+    const agent = this.agents.get(agentId);
+    if (
+      !agent ||
+      agent.internal ||
+      !agent.session.checkJAgentDeskTools ||
+      this.hasInFlightRun(agentId) ||
+      !this.jagentdeskToolsEnabled ||
+      !isJAgentDeskToolPolicyEnabled(this.jagentdeskToolPolicies.get(agentId))
+    ) {
+      return null;
+    }
+    try {
+      const health = await agent.session.checkJAgentDeskTools({
+        signal: AbortSignal.timeout(JAGENTDESK_TOOLS_CHECK_TIMEOUT_MS),
+      });
+      this.logger.debug({ agentId, health }, "JAgentDesk tools check");
+      if (health.status !== "missing") {
+        this.unavailableJAgentDeskTools.delete(agentId);
+        return null;
+      }
+      return { reason: health.reason };
+    } catch (error) {
+      // An unanswered check is not proof of missing tools; the turn surfaces real failures.
+      this.logger.warn({ err: error, agentId }, "JAgentDesk tools check failed");
+      return null;
+    }
+  }
+
+  /** The host's tool groups differ from the ones the agent's live runtime was opened with. */
+  private pendingHostToolSetDiff(agentId: string): HostToolSetDiff | null {
+    if (!this.hostToolSet) return null;
+    const agent = this.getAgent(agentId);
+    if (!agent || agent.lifecycle === "closed" || agent.internal || this.hasInFlightRun(agentId)) {
+      return null;
+    }
+    // Without the JAgentDesk tools the host's tool groups never reach this runtime.
+    if (
+      !this.jagentdeskToolsEnabled ||
+      !isJAgentDeskToolPolicyEnabled(this.jagentdeskToolPolicies.get(agentId))
+    ) {
+      return null;
+    }
+    const diff = diffHostToolSets(this.hostToolSet.launched(agentId), this.hostToolSet.current());
+    if (diff) return diff;
+    // Spec 29.4: a Jira connection added mid-session changes the launch instructions and the
+    // connectors to hide without changing any tool group.
+    return this.hostHintsChanged(agentId) ? { added: [], removed: [] } : null;
+  }
+
+  private hostHintsChanged(agentId: string): boolean {
+    const launched = this.launchedHostHints.get(agentId);
+    // Launches without instructions (internal or history purposes) never carried hints.
+    if (!launched || launched === hostHintsSignature([], []) || !this.hostToolSet) return false;
+    const hidden = this.hideProviderConnectors()
+      ? (this.hostToolSet.replacedProviderConnectors?.(agentId) ?? [])
+      : [];
+    return launched !== hostHintsSignature(this.hostToolSet.instructions(agentId), hidden);
+  }
+
+  /**
+   * Reloading keeps the conversation: the native session resumes, or there is no conversation
+   * yet (Codex starts its thread with the first turn), so a fresh session loses nothing.
+   */
+  private canResumeNativeSession(agentId: string): boolean {
+    if (this.agents.get(agentId)?.persistence?.sessionId) return true;
+    return !this.getTimeline(agentId).some((item) => item.type === "user_message");
+  }
+
+  private async noteUnappliedHostToolSet(agentId: string, diff: HostToolSetDiff): Promise<void> {
+    const signature = hostToolSetSignature(diff);
+    if (this.unappliedHostToolSets.get(agentId) === signature) return;
+    this.unappliedHostToolSets.set(agentId, signature);
+    const agent = this.requireAgent(agentId);
+    await this.appendTimelineItem(agentId, {
+      type: "notification",
+      level: "info",
+      message: `New tools apply from a new session for ${this.providerLabel(agent.provider)}`,
+    });
   }
 
   private needsPluginSessionReload(agentId: string): boolean {
@@ -1782,6 +1971,8 @@ export class AgentManager {
   }
 
   async waitForAgentClose(agentId: string): Promise<void> {
+    // Loading during a reload must wait for the replacement, not resume another writer.
+    await this.lifecycleMutationTails.get(agentId)?.catch(() => undefined);
     await this.inFlightAgentCloses?.get(agentId)?.catch(() => undefined);
     if (this.collectingRuntimes.has(agentId))
       await this.lifecycleMutationTails.get(agentId)?.catch(() => undefined);
@@ -2244,7 +2435,9 @@ export class AgentManager {
     options?: { rehydrateFromDisk?: boolean },
   ): Promise<ManagedAgent> {
     return this.trackAgentRegistrationOperation(
-      this.reloadAgentSessionInternal(agentId, overrides, options),
+      this.runLifecycleMutation(agentId, () =>
+        this.reloadAgentSessionInternal(agentId, overrides, options),
+      ),
     );
   }
 
@@ -2294,23 +2487,37 @@ export class AgentManager {
     );
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
 
-    const launchedOptions = this.launchOptionsFor({ client, own: storedConfig.providerOptions });
-    const session = handle
-      ? await client.resumeSession(handle, providerLaunchConfig, launchContext)
-      : await client.createSession(providerLaunchConfig, launchContext);
-    await this.requireExternalMcpSupport(session, providerLaunchConfig, launchContext);
+    // Refuse before releasing the live runtime: the replacement would be refused anyway.
+    if (
+      Object.keys(stripInternalJAgentDeskMcpServer(providerLaunchConfig).mcpServers ?? {}).length >
+        0 &&
+      existing.session.capabilities.supportsMcpServers !== true
+    ) {
+      this.detachPluginTools(agentId);
+      throw this.unsupportedMcpError(providerLaunchConfig, launchContext);
+    }
 
+    const launchedOptions = this.launchOptionsFor({ client, own: storedConfig.providerOptions });
+    let session: AgentSession | undefined;
+    let closedExisting: ManagedAgentClosed | undefined;
     let handedToRegistration = false;
     try {
+      // Paseo #4353: a persisted thread has one writer even while its turn is idle (Codex
+      // refuses a second one with "thread … already has an active writer"), so the old
+      // runtime is released before the same session is resumed.
+      await this.closeReloadedSession(existing.session, agentId);
+      await this.drainSessionEvents(agentId);
+      this.cancelRunningProviderSubagents(agentId);
+      this.clearProviderBackgroundWork(agentId);
+      closedExisting = this.prepareAgentForClosure(existing, "agent reloaded");
+      await this.persistSnapshot(closedExisting);
       this.assertAcceptingAgentRegistrations();
 
-      this.cancelRunningProviderSubagents(agentId);
-      const closedExisting = this.prepareAgentForClosure(existing, "agent reloaded");
-      try {
-        await this.persistSnapshot(closedExisting);
-      } finally {
-        await this.closeReloadedSession(existing.session, agentId);
-      }
+      session = handle
+        ? await client.resumeSession(handle, providerLaunchConfig, launchContext)
+        : await client.createSession(providerLaunchConfig, launchContext);
+      await this.requireExternalMcpSupport(session, providerLaunchConfig, launchContext);
+      this.assertAcceptingAgentRegistrations();
 
       if (rehydrateFromDisk) {
         // Wipe the in-memory timeline so registerSession mints a new epoch and
@@ -2342,34 +2549,44 @@ export class AgentManager {
         attention: preservedAttention,
         restoring: true,
       });
+    } catch (error) {
+      if (closedExisting) {
+        this.emitClosedAgent(closedExisting, { persist: false });
+      } else if (this.agents.get(agentId) === existing) {
+        existing.lifecycle = "error";
+        existing.lastError = error instanceof Error ? error.message : String(error);
+        this.emitState(existing);
+      }
+      throw error;
     } finally {
       if (!handedToRegistration) {
-        await this.closeUnregisteredSession(session);
+        this.detachPluginTools(agentId);
+        if (session) await this.closeUnregisteredSession(session);
       }
     }
   }
 
   private async closeReloadedSession(session: AgentSession, agentId: string): Promise<void> {
-    try {
-      const result = await this.waitWithTimeout({
-        operation: session.close(),
-        timeoutMs: this.rescueTimeouts.reloadSessionCloseMs,
-        onLateError: (error) => {
-          this.logger.warn(
-            { err: error, agentId },
-            "Previous session close failed after refresh timeout",
-          );
-        },
-      });
-
-      if (result === "timed_out") {
+    let operation = this.reloadedSessionCloses.get(session);
+    if (!operation) {
+      operation = session.close();
+      this.reloadedSessionCloses.set(session, operation);
+      // Keep pending closes across request timeouts; a retry must await the same release.
+      void operation.catch(() => this.reloadedSessionCloses.delete(session));
+    }
+    const result = await this.waitWithTimeout({
+      operation,
+      timeoutMs: this.rescueTimeouts.reloadSessionCloseMs,
+      onLateError: (error) => {
         this.logger.warn(
-          { agentId, timeoutMs: this.rescueTimeouts.reloadSessionCloseMs },
-          "Timed out closing previous session during refresh",
+          { err: error, agentId },
+          "Previous session close failed after refresh timeout",
         );
-      }
-    } catch (error) {
-      this.logger.warn({ err: error, agentId }, "Failed to close previous session during refresh");
+      },
+    });
+    // A timeout must not authorize a second writer on the same session.
+    if (result === "timed_out") {
+      throw new Error("Timed out closing previous session during refresh");
     }
   }
 
@@ -4777,13 +4994,16 @@ export class AgentManager {
       title?: string;
       description?: string;
       input?: Record<string, unknown>;
+      actions?: AgentPermissionAction[];
+      /** Host settings changes the user decides themselves, even in an unattended mode. */
+      alwaysAsk?: boolean;
     },
   ): Promise<AgentPermissionResponse> {
     const agent = this.requireAgent(agentId);
     // Spec 33.7 ("Chế độ bypass được tôn trọng"): an unattended provider mode is the
     // operator's standing approval, so every JAgentDesk permission card is auto-approved —
     // no pending card, no permission_requested event. Attended modes keep the card.
-    if (this.isAgentSessionUnattended(agent)) {
+    if (!request.alwaysAsk && this.isAgentSessionUnattended(agent)) {
       this.logger.debug(
         { agentId, tool: request.name, modeId: agent.currentModeId },
         "Auto-approved host tool permission: agent is in an unattended provider mode",
@@ -4799,6 +5019,7 @@ export class AgentManager {
       title: request.title,
       description: request.description,
       input: request.input as Record<string, unknown>,
+      ...(request.actions ? { actions: request.actions } : {}),
     };
 
     const promise = new Promise<AgentPermissionResponse>((resolvePermission) => {
@@ -5736,6 +5957,10 @@ export class AgentManager {
 
   private discardRetainedAgentState(agentId: string): void {
     this.jagentdeskToolPolicies.delete(agentId);
+    this.hostToolInstructions.delete(agentId);
+    this.unappliedHostToolSets.delete(agentId);
+    this.unavailableJAgentDeskTools.delete(agentId);
+    this.launchedHostHints.delete(agentId);
     this.timelineStore.delete(agentId);
     this.detachPluginTools(agentId);
     for (const event of this.providerSubagents.deleteParent(agentId)) {
@@ -7463,6 +7688,7 @@ export class AgentManager {
     const jagentdeskToolPolicy = this.resolveJAgentDeskToolPolicy(client.provider);
     this.jagentdeskToolPolicies.set(agentId, jagentdeskToolPolicy);
     this.detachPluginTools(agentId);
+    const hostTools = this.adoptHostToolSet(agentId, opening?.purpose);
     let appendSystemPrompt: string[] | undefined;
     let mcpServers: AgentSessionConfig["mcpServers"];
     let mcpServerOwners: Record<string, string> | undefined;
@@ -7493,6 +7719,7 @@ export class AgentManager {
     const context: AgentLaunchContext = {
       agentId,
       ...(this.durablePorts ? { compactionHooks: this.durable.hooksFor(agentId) } : {}),
+      ...hostTools,
       ...pluginPromptContext(appendSystemPrompt),
       mcpServers,
       mcpServerOwners,
@@ -7523,6 +7750,33 @@ export class AgentManager {
     return context;
   }
 
+  /**
+   * Every launch (create, resume, reload, idle-runtime resume) opens with the host's current
+   * tool groups; the per-agent snapshot only keeps one runtime's tools consistent. Records the
+   * launch's tool instructions, which `resolveProviderLaunchConfig` joins into the daemon prompt.
+   */
+  private adoptHostToolSet(
+    agentId: string,
+    purpose: PluginSessionOpenRequest["purpose"] | undefined,
+  ): Pick<AgentLaunchContext, "inAppBrowser" | "hideProviderConnectors"> {
+    this.unappliedHostToolSets.delete(agentId);
+    this.hostToolInstructions.delete(agentId);
+    if (!this.hostToolSet) return {};
+    this.hostToolSet.adopt(agentId);
+    const interactive = (purpose ?? "interactive") === "interactive";
+    const instructions = interactive ? this.hostToolSet.instructions(agentId) : [];
+    if (instructions.length) this.hostToolInstructions.set(agentId, instructions);
+    const hidden =
+      interactive && this.hideProviderConnectors()
+        ? (this.hostToolSet.replacedProviderConnectors?.(agentId) ?? [])
+        : [];
+    this.launchedHostHints.set(agentId, hostHintsSignature(instructions, hidden));
+    return {
+      ...(this.hostToolSet.inAppBrowser(agentId) ? { inAppBrowser: true } : {}),
+      ...(hidden.length ? { hideProviderConnectors: hidden } : {}),
+    };
+  }
+
   private resolveProviderLaunchConfig(
     launchConfig: AgentSessionConfig,
     launchContext: AgentLaunchContext,
@@ -7539,7 +7793,13 @@ export class AgentManager {
         throw new Error(`MCP server '${name}' from plugin ${owner} collides with ${existingOwner}`);
       }
     }
-    launchConfig = { ...launchConfig, pluginAppendSystemPrompt: launchContext.appendSystemPrompt };
+    launchConfig = {
+      ...withHostToolInstructions(
+        launchConfig,
+        this.hostToolInstructions.get(launchContext.agentId ?? ""),
+      ),
+      pluginAppendSystemPrompt: launchContext.appendSystemPrompt,
+    };
     const merged =
       Object.keys(launchContext.mcpServers ?? {}).length > 0
         ? {
@@ -7664,6 +7924,19 @@ export function commandMayHaveChangedExternalState(command: string): boolean {
     // ahead/behind counts can drift stale until the next refresh.
     /\bgit\s+fetch\b/.test(normalized)
   );
+}
+
+// Joined into the daemon prompt rather than the plugin prompt: every provider reads it, and
+// Codex before 0.121 refuses plugin prompts on a new thread.
+function withHostToolInstructions(
+  config: AgentSessionConfig,
+  instructions: string[] | undefined,
+): AgentSessionConfig {
+  if (!instructions?.length) return config;
+  const daemonAppendSystemPrompt = [config.daemonAppendSystemPrompt, ...instructions]
+    .filter((part): part is string => Boolean(part?.trim()))
+    .join("\n\n");
+  return { ...config, daemonAppendSystemPrompt };
 }
 
 function pluginPromptContext(

@@ -8,6 +8,7 @@ import { ProviderQuotaTracker } from "./agent/failover/provider-quota.js";
 import { ProviderUsageService } from "../services/quota-fetcher/service.js";
 import { builtinServerRegistry } from "./plugins/builtin/loaded.js";
 import { createBuiltinCoreServices } from "./plugins/builtin/services.js";
+import { createBuiltinHostToolSet } from "./plugins/builtin/host-tool-set.js";
 import {
   createFinishSubscriptions as createRemoteFinishSubscriptions,
   createJsonFinishSubscriptionStore as createRemoteFinishStore,
@@ -507,6 +508,7 @@ export interface JAgentDeskDaemonConfig {
   appendSystemPrompt?: string;
   // Operator / engagement authorization context injected first into every agent's system prompt.
   operatorContext?: string;
+  hideProviderJiraConnectors?: boolean;
   terminalProfiles?: TerminalProfile[];
   orchestration?: OrchestrationConfig;
   staticDir: string;
@@ -672,6 +674,7 @@ function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): Mutab
     resumeOnStartup: config.resumeOnStartup === true,
     resumePrompt: config.resumePrompt ?? "Resume working.",
     operatorContext: config.operatorContext ?? "",
+    jira: { hideProviderConnectors: config.hideProviderJiraConnectors !== false },
     orchestration: config.orchestration ?? createDefaultOrchestrationConfig(),
     ...continuityConfigFromStartup(config),
   };
@@ -1151,6 +1154,18 @@ export async function createJAgentDeskDaemon(
     mcpAuthToken: agentMcpAuthToken,
     logger,
   });
+
+  // Spec 04 §27b.1: built-in tool groups are compared at the start of every turn.
+  const builtinHostToolSet = createBuiltinHostToolSet({
+    state: pluginRuntime.builtin,
+    registry: builtinServerRegistry,
+    launchHints: (ids) => builtinServerRegistry.launchHints(config.jagentdeskHome, ids),
+  });
+  agentManager.setHostToolSet(builtinHostToolSet.source);
+  agentManager.setHideProviderConnectors(
+    () => daemonConfigStore.get().jira?.hideProviderConnectors !== false,
+  );
+  agentManager.setProviderLabel((provider) => providerSnapshotManager.getProviderLabel(provider));
 
   const unsubscribeBuiltinAgentSnapshots = agentManager.subscribe(
     (event) => {
@@ -1951,6 +1966,7 @@ export async function createJAgentDeskDaemon(
     },
     requestHostToolPermission: (agentId, req) =>
       agentManager.requestHostToolPermission(agentId, req),
+    hostToolGroups: builtinHostToolSet.groups,
     logger,
   });
   const createAgentToolCatalog = (runtime: JAgentDeskToolRuntimeContext) =>

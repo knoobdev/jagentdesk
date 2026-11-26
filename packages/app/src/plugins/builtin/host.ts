@@ -1,5 +1,7 @@
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
-import type { ComponentType } from "react";
+import type { ComponentType, Dispatch, SetStateAction } from "react";
+import type { UserComposerAttachment } from "@/attachments/types";
+import type { ComposerTextSource } from "@/composer/text-source";
 import type { LucideIcon } from "lucide-react-native";
 import type { BuiltinPluginId } from "@jagentdesk/protocol/builtin-plugins";
 import type { PluginAttachmentSourceContribution, PluginTimelineItem } from "@jagentdesk/plugin";
@@ -68,6 +70,12 @@ export interface BuiltinInspectorTab {
 export interface BuiltinComposerDockProps extends BuiltinAgentProps {
   cwd: string;
   onOpenFile: (absolutePath: string) => void;
+}
+/** Watches what the user types in any composer and may attach things to the message. */
+export interface BuiltinComposerTextWatcherProps extends BuiltinClientProps {
+  text: ComposerTextSource;
+  attachments: UserComposerAttachment[];
+  setAttachments: Dispatch<SetStateAction<UserComposerAttachment[]>>;
 }
 /** A user message core parsed as a Spec mode phase command; core keeps copy and rewind text. */
 export interface BuiltinUserMessageBodyProps {
@@ -144,6 +152,8 @@ export interface BuiltinClientHost {
   agentHeaderControl(id: string, component: ComponentType<BuiltinAgentProps>): void;
   /** Rendered above the agent composer input. */
   agentComposerDock(id: string, component: ComponentType<BuiltinComposerDockProps>): void;
+  /** Mounted invisibly in every composer; reads the text and may add attachments. */
+  composerTextWatcher(id: string, component: ComponentType<BuiltinComposerTextWatcherProps>): void;
   /**
    * A card in the host's Settings → Agents section. `order` keeps cards from several features
    * in their phase 1 sequence (browser opt-in 10, autorun 20, sharing 30, fingerprints 40).
@@ -178,6 +188,7 @@ export interface BuiltinClientContributions {
   agentPanel: Map<string, ComponentType<BuiltinAgentProps>>;
   turnPreparers: BuiltinTurnPreparer[];
   composerDocks: Map<string, ComponentType<BuiltinComposerDockProps>>;
+  composerTextWatchers: Map<string, ComponentType<BuiltinComposerTextWatcherProps>>;
   agentHeader: Map<string, ComponentType<BuiltinAgentProps>>;
   workspaceHeader: Map<string, ComponentType<BuiltinClientProps>>;
   userMessageBody: ComponentType<BuiltinUserMessageBodyProps> | null;
@@ -207,6 +218,7 @@ export class BuiltinClientRegistry {
       agentPanel: new Map(),
       turnPreparers: [],
       composerDocks: new Map(),
+      composerTextWatchers: new Map(),
       agentHeader: new Map(),
       workspaceHeader: new Map(),
       userMessageBody: null,
@@ -241,6 +253,7 @@ export class BuiltinClientRegistry {
       agentPanelAccessory: (key, component) => add(entry.agentPanel, key, component),
       turnPreparer: (prepare) => entry.turnPreparers.push(prepare),
       agentComposerDock: (key, component) => add(entry.composerDocks, key, component),
+      composerTextWatcher: (key, component) => add(entry.composerTextWatchers, key, component),
       agentHeaderControl: (key, component) => add(entry.agentHeader, key, component),
       workspaceHeaderControl: (key, component) => add(entry.workspaceHeader, key, component),
       agentSettingsCard: (key, component, order) =>

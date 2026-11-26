@@ -227,6 +227,7 @@ export class OpenCodeV2AgentClient implements AgentClient {
       moved,
       historyOnly,
     );
+    session.expectedBridgeTools = bridge ? (launch?.jagentdeskTools?.tools.size ?? 0) : 0;
     try {
       await session.initialize(
         launch?.env

@@ -533,6 +533,7 @@ function mergeMutableConfigIntoPersistedConfig(params: {
       enableTerminalAgentHooks: mutable.enableTerminalAgentHooks,
       appendSystemPrompt: mutable.appendSystemPrompt,
       operatorContext: mutable.operatorContext,
+      ...(mutable.jira !== undefined ? { jira: mutable.jira } : {}),
       orchestration: mutable.orchestration,
       ...(mutable.agentProfiles !== undefined ? { agentProfiles: mutable.agentProfiles } : {}),
       ...(mutable.terminalProfiles !== undefined

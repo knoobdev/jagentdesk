@@ -30,6 +30,7 @@ import { admitsAgent } from "../directory.js";
 import { type ProviderJAgentDeskToolsPolicy } from "@jagentdesk/protocol/provider-config";
 import { isJAgentDeskToolEnabled } from "../jagentdesk-tool-policy.js";
 import { registerPluginTools } from "./plugin-tools.js";
+import { registerHostToolGroupTools, type HostToolGroups } from "./host-tool-groups.js";
 import { stat } from "node:fs/promises";
 import { z } from "zod";
 import { type BuiltinPluginId } from "@jagentdesk/protocol/builtin-plugins";
@@ -39,6 +40,7 @@ import { type Logger } from "pino";
 import {
   type AgentMode,
   type AgentProvider,
+  type AgentPermissionAction,
   type AgentPermissionResponse,
 } from "../agent-sdk-types.js";
 import {
@@ -237,8 +239,12 @@ export interface JAgentDeskToolHostDependencies {
       title?: string;
       description?: string;
       input?: Record<string, unknown>;
+      actions?: AgentPermissionAction[];
+      alwaysAsk?: boolean;
     },
   ) => Promise<AgentPermissionResponse>;
+  /** Built-in tool groups an agent can ask the user to turn on (spec 04 §27b.2). */
+  hostToolGroups?: HostToolGroups;
   enableVoiceTools?: boolean;
   voiceOnly?: boolean;
   logger: Logger;
@@ -1120,6 +1126,7 @@ function createToolCatalog(
       description: config.description ?? name,
       inputSchema: config.inputSchema,
       outputSchema: config.outputSchema,
+      ...(config._meta ? { _meta: config._meta } : {}),
       handler: handler as JAgentDeskToolDefinition["handler"],
     });
   };
@@ -1901,6 +1908,18 @@ function createToolCatalog(
     builtinToolContext,
     { only: trailingBuiltinTools },
   );
+
+  if (scope === "agent" && callerAgentId && options.hostToolGroups) {
+    registerHostToolGroupTools({
+      registerTool,
+      groups: options.hostToolGroups,
+      callerAgentId,
+      requestPermission: (agentId, request) =>
+        options.requestHostToolPermission
+          ? options.requestHostToolPermission(agentId, request)
+          : agentManager.requestHostToolPermission(agentId, request),
+    });
+  }
 
   registerTool(
     "list_hosts",

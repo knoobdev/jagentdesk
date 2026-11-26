@@ -23,6 +23,15 @@ import type { JiraSite } from "./site.js";
 // card (04.21) first and runs only on "allow". There is no delete tool. Results are compact
 // Markdown, never raw ADF.
 
+/** Launch instruction while the host has connected Jira sites (spec 29.4, A29.agent.1). */
+export function jiraAgentInstruction(sites: readonly string[]): string {
+  return [
+    `Jira: JAgentDesk is connected to ${sites.join(", ")}.`,
+    "For every Jira task on these sites (find, read, comment on, create, update, assign or transition issues, boards and sprints) use the JAgentDesk `jira_*` tools, for example `jira_get_issue` and `jira_search`; if your tools are deferred, find them with tool search first.",
+    "Do not use your own Jira or Atlassian connector (for example `mcp__claude_ai_Atlassian_MCP__*` or an `atlassian` MCP server) for these sites; use it only for a Jira site JAgentDesk has no connection to.",
+  ].join(" ");
+}
+
 export const JIRA_TOOL_ATTACHMENT_MAX_BYTES = 256 * 1024;
 
 export interface JiraToolPermissionRequest {

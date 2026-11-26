@@ -326,6 +326,7 @@ export const PersistedConfigSchema = z
         enableTerminalAgentHooks: z.boolean().optional(),
         appendSystemPrompt: z.string().optional(),
         operatorContext: z.string().optional(),
+        jira: z.object({ hideProviderConnectors: z.boolean().optional() }).strict().optional(),
         terminalProfiles: z.array(TerminalProfileSchema).optional(),
         agentProfiles: z.array(AgentProfileSchema).optional(),
         orchestration: OrchestrationConfigSchema.optional(),

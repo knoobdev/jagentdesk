@@ -722,6 +722,18 @@ export interface AgentLaunchContext {
   agentId?: string;
   env?: Record<string, string>;
   /**
+   * JAgentDesk browser tools are part of this launch. Providers turn off their own browser
+   * tooling (Codex's Browser/Chrome plugin skills, Claude in Chrome) and refuse shell commands
+   * that open a URL in the system browser, so pages open in the app (spec 04 §27b.3).
+   */
+  inAppBrowser?: boolean;
+  /**
+   * Provider-owned connector families JAgentDesk tools replace in this launch, for example
+   * `atlassian` while JAgentDesk has a Jira connection (spec 29.4). Providers hide those
+   * connectors from the agent where their CLI can; launch-only, never persisted.
+   */
+  hideProviderConnectors?: string[];
+  /**
    * Runtime-only internal JAgentDesk tools. This must never be persisted into
    * AgentSessionConfig; providers may adapt it to their native tool surface.
    */
@@ -795,6 +807,11 @@ export interface AgentUsageSession {
   sessionKey: string;
 }
 
+export type JAgentDeskToolsHealth =
+  | { status: "ok" }
+  | { status: "missing"; reason: string }
+  | { status: "unknown" };
+
 export interface AgentSession {
   /** Persist the session's current handle immediately after an interactive resume. */
   readonly persistenceUpdatedOnResume?: boolean;
@@ -862,6 +879,13 @@ export interface AgentSession {
   close(): Promise<void>;
 
   listCommands?(): Promise<AgentSlashCommand[]>;
+
+  /**
+   * Spec 04 §27b.0: whether the JAgentDesk tools reached this runtime, asked before each
+   * foreground turn. Cheap: reads the provider's own MCP or bridge status and may repair the
+   * connection in place. Providers that cannot tell return `unknown`.
+   */
+  checkJAgentDeskTools?(options: { signal: AbortSignal }): Promise<JAgentDeskToolsHealth>;
 
   /** A returned model is the effective selection committed by this mutation.
    * Returning void means the requested selection was accepted. No status read is required. */

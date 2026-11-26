@@ -468,6 +468,9 @@ export const MutableDaemonConfigSchema = z
     // COMPAT(crossProviderContinuity): added in v0.10.2; optional because older daemons omit it.
     agentFailover: AgentFailoverConfigSchema.optional(),
     crossProviderChildren: CrossProviderChildrenConfigSchema.optional(),
+    // COMPAT(jiraConnectorSetting): added in v0.10.2, remove after 2027-05-26; optional because older daemons omit it.
+    // Spec 29.4: hide the provider's own Jira/Atlassian connectors from agents (default on).
+    jira: z.object({ hideProviderConnectors: z.boolean() }).optional(),
     terminalProfiles: z.array(TerminalProfileSchema).optional(),
     agentProfiles: z.array(AgentProfileSchema).optional(),
     orchestration: OrchestrationConfigSchema.default(createDefaultOrchestrationConfig()),
@@ -525,6 +528,7 @@ export const MutableDaemonConfigPatchSchema = z
     operatorContext: z.string().optional(),
     agentFailover: AgentFailoverConfigSchema.optional(),
     crossProviderChildren: CrossProviderChildrenConfigSchema.optional(),
+    jira: z.object({ hideProviderConnectors: z.boolean().optional() }).optional(),
     terminalProfiles: z.array(TerminalProfileSchema).optional(),
     agentProfiles: z.array(AgentProfileSchema).optional(),
     orchestration: OrchestrationConfigPatchSchema.optional(),

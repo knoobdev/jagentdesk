@@ -22,6 +22,11 @@ interface SharedServiceOptions {
   bridge?: OpenCodeBridge;
 }
 
+export interface OpenCodeSessionToolsStatus {
+  bound: boolean;
+  tools: string[];
+}
+
 export interface SharedService {
   client: V2Api;
   exited: Promise<Error>;
@@ -29,6 +34,8 @@ export interface SharedService {
   bindSession(sessionId: string, cwd: string): Promise<void>;
   unbindSession(sessionId: string, cwd: string): Promise<void>;
   refreshLocation(cwd: string, signal?: AbortSignal): Promise<void>;
+  /** Spec 04 §27b.0: the bridge plugin's tools for one session; null when the plugin cannot tell. */
+  sessionToolsStatus(sessionId: string, cwd: string): Promise<OpenCodeSessionToolsStatus | null>;
 }
 
 export async function connectSharedService(
@@ -167,7 +174,7 @@ export function bridgeBindings(
   bridge: OpenCodeBridge | undefined,
   advertised?: string,
   pluginDirectory?: string,
-): Pick<SharedService, "bindSession" | "unbindSession" | "refreshLocation"> {
+): Pick<SharedService, "bindSession" | "unbindSession" | "refreshLocation" | "sessionToolsStatus"> {
   return {
     bindSession: async (sessionId, cwd) => {
       if (!bridge) return;
@@ -210,6 +217,31 @@ export function bridgeBindings(
         { location, rpcID: "jagentdesk.bridge", method: "refresh", input: {} },
         { signal },
       );
+    },
+    sessionToolsStatus: async (sessionId, cwd) => {
+      if (!bridge) return null;
+      let result: Awaited<ReturnType<typeof client.rpc.call>>;
+      try {
+        result = await client.rpc.call(
+          {
+            location: { directory: cwd },
+            rpcID: "jagentdesk.bridge",
+            method: "status",
+            input: { sessionID: sessionId },
+          },
+          { signal: AbortSignal.timeout(5_000) },
+        );
+      } catch {
+        // COMPAT(openCodeBridgeStatus): added in v0.10.2, remove after 2027-05-26; older loaded plugins lack `status`.
+        return null;
+      }
+      const output = result.output;
+      if (!output || typeof output !== "object" || !("bound" in output)) return null;
+      const tools = "tools" in output && Array.isArray(output.tools) ? output.tools : [];
+      return {
+        bound: output.bound === true,
+        tools: tools.filter((name: unknown): name is string => typeof name === "string"),
+      };
     },
   };
 }

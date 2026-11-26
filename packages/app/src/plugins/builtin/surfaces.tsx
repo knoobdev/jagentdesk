@@ -17,6 +17,7 @@ import type {
   BuiltinAttachmentPillProps,
   BuiltinClientProps,
   BuiltinComposerDockProps,
+  BuiltinComposerTextWatcherProps,
   BuiltinDestination,
   BuiltinUserMessageBodyProps,
   BuiltinScreen as ScreenProps,
@@ -147,6 +148,18 @@ export function BuiltinComposerDocks(props: BuiltinComposerDockProps) {
     <>
       {[...entries].flatMap(([id, entry]) =>
         [...entry.composerDocks].map(([key, Dock]) => <Dock key={`${id}/${key}`} {...props} />),
+      )}
+    </>
+  );
+}
+export function BuiltinComposerTextWatchers(props: BuiltinComposerTextWatcherProps) {
+  const entries = useBuiltinClientContributions(props.serverId);
+  return (
+    <>
+      {[...entries].flatMap(([id, entry]) =>
+        [...entry.composerTextWatchers].map(([key, Watcher]) => (
+          <Watcher key={`${id}/${key}`} {...props} />
+        )),
       )}
     </>
   );
