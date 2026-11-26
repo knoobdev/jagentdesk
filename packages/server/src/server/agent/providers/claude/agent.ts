@@ -5886,7 +5886,7 @@ class ClaudeAgentSession implements AgentSession {
     // ADR-0046: every tool of the internal JAgentDesk MCP server gates itself through the
     // daemon's own permission card where needed (requestHostToolPermission), so Claude must
     // not add a second approval — the same contract Codex gets via
-    // default_tools_approval_mode = "auto". Only the injected internal server qualifies;
+    // default_tools_approval_mode = "approve". Only the injected internal server qualifies;
     // a user-configured server with the same name or tool names keeps prompting.
     if (this.isInternalJAgentDeskMcpTool(toolName)) {
       return { behavior: "allow", updatedInput: input };
