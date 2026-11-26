@@ -1564,6 +1564,30 @@ export const ja: TranslationResources = {
     },
   },
   continuity: {
+    settings: {
+      addProvider: "プロバイダーを追加",
+      moveUp: "上へ",
+      moveDown: "下へ",
+      remove: "削除",
+      emptyList: "プロバイダーはまだありません。",
+      failoverTitle: "フェイルオーバー",
+      failoverHint:
+        "プロバイダーが使用量の上限に達すると、エージェントはその場でこの一覧の次のプロバイダーに切り替え、失敗したメッセージを再送します。1ターンにつき最大1回、エージェントごとに1時間に3回まで。",
+      childrenTitle: "他のプロバイダーの子エージェント",
+      childrenHint:
+        "エージェントはこれらのプロバイダーで子エージェントを起動できます。デーモンは残り使用量が最も多いものを提案します。オフ: 子エージェントは親のプロバイダーで動作します。",
+    },
+    usageLimit: {
+      hintOff: "このエージェントのフェイルオーバーはオフです。",
+      hintUsedUp: "フェイルオーバー一覧のどのプロバイダーも引き継げませんでした。",
+      continueWith: "{{provider}} で続行",
+    },
+    failover: {
+      menu: "フェイルオーバー…",
+      sheetTitle: "このエージェントのフェイルオーバー",
+      useHost: "ホストの設定を使用",
+      save: "保存",
+    },
     viewHandoff: "引き継ぎを表示",
     viewDelta: "送信した更新を表示",
     handoffTitle: "引き継ぎ",

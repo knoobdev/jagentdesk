@@ -1594,6 +1594,30 @@ export const fr: TranslationResources = {
     },
   },
   continuity: {
+    settings: {
+      addProvider: "Ajouter un fournisseur",
+      moveUp: "Monter",
+      moveDown: "Descendre",
+      remove: "Retirer",
+      emptyList: "Aucun fournisseur pour l’instant.",
+      failoverTitle: "Basculement",
+      failoverHint:
+        "Quand un fournisseur atteint sa limite d’utilisation, l’agent bascule sur place vers le fournisseur suivant de cette liste et renvoie le message échoué. Au plus une fois par tour et trois fois par heure par agent.",
+      childrenTitle: "Agents enfants sur d’autres fournisseurs",
+      childrenHint:
+        "Les agents peuvent lancer des agents enfants sur ces fournisseurs ; le daemon suggère celui qui a le plus de quota restant. Désactivé : les enfants utilisent le fournisseur de leur parent.",
+    },
+    usageLimit: {
+      hintOff: "Le basculement est désactivé pour cet agent.",
+      hintUsedUp: "Aucun fournisseur de la liste n’a pu prendre le relais.",
+      continueWith: "Continuer avec {{provider}}",
+    },
+    failover: {
+      menu: "Basculement…",
+      sheetTitle: "Basculement de cet agent",
+      useHost: "Utiliser le réglage de l’hôte",
+      save: "Enregistrer",
+    },
     viewHandoff: "Voir la passation",
     viewDelta: "Voir la mise à jour envoyée",
     handoffTitle: "Passation",

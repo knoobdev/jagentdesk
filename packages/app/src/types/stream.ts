@@ -4,6 +4,7 @@ import type {
   AgentProvider,
   ProviderSwitchNotice,
   ToolCallDetail,
+  UsageLimitNotice,
 } from "@jagentdesk/protocol/agent-types";
 import type { AgentAttachment, AgentStreamEventPayload } from "@jagentdesk/protocol/messages";
 import type { AttachmentMetadata } from "@/attachments/types";
@@ -786,6 +787,8 @@ export interface ActivityLogItem {
   metadata?: Record<string, unknown>;
   /** Set on the row a provider switch appended (spec 40 §3). */
   providerSwitch?: ProviderSwitchNotice;
+  /** Set on the row a usage limit appended when no failover ran (spec 40 §4). */
+  usageLimit?: UsageLimitNotice;
 }
 
 export interface CompactionItem {
@@ -1469,6 +1472,7 @@ function reduceTimelineEvent(
         level: item.level,
         message: item.message,
         ...(item.providerSwitch ? { providerSwitch: item.providerSwitch } : {}),
+        ...(item.usageLimit ? { usageLimit: item.usageLimit } : {}),
       });
     }
     case "compaction":

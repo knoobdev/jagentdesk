@@ -1,3 +1,4 @@
+import { ContinuitySettingsCards } from "@/continuity/continuity-settings-cards";
 import { hostTransportLabelKey } from "@/types/host-connection";
 import {
   ArrowDown,
@@ -272,6 +273,7 @@ export function HostAgentsPage({ serverId }: { serverId: string }) {
           <AppendSystemPromptCard serverId={serverId} />
           <OperatorContextCard serverId={serverId} />
           <RestartRecoveryCard serverId={serverId} />
+          <ContinuitySettingsCards serverId={serverId} />
           <IdleRuntimeCleanupCard serverId={serverId} />
         </SettingsSection>
       ) : (

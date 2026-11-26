@@ -1,3 +1,4 @@
+import { AgentFailoverSheetHost } from "@/continuity/agent-failover-sheet";
 import {
   useWindowLayout,
   resolveWorkspaceActionPlacement,
@@ -719,6 +720,7 @@ function MobileWorkspaceTabOption({
       closeOthers: t("workspace.tabs.menu.closeOthers"),
       reloadAgent: t("workspace.tabs.menu.reloadAgent"),
       reloadAgentTooltip: t("workspace.tabs.menu.reloadAgentTooltip"),
+      failover: t("continuity.failover.menu"),
       close: t("workspace.tabs.menu.close"),
     }),
     [t],
@@ -4553,6 +4555,7 @@ function WorkspaceScreenContent({
                 onSubmit={handleRenameModalSubmit}
                 onClose={handleRenameModalClose}
               />
+              <AgentFailoverSheetHost serverId={normalizedServerId} />
             </View>
           </RenderProfile>
         </WorkspaceFocusProvider>

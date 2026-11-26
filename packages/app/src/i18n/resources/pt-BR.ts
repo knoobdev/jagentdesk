@@ -1558,6 +1558,30 @@ export const ptBR: TranslationResources = {
     },
   },
   continuity: {
+    settings: {
+      addProvider: "Adicionar provedor",
+      moveUp: "Subir",
+      moveDown: "Descer",
+      remove: "Remover",
+      emptyList: "Nenhum provedor ainda.",
+      failoverTitle: "Failover",
+      failoverHint:
+        "Quando um provedor atinge o limite de uso, o agente troca no lugar para o próximo provedor desta lista e reenvia a mensagem que falhou. No máximo uma vez por turno e três vezes por hora por agente.",
+      childrenTitle: "Agentes filhos em outros provedores",
+      childrenHint:
+        "Agentes podem iniciar agentes filhos nesses provedores; o daemon sugere o que tem mais uso restante. Desligado: os filhos usam o provedor do pai.",
+    },
+    usageLimit: {
+      hintOff: "O failover está desligado para este agente.",
+      hintUsedUp: "Nenhum provedor da lista pôde assumir.",
+      continueWith: "Continuar com {{provider}}",
+    },
+    failover: {
+      menu: "Failover…",
+      sheetTitle: "Failover deste agente",
+      useHost: "Usar a configuração do host",
+      save: "Salvar",
+    },
     viewHandoff: "Ver passagem",
     viewDelta: "Ver atualização enviada",
     handoffTitle: "Passagem",

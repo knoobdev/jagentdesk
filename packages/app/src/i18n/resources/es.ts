@@ -1574,6 +1574,30 @@ export const es: TranslationResources = {
     },
   },
   continuity: {
+    settings: {
+      addProvider: "Añadir proveedor",
+      moveUp: "Subir",
+      moveDown: "Bajar",
+      remove: "Quitar",
+      emptyList: "Aún no hay proveedores.",
+      failoverTitle: "Conmutación por error",
+      failoverHint:
+        "Cuando un proveedor alcanza su límite de uso, el agente cambia en el sitio al siguiente proveedor de esta lista y reenvía el mensaje fallido. Como máximo una vez por turno y tres veces por hora por agente.",
+      childrenTitle: "Agentes hijos en otros proveedores",
+      childrenHint:
+        "Los agentes pueden iniciar agentes hijos en estos proveedores; el daemon sugiere el que tenga más uso disponible. Desactivado: los hijos usan el proveedor de su padre.",
+    },
+    usageLimit: {
+      hintOff: "La conmutación por error está desactivada para este agente.",
+      hintUsedUp: "Ningún proveedor de la lista pudo continuar.",
+      continueWith: "Continuar con {{provider}}",
+    },
+    failover: {
+      menu: "Conmutación por error…",
+      sheetTitle: "Conmutación por error de este agente",
+      useHost: "Usar la configuración del host",
+      save: "Guardar",
+    },
     viewHandoff: "Ver traspaso",
     viewDelta: "Ver actualización enviada",
     handoffTitle: "Traspaso",

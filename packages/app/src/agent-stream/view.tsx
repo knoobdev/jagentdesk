@@ -1,4 +1,5 @@
 import { ProviderSwitchRow } from "@/continuity/provider-switch-row";
+import { UsageLimitRow } from "@/continuity/usage-limit-row";
 import { useChatOutlineRail } from "@/chat-rail";
 import { SubagentLaunchMarker } from "@/subagents/launch-marker";
 import { useRevealedText } from "@/hooks/use-revealed-text";
@@ -1003,6 +1004,16 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             );
 
           case "activity_log":
+            if (item.usageLimit) {
+              return (
+                <UsageLimitRow
+                  serverId={resolvedServerId}
+                  agentId={agentId}
+                  message={item.message}
+                  notice={item.usageLimit}
+                />
+              );
+            }
             if (item.providerSwitch) {
               return (
                 <ProviderSwitchRow

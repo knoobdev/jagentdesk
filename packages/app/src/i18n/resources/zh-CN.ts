@@ -1513,6 +1513,30 @@ export const zhCN: TranslationResources = {
     },
   },
   continuity: {
+    settings: {
+      addProvider: "添加提供商",
+      moveUp: "上移",
+      moveDown: "下移",
+      remove: "移除",
+      emptyList: "暂无提供商。",
+      failoverTitle: "故障转移",
+      failoverHint:
+        "当提供商报告用量已达上限时，智能体会就地切换到此列表中的下一个提供商，并重新发送失败的消息。每轮最多一次，每个智能体每小时最多三次。",
+      childrenTitle: "其他提供商上的子智能体",
+      childrenHint:
+        "智能体可以在这些提供商上启动子智能体；守护进程会推荐剩余用量最多的那个。关闭时：子智能体使用父智能体的提供商。",
+    },
+    usageLimit: {
+      hintOff: "此智能体的故障转移已关闭。",
+      hintUsedUp: "故障转移列表中没有可以接手的提供商。",
+      continueWith: "使用 {{provider}} 继续",
+    },
+    failover: {
+      menu: "故障转移…",
+      sheetTitle: "此智能体的故障转移",
+      useHost: "使用主机设置",
+      save: "保存",
+    },
     viewHandoff: "查看交接",
     viewDelta: "查看已发送的更新",
     handoffTitle: "交接",

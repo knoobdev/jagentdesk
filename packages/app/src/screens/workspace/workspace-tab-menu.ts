@@ -1,3 +1,4 @@
+import { useAgentFailoverSheetStore } from "@/continuity/agent-failover-store";
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
 import { i18n } from "@/i18n/i18next";
 import { encodeFilePathForPathSegment, encodeWorkspaceIdForPathSegment } from "@/utils/host-routes";
@@ -18,6 +19,7 @@ export interface WorkspaceTabMenuLabels {
   closeOthers: string;
   reloadAgent: string;
   reloadAgentTooltip: string;
+  failover: string;
   close: string;
 }
 
@@ -34,6 +36,7 @@ export const DEFAULT_WORKSPACE_TAB_MENU_LABELS: WorkspaceTabMenuLabels = {
   closeOthers: i18n.t("workspace.tabs.menu.closeOthers"),
   reloadAgent: i18n.t("workspace.tabs.menu.reloadAgent"),
   reloadAgentTooltip: i18n.t("workspace.tabs.menu.reloadAgentTooltip"),
+  failover: i18n.t("continuity.failover.menu"),
   close: i18n.t("workspace.tabs.menu.close"),
 };
 
@@ -304,6 +307,16 @@ export function buildWorkspaceTabMenuEntries(
       testID: `${menuTestIDBase}-reload-agent`,
       onSelect: () => {
         void onReloadAgent(agentId);
+      },
+    });
+    // Spec 40 §4: per-agent failover override.
+    entries.push({
+      kind: "item",
+      key: "failover",
+      label: labels.failover,
+      testID: `${menuTestIDBase}-failover`,
+      onSelect: () => {
+        useAgentFailoverSheetStore.getState().open(agentId);
       },
     });
   }

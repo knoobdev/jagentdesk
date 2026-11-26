@@ -1593,6 +1593,30 @@ export const en = {
       "This build has no Tailscale native module. Install a build with Tailscale support, or connect over your local network with a direct connection.",
   },
   continuity: {
+    settings: {
+      addProvider: "Add provider",
+      moveUp: "Up",
+      moveDown: "Down",
+      remove: "Remove",
+      emptyList: "No providers yet.",
+      failoverTitle: "Failover",
+      failoverHint:
+        "When a provider reports a usage limit, the agent switches in place to the next provider in this list and resends the failed message. At most once per turn and three times an hour per agent.",
+      childrenTitle: "Child agents on other providers",
+      childrenHint:
+        "Agents may start child agents on these providers; the daemon suggests the one with the most usage left. Off: children run on their parent's provider.",
+    },
+    usageLimit: {
+      hintOff: "Failover is off for this agent.",
+      hintUsedUp: "No provider in the failover list could take over.",
+      continueWith: "Continue with {{provider}}",
+    },
+    failover: {
+      menu: "Failover…",
+      sheetTitle: "Failover for this agent",
+      useHost: "Use the host setting",
+      save: "Save",
+    },
     viewHandoff: "View handoff",
     viewDelta: "View update sent",
     handoffTitle: "Handoff",

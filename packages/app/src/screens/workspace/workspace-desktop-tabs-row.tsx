@@ -875,6 +875,7 @@ export function WorkspaceDesktopTabsRow({
       closeOthers: t("workspace.tabs.menu.closeOthers"),
       reloadAgent: t("workspace.tabs.menu.reloadAgent"),
       reloadAgentTooltip: t("workspace.tabs.menu.reloadAgentTooltip"),
+      failover: t("continuity.failover.menu"),
       close: t("workspace.tabs.menu.close"),
     }),
     [t],
