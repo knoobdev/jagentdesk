@@ -14,6 +14,12 @@ describe("resolveCloseAgentTabPolicy", () => {
     });
   });
 
+  it("keeps a bot's own agent: closing its tab never archives the bot", () => {
+    expect(
+      resolveCloseAgentTabPolicy({ parentAgentId: null, labels: { "jagentdesk.bot.id": "bot_1" } }),
+    ).toEqual({ kind: "layout-only" });
+  });
+
   it("preserves the existing archive fallback when the agent is missing", () => {
     expect(resolveCloseAgentTabPolicy(null)).toEqual({ kind: "archive-on-close" });
     expect(resolveCloseAgentTabPolicy(undefined)).toEqual({ kind: "archive-on-close" });
