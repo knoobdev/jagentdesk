@@ -25,6 +25,7 @@ function ContinuityListCard({
   hint,
   value,
   toPatch,
+  reorderable,
   testID,
 }: {
   serverId: string;
@@ -32,6 +33,7 @@ function ContinuityListCard({
   hint: string;
   value: ListSetting;
   toPatch: (next: ListSetting) => MutableDaemonConfigPatch;
+  reorderable: boolean;
   testID: string;
 }) {
   const { t } = useTranslation();
@@ -75,6 +77,7 @@ function ContinuityListCard({
           value={value.entries}
           onChange={handleEntries}
           disabled={mutation.isPending}
+          reorderable={reorderable}
           testIDPrefix={testID}
         />
       </View>
@@ -119,6 +122,7 @@ export function ContinuitySettingsCards({ serverId }: { serverId: string }) {
         hint={t("continuity.settings.failoverHint")}
         value={failoverValue}
         toPatch={failoverPatch}
+        reorderable
         testID="host-page-failover-card"
       />
       <ContinuityListCard
@@ -127,6 +131,7 @@ export function ContinuitySettingsCards({ serverId }: { serverId: string }) {
         hint={t("continuity.settings.childrenHint")}
         value={childrenValue}
         toPatch={childrenPatch}
+        reorderable={false}
         testID="host-page-child-providers-card"
       />
     </>

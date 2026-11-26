@@ -1,6 +1,5 @@
 import { useTranslation } from "react-i18next";
 import type { SessionLedger } from "@jagentdesk/protocol/messages";
-import { getAgentProviderDefinition } from "@jagentdesk/protocol/provider-manifest";
 import { useFetchQuery } from "@/data/query";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useSessionStore } from "@/stores/session-store";
@@ -32,13 +31,7 @@ export function useAgentLedger(input: {
   });
 }
 
-export function providerDisplayLabel(provider: string): string {
-  try {
-    return getAgentProviderDefinition(provider).label;
-  } catch {
-    return provider;
-  }
-}
+export { providerDisplayLabel } from "./provider-model-choices";
 
 /** The daemon wraps handoffs in a tag for the model; the viewer shows the body only. */
 export function handoffDisplayText(text: string): string {
