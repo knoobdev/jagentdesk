@@ -1298,3 +1298,81 @@ describe("Claude model discovery process", () => {
     });
   });
 });
+
+// Spec 04 §5: snapshot cwds refreshing at once share one `claude` discovery process.
+describe("ClaudeAgentClient model discovery sharing", () => {
+  function createSharedDiscoveryClient() {
+    let finish: (models: ModelInfo[]) => void = () => {};
+    const signals: AbortSignal[] = [];
+    const discoverModels = vi.fn(
+      (options: { signal?: AbortSignal }) =>
+        new Promise<ModelInfo[]>((resolve) => {
+          if (options.signal) signals.push(options.signal);
+          finish = resolve;
+        }),
+    );
+    const client = new ClaudeAgentClient({
+      logger: createTestLogger(),
+      resolveVersion: async () => "2.1.321",
+      discoverModels,
+    });
+    return { client, discoverModels, signals, finish: (models: ModelInfo[]) => finish(models) };
+  }
+
+  const MODEL: ModelInfo = {
+    value: "mythos",
+    resolvedModel: "claude-mythos-5-2",
+    displayName: "Mythos",
+    description: "",
+  };
+
+  it("runs one discovery for concurrent catalog refreshes", async () => {
+    const { client, discoverModels, finish } = createSharedDiscoveryClient();
+    const refreshes = ["/tmp/a", "/tmp/b", "/tmp/c"].map((cwd) =>
+      client.fetchCatalog({ scope: "workspace", cwd, force: true }),
+    );
+    await vi.waitFor(() => expect(discoverModels).toHaveBeenCalledTimes(1));
+    finish([MODEL]);
+    const catalogs = await Promise.all(refreshes);
+    expect(discoverModels).toHaveBeenCalledTimes(1);
+    for (const catalog of catalogs) expect(catalog.incomplete).toBeUndefined();
+
+    // A later refresh discovers again.
+    const later = client.fetchCatalog({ scope: "global", force: true });
+    await vi.waitFor(() => expect(discoverModels).toHaveBeenCalledTimes(2));
+    finish([MODEL]);
+    await later;
+  });
+
+  it("keeps the shared discovery running while one caller is still waiting", async () => {
+    const { client, discoverModels, signals, finish } = createSharedDiscoveryClient();
+    const first = new AbortController();
+    const second = new AbortController();
+    const firstRefresh = client.fetchCatalog(
+      { scope: "global", force: true },
+      { signal: first.signal, runActivity: (_name, operation) => operation() },
+    );
+    const secondRefresh = client.fetchCatalog(
+      { scope: "global", force: true },
+      { signal: second.signal, runActivity: (_name, operation) => operation() },
+    );
+    await vi.waitFor(() => expect(discoverModels).toHaveBeenCalledTimes(1));
+
+    first.abort(new Error("first caller left"));
+    await expect(firstRefresh).rejects.toThrow("first caller left");
+    expect(signals[0]?.aborted).toBe(false);
+
+    finish([MODEL]);
+    await expect(secondRefresh).resolves.toMatchObject({ models: expect.any(Array) });
+
+    const third = new AbortController();
+    const thirdRefresh = client.fetchCatalog(
+      { scope: "global", force: true },
+      { signal: third.signal, runActivity: (_name, operation) => operation() },
+    );
+    await vi.waitFor(() => expect(discoverModels).toHaveBeenCalledTimes(2));
+    third.abort(new Error("last caller left"));
+    await expect(thirdRefresh).rejects.toThrow("last caller left");
+    expect(signals[1]?.aborted).toBe(true);
+  });
+});
