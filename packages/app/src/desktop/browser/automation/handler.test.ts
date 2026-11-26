@@ -5,6 +5,7 @@ import { mountBrowserAutomationHandler } from "./handler";
 import type { DesktopHostBridge } from "@/desktop/host";
 import { useBrowserStore } from "@/desktop/browser/store";
 import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
+import { collectAllPanes, findPaneContainingTab } from "@/stores/workspace-layout-actions";
 import { buildWorkspaceTabPersistenceKey } from "@/workspace-tabs/model";
 
 type BrowserAutomationExecuteRequest = Extract<
@@ -278,10 +279,10 @@ describe("mountBrowserAutomationHandler", () => {
   beforeEach(() => {
     browserAutomationStorage.clear();
     useBrowserStore.setState({ browsersById: {} });
-    useWorkspaceLayoutStore.setState({ layoutByWorkspace: {} });
+    useWorkspaceLayoutStore.setState({ layoutByWorkspace: {}, explorerPaneIdByWorkspace: {} });
   });
 
-  test("browser_new_tab creates a workspace browser tab without stealing focus", async () => {
+  test("browser_new_tab selects the new tab in the inspector pane beside the chat", async () => {
     const browser = new BrowserAutomationHandlerHarness();
     const workspaceKey = buildWorkspaceTabPersistenceKey({
       serverId: "server-1",
@@ -306,13 +307,16 @@ describe("mountBrowserAutomationHandler", () => {
         target: { kind: "browser", browserId: result.browserId },
       }),
     ]);
-    expect(layout?.root).toEqual(
-      expect.objectContaining({
-        kind: "pane",
-        pane: expect.objectContaining({ focusedTabId: previousFocusedTabId }),
-      }),
+    if (!layout || !previousFocusedTabId || !openedTabs[0]) throw new Error("Expected tabs");
+    const chatPane = findPaneContainingTab(layout.root, previousFocusedTabId);
+    const browserPane = findPaneContainingTab(layout.root, openedTabs[0].tabId);
+    expect(collectAllPanes(layout.root)).toHaveLength(2);
+    expect(chatPane?.focusedTabId).toBe(previousFocusedTabId);
+    expect(browserPane?.focusedTabId).toBe(openedTabs[0].tabId);
+    expect(browserPane?.id).not.toBe(chatPane?.id);
+    expect(useWorkspaceLayoutStore.getState().explorerPaneIdByWorkspace[workspaceKey]).toBe(
+      browserPane?.id,
     );
-    expect(openedTabs[0]?.tabId).not.toBe(previousFocusedTabId);
     expect(browser.browser.activeWorkspaceBrowsers).toEqual([]);
     expect(browser.resident.ensuredWebviews).toEqual([
       {
