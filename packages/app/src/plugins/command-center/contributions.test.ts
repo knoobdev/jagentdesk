@@ -26,6 +26,7 @@ const workspace: PluginWorkspaceSnapshot = {
   statusEnteredAt: null,
   archivingAt: null,
   diffStat: null,
+  parentWorkspaceId: null,
 };
 
 const agent: PluginAgentSnapshot = {

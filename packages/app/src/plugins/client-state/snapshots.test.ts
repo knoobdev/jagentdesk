@@ -72,6 +72,7 @@ describe("plugin context snapshots", () => {
       statusEnteredAt: "2026-08-16T10:00:00.000Z",
       archivingAt: null,
       diffStat: { additions: 12, deletions: 3 },
+      parentWorkspaceId: null,
     });
     expect(snapshot.diffStat).not.toBe(workspace.diffStat);
     expect(Object.isFrozen(snapshot)).toBe(true);
@@ -82,6 +83,17 @@ describe("plugin context snapshots", () => {
     expect(snapshot.diffStat).toEqual({ additions: 12, deletions: 3 });
     expect(workspace.name).toBe("Review");
     expect(workspace.diffStat).toEqual({ additions: 12, deletions: 3 });
+  });
+
+  it("points a dispatched workspace at its parent, and a root workspace at null", () => {
+    const parent = createPluginWorkspaceSnapshot(workspace);
+    const child = createPluginWorkspaceSnapshot({
+      ...workspace,
+      id: "workspace-2",
+      parentWorkspaceId: workspace.id,
+    });
+    expect(parent.parentWorkspaceId).toBeNull();
+    expect(child.parentWorkspaceId).toBe(parent.id);
   });
 
   it("commits a deeply immutable matching agent snapshot without exposing store records", () => {
