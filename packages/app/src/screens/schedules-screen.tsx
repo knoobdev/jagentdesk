@@ -11,6 +11,7 @@ import { useIsFocused } from "expo-router/react-navigation";
 import { CalendarClock, Plus } from "lucide-react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { PageHeader } from "@/components/headers/page-header";
+import { usePageScroll, type PageScroll } from "@/components/headers/use-page-scroll";
 import { useGumloopPageGutterStyle } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { HostFilter } from "@/components/hosts/host-filter";
 import { ALL_HOSTS_OPTION_ID } from "@/components/hosts/host-picker";
@@ -68,6 +69,7 @@ function SchedulesScreenContent(): ReactElement {
   const { agents } = useAggregatedAgents({ includeArchived: true });
   const { projects } = useProjects();
   const hosts = useHosts();
+  const pageScroll = usePageScroll();
   const runtime = getHostRuntimeStore();
   const runtimeVersion = useSyncExternalStore(
     (onStoreChange) => runtime.subscribeAll(onStoreChange),
@@ -184,8 +186,10 @@ function SchedulesScreenContent(): ReactElement {
         title="Schedules"
         description="Prompts that run on their own, on a timer or a cron, on any of your hosts."
         actions={headerActions}
+        scrolled={pageScroll.scrolled}
       />
       <SchedulesScreenBody
+        scrollProps={pageScroll.scrollProps}
         rows={visibleRows}
         loadState={loadState}
         hostErrors={hostErrors}
@@ -212,6 +216,7 @@ function SchedulesScreenContent(): ReactElement {
 }
 
 function SchedulesScreenBody({
+  scrollProps,
   rows,
   loadState,
   hostErrors,
@@ -226,6 +231,7 @@ function SchedulesScreenBody({
   onCreate,
   onEdit,
 }: {
+  scrollProps: PageScroll["scrollProps"];
   rows: ScheduleRowView[];
   loadState: AggregateLoadState<AggregatedSchedule>;
   hostErrors: ScheduleHostError[];
@@ -311,6 +317,7 @@ function SchedulesScreenBody({
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         testID="schedules-list"
+        {...scrollProps}
       >
         {hostErrors.length > 0 ? <ScheduleHostErrorsBanner errors={hostErrors} /> : null}
         {schedulesContent}

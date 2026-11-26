@@ -1,4 +1,7 @@
-import { useGumloopDesktopShell } from "@/components/gumloop-shell/use-gumloop-chrome";
+import {
+  useGumloopDesktopShell,
+  useIsGumloopTheme,
+} from "@/components/gumloop-shell/use-gumloop-chrome";
 import { GUMLOOP_PAGE_GUTTER } from "@/components/gumloop-shell/list-styles";
 import { useMemo, useRef, type ReactNode } from "react";
 import { Text, View } from "react-native";
@@ -32,7 +35,8 @@ interface PageHeaderProps {
   testID?: string;
   /**
    * The page body has scrolled: draw the 1 px divider under the header. Web detects it on its
-   * own; pass it where the page tracks its scroll itself (spec 38 §4.4c).
+   * own; native cannot see the page's scroll view, so pages pass it from `usePageScroll`
+   * (spec 38 §4.4c).
    */
   scrolled?: boolean;
 }
@@ -57,19 +61,26 @@ export function PageHeader({
   scrolled,
 }: PageHeaderProps) {
   const gumloop = useGumloopDesktopShell(true);
-  const headerRef = useRef<View>(null);
-  const detectedScrolled = usePageScrolled(headerRef, gumloop && scrolled === undefined);
-  const showDivider = scrolled ?? detectedScrolled;
   const isCompact = useIsCompactFormFactor();
+  // Phones in the Gumloop theme get the same solid header and divider (spec 38 §4.4c); classic
+  // themes keep their header as it was.
+  const gumloopPhone = useIsGumloopTheme() && isCompact;
+  const headerRef = useRef<View>(null);
+  const detectedScrolled = usePageScrolled(
+    headerRef,
+    (gumloop || gumloopPhone) && scrolled === undefined,
+  );
+  const showDivider = scrolled ?? detectedScrolled;
   const insets = useSafeAreaInsets();
   const ThemedIcon = useMemo(() => withUnistyles(icon), [icon]);
   const containerStyle = useMemo(
     () => [
       styles.container,
       gumloop && styles.gumloopContainer,
+      gumloopPhone && styles.gumloopPhoneContainer,
       isCompact ? { paddingTop: insets.top + 12 } : null,
     ],
-    [gumloop, insets.top, isCompact],
+    [gumloop, gumloopPhone, insets.top, isCompact],
   );
   const rightSide =
     accessory || actions ? (
@@ -111,7 +122,7 @@ export function PageHeader({
     );
   }
   return (
-    <View style={containerStyle} testID={testID}>
+    <View ref={headerRef} style={containerStyle} testID={testID}>
       <View style={styles.row}>
         <View style={styles.titleGroup}>
           <CompactBackButton />
@@ -124,6 +135,9 @@ export function PageHeader({
       </View>
       {description ? <Text style={styles.description}>{description}</Text> : null}
       {tabs ? <View style={styles.tabs}>{tabs}</View> : null}
+      {gumloopPhone && showDivider ? (
+        <View style={styles.scrollDivider} pointerEvents="none" testID="page-header-divider" />
+      ) : null}
     </View>
   );
 }
@@ -142,6 +156,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     // the header's bottom padding and has to paint over it.
     backgroundColor: theme.colors.surface0,
   },
+  gumloopPhoneContainer: { backgroundColor: theme.colors.surface0 },
   scrollDivider: {
     position: "absolute",
     left: 0,

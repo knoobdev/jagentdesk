@@ -8,6 +8,7 @@ import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { ChevronLeft, History } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { PageHeader } from "@/components/headers/page-header";
+import { usePageScroll } from "@/components/headers/use-page-scroll";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { AgentList } from "@/components/agent-list";
@@ -35,6 +36,7 @@ function SessionsScreenContent() {
   );
   const { theme } = useUnistyles();
   const { t } = useTranslation();
+  const pageScroll = usePageScroll();
   const hosts = useHosts();
   const [selectedHost, setSelectedHost] = useState(ALL_HOSTS_OPTION_ID);
   const historyServerId = selectedHost === ALL_HOSTS_OPTION_ID ? null : selectedHost;
@@ -90,6 +92,7 @@ function SessionsScreenContent() {
         icon={History}
         title={t("sessions.title")}
         description="Every agent session on your hosts, newest first. Open one to pick it back up."
+        scrolled={pageScroll.scrolled}
       />
       {showHostFilter ? (
         <View style={filterStyle}>
@@ -132,6 +135,7 @@ function SessionsScreenContent() {
           listFooterComponent={listFooterComponent}
           showAttentionIndicator={false}
           showHostColumn
+          scrollProps={pageScroll.scrollProps}
         />
       ) : null}
     </View>

@@ -31,6 +31,7 @@ import { Archive, ChevronRight } from "lucide-react-native";
 import { getProviderIcon } from "@/components/provider-icons";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
 import { useArchiveAgent } from "@/hooks/use-archive-agent";
+import type { PageScroll } from "@/components/headers/use-page-scroll";
 
 interface AgentListProps {
   agents: AggregatedAgent[];
@@ -45,6 +46,8 @@ interface AgentListProps {
   showHostColumn?: boolean;
   /** "embedded" is Home's recent activity, whose first day label sits 12px under its own label. */
   placement?: AgentListPlacement;
+  /** The page's scroll tracking, for its header divider (`usePageScroll`). */
+  scrollProps?: PageScroll["scrollProps"];
 }
 
 type AgentListPlacement = "page" | "embedded";
@@ -422,6 +425,7 @@ export function AgentList({
   showAttentionIndicator = true,
   showHostColumn = false,
   placement = "page",
+  scrollProps,
 }: AgentListProps) {
   const { theme } = useUnistyles();
   const { t } = useTranslation();
@@ -613,6 +617,7 @@ export function AgentList({
         keyboardShouldPersistTaps="handled"
         ListFooterComponent={listFooterComponent}
         refreshControl={refreshControl}
+        {...scrollProps}
       />
 
       <Modal
