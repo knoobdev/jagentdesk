@@ -61,6 +61,16 @@ folds its tool calls into one summary line, and only rows a built-in appended st
 
 Plugin item kinds must match `^[a-z][a-z0-9-]*$`.
 
+## Lessons
+
+A lesson (spec 42 §4) is a memory with `kind: "lesson"` that an agent saves when the user corrects it, with citations `{ path, symbol?, excerpt? }`. The spec 42 columns were added to existing databases with `ALTER TABLE` on open.
+
+- Citations are checked when the lesson is saved and again before every injection (`plugins/memory/server/lessons.ts`): the file must exist under the agent's cwd and the excerpt must still appear in it, whitespace collapsed. A failed check marks the lesson `stale` with the reason; it is never injected until the user fixes or restores it.
+- Statuses: `active`, `pending` (Capture lessons, waiting for approval), `stale`, `deprecated`, `graduated`. Only `active` entries are searched or injected. A captured copy never demotes an entry the user already approved.
+- 👍/👎 on the chip and the `rate_memory` tool count `helpful`/`harmful` on any memory. Two or more harmful and more harmful than helpful deprecates it. Helpful restarts a lesson's 28-day clock (`kept_at`); a lesson not kept for 28 days goes stale. The sweep runs before injection and on every Memory page list.
+- At equal score a lesson goes before a plain memory.
+- "Make this a project rule" shows for an active lesson with helpful ≥ 3, harmful 0 and use by two or more agents. The daemon writes a bullet under `## Learned rules` in `AGENTS.md` (or `CLAUDE.md` when the project has only that file) at the project root, only after the user approved the exact diff, and refuses when the file changed since the preview.
+
 ## App surfaces
 
 - Memory page: main sidebar after Skills (`APP_NAV_ORDER`, the Gumloop `PRIMARY_ORDER`, the
@@ -70,7 +80,7 @@ Plugin item kinds must match `^[a-z][a-z0-9-]*$`.
 - Inspector tab "Memory": the `builtin_inspector` workspace tab kind on desktop, and an extra tab
   in the compact inspector sheet. It shows the inspected agent: the focused pane's agent, else the
   first agent tab.
-- Settings: a "Memory" section on host Settings → Plugins (enabled, auto-inject, token cap).
+- Settings: a "Memory" section on host Settings → Plugins (enabled, auto-inject, token cap, and the five spec 42 switches; see [durable-context.md](durable-context.md)).
 
 Strings live in `packages/app/src/i18n/resources/memory.ts`, English in every locale for now.
 

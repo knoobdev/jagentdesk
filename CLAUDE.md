@@ -31,6 +31,7 @@ At the start of non-trivial work, list `docs/` and skim anything relevant to the
 | [docs/agent-lifecycle.md](docs/agent-lifecycle.md)                     | Agent states, parent/child relationships, archive semantics, tabs vs archive, subagents track                                          |
 | [docs/orchestration.md](docs/orchestration.md)                         | ORC (Supervisor → Lead → Peer) — `/orc` entry point, roles, limits, settings                                                           |
 | [docs/cross-provider-continuity.md](docs/cross-provider-continuity.md) | Session ledger, provider switch handoff and resume, usage-limit failover, child agents on other providers                              |
+| [docs/durable-context.md](docs/durable-context.md)                     | Compaction signals, re-grounding block, recitation, 80 % ledger nudge, Claude compact hooks, Rollover, Capture lessons                 |
 | [docs/bots.md](docs/bots.md)                                           | Bots daemon lifecycle, SQLite homes/items/rooms, permission boundary, triggers and client RPC contract                                 |
 | [docs/coding-standards.md](docs/coding-standards.md)                   | Type hygiene, error handling, state design, React patterns, file organization                                                          |
 | [docs/design.md](docs/design.md)                                       | Design system — tokens, buttons, hierarchy, density, alignment rails, states, what's forbidden                                         |

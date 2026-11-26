@@ -1,6 +1,6 @@
 # Cross-provider continuity
 
-An agent keeps its id, timeline and workspace when it moves to another provider: by hand from the composer's model menu, by failover when a provider reports a usage limit, or when it starts a child on another provider. The source of truth is spec 40 and ADR-0057 in the spec repo. Code: `packages/server/src/server/agent/session-ledger/` (ledger, handoffs) and `packages/server/src/server/agent/failover/` (failure classification, failover, child providers).
+An agent keeps its id, timeline and workspace when it moves to another provider: by hand from the composer's model menu, by failover when a provider reports a usage limit, or when it starts a child on another provider. The source of truth is spec 40 and ADR-0057 in the spec repo. Code: `packages/server/src/server/agent/session-ledger/` (ledger, handoffs) and `packages/server/src/server/agent/failover/` (failure classification, failover, child providers). The same ledger re-grounds an agent after a compaction and seeds a rollover; see [durable-context.md](durable-context.md).
 
 ## Session ledger
 
