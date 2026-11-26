@@ -33,6 +33,8 @@ import {
   type PressableStateCallbackType,
 } from "react-native";
 import { useRouter } from "expo-router";
+import { useNavigation, usePreventRemove } from "expo-router/react-navigation";
+import { registerRouteLeaveGuard } from "@/navigation/route-leave-guard";
 import { useIsFocused } from "expo-router/react-navigation";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
@@ -60,6 +62,7 @@ import {
   GitBranch,
   Wrench,
   Mic,
+  Layers,
 } from "lucide-react-native";
 import { DropdownTrigger } from "@/components/ui/dropdown-trigger";
 import { ComboboxTrigger } from "@/components/ui/combobox-trigger";
@@ -117,6 +120,7 @@ import {
   HostConnectionsPage,
   HostPairDevicePage,
   HostAgentsPage,
+  HostAgentProfilesPage,
   HostSettingsPage,
   HostProvidersPage,
   HostUsagePage,
@@ -225,6 +229,7 @@ const HOST_SECTION_ITEMS: HostSectionItem[] = [
   { id: "connections", labelKey: "settings.hostSections.connections", icon: Network },
   { id: "pair-device", labelKey: "openProject.tiles.pairDevice.title", icon: Smartphone },
   { id: "agents", labelKey: "settings.hostSections.agents", icon: Bot },
+  { id: "agent-profiles", labelKey: "settings.hostSections.agentProfiles", icon: Layers },
   { id: "orchestration", labelKey: "settings.hostSections.orchestration", icon: GitBranch },
   { id: "voice", labelKey: "settings.hostSections.voice", icon: Mic },
   { id: "workspaces", labelKey: "settings.hostSections.workspaces", icon: FolderGit2 },
@@ -249,6 +254,9 @@ function renderHostSettingsContent(
       return <HostPairDevicePage serverId={view.serverId} />;
     case "agents":
       return <HostAgentsPage serverId={view.serverId} />;
+    case "agent-profiles":
+      // Rendered directly by SettingsScreen: the page owns its header, roster and drawer split.
+      return null;
     case "orchestration":
       return <HostOrchestrationPage serverId={view.serverId} />;
     case "voice":
@@ -1001,6 +1009,131 @@ function SettingsSidebar({
 // Main screen
 // ---------------------------------------------------------------------------
 
+/** The desktop detail pane: the page header over the scrolling page body. */
+function SettingsDesktopDetail({
+  title,
+  description,
+  scrolled,
+  headerLeft,
+  onScroll,
+  contentContainerStyle,
+  gumloopDesktop,
+  children,
+}: {
+  title: string | undefined;
+  description: string;
+  scrolled: boolean;
+  headerLeft: ReactNode;
+  onScroll: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+  contentContainerStyle: { paddingBottom: number };
+  gumloopDesktop: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <>
+      <SettingsDesktopHeader
+        title={title ?? "Settings"}
+        description={description}
+        scrolled={scrolled}
+      >
+        <ScreenHeader
+          borderless={title === undefined}
+          left={headerLeft}
+          leftStyle={desktopStyles.detailLeft}
+        />
+      </SettingsDesktopHeader>
+      <SettingsScrollView
+        {...settingsScrollProps}
+        style={styles.scrollView}
+        contentContainerStyle={contentContainerStyle}
+        onScroll={onScroll}
+        scrollEventThrottle={16}
+        testID="settings-detail-scroll-body"
+      >
+        <View style={[styles.content, gumloopDesktop && styles.gumloopContent]}>{children}</View>
+      </SettingsScrollView>
+    </>
+  );
+}
+
+interface SettingsBeforeLeaveGuard {
+  isDirty: () => boolean;
+  confirmDiscard: () => Promise<boolean>;
+  subscribeDirty?: (listener: () => void) => () => void;
+}
+
+/**
+ * Lets an active Settings editor (such as Agent profiles) veto both in-app
+ * section switches and route-boundary exits (browser Back, native swipe-back,
+ * hardware Back) with a single discard confirmation.
+ *
+ * Uses `usePreventRemove` so native stacks set `preventNativeDismiss` before
+ * iOS can interactively dismiss the screen on a back swipe.
+ */
+function useSettingsBeforeLeaveGuard() {
+  const navigation = useNavigation();
+  const beforeLeaveRef = useRef<SettingsBeforeLeaveGuard | null>(null);
+  const dirtyUnsubRef = useRef<(() => void) | null>(null);
+  const [preventRemove, setPreventRemove] = useState(false);
+
+  const registerBeforeLeave = useCallback((guard: SettingsBeforeLeaveGuard | null) => {
+    dirtyUnsubRef.current?.();
+    dirtyUnsubRef.current = null;
+    beforeLeaveRef.current = guard;
+    const syncDirty = () => {
+      setPreventRemove(Boolean(beforeLeaveRef.current?.isDirty()));
+    };
+    syncDirty();
+    if (guard?.subscribeDirty) {
+      dirtyUnsubRef.current = guard.subscribeDirty(syncDirty);
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      dirtyUnsubRef.current?.();
+      dirtyUnsubRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    return registerRouteLeaveGuard({
+      isDirty: () => Boolean(beforeLeaveRef.current?.isDirty()),
+      confirmDiscard: async () => (await beforeLeaveRef.current?.confirmDiscard()) ?? true,
+    });
+  }, []);
+
+  usePreventRemove(preventRemove, ({ data }) => {
+    const guard = beforeLeaveRef.current;
+    if (!guard?.isDirty()) {
+      navigation.dispatch(data.action);
+      return;
+    }
+    const confirmAndLeave = async () => {
+      if (await guard.confirmDiscard()) {
+        navigation.dispatch(data.action);
+      }
+    };
+    void confirmAndLeave();
+  });
+
+  const guardNavigation = useCallback((navigate: () => void) => {
+    const guard = beforeLeaveRef.current;
+    if (!guard?.isDirty()) {
+      navigate();
+      return;
+    }
+    const run = async () => {
+      if (await guard.confirmDiscard()) {
+        navigate();
+      }
+    };
+    void run();
+  }, []);
+
+  return { registerBeforeLeave, guardNavigation };
+}
+
 export interface SettingsScreenProps {
   view: SettingsView;
   openAddHostIntent?: string | null;
@@ -1173,21 +1306,25 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
     [isCompactLayout, router],
   );
 
+  const { registerBeforeLeave, guardNavigation } = useSettingsBeforeLeaveGuard();
+
   const handleSelectSection = useCallback(
     (section: SettingsSectionSlug) => {
       const target = buildSettingsSectionRoute(section);
-      if (isCompactLayout) {
-        router.push(target);
-      } else {
-        router.replace(target);
-      }
+      guardNavigation(() => {
+        if (isCompactLayout) {
+          router.push(target);
+        } else {
+          router.replace(target);
+        }
+      });
     },
-    [isCompactLayout, router],
+    [guardNavigation, isCompactLayout, router],
   );
 
   // Picker: choose the host for host-section rows. If the user is already on a
   // host detail route, keep that detail section and swap only the host segment.
-  const handleSelectHost = useCallback(
+  const handleSelectHostNow = useCallback(
     (serverId: string) => {
       selectSettingsHost(serverId);
       if (view.kind === "project") {
@@ -1211,6 +1348,16 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
     },
     [isCompactLayout, router, view],
   );
+  const handleSelectHost = useCallback(
+    (serverId: string) => {
+      if (view.kind === "host" && view.serverId === serverId) {
+        selectSettingsHost(serverId);
+        return;
+      }
+      guardNavigation(() => handleSelectHostNow(serverId));
+    },
+    [guardNavigation, handleSelectHostNow, view],
+  );
 
   const handleSelectHostSection = useCallback(
     (section: HostSectionSlug) => {
@@ -1219,13 +1366,15 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
         return;
       }
       const target = buildSettingsHostSectionRoute(activeHostServerId, section);
-      if (isCompactLayout) {
-        router.push(target);
-      } else {
-        router.replace(target);
-      }
+      guardNavigation(() => {
+        if (isCompactLayout) {
+          router.push(target);
+        } else {
+          router.replace(target);
+        }
+      });
     },
-    [activeHostServerId, handleAddHost, isCompactLayout, router],
+    [activeHostServerId, guardNavigation, handleAddHost, isCompactLayout, router],
   );
 
   const handleScanQr = useCallback(() => {
@@ -1252,19 +1401,23 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
 
   const detailProjectServerId = view.kind === "project" ? view.serverId : null;
   const handleBackFromDetail = useCallback(() => {
-    if (detailProjectServerId) {
-      router.navigate(buildSettingsHostSectionRoute(detailProjectServerId, "projects"));
-      return;
-    }
-    handleBackToRoot();
-  }, [detailProjectServerId, handleBackToRoot, router]);
+    guardNavigation(() => {
+      if (detailProjectServerId) {
+        router.navigate(buildSettingsHostSectionRoute(detailProjectServerId, "projects"));
+        return;
+      }
+      handleBackToRoot();
+    });
+  }, [detailProjectServerId, guardNavigation, handleBackToRoot, router]);
 
   const handleBackToWorkspace = useCallback(() => {
-    if (navigateToLastWorkspace()) {
-      return;
-    }
-    router.replace(buildOpenProjectRoute());
-  }, [router]);
+    guardNavigation(() => {
+      if (navigateToLastWorkspace()) {
+        return;
+      }
+      router.replace(buildOpenProjectRoute());
+    });
+  }, [guardNavigation, router]);
 
   const installedPlugins = useInstalledPlugins();
   const pluginDisplayName = usePluginDisplayName(view.kind === "plugin" ? view : null);
@@ -1439,6 +1592,23 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
     );
   }
 
+  const agentProfilesServerId =
+    view.kind === "host" && view.section === "agent-profiles" ? view.serverId : null;
+
+  if (isCompactLayout && agentProfilesServerId) {
+    return (
+      <View style={styles.container}>
+        <HostAgentProfilesPage
+          serverId={agentProfilesServerId}
+          description={pageDescription}
+          onBack={handleBackFromDetail}
+          onRegisterBeforeLeave={registerBeforeLeave}
+        />
+        {addHostModals}
+      </View>
+    );
+  }
+
   if (isCompactLayout) {
     return (
       <View style={styles.container}>
@@ -1502,29 +1672,25 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
         )}
         <WindowChromeRegion corners="top-right">
           <View style={desktopStyles.contentPane} testID="settings-detail-pane">
-            <SettingsDesktopHeader
-              title={detailHeader?.title ?? "Settings"}
-              description={pageDescription}
-              scrolled={detailScrolled}
-            >
-              <ScreenHeader
-                borderless={!detailHeader}
-                left={desktopDetailHeaderLeft}
-                leftStyle={desktopStyles.detailLeft}
+            {agentProfilesServerId ? (
+              <HostAgentProfilesPage
+                serverId={agentProfilesServerId}
+                description={pageDescription}
+                onRegisterBeforeLeave={registerBeforeLeave}
               />
-            </SettingsDesktopHeader>
-            <SettingsScrollView
-              {...settingsScrollProps}
-              style={styles.scrollView}
-              contentContainerStyle={insetBottomStyle}
-              onScroll={handleDetailScroll}
-              scrollEventThrottle={16}
-              testID="settings-detail-scroll-body"
-            >
-              <View style={[styles.content, gumloopDesktop && styles.gumloopContent]}>
+            ) : (
+              <SettingsDesktopDetail
+                title={detailHeader?.title}
+                description={pageDescription}
+                scrolled={detailScrolled}
+                headerLeft={desktopDetailHeaderLeft}
+                onScroll={handleDetailScroll}
+                contentContainerStyle={insetBottomStyle}
+                gumloopDesktop={gumloopDesktop}
+              >
                 {content}
-              </View>
-            </SettingsScrollView>
+              </SettingsDesktopDetail>
+            )}
           </View>
         </WindowChromeRegion>
       </View>

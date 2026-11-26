@@ -7,6 +7,8 @@ class JAgentDeskTerminalModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("JAgentDeskTerminal")
 
+    OnCreate { TerminalInputKeyboard.install() }
+
     View(JAgentDeskTerminalView::class) {
       Events("onCellMetrics")
 

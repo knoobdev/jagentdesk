@@ -42,11 +42,7 @@ import {
   unblockJAgentDeskConfigWrites,
 } from "../support/helpers/project-settings";
 import { gotoAppShell } from "../support/helpers/app";
-import {
-  addProjectFlowInput,
-  chooseAddProjectMethod,
-  openAddProjectFlow,
-} from "../support/helpers/add-project-flow";
+import { addProjectFlowInput, openAddProjectFlow } from "../support/helpers/add-project-flow";
 import { createTempGitRepo } from "../support/helpers/workspace";
 
 const updatedSetup = ["npm install", "npm run build"];
@@ -157,7 +153,6 @@ async function readProjectConfigFile(project: ProjectsSettingsProject): Promise<
 
 async function addProjectFromSidebar(page: Page, projectPath: string): Promise<string> {
   await openAddProjectFlow(page);
-  await chooseAddProjectMethod(page, "directory-search");
 
   const input = addProjectFlowInput(page);
   await input.fill(projectPath);

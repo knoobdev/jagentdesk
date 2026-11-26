@@ -1,4 +1,4 @@
-import type { StreamItem } from "@/types/stream";
+import { getAssistantReply, type StreamItem } from "@/types/stream";
 import { startsNewTurn, isTurnTrigger } from "@/agent-stream/turn-membership";
 
 export interface TurnTiming {
@@ -48,7 +48,7 @@ function closeTurn(turn: OpenTurn, into: Map<string, TurnTiming>): void {
   if (
     footerIds.length === 0 &&
     (turn.previousItem?.kind === "tool_call" ||
-      (turn.previousItem?.kind === "plugin" && turn.previousItem.sourceKind === "tool_call"))
+      (turn.previousItem?.kind === "plugin" && turn.previousItem.source?.kind === "tool_call"))
   ) {
     footerIds = [turn.previousItem.id];
   }
@@ -74,10 +74,7 @@ function walkTurns(
       assistantIds = [];
     }
     lastItemAt = item.timestamp;
-    if (
-      item.kind === "assistant_message" ||
-      (item.kind === "plugin" && item.sourceKind === "assistant_message")
-    ) {
+    if (getAssistantReply(item)) {
       assistantIds.push(item.id);
     }
     previousItem = item;

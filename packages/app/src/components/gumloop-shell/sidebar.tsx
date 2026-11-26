@@ -44,6 +44,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { HostStatusDot } from "@/components/host-status-dot";
 import { SidebarWorkspaceList } from "@/components/sidebar-workspace-list";
+import { SidebarToastRegion } from "@/components/sidebar/sidebar-toast-region";
+import { SidebarSelectionHost } from "@/sidebar-selection";
 import { useSidebarModel } from "@/components/sidebar/sidebar-model";
 import {
   useAppNavItems,
@@ -512,20 +514,24 @@ export function GumloopSidebar({ active }: { active: boolean }) {
   else if (projectsCollapsed)
     middle = <ScrollView contentContainerStyle={styles.rootScroll}>{navigation}</ScrollView>;
   else
+    // The region shows the list's toasts (archive undo, the select-mode bar) over its bottom edge.
     middle = (
-      <SidebarWorkspaceList
-        statusGroups={model.statusGroups}
-        pinnedGroups={model.pinnedGroups}
-        projects={model.projects}
-        workspaceEntriesByKey={model.workspaceEntriesByKey}
-        collapsedProjectKeys={model.collapsedProjectKeys}
-        onToggleProjectCollapsed={model.toggleProjectCollapsed}
-        shortcutIndexByWorkspaceKey={model.shortcutModel.shortcutIndexByWorkspaceKey}
-        groupMode="project"
-        onAddProject={addProject}
-        onWorkspacePress={resetDrill}
-        navigationHeaderComponent={navigation}
-      />
+      <SidebarToastRegion active={active}>
+        <SidebarWorkspaceList
+          statusGroups={model.statusGroups}
+          pinnedGroups={model.pinnedGroups}
+          projects={model.projects}
+          workspaceEntriesByKey={model.workspaceEntriesByKey}
+          collapsedProjectKeys={model.collapsedProjectKeys}
+          onToggleProjectCollapsed={model.toggleProjectCollapsed}
+          shortcutIndexByWorkspaceKey={model.shortcutModel.shortcutIndexByWorkspaceKey}
+          groupMode="project"
+          onAddProject={addProject}
+          onWorkspacePress={resetDrill}
+          navigationHeaderComponent={navigation}
+        />
+        <SidebarSelectionHost active={active} workspaceEntriesByKey={model.workspaceEntriesByKey} />
+      </SidebarToastRegion>
     );
   const dismissPluginView = useCallback(() => setDismissedPath(null), []);
   if (!drill) middle = <SidebarViewSlot dismiss={dismissPluginView}>{middle}</SidebarViewSlot>;

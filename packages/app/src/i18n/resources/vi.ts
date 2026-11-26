@@ -98,6 +98,7 @@ export const vi = {
 
       error: "Lỗi",
       unableToSave: "Không thể lưu",
+      unableToCopy: "Không thể sao chép",
       nameRequired: "Cần nhập tên",
       daemonUnavailable: "Daemon không khả dụng",
       daemonClientUnavailable: "Client daemon không khả dụng",

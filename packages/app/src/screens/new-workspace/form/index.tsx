@@ -35,6 +35,11 @@ export interface NewWorkspaceFormProps {
   isPending: boolean;
   /** Plugin fields, drawn after the base ref. */
   pluginItems: ReactNode;
+  /**
+   * Where focus goes when a field's picker closes, so the user keeps typing the prompt. Without
+   * one, focus returns to the field that opened the picker.
+   */
+  restoreFocusRef?: RefObject<unknown>;
   project: PickerControl & {
     options: ComboboxOption[];
     projectByOptionId: Map<string, HostProjectListItem>;
@@ -167,7 +172,17 @@ function useRefRenderOption(itemById: Map<string, PickerItem>, isPending: boolea
  */
 export function useNewWorkspaceForm(props: NewWorkspaceFormProps): ReactElement {
   const { t } = useTranslation();
-  const { isCompact, isPending, pluginItems, project, host, isolation, base, launch } = props;
+  const {
+    isCompact,
+    isPending,
+    pluginItems,
+    restoreFocusRef,
+    project,
+    host,
+    isolation,
+    base,
+    launch,
+  } = props;
   const variant: FieldTriggerVariant = isCompact ? "field" : "badge";
   const projectPicker = useProjectPicker(project, isPending);
   const isolationPicker = useIsolationPicker(isolation, isPending);
@@ -224,6 +239,7 @@ export function useNewWorkspaceForm(props: NewWorkspaceFormProps): ReactElement 
       open={host.openState}
       onOpenChange={host.onOpenChange}
       anchorRef={host.anchorRef}
+      restoreFocusRef={restoreFocusRef}
       includeAddHost
       onAddHost={host.onAddHost}
       addHostTestID="new-workspace-host-picker-add-host"
@@ -299,6 +315,7 @@ export function useNewWorkspaceForm(props: NewWorkspaceFormProps): ReactElement 
         desktopPlacement="bottom-start"
         desktopMinWidth={360}
         anchorRef={project.anchorRef}
+        restoreFocusRef={restoreFocusRef}
         emptyText="No projects available."
         renderOption={projectPicker.renderOption}
         footer={projectPicker.footer}
@@ -312,6 +329,7 @@ export function useNewWorkspaceForm(props: NewWorkspaceFormProps): ReactElement 
         onOpenChange={isolation.onOpenChange}
         desktopPlacement="bottom-start"
         anchorRef={isolation.anchorRef}
+        restoreFocusRef={restoreFocusRef}
         renderOption={isolationPicker.renderOption}
       />
       <Combobox
@@ -326,6 +344,7 @@ export function useNewWorkspaceForm(props: NewWorkspaceFormProps): ReactElement 
         onSearchQueryChange={base.setSearchQuery}
         desktopPlacement="bottom-start"
         anchorRef={base.anchorRef}
+        restoreFocusRef={restoreFocusRef}
         emptyText={base.emptyText}
         renderOption={renderRefOption}
       />

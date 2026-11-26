@@ -20,6 +20,7 @@ export const ArrowUp = StubIcon;
 export const ArrowUpRight = StubIcon;
 export const AudioLines = StubIcon;
 export const Blocks = StubIcon;
+export const BookText = StubIcon;
 export const BookmarkPlus = StubIcon;
 export const Bot = StubIcon;
 export const Brain = StubIcon;

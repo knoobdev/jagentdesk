@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/control-geometry";
 import type { Theme } from "@/styles/theme";
 import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 type SegmentedControlIconRenderer = (props: { color: string; size: number }) => ReactNode;
 
@@ -18,6 +19,8 @@ export interface SegmentedControlOption<T extends string> {
   icon?: SegmentedControlIconRenderer;
   disabled?: boolean;
   testID?: string;
+  /** Desktop hover hint, such as the segment's keyboard shortcut. */
+  tooltip?: string;
 }
 
 interface SegmentedControlProps<T extends string> {
@@ -26,6 +29,8 @@ interface SegmentedControlProps<T extends string> {
   onValueChange: (value: T) => void;
   size?: SegmentedControlSize;
   hideLabels?: boolean;
+  /** Share the container's width equally between the segments, for a control that heads a surface. */
+  fill?: boolean;
   style?: StyleProp<ViewStyle>;
   testID?: string;
 }
@@ -57,6 +62,7 @@ export function SegmentedControl<T extends string>({
   onValueChange,
   size = "md",
   hideLabels = false,
+  fill = false,
   style,
   testID,
 }: SegmentedControlProps<T>) {
@@ -89,6 +95,7 @@ export function SegmentedControl<T extends string>({
             isSelected={isSelected}
             iconSize={iconSize}
             hideLabels={hideLabels}
+            fill={fill}
             segmentSizeStyle={segmentSizeStyle}
             labelSizeStyle={labelSizeStyle}
             currentValue={value}
@@ -106,6 +113,7 @@ function SegmentItem<T extends string>({
   isSelected,
   iconSize,
   hideLabels,
+  fill,
   segmentSizeStyle,
   labelSizeStyle,
   currentValue,
@@ -117,6 +125,7 @@ function SegmentItem<T extends string>({
   isSelected: boolean;
   iconSize: number;
   hideLabels: boolean;
+  fill: boolean;
   segmentSizeStyle: StyleProp<ViewStyle>;
   labelSizeStyle: StyleProp<TextStyle>;
   currentValue: T | null;
@@ -139,6 +148,7 @@ function SegmentItem<T extends string>({
         ? [
             styles.segment,
             segmentSizeStyle,
+            fill && styles.segmentFill,
             styles.segmentUnderline,
             isSelected && styles.segmentUnderlineSelected,
             Boolean(hovered) && !isSelected && styles.segmentUnderlineHover,
@@ -147,18 +157,19 @@ function SegmentItem<T extends string>({
         : [
             styles.segment,
             segmentSizeStyle,
+            fill && styles.segmentFill,
             isSelected && styles.segmentSelected,
             Boolean(hovered) && !isSelected && styles.segmentHover,
             pressed && !isSelected && styles.segmentPressed,
             option.disabled && styles.segmentDisabled,
           ],
-    [isSelected, option.disabled, segmentSizeStyle, underline],
+    [fill, isSelected, option.disabled, segmentSizeStyle, underline],
   );
   const accessibilityState = useMemo(
     () => ({ selected: isSelected, disabled: option.disabled }),
     [isSelected, option.disabled],
   );
-  return (
+  const segment = (
     <Pressable
       accessibilityRole="button"
       accessibilityState={accessibilityState}
@@ -181,6 +192,15 @@ function SegmentItem<T extends string>({
         </Text>
       )}
     </Pressable>
+  );
+  if (!option.tooltip) return segment;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{segment}</TooltipTrigger>
+      <TooltipContent side="bottom" offset={8}>
+        <Text style={styles.tooltipText}>{option.tooltip}</Text>
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -218,6 +238,12 @@ const styles = StyleSheet.create((theme) => {
     },
     segmentMd: {
       ...geometry.segmentedSegmentMd,
+    },
+    segmentFill: {
+      flexGrow: 1,
+      flexBasis: 0,
+      flexShrink: 1,
+      minWidth: 0,
     },
     segmentSelected: {
       backgroundColor: theme.colors.foreground,
@@ -278,6 +304,10 @@ const styles = StyleSheet.create((theme) => {
     labelUnderlineSelected: {
       color: theme.colors.foreground,
       fontWeight: theme.fontWeight.semibold,
+    },
+    tooltipText: {
+      fontSize: theme.fontSize.base,
+      color: theme.colors.popoverForeground,
     },
   };
 });

@@ -1,7 +1,6 @@
 import { useCallback, useMemo, type ReactElement, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Text, Pressable, View } from "react-native";
-import type { GestureResponderEvent } from "react-native";
 import { Plus, Server, Settings } from "lucide-react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { HostStatusDot } from "@/components/host-status-dot";
@@ -82,37 +81,31 @@ export function HostPickerOption({
       ? formatActiveConnectionLabel(activeConnection)
       : undefined;
   const leadingSlot = useMemo(() => <HostStatusDotSlot serverId={serverId} />, [serverId]);
-  const handleSettingsPress = useCallback(
-    (event: GestureResponderEvent) => {
-      event.stopPropagation();
-      onOpenHostSettings?.(serverId);
-    },
-    [onOpenHostSettings, serverId],
-  );
+  const handleSettingsPress = useCallback(() => {
+    onOpenHostSettings?.(serverId);
+  }, [onOpenHostSettings, serverId]);
   const trailingSlot = useMemo(() => {
-    const transportKey = hostTransportLabelKey(activeConnection?.type ?? "directTcp");
+    if (!activeConnection) return undefined;
+    const transportKey = hostTransportLabelKey(activeConnection.type);
     return (
-      <View style={styles.transportActions}>
-        {activeConnection ? (
-          <View style={styles.transportBadge}>
-            <Text style={styles.transportText}>{t(transportKey)}</Text>
-          </View>
-        ) : null}
-        {onOpenHostSettings ? (
-          <Pressable
-            onPress={handleSettingsPress}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel={`Open ${label} settings`}
-          >
-            <Settings size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />
-          </Pressable>
-        ) : null}
+      <View style={styles.transportBadge}>
+        <Text style={styles.transportText}>{t(transportKey)}</Text>
       </View>
     );
+  }, [activeConnection, t]);
+  const trailingAction = useMemo(() => {
+    if (!onOpenHostSettings) return undefined;
+    return (
+      <Pressable
+        onPress={handleSettingsPress}
+        style={styles.settingsAction}
+        accessibilityRole="button"
+        accessibilityLabel={`Open ${label} settings`}
+      >
+        <Settings size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />
+      </Pressable>
+    );
   }, [
-    activeConnection,
-    t,
     handleSettingsPress,
     label,
     onOpenHostSettings,
@@ -126,6 +119,7 @@ export function HostPickerOption({
       description={connectionLabel}
       leadingSlot={leadingSlot}
       trailingSlot={trailingSlot}
+      trailingAction={trailingAction}
       selected={selected}
       active={active}
       onPress={onPress}
@@ -180,6 +174,7 @@ export interface HostPickerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   anchorRef: React.RefObject<View | null>;
+  restoreFocusRef?: ComboboxProps["restoreFocusRef"];
   includeAllHost?: boolean;
   includeAddHost?: boolean;
   onAddHost?: () => void;
@@ -203,6 +198,7 @@ export function HostPicker({
   open,
   onOpenChange,
   anchorRef,
+  restoreFocusRef,
   includeAllHost,
   includeAddHost,
   onAddHost,
@@ -325,6 +321,7 @@ export function HostPicker({
         open={open}
         onOpenChange={onOpenChange}
         anchorRef={anchorRef}
+        restoreFocusRef={restoreFocusRef}
         desktopPlacement={desktopPlacement}
         desktopMinWidth={desktopMinWidth}
       />
@@ -333,7 +330,6 @@ export function HostPicker({
 }
 
 const styles = StyleSheet.create((theme) => ({
-  transportActions: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
   transportBadge: {
     borderRadius: theme.borderRadius.full,
     borderWidth: 1,
@@ -343,6 +339,12 @@ const styles = StyleSheet.create((theme) => ({
     paddingVertical: theme.spacing[1],
   },
   transportText: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.xs },
+  settingsAction: {
+    flex: 1,
+    justifyContent: "center",
+    paddingLeft: theme.spacing[1],
+    paddingRight: theme.spacing[3],
+  },
   statusDotSlot: {
     width: theme.iconSize.sm,
     height: theme.iconSize.sm,

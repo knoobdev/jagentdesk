@@ -14,6 +14,7 @@ import { HeaderIconBadge } from "@/components/headers/header-icon-badge";
 import { HeaderToggleButton } from "@/components/headers/header-toggle-button";
 import { ScreenHeader } from "@/components/headers/screen-header";
 import { ScreenTitle } from "@/components/headers/screen-title";
+import { SidebarMenuToggle } from "@/components/headers/sidebar-menu-toggle";
 import { HostPicker } from "@/components/hosts/host-picker";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import {
@@ -234,6 +235,7 @@ export function PluginSurfaceScreen() {
   const headerLeft = useMemo(
     () => (
       <>
+        <SidebarMenuToggle />
         {Icon ? (
           <HeaderIconBadge>
             <ThemedPluginHeaderIcon Icon={Icon} uniProps={mutedColorMapping} />

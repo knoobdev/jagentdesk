@@ -21,8 +21,10 @@ import {
   getTerminalProfileIcon,
   resolveTerminalProfiles,
 } from "@jagentdesk/protocol/terminal-profiles";
+import { AgentProfilesPage, type AgentProfilesBeforeLeaveGuard } from "@/agent-profiles";
 import { AdaptiveModalSheet, type SheetHeader } from "@/components/adaptive-modal-sheet";
 import { HostPickerOption } from "@/components/hosts/host-picker";
+import { PageLayout } from "@/components/page-layout";
 import { SettingsTextAreaCard } from "@/components/settings-textarea";
 import { Alert as InlineAlert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -286,6 +288,43 @@ export function HostAgentsPage({ serverId }: { serverId: string }) {
         </View>
       )}
     </View>
+  );
+}
+
+export function HostAgentProfilesPage({
+  serverId,
+  description,
+  onBack,
+  onRegisterBeforeLeave,
+}: {
+  serverId: string;
+  description?: string;
+  onBack?: () => void;
+  onRegisterBeforeLeave?: (guard: AgentProfilesBeforeLeaveGuard | null) => void;
+}) {
+  const { t } = useTranslation();
+  const host = useHostProfile(serverId);
+
+  if (!host) {
+    return (
+      <PageLayout
+        title={t("settings.host.agentProfiles.sectionTitle")}
+        description={description}
+        onBack={onBack}
+        titleTestID="settings-detail-header-title"
+      >
+        <HostNotFound />
+      </PageLayout>
+    );
+  }
+
+  return (
+    <AgentProfilesPage
+      serverId={serverId}
+      description={description}
+      onBack={onBack}
+      onRegisterBeforeLeave={onRegisterBeforeLeave}
+    />
   );
 }
 

@@ -49,6 +49,7 @@ class TimelineWorld {
     replaceDemandedAgentIds: () => undefined,
     onCatchUpOwed: () => undefined,
     onCatchUpSettled: () => undefined,
+    isArchived: () => false,
     canCheckFreshness: () => this.freshnessEnabled,
     applyCurrentTimeline: (agentId) => {
       this.currentAnswers.push(agentId);

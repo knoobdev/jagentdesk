@@ -20,6 +20,7 @@ import {
   useState,
   useLayoutEffect,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { useTranslation } from "react-i18next";
 import { Text, View } from "react-native";
@@ -872,6 +873,11 @@ function useNewWorkspaceInitialContext({
   };
 }
 
+/** The prompt takes focus back after a picker closes, unless the terminal shows no prompt. */
+function promptFocusTarget<T>(takesPrompt: boolean, ref: RefObject<T>): RefObject<T> | undefined {
+  return takesPrompt ? ref : undefined;
+}
+
 export function NewWorkspaceScreen({
   serverId,
   sourceDirectory: sourceDirectoryProp,
@@ -1496,9 +1502,18 @@ export function NewWorkspaceScreen({
       ? t("newWorkspace.refPicker.searching")
       : t("newWorkspace.refPicker.noMatchingRefs");
 
+  // The prompt is where the user types; when a field's picker closes, focus returns there rather
+  // than to whatever had focus when the picker opened. A terminal profile that takes no prompt
+  // shows a read-only command preview, so its pickers keep returning focus to their field.
+  const composerFocusRef = useRef<{ focus: () => void } | null>(null);
+  const handleComposerFocusInput = useCallback((focus: () => void) => {
+    composerFocusRef.current = { focus };
+  }, []);
+
   const formStack = useNewWorkspaceForm({
     isCompact,
     isPending,
+    restoreFocusRef: promptFocusTarget(terminalTakesPrompt, composerFocusRef),
     pluginItems: (
       <PluginNewWorkspaceItems serverId={selectedServerId} screen={pluginScreen} setup={setup} />
     ),
@@ -1592,6 +1607,7 @@ export function NewWorkspaceScreen({
       clearDraft={noopClearDraft}
       autoFocus={terminalTakesPrompt}
       autoFocusKey={launchFocusKey}
+      onFocusInput={handleComposerFocusInput}
     />
   ) : (
     <Composer
@@ -1621,6 +1637,7 @@ export function NewWorkspaceScreen({
       clearDraft={handleClearDraft}
       autoFocus
       autoFocusKey={launchFocusKey}
+      onFocusInput={handleComposerFocusInput}
       commandDraft={composerState?.commandDraft}
       agentControls={agentControlsWithDisabled}
     />

@@ -6,7 +6,7 @@ import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome
 import { showNativeToast } from "./native-toast";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Animated, Easing, Text, View } from "react-native";
+import { Animated, Easing, Text, View, type LayoutChangeEvent } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
@@ -21,10 +21,16 @@ import {
 } from "@/constants/layout";
 
 export type ToastVariant = "default" | "info" | "success" | "warning" | "error";
+/**
+ * `action` tightens vertical and trailing insets around `size="sm"` pill controls and uses a
+ * concentric corner radius (`controlHeight / 2 + inset`) so buttons nest evenly in the shell.
+ */
+export type ToastLayout = "default" | "action";
 
 export interface ToastShowOptions {
   icon?: ReactNode;
   variant?: ToastVariant;
+  layout?: ToastLayout;
   durationMs?: number | null;
   nativeAndroid?: boolean;
   testID?: string;
@@ -38,6 +44,7 @@ export interface ToastState {
   nativeMessage: string | null;
   icon?: ReactNode;
   variant: ToastVariant;
+  layout?: ToastLayout;
   durationMs: number | null;
   testID?: string;
   onDismiss?: () => void;
@@ -55,6 +62,8 @@ export interface ToastApi {
 type ToastViewportPlacement = "app-shell" | "panel" | "sidebar";
 
 const DEFAULT_DURATION_MS = 2200;
+/** The sidebar toasts sit this far above the region's bottom edge (`sidebarContainer.bottom`). */
+const SIDEBAR_TOAST_INSET = 8;
 
 export function useToastHost(): {
   api: ToastApi;
@@ -99,6 +108,7 @@ export function useToastHost(): {
         nativeMessage,
         icon: options?.icon,
         variant,
+        layout: options?.layout,
         durationMs,
         testID: options?.testID,
         onDismiss: options?.onDismiss,
@@ -132,12 +142,18 @@ export function useToastHost(): {
 
 export function ToastViewport({
   toast,
+  persistentToast = null,
   onDismiss,
   placement = "app-shell",
+  onBottomCoverageChange,
 }: {
   toast: ToastState | null;
+  /** Sidebar placement: a persistent bar (such as select mode) that stays below transient toasts. */
+  persistentToast?: ToastState | null;
   onDismiss: () => void;
   placement?: ToastViewportPlacement;
+  /** Sidebar placement: the distance the toasts cover above the region's bottom edge. */
+  onBottomCoverageChange?: (height: number) => void;
 }) {
   const gumloop = useIsGumloopTheme();
   const { theme } = useUnistyles();
@@ -253,54 +269,39 @@ export function ToastViewport({
     resolveToastTopOffset(placement, isMobile, insets.top, theme.spacing[2], theme.spacing[3]);
 
   const toastVariant = toast?.variant;
+  const toastLayout = toast?.layout;
   const toastAnimatedStyle = useMemo(
     () => [
-      styles.toast,
-      toastVariant === "info" ? styles.toastInfo : null,
-      toastVariant === "success" ? styles.toastSuccess : null,
-      toastVariant === "warning" ? styles.toastWarning : null,
-      toastVariant === "error" ? styles.toastError : null,
-      gumloop && styles.gumloopToast,
-      gumloop && toastVariant === "success" && styles.gumloopSuccess,
-      gumloop && toastVariant === "warning" && styles.gumloopWarning,
-      gumloop && toastVariant === "error" && styles.gumloopError,
+      ...toastSurfaceStyles(gumloop, toastVariant, toastLayout),
       {
         marginTop: placement === "sidebar" ? 0 : topOffset,
         opacity,
         transform: [{ translateY }],
       },
     ],
-    [gumloop, toastVariant, topOffset, opacity, translateY, placement],
+    [gumloop, toastLayout, toastVariant, topOffset, opacity, translateY, placement],
   );
   const toastMessageStyle = useMemo(
-    () => [
-      styles.message,
-      toastVariant === "error" ? styles.messageError : null,
-      gumloop && toastVariant === "error" && styles.gumloopErrorText,
-    ],
+    () => toastMessageStyles(gumloop, toastVariant),
     [gumloop, toastVariant],
   );
 
+  const persistentCard = renderPersistentToast(placement, persistentToast, gumloop);
+  const handleSidebarLayout = onBottomCoverageChange
+    ? (event: LayoutChangeEvent) => reportSidebarCoverage(event, onBottomCoverageChange)
+    : undefined;
+
   if (!toast) {
-    return null;
+    return renderPersistentToastOnly(persistentCard, handleSidebarLayout);
   }
 
-  let defaultIcon: ReactNode = null;
-  if (toast.variant === "info") {
-    defaultIcon = <Info size={18} color={theme.colors.palette.blue[300]} />;
-  } else if (toast.variant === "success") {
-    defaultIcon = <CheckCircle2 size={18} color={theme.colors.primary} />;
-  } else if (toast.variant === "warning") {
-    defaultIcon = <AlertTriangle size={18} color={theme.colors.palette.amber[500]} />;
-  } else if (toast.variant === "error") {
-    defaultIcon = <AlertTriangle size={18} color={theme.colors.destructive} />;
-  }
-  const icon = toast.icon ?? defaultIcon;
+  const icon = toast.icon ?? defaultToastIcon(toast.variant, theme);
 
   const content = (
     <View
       style={placement === "sidebar" ? styles.sidebarContainer : styles.container}
       pointerEvents="box-none"
+      onLayout={placement === "sidebar" ? handleSidebarLayout : undefined}
     >
       <Animated.View
         testID={toast.testID ?? "app-toast"}
@@ -320,6 +321,7 @@ export function ToastViewport({
           </View>
         )}
       </Animated.View>
+      {persistentCard}
     </View>
   );
 
@@ -328,6 +330,107 @@ export function ToastViewport({
   }
 
   return placement === "panel" ? <FloatingHeaderOverlay>{content}</FloatingHeaderOverlay> : content;
+}
+
+function toastSurfaceStyles(
+  gumloop: boolean,
+  variant: ToastVariant | undefined,
+  layout: ToastLayout | undefined,
+) {
+  const variantStyles: Partial<Record<ToastVariant, object>> = {
+    info: styles.toastInfo,
+    success: styles.toastSuccess,
+    warning: styles.toastWarning,
+    error: styles.toastError,
+  };
+  const gumloopVariantStyles: Partial<Record<ToastVariant, object>> = {
+    success: styles.gumloopSuccess,
+    warning: styles.gumloopWarning,
+    error: styles.gumloopError,
+  };
+  return [
+    styles.toast,
+    layout === "action" ? styles.toastAction : null,
+    variant ? variantStyles[variant] : null,
+    gumloop ? styles.gumloopToast : null,
+    gumloop && variant ? gumloopVariantStyles[variant] : null,
+  ];
+}
+
+function toastMessageStyles(gumloop: boolean, variant: ToastVariant | undefined) {
+  const isError = variant === "error";
+  return [
+    styles.message,
+    isError ? styles.messageError : null,
+    gumloop && isError ? styles.gumloopErrorText : null,
+  ];
+}
+
+function defaultToastIcon(
+  variant: ToastVariant,
+  theme: ReturnType<typeof useUnistyles>["theme"],
+): ReactNode {
+  switch (variant) {
+    case "info":
+      return <Info size={18} color={theme.colors.palette.blue[300]} />;
+    case "success":
+      return <CheckCircle2 size={18} color={theme.colors.primary} />;
+    case "warning":
+      return <AlertTriangle size={18} color={theme.colors.palette.amber[500]} />;
+    case "error":
+      return <AlertTriangle size={18} color={theme.colors.destructive} />;
+    default:
+      return null;
+  }
+}
+
+function renderPersistentToast(
+  placement: ToastViewportPlacement,
+  toast: ToastState | null,
+  gumloop: boolean,
+): ReactNode {
+  if (placement !== "sidebar" || !toast) return null;
+  return <PersistentToastCard toast={toast} gumloop={gumloop} />;
+}
+
+function renderPersistentToastOnly(
+  card: ReactNode,
+  onLayout: ((event: LayoutChangeEvent) => void) | undefined,
+): ReactNode {
+  if (!card) return null;
+  return (
+    <View style={styles.sidebarContainer} pointerEvents="box-none" onLayout={onLayout}>
+      {card}
+    </View>
+  );
+}
+
+/** The toasts' top edge, measured from the region's bottom: their height plus the bottom inset. */
+function reportSidebarCoverage(event: LayoutChangeEvent, report: (height: number) => void) {
+  const height = event.nativeEvent.layout.height;
+  if (height > 0) report(height + SIDEBAR_TOAST_INSET);
+}
+
+/** The sidebar's persistent bar: no timer and no entry motion, so it reads as part of the list. */
+function PersistentToastCard({ toast, gumloop }: { toast: ToastState; gumloop: boolean }) {
+  const style = useMemo(
+    () => [
+      styles.toast,
+      toast.layout === "action" ? styles.toastAction : null,
+      gumloop && styles.gumloopToast,
+    ],
+    [gumloop, toast.layout],
+  );
+  return (
+    <View testID={toast.testID ?? "app-toast"} style={style} accessibilityRole="alert">
+      {toast.icon ? <View style={styles.iconSlot}>{toast.icon}</View> : null}
+      {typeof toast.content === "string" ? (
+        <Text style={styles.message}>{toast.content}</Text>
+      ) : (
+        <View style={styles.contentSlot}>{toast.content}</View>
+      )}
+    </View>
+  );
 }
 
 const styles = StyleSheet.create((theme) => ({
@@ -346,6 +449,7 @@ const styles = StyleSheet.create((theme) => ({
     bottom: theme.spacing[2],
     zIndex: OVERLAY_Z.toast,
     alignItems: "center",
+    gap: theme.spacing[2],
   },
   toast: {
     alignSelf: "center",
@@ -360,6 +464,13 @@ const styles = StyleSheet.create((theme) => ({
     paddingVertical: theme.spacing[2],
     paddingHorizontal: theme.spacing[3],
     ...theme.shadow.md,
+  },
+  // Concentric with the 28pt size="sm" pill controls inside: radius = control height / 2 + inset.
+  toastAction: {
+    borderRadius: 14 + theme.spacing[1.5],
+    paddingVertical: theme.spacing[1.5],
+    paddingLeft: 14,
+    paddingRight: theme.spacing[1.5],
   },
   gumloopToast: { borderRadius: 12 },
   gumloopSuccess: {

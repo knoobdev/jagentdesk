@@ -106,8 +106,7 @@ function transformSourceItem(
     const projected: PluginTimelineStreamItem = {
       kind: "plugin",
       id: `${pluginItem.pluginId}/${pluginItem.id}`,
-      sourceId: item.id,
-      sourceKind: item.kind,
+      source: item,
       timestamp: item.timestamp,
       pluginId: pluginItem.pluginId,
       pluginItemId: pluginItem.id,
@@ -115,9 +114,6 @@ function transformSourceItem(
       version: pluginItem.version,
       data: pluginItem.data,
     };
-    if ((item.kind === "assistant_message" || item.kind === "tool_call") && item.turnMetrics) {
-      projected.turnMetrics = item.turnMetrics;
-    }
     if (item.timelineCursor) projected.timelineCursor = item.timelineCursor;
     if (item.turnId) projected.turnId = item.turnId;
     return projected;

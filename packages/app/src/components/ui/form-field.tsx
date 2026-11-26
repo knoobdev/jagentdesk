@@ -27,12 +27,14 @@ import {
 interface FieldProps {
   label: string;
   children: ReactNode;
+  /** A control on the label's row, at its trailing edge. */
+  trailing?: ReactNode;
   hint?: string;
   error?: string | null;
   testID?: string;
 }
 
-export function Field({ label, children, hint, error, testID }: FieldProps) {
+export function Field({ label, children, trailing, hint, error, testID }: FieldProps) {
   const hintTestID = useMemo(() => (testID ? `${testID}-hint` : undefined), [testID]);
   const errorTestID = useMemo(() => (testID ? `${testID}-error` : undefined), [testID]);
   const subtext = useMemo(() => {
@@ -55,7 +57,14 @@ export function Field({ label, children, hint, error, testID }: FieldProps) {
 
   return (
     <View style={styles.container} testID={testID}>
-      <Text style={styles.label}>{label}</Text>
+      {trailing ? (
+        <View style={styles.header}>
+          <Text style={[styles.label, styles.headerLabel]}>{label}</Text>
+          {trailing}
+        </View>
+      ) : (
+        <Text style={styles.label}>{label}</Text>
+      )}
       {children}
       {subtext}
     </View>
@@ -64,6 +73,10 @@ export function Field({ label, children, hint, error, testID }: FieldProps) {
 
 type FormTextInputProps = AdaptiveTextInputProps & {
   size?: FieldControlSize;
+  /** A glyph inside the field before the text, such as a search icon. */
+  leading?: ReactNode;
+  /** The value is rejected; the border and focus ring turn to the danger color. */
+  invalid?: boolean;
 };
 
 type FlatFormTextInputStyle = ViewStyle & TextStyle;
@@ -152,7 +165,7 @@ function assignTextInputRef(forwardedRef: ForwardedRef<TextInput>, node: TextInp
 }
 
 export const FormTextInput = forwardRef<TextInput, FormTextInputProps>(function FormTextInput(
-  { size = "md", style, onFocus, onBlur, editable, ...props },
+  { size = "md", leading, invalid = false, style, onFocus, onBlur, editable, ...props },
   ref,
 ) {
   const [focused, setFocused] = useState(false);
@@ -188,6 +201,7 @@ export const FormTextInput = forwardRef<TextInput, FormTextInputProps>(function 
     ({ hovered = false }: PressableStateCallbackType & { hovered?: boolean }) => [
       formInputStyles.chrome,
       chromeSizeStyle,
+      leading ? formInputStyles.chromeWithLeading : null,
       resolveControlInteractionStyles(
         {
           controlRest: formInputStyles.controlRest,
@@ -201,13 +215,15 @@ export const FormTextInput = forwardRef<TextInput, FormTextInputProps>(function 
           disabled: isDisabled,
         },
       ),
+      invalid ? formInputStyles.controlInvalid : null,
       splitStyle.chromeStyle,
     ],
-    [chromeSizeStyle, focused, isDisabled, splitStyle.chromeStyle],
+    [chromeSizeStyle, focused, invalid, isDisabled, leading, splitStyle.chromeStyle],
   );
 
   return (
     <Pressable disabled={isDisabled} style={chromeStyle}>
+      {leading}
       <AdaptiveTextInput
         ref={setInputRef}
         editable={editable}
@@ -223,6 +239,16 @@ export const FormTextInput = forwardRef<TextInput, FormTextInputProps>(function 
 const styles = StyleSheet.create((theme) => ({
   container: {
     gap: theme.spacing[2],
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: theme.spacing[2],
+  },
+  headerLabel: {
+    flexShrink: 1,
+    minWidth: 0,
   },
   label: {
     color: theme.colors.foregroundMuted,
@@ -248,6 +274,11 @@ const formInputStyles = StyleSheet.create((theme) => {
     chrome: {
       backgroundColor: theme.colors.surface2,
     },
+    chromeWithLeading: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: theme.spacing[2],
+    },
     chromeSm: {
       ...geometry.fieldControlSm,
     },
@@ -265,6 +296,11 @@ const formInputStyles = StyleSheet.create((theme) => {
     },
     controlDisabled: {
       ...geometry.controlDisabled,
+    },
+    // Matches the inline error under the field (docs/design.md, Errors).
+    controlInvalid: {
+      borderColor: theme.colors.palette.red[300],
+      outlineColor: theme.colors.palette.red[300],
     },
     input: {
       flex: 1,
