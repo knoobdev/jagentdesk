@@ -2341,6 +2341,18 @@ export const fr: TranslationResources = {
           desktop: "App de bureau",
         },
       },
+      connectionLog: {
+        title: "Journal de connexion",
+        rowTitle: "Journal de connexion",
+        rowHint:
+          "Événements récents de connexion et de handshake sur cet appareil. Sans contenu de message ni clés.",
+        open: "Afficher",
+        copy: "Copier les journaux",
+        clear: "Effacer",
+        empty: "Aucun événement de connexion pour l'instant.",
+        copyLabel: "journal de connexion",
+        copyFailed: "Impossible de copier le journal de connexion",
+      },
     },
     appearance: {
       theme: {
