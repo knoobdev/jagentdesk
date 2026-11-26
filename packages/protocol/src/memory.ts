@@ -13,6 +13,16 @@ export const MemorySourceSchema = z.object({
   by: z.enum(["agent", "user"]),
 });
 
+export const MemoryKindSchema = z.enum(["memory", "lesson"]);
+export const MemoryStatusSchema = z.enum(["active", "pending", "stale", "deprecated", "graduated"]);
+
+/** Where a lesson came from (spec 42 §4): a file, optionally a symbol and an exact excerpt. */
+export const MemoryCitationSchema = z.object({
+  path: z.string(),
+  symbol: z.string().optional(),
+  excerpt: z.string().optional(),
+});
+
 export const MemoryRecordSchema = z.object({
   id: z.string(),
   scope: MemoryScopeSchema,
@@ -25,6 +35,21 @@ export const MemoryRecordSchema = z.object({
   updatedAtMs: z.number(),
   lastUsedAtMs: z.number().nullable(),
   useCount: z.number().int(),
+  // COMPAT(durableContext): spec 42 fields, added in v0.10.2; older daemons omit them.
+  kind: MemoryKindSchema.optional(),
+  status: MemoryStatusSchema.optional(),
+  citations: z.array(MemoryCitationSchema).optional(),
+  helpful: z.number().int().optional(),
+  harmful: z.number().int().optional(),
+  /** Why the entry is stale or deprecated ("Cited file not found: …", "Not used for 28 days"). */
+  statusReason: z.string().nullable().optional(),
+  lastValidatedAtMs: z.number().nullable().optional(),
+  /** Distinct agents the entry was injected into or found by. */
+  agentCount: z.number().int().optional(),
+  /** The rules file a graduated lesson was written to. */
+  graduatedPath: z.string().nullable().optional(),
+  /** True when the lesson meets the "Make this a project rule" bar. */
+  graduationReady: z.boolean().optional(),
 });
 
 export const MemoryUseSchema = z.object({
@@ -45,6 +70,12 @@ export const MemorySettingsSchema = z.object({
   enabled: z.boolean(),
   autoInject: z.boolean(),
   tokenCap: z.number().int(),
+  // COMPAT(durableContext): spec 42 §8 switches, added in v0.10.2.
+  regroundAfterCompaction: z.boolean().optional(),
+  recitation: z.boolean().optional(),
+  ledgerNudge: z.boolean().optional(),
+  learnFromCorrections: z.boolean().optional(),
+  lessonExpiry: z.boolean().optional(),
 });
 
 export const MemoryListRequestSchema = z.object({
@@ -56,6 +87,8 @@ export const MemoryListRequestSchema = z.object({
   agentId: z.string().optional(),
   query: z.string().optional(),
   tag: z.string().optional(),
+  kind: MemoryKindSchema.optional(),
+  status: MemoryStatusSchema.optional(),
 });
 export const MemoryListResponseSchema = z.object({
   type: z.literal("memory.list.response"),
@@ -81,6 +114,10 @@ export const MemorySaveRequestSchema = z.object({
   text: z.string().optional(),
   tags: z.array(z.string()).optional(),
   pinned: z.boolean().optional(),
+  kind: MemoryKindSchema.optional(),
+  citations: z.array(MemoryCitationSchema).optional(),
+  /** "active" approves a pending lesson or restores a stale/deprecated entry. */
+  status: MemoryStatusSchema.optional(),
 });
 export const MemorySaveResponseSchema = z.object({
   type: z.literal("memory.save.response"),
@@ -132,10 +169,70 @@ export const MemorySettingsSetRequestSchema = z.object({
   enabled: z.boolean().optional(),
   autoInject: z.boolean().optional(),
   tokenCap: z.number().int().optional(),
+  regroundAfterCompaction: z.boolean().optional(),
+  recitation: z.boolean().optional(),
+  ledgerNudge: z.boolean().optional(),
+  learnFromCorrections: z.boolean().optional(),
+  lessonExpiry: z.boolean().optional(),
 });
 export const MemorySettingsSetResponseSchema = z.object({
   type: z.literal("memory.settings.set.response"),
   payload: z.object({ requestId: z.string(), settings: MemorySettingsSchema }),
+});
+
+/** 👍/👎 on the "Used N memories" chip (spec 42 §4). */
+export const MemoryRateRequestSchema = z.object({
+  type: z.literal("memory.rate.request"),
+  requestId: z.string(),
+  id: z.string(),
+  helpful: z.boolean(),
+  agentId: z.string().optional(),
+});
+export const MemoryRateResponseSchema = z.object({
+  type: z.literal("memory.rate.response"),
+  payload: z.object({ requestId: z.string(), memory: MemoryRecordSchema }),
+});
+
+/** "Validate now": checks the citations of one lesson, or of every lesson in a project. */
+export const MemoryValidateRequestSchema = z.object({
+  type: z.literal("memory.validate.request"),
+  requestId: z.string(),
+  id: z.string().optional(),
+  projectId: z.string().optional(),
+});
+export const MemoryValidateResponseSchema = z.object({
+  type: z.literal("memory.validate.response"),
+  payload: z.object({ requestId: z.string(), memories: z.array(MemoryRecordSchema) }),
+});
+
+/** "Make this a project rule" (spec 42 §5): the diff to AGENTS.md / CLAUDE.md, not yet written. */
+export const MemoryGraduationPreviewRequestSchema = z.object({
+  type: z.literal("memory.graduation.preview.request"),
+  requestId: z.string(),
+  id: z.string(),
+});
+export const MemoryGraduationPreviewResponseSchema = z.object({
+  type: z.literal("memory.graduation.preview.response"),
+  payload: z.object({
+    requestId: z.string(),
+    id: z.string(),
+    path: z.string(),
+    relativePath: z.string(),
+    created: z.boolean(),
+    diff: z.string(),
+    /** Hash of the file as previewed; apply refuses when the file changed since. */
+    baseHash: z.string(),
+  }),
+});
+export const MemoryGraduationApplyRequestSchema = z.object({
+  type: z.literal("memory.graduation.apply.request"),
+  requestId: z.string(),
+  id: z.string(),
+  baseHash: z.string(),
+});
+export const MemoryGraduationApplyResponseSchema = z.object({
+  type: z.literal("memory.graduation.apply.response"),
+  payload: z.object({ requestId: z.string(), memory: MemoryRecordSchema, path: z.string() }),
 });
 
 /** Pushed to every session after any memory or memory setting changes. */
@@ -157,6 +254,12 @@ export type MemorySaveRequest = z.infer<typeof MemorySaveRequestSchema>;
 export type MemoryDeleteRequest = z.infer<typeof MemoryDeleteRequestSchema>;
 export type MemoryAgentRequest = z.infer<typeof MemoryAgentRequestSchema>;
 export type MemorySettingsSetRequest = z.infer<typeof MemorySettingsSetRequestSchema>;
+export type MemoryCitationWire = z.infer<typeof MemoryCitationSchema>;
+export type MemoryKindWire = z.infer<typeof MemoryKindSchema>;
+export type MemoryStatusWire = z.infer<typeof MemoryStatusSchema>;
+export type MemoryGraduationPreview = z.infer<
+  typeof MemoryGraduationPreviewResponseSchema
+>["payload"];
 
 export const MemoryRequestSchemas = [
   MemoryListRequestSchema,
@@ -165,6 +268,10 @@ export const MemoryRequestSchemas = [
   MemoryAgentRequestSchema,
   MemorySettingsGetRequestSchema,
   MemorySettingsSetRequestSchema,
+  MemoryRateRequestSchema,
+  MemoryValidateRequestSchema,
+  MemoryGraduationPreviewRequestSchema,
+  MemoryGraduationApplyRequestSchema,
 ] as const;
 
 export const MemoryResponseSchemas = [
@@ -174,5 +281,9 @@ export const MemoryResponseSchemas = [
   MemoryAgentResponseSchema,
   MemorySettingsGetResponseSchema,
   MemorySettingsSetResponseSchema,
+  MemoryRateResponseSchema,
+  MemoryValidateResponseSchema,
+  MemoryGraduationPreviewResponseSchema,
+  MemoryGraduationApplyResponseSchema,
   MemoryChangedMessageSchema,
 ] as const;

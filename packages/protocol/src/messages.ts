@@ -1044,6 +1044,23 @@ export const AgentTimelineItemPayloadSchema: z.ZodType<AgentTimelineItem, unknow
         suggestion: z.object({ provider: z.string(), model: z.string().nullable() }).nullable(),
       })
       .optional(),
+    contextCompaction: z
+      .object({
+        id: z.string(),
+        provider: z.string(),
+        trigger: z.string().nullable(),
+        preTokens: z.number().nullable(),
+        postTokens: z.number().nullable(),
+        inferred: z.boolean(),
+      })
+      .optional(),
+    regrounding: z
+      .object({
+        id: z.string(),
+        compactionId: z.string().nullable(),
+        estimatedTokens: z.number(),
+      })
+      .optional(),
   }),
   ToolCallTimelineItemPayloadSchema,
   z.object({
@@ -2251,6 +2268,20 @@ export const AgentContinuitySetRequestMessageSchema = z.object({
   agentId: z.string(),
   failover: AgentFailoverConfigSchema.nullable().optional(),
   crossProviderChildren: CrossProviderChildrenConfigSchema.nullable().optional(),
+  requestId: z.string(),
+});
+
+/** Spec 42 §6: new native session on the same provider and model, with the ledger handoff. */
+export const AgentRolloverRequestMessageSchema = z.object({
+  type: z.literal("agent.rollover.request"),
+  agentId: z.string(),
+  requestId: z.string(),
+});
+
+/** Spec 42 §7: one visible turn asking the agent to save pending lessons. */
+export const AgentLessonsCaptureRequestMessageSchema = z.object({
+  type: z.literal("agent.lessons.capture.request"),
+  agentId: z.string(),
   requestId: z.string(),
 });
 
@@ -4841,6 +4872,8 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   AgentContinuityGetRequestMessageSchema,
   AgentContinuitySetRequestMessageSchema,
   AgentFailoverContinueRequestMessageSchema,
+  AgentRolloverRequestMessageSchema,
+  AgentLessonsCaptureRequestMessageSchema,
   UsageListReportsRequestMessageSchema,
   ResumeAgentRequestMessageSchema,
   ImportAgentRequestMessageSchema,
@@ -5298,6 +5331,8 @@ export const ServerInfoStatusPayloadSchema = z
         idleRuntimeCleanupSetting: z.boolean().optional(),
         // COMPAT(crossProviderContinuity): added in v0.10.2, remove gate after 2027-05-26.
         crossProviderContinuity: z.boolean().optional(),
+        // COMPAT(durableContext): added in v0.10.2, remove gate after 2027-05-26.
+        durableContext: z.boolean().optional(),
         // ADR-0051: released v0.9.x apps require this optional flag; retain forever.
         "terminal-restore-modes": z.boolean().optional(),
         // COMPAT(terminalInputModeReplay): added in v0.2.6, remove gate after 2027-02-02.
@@ -8693,6 +8728,26 @@ export const SessionLedgerProviderSessionSchema = z.object({
   current: z.boolean(),
 });
 
+export const SessionLedgerCompactionSchema = z.object({
+  id: z.string(),
+  at: z.string(),
+  provider: z.string(),
+  trigger: z.string().nullable(),
+  preTokens: z.number().nullable(),
+  postTokens: z.number().nullable(),
+  inferred: z.boolean(),
+  /** Claude's own summary from the PostCompact hook, kept to compare with the ledger. */
+  summary: z.string().nullable(),
+});
+
+export const SessionLedgerRegroundingSchema = z.object({
+  id: z.string(),
+  at: z.string(),
+  compactionId: z.string().nullable(),
+  text: z.string(),
+  estimatedTokens: z.number(),
+});
+
 export const SessionLedgerSchema = z.object({
   markdown: z.string(),
   decisions: z.array(SessionLedgerNoteSchema),
@@ -8700,6 +8755,9 @@ export const SessionLedgerSchema = z.object({
   nextStep: SessionLedgerNoteSchema.nullable(),
   handoffs: z.array(SessionLedgerHandoffSchema),
   providerSessions: z.array(SessionLedgerProviderSessionSchema),
+  // COMPAT(durableContext): added in v0.10.2; older daemons omit them.
+  compactions: z.array(SessionLedgerCompactionSchema).optional(),
+  regroundings: z.array(SessionLedgerRegroundingSchema).optional(),
 });
 
 export const AgentLedgerGetResponseMessageSchema = z.object({
@@ -8744,6 +8802,27 @@ export const AgentContinuitySetResponseMessageSchema = z.object({
 
 export const AgentFailoverContinueResponseMessageSchema = z.object({
   type: z.literal("agent.failover.continue.response"),
+  payload: z.object({
+    requestId: z.string(),
+    agentId: z.string(),
+    accepted: z.boolean(),
+    error: z.string().nullable(),
+  }),
+});
+
+export const AgentRolloverResponseMessageSchema = z.object({
+  type: z.literal("agent.rollover.response"),
+  payload: z.object({
+    requestId: z.string(),
+    agentId: z.string(),
+    sessionId: z.string().nullable(),
+    handoffId: z.string().nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
+export const AgentLessonsCaptureResponseMessageSchema = z.object({
+  type: z.literal("agent.lessons.capture.response"),
   payload: z.object({
     requestId: z.string(),
     agentId: z.string(),
@@ -9626,6 +9705,8 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   AgentContinuityGetResponseMessageSchema,
   AgentContinuitySetResponseMessageSchema,
   AgentFailoverContinueResponseMessageSchema,
+  AgentRolloverResponseMessageSchema,
+  AgentLessonsCaptureResponseMessageSchema,
   UsageListReportsResponseMessageSchema,
   UsageListReportsUpdateMessageSchema,
   ListCommandsResponseSchema,
@@ -10038,6 +10119,8 @@ export type AgentContinuityGetPayload = z.infer<
   typeof AgentContinuityGetResponseMessageSchema
 >["payload"];
 export type SessionLedgerHandoff = z.infer<typeof SessionLedgerHandoffSchema>;
+export type SessionLedgerCompaction = z.infer<typeof SessionLedgerCompactionSchema>;
+export type SessionLedgerRegrounding = z.infer<typeof SessionLedgerRegroundingSchema>;
 export type AgentLedgerGetPayload = z.infer<typeof AgentLedgerGetResponseMessageSchema>["payload"];
 
 export type ProviderUsageListResponseMessage = z.infer<

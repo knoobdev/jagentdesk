@@ -358,6 +358,7 @@ import {
   type SkillWrittenPaths,
 } from "@jagentdesk/protocol/native-skills";
 import type {
+  MemoryGraduationPreview,
   MemoryListRequest,
   MemoryProject,
   MemoryRecordWire,
@@ -8246,6 +8247,46 @@ export class DaemonClient {
     });
   }
 
+  /** 👍/👎 on a memory or lesson (spec 42 §4). */
+  async rateMemory(
+    input: { id: string; helpful: boolean; agentId?: string },
+    requestId?: string,
+  ): Promise<{ requestId: string; memory: MemoryRecordWire }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "memory.rate.request", ...input },
+    });
+  }
+
+  /** "Validate now": one lesson by id, or every lesson of a project. */
+  async validateMemories(
+    input: { id?: string; projectId?: string },
+    requestId?: string,
+  ): Promise<{ requestId: string; memories: MemoryRecordWire[] }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "memory.validate.request", ...input },
+    });
+  }
+
+  /** The AGENTS.md / CLAUDE.md diff "Make this a project rule" would write (spec 42 §5). */
+  async previewMemoryGraduation(id: string, requestId?: string): Promise<MemoryGraduationPreview> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "memory.graduation.preview.request", id },
+    });
+  }
+
+  async applyMemoryGraduation(
+    input: { id: string; baseHash: string },
+    requestId?: string,
+  ): Promise<{ requestId: string; memory: MemoryRecordWire; path: string }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "memory.graduation.apply.request", ...input },
+    });
+  }
+
   // ── Native SKILL.md skills (spec 22.4). Errors reject with DaemonRpcError whose
   // `code` is one of NATIVE_SKILLS_ERROR_CODES (e.g. "skill_name_conflict",
   // "confirmation_required", "skill_not_owned").
@@ -8785,6 +8826,26 @@ export class DaemonClient {
         message: { type: "agent.failover.continue.request", agentId, ...target },
       });
     if (!payload.accepted) throw new Error(payload.error ?? "Continue with provider failed");
+  }
+
+  /** Spec 42 §6: fresh native session on the same provider and model, with the ledger handoff. */
+  async rolloverAgent(
+    agentId: string,
+  ): Promise<{ sessionId: string | null; handoffId: string | null }> {
+    const payload = await this.sendNamespacedCorrelatedSessionRequest<"agent.rollover.response">({
+      message: { type: "agent.rollover.request", agentId },
+    });
+    if (payload.error) throw new Error(payload.error);
+    return { sessionId: payload.sessionId, handoffId: payload.handoffId };
+  }
+
+  /** Spec 42 §7: one visible turn asking the agent to save pending lessons. */
+  async captureAgentLessons(agentId: string): Promise<void> {
+    const payload =
+      await this.sendNamespacedCorrelatedSessionRequest<"agent.lessons.capture.response">({
+        message: { type: "agent.lessons.capture.request", agentId },
+      });
+    if (!payload.accepted) throw new Error(payload.error ?? "Capture lessons failed");
   }
 
   /** The session ledger of an agent (spec 40 §2), with its handoffs and provider sessions. */

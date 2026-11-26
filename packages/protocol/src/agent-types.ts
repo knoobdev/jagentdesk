@@ -426,6 +426,10 @@ export type AgentTimelineItem =
       providerSwitch?: ProviderSwitchNotice;
       /** Set on the row a usage-limit failure appends when no failover ran (spec 40 §4). */
       usageLimit?: UsageLimitNotice;
+      /** Set on the "Context compacted" row (spec 42 §1). */
+      contextCompaction?: ContextCompactionNotice;
+      /** Set on the "Re-grounded after compaction" row (spec 42 §2). */
+      regrounding?: RegroundingNotice;
     }
   | CompactionTimelineItem
   | PluginTimelineItem;
@@ -439,6 +443,24 @@ export interface ProviderSwitchNotice {
   /** "resume" (native session resumed, delta sent) or "handoff" (new session, ledger sent). */
   mode: string;
   handoffId: string | null;
+}
+
+export interface ContextCompactionNotice {
+  id: string;
+  provider: string;
+  /** "auto" or "manual" when the provider says; null when unknown or inferred. */
+  trigger: string | null;
+  preTokens: number | null;
+  postTokens: number | null;
+  /** True when no provider event reported it and the daemon read it off a context-usage drop. */
+  inferred: boolean;
+}
+
+export interface RegroundingNotice {
+  /** Id of the block in the session ledger (`agent.ledger.get` → `regroundings`). */
+  id: string;
+  compactionId: string | null;
+  estimatedTokens: number;
 }
 
 export interface UsageLimitNotice {
