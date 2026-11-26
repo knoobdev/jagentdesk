@@ -134,22 +134,39 @@ test("repeated content is reused without rewriting the attachment", async () => 
 test("64 MiB materialization leaves the event loop responsive and preserves bytes", async () => {
   const bytes = Buffer.alloc(64 * 1024 * 1024, 37);
   const data = bytes.toString("base64");
-  let previous = performance.now();
-  let longest = 0;
-  const probe = setInterval(() => {
-    const now = performance.now();
-    longest = Math.max(longest, now - previous);
-    previous = now;
-  }, 1);
+  const materializing = new AsyncLocalStorage<boolean>();
+  let loopAdvanced = false;
+  let yieldedBeforeFilesystem: boolean | undefined;
+  const hook = createHook({
+    init(_id, type) {
+      // The first filesystem request follows hashing. A later turn could
+      // come from filesystem I/O even if hashing blocked the event loop.
+      if (
+        type === "FSREQPROMISE" &&
+        materializing.getStore() &&
+        yieldedBeforeFilesystem === undefined
+      ) {
+        yieldedBeforeFilesystem = loopAdvanced;
+      }
+    },
+  });
+  const probe = setImmediate(() => {
+    loopAdvanced = true;
+  });
+  hook.enable();
   try {
-    const result = await materializeProviderImage({ data, mimeType: "image/png" });
-    await new Promise((resolve) => setTimeout(resolve, 5));
-    console.log(`64 MiB attachment longest loop gap: ${longest.toFixed(2)} ms`);
-    expect(longest).toBeLessThan(50);
-    expect(readFileSync(result.path).equals(bytes)).toBe(true);
-    rmSync(result.path, { force: true });
+    const result = await materializing.run(true, () =>
+      materializeProviderImage({ data, mimeType: "image/png" }),
+    );
+    try {
+      expect(yieldedBeforeFilesystem).toBe(true);
+      expect(readFileSync(result.path).equals(bytes)).toBe(true);
+    } finally {
+      rmSync(result.path, { force: true });
+    }
   } finally {
-    clearInterval(probe);
+    hook.disable();
+    clearImmediate(probe);
   }
 });
 
