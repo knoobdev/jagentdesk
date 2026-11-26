@@ -52,7 +52,9 @@ import {
 } from "@/components/sidebar/use-app-nav";
 import { SidebarDisplayPreferencesMenu } from "@/components/sidebar/sidebar-display-preferences-menu";
 import { SidebarHelpMenu } from "@/components/sidebar/sidebar-help-menu";
-import { PluginSidebarItems, usePluginSidebarGroups } from "@/plugins/sidebar-items";
+import { usePluginSidebarGroups, usePluginSidebarNavigation } from "@/plugins/sidebar-items";
+import { resolvePluginIcon } from "@/plugins/icons";
+import type { PluginSidebarGroup } from "@/plugins/sidebar-groups";
 import { openPluginSidebarItem, usePluginScreenSidebarItems } from "@/plugins/sidebar-screen-items";
 import { useHosts, useHostRuntimeSnapshot } from "@/runtime/host-runtime";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
@@ -73,7 +75,6 @@ import { WorkspaceSidebar } from "./workspace-sidebar";
 import {
   GUMLOOP_PANEL_HOST,
   resolveSidebarDrillIn as resolveCoreSidebarDrillIn,
-  toolsInitiallyCollapsed,
   useGumloopSidebarState,
 } from "./sidebar-state";
 
@@ -93,6 +94,7 @@ const PRIMARY_ORDER: readonly string[] = [
 ];
 const PRIMARY_KEYS = new Set(PRIMARY_ORDER);
 const foreground = (theme: Theme) => ({ color: theme.colors.foreground });
+const muted = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const ThemedPanelLeft = withUnistyles(PanelLeft);
 const ThemedSearch = withUnistyles(Search);
 const ThemedArrowDownUp = withUnistyles(ArrowDownUp);
@@ -292,13 +294,17 @@ function ConnectionFooter({ serverId, onNavigate }: { serverId: string; onNaviga
     </View>
   );
 }
+// Group headings (spec 38 §4.2 "Nhóm Tools"/"Nhóm Projects"): a 12/600 muted title, then the
+// fold chevron on the right, then any group actions.
 function GroupHeading({
   title,
+  count,
   collapsed,
   onPress,
   children,
 }: {
   title: string;
+  count?: number;
   collapsed: boolean;
   onPress: () => void;
   children?: ReactNode;
@@ -316,11 +322,33 @@ function GroupHeading({
         aria-expanded={!collapsed}
         testID={`gumloop-group-${title.toLowerCase()}`}
       >
-        <Chevron size={14} uniProps={foreground} />
-        <Text style={styles.groupLabel}>{title}</Text>
+        <Text style={styles.groupLabel} numberOfLines={1}>
+          {count === undefined ? title : `${title} · ${count}`}
+        </Text>
+        <Chevron size={14} uniProps={muted} />
       </Pressable>
       {children}
     </View>
+  );
+}
+
+function PluginGroupRow({
+  group,
+  onNavigate,
+}: {
+  group: PluginSidebarGroup;
+  onNavigate: () => void;
+}) {
+  const { navigate, isActive } = usePluginSidebarNavigation(group, onNavigate);
+  const icon = useMemo(() => resolvePluginIcon(group.icon), [group.icon]);
+  return (
+    <GumloopRow
+      icon={icon}
+      label={group.title}
+      selected={isActive}
+      onPress={navigate}
+      testID={`plugin-sidebar-${group.pluginId}-${group.contributionId}`}
+    />
   );
 }
 
@@ -330,15 +358,11 @@ function RootNavigation({ onNavigate }: { onNavigate: () => void }) {
   const pluginHeaders = usePluginScreenSidebarItems("header");
   const pluginFooters = usePluginScreenSidebarItems("footer");
   const tools = items.filter((item) => !PRIMARY_KEYS.has(item.key) && item.group !== "main");
-  const savedCollapsed = useGumloopSidebarState((state) => state.toolsCollapsed);
+  const toolsCollapsed = useGumloopSidebarState((state) => state.toolsCollapsed);
   const projectsCollapsed = useGumloopSidebarState((state) => state.projectsCollapsed);
   const setCollapsed = useGumloopSidebarState((state) => state.setToolsCollapsed);
   const toggleProjects = useGumloopSidebarState((state) => state.toggleProjects);
-  const toolsCollapsed =
-    savedCollapsed ??
-    toolsInitiallyCollapsed(
-      tools.length + groups.length + pluginHeaders.length + pluginFooters.length,
-    );
+  const toolCount = tools.length + groups.length + pluginHeaders.length + pluginFooters.length;
   const toggleTools = useCallback(
     () => setCollapsed(!toolsCollapsed),
     [setCollapsed, toolsCollapsed],
@@ -355,29 +379,43 @@ function RootNavigation({ onNavigate }: { onNavigate: () => void }) {
             <NavRow key={item.key} item={item} onNavigate={onNavigate} />
           ))}
       </View>
-      <GroupHeading title="Tools" collapsed={toolsCollapsed} onPress={toggleTools} />
-      {toolsCollapsed ? null : (
-        <View style={styles.navItems}>
-          {tools.map((item) => (
-            <NavRow key={item.key} item={item} onNavigate={onNavigate} />
-          ))}
-          <PluginSidebarItems onBeforeNavigate={onNavigate} />
-          {[...pluginHeaders, ...pluginFooters].map(({ key, plugin, item }) => (
-            <ScreenPluginRow key={key} plugin={plugin} item={item} />
-          ))}
+      {toolCount > 0 ? (
+        <View testID="gumloop-tools">
+          <View style={styles.divider} />
+          <GroupHeading
+            title="Tools"
+            count={toolCount}
+            collapsed={toolsCollapsed}
+            onPress={toggleTools}
+          />
+          {toolsCollapsed ? null : (
+            <View style={styles.navItems}>
+              {tools.map((item) => (
+                <NavRow key={item.key} item={item} onNavigate={onNavigate} />
+              ))}
+              {groups.map((group) => (
+                <PluginGroupRow key={group.key} group={group} onNavigate={onNavigate} />
+              ))}
+              {[...pluginHeaders, ...pluginFooters].map(({ key, plugin, item }) => (
+                <ScreenPluginRow key={key} plugin={plugin} item={item} />
+              ))}
+            </View>
+          )}
         </View>
-      )}
-      <GroupHeading title="Projects" collapsed={projectsCollapsed} onPress={toggleProjects}>
-        <SidebarDisplayPreferencesMenu />
-        <Pressable
-          onPress={addProject}
-          accessibilityRole="button"
-          accessibilityLabel="Add project"
-          style={styles.iconButton}
-        >
-          <ThemedPlus size={18} uniProps={foreground} />
-        </Pressable>
-      </GroupHeading>
+      ) : null}
+      <View style={styles.projectsHeading}>
+        <GroupHeading title="Projects" collapsed={projectsCollapsed} onPress={toggleProjects}>
+          <SidebarDisplayPreferencesMenu />
+          <Pressable
+            onPress={addProject}
+            accessibilityRole="button"
+            accessibilityLabel="Add project"
+            style={styles.iconButton}
+          >
+            <ThemedPlus size={18} uniProps={foreground} />
+          </Pressable>
+        </GroupHeading>
+      </View>
     </View>
   );
 }
@@ -677,21 +715,29 @@ const styles = StyleSheet.create((theme: Theme) => ({
   navigation: { paddingHorizontal: 2 },
   // 32 px rows on a 34 px pitch (spec 38 §4.2).
   navItems: { gap: 2 },
+  // Tools sits right under the main nav behind a 1 px rule with 8 px either side (spec 38 §4.2).
+  divider: { height: 1, marginVertical: 8, backgroundColor: theme.colors.border },
+  projectsHeading: { marginTop: 16 },
   groupHeading: {
-    marginTop: 24,
-    height: { xs: 44, md: 34 },
+    height: { xs: 44, md: 32 },
     flexDirection: "row",
     alignItems: "center",
   },
   groupToggle: {
     flex: 1,
-    height: { xs: 44, md: 34 },
+    height: { xs: 44, md: 32 },
     flexDirection: "row",
     alignItems: "center",
-    gap: 5,
-    paddingHorizontal: 8,
+    gap: 8,
+    paddingHorizontal: 10,
+    borderRadius: 8,
   },
-  groupLabel: { fontSize: 14, color: theme.colors.foregroundMuted },
+  groupLabel: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "600",
+    color: theme.colors.foregroundMuted,
+  },
   footer: {
     paddingHorizontal: 10,
     paddingTop: 12,

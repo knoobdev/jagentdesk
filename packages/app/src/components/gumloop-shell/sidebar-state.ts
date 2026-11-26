@@ -10,28 +10,46 @@ export const GUMLOOP_PANEL_HOST = "gumloop-sidebar-panel";
 export const GUMLOOP_COMPACT_ACTIONS_HOST = "gumloop-compact-header-actions";
 
 interface GumloopSidebarState {
-  toolsCollapsed: boolean | null;
+  toolsCollapsed: boolean;
   projectsCollapsed: boolean;
   setToolsCollapsed: (collapsed: boolean) => void;
   toggleProjects: () => void;
 }
 
-export function toolsInitiallyCollapsed(count: number): boolean {
-  return count > 6;
+type PersistedSidebarState = Pick<GumloopSidebarState, "toolsCollapsed" | "projectsCollapsed">;
+
+/**
+ * Version 1 opens Tools by default (spec 38 §4.2, 2026-11-26). Up to v0.10.0 Tools started folded
+ * when it had more than 6 entries and users never found Docker, Data or Jira there, so a fold saved
+ * by an older build is dropped once on the way to version 1. Folds saved from version 1 on stick.
+ */
+export const GUMLOOP_SIDEBAR_STATE_VERSION = 1;
+
+export function migrateGumloopSidebarState(
+  persisted: unknown,
+  version: number,
+): PersistedSidebarState {
+  const saved = (persisted ?? {}) as Partial<Record<keyof PersistedSidebarState, unknown>>;
+  return {
+    toolsCollapsed: version >= 1 && saved.toolsCollapsed === true,
+    projectsCollapsed: saved.projectsCollapsed === true,
+  };
 }
 
 export const useGumloopSidebarState = create<GumloopSidebarState>()(
   persist(
     (set) => ({
-      toolsCollapsed: null,
+      toolsCollapsed: false,
       projectsCollapsed: false,
       setToolsCollapsed: (toolsCollapsed) => set({ toolsCollapsed }),
       toggleProjects: () => set((state) => ({ projectsCollapsed: !state.projectsCollapsed })),
     }),
     {
       name: "jagentdesk:gumloop-sidebar",
+      version: GUMLOOP_SIDEBAR_STATE_VERSION,
+      migrate: migrateGumloopSidebarState,
       storage: createJSONStorage(() => AsyncStorage),
-      partialize: (state) => ({
+      partialize: (state): PersistedSidebarState => ({
         toolsCollapsed: state.toolsCollapsed,
         projectsCollapsed: state.projectsCollapsed,
       }),

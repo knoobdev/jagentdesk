@@ -1,40 +1,78 @@
 import type { StorageValue } from "zustand/middleware";
 import { describe, expect, it } from "vitest";
 import {
+  GUMLOOP_SIDEBAR_STATE_VERSION,
   GUMLOOP_SIDEBAR_WIDTH,
+  migrateGumloopSidebarState,
   resolveSidebarDrillIn,
-  toolsInitiallyCollapsed,
   useGumloopSidebarState,
 } from "./sidebar-state";
 import { composeWorkspaceStructure } from "@/stores/session-store-hooks/selectors";
 import { builtinPluginEnabled } from "@/plugins/builtin/registry";
 
-const PERSISTED = { state: { toolsCollapsed: true, projectsCollapsed: false }, version: 0 };
+function memoryStorage(initial: StorageValue<unknown> | null) {
+  let saved = initial;
+  return {
+    read: () => saved,
+    storage: {
+      getItem: () => saved,
+      setItem: (_key: string, value: StorageValue<unknown>) => {
+        saved = value;
+      },
+      removeItem: () => {},
+    },
+  };
+}
 
 describe("Gumloop sidebar model", () => {
-  it("has one fixed-width sidebar and chooses the default Tools fold by destination count", () => {
+  it("has one fixed-width sidebar and opens Tools and Projects on a fresh client", async () => {
     expect(GUMLOOP_SIDEBAR_WIDTH).toBe(324);
-    expect(toolsInitiallyCollapsed(6)).toBe(false);
-    expect(toolsInitiallyCollapsed(7)).toBe(true);
+    useGumloopSidebarState.persist.setOptions({ storage: memoryStorage(null).storage });
+    await useGumloopSidebarState.persist.rehydrate();
+    expect(useGumloopSidebarState.getState()).toMatchObject({
+      toolsCollapsed: false,
+      projectsCollapsed: false,
+    });
   });
-  it("restores the client's explicit group folds through hydration", async () => {
-    let saved: StorageValue<unknown> = PERSISTED;
-    useGumloopSidebarState.persist.setOptions({
-      storage: {
-        getItem: () => saved,
-        setItem: (_key, value) => {
-          saved = { ...value, version: 0 };
-        },
-        removeItem: () => {},
-      },
+  it.each([
+    ["a v0.10.0 auto-fold", 0, { toolsCollapsed: true, projectsCollapsed: false }, false],
+    ["a v0.10.0 unset fold", 0, { toolsCollapsed: null, projectsCollapsed: false }, false],
+    ["a fold saved by this version", 1, { toolsCollapsed: true, projectsCollapsed: false }, true],
+  ])("migrates %s", (_name, version, state, toolsCollapsed) => {
+    expect(migrateGumloopSidebarState(state, version)).toEqual({
+      toolsCollapsed,
+      projectsCollapsed: false,
+    });
+  });
+  it("keeps a v0.10.0 Projects fold and tolerates a missing state", () => {
+    expect(
+      migrateGumloopSidebarState({ toolsCollapsed: true, projectsCollapsed: true }, 0),
+    ).toEqual({ toolsCollapsed: false, projectsCollapsed: true });
+    expect(migrateGumloopSidebarState(undefined, 0)).toEqual({
+      toolsCollapsed: false,
+      projectsCollapsed: false,
+    });
+  });
+  it("reopens a stored v0.10.0 Tools fold once, then remembers the client's folds", async () => {
+    const memory = memoryStorage({
+      state: { toolsCollapsed: true, projectsCollapsed: false },
+      version: 0,
+    });
+    useGumloopSidebarState.persist.setOptions({ storage: memory.storage });
+    await useGumloopSidebarState.persist.rehydrate();
+    expect(useGumloopSidebarState.getState().toolsCollapsed).toBe(false);
+    expect(memory.read()?.version).toBe(GUMLOOP_SIDEBAR_STATE_VERSION);
+    useGumloopSidebarState.getState().setToolsCollapsed(true);
+    useGumloopSidebarState.getState().toggleProjects();
+    expect(memory.read()).toEqual({
+      state: { toolsCollapsed: true, projectsCollapsed: true },
+      version: GUMLOOP_SIDEBAR_STATE_VERSION,
     });
     await useGumloopSidebarState.persist.rehydrate();
-    expect(useGumloopSidebarState.getState().toolsCollapsed).toBe(true);
-    useGumloopSidebarState.getState().setToolsCollapsed(false);
-    useGumloopSidebarState.getState().toggleProjects();
-    expect(saved.state).toEqual({ toolsCollapsed: false, projectsCollapsed: true });
-    await useGumloopSidebarState.persist.rehydrate();
-    expect(useGumloopSidebarState.getState().projectsCollapsed).toBe(true);
+    expect(useGumloopSidebarState.getState()).toMatchObject({
+      toolsCollapsed: true,
+      projectsCollapsed: true,
+    });
   });
   it("gates a destination from the pushed feature snapshot", () => {
     expect(
