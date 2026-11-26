@@ -24,6 +24,12 @@ import { type AgentStorage } from "../agent-storage.js";
 import { type AgentOwner } from "../agent-owner.js";
 import { type ProviderSnapshotManager } from "../provider-snapshot-manager.js";
 import { type AgentPromptSource } from "../agent-messages/index.js";
+import {
+  startsWithCommand,
+  withMemoryBlock,
+  type MemoryPort,
+  type MemoryTurnInjection,
+} from "../memory-port.js";
 import { setupFinishNotification, startCreatedAgentInitialPrompt } from "../agent-prompt.js";
 import { resolveCreateAgentTitles } from "../create-agent-title.js";
 import { buildAgentPrompt } from "../prompt-attachments.js";
@@ -65,6 +71,8 @@ export interface CreateAgentCommandDependencies {
   createJAgentDeskWorktree?: CreateJAgentDeskWorktreeWorkflowFn;
   // Mints a fresh directory workspace for a cwd and returns its id.
   ensureWorkspaceForCreate?: EnsureWorkspaceForCreate;
+  /** Memory auto-inject for a user's first message (spec 41 §3.1); absent while Memory is off. */
+  memory?: MemoryPort | null;
 }
 
 export type EnsureWorkspaceForCreate = (
@@ -563,16 +571,20 @@ async function sendInitialPrompt(
     if (prompt === undefined) {
       return { started: false, liveSnapshot: snapshot };
     }
+    const memory = await prepareInitialMemory(dependencies, resolved, snapshot.id, prompt);
     const liveSnapshot = await startCreatedAgentInitialPrompt({
       agentManager: dependencies.agentManager,
       agentStorage: dependencies.agentStorage,
       source: resolved.source,
       agentId: snapshot.id,
       snapshot,
-      prompt,
+      prompt: withMemoryBlock(prompt, memory, {
+        commandFirst: startsWithCommand(promptText(prompt)),
+      }),
       runOptions: resolved.runOptions,
       logger: resolved.promptLogger ?? dependencies.logger,
     });
+    await memory?.commit({ messageId: resolved.runOptions?.clientMessageId ?? null });
     return { started: true, liveSnapshot };
   } catch (error) {
     if (resolved.promptFailure === "throw") {
@@ -587,6 +599,31 @@ async function sendInitialPrompt(
     }
     dependencies.logger.error({ err: error, agentId: snapshot.id }, "Failed to run initial prompt");
     return { started: false, liveSnapshot: snapshot };
+  }
+}
+
+function promptText(prompt: AgentPromptInput): string {
+  if (typeof prompt === "string") return prompt;
+  return prompt
+    .flatMap((block) => (block.type === "text" && !("mimeType" in block) ? [block.text] : []))
+    .join("\n");
+}
+
+/** Only a person's first message gets memories; agent-created agents carry their own context. */
+async function prepareInitialMemory(
+  dependencies: CreateAgentCommandDependencies,
+  resolved: ResolvedCreateAgent,
+  agentId: string,
+  prompt: AgentPromptInput,
+): Promise<MemoryTurnInjection | null> {
+  if (!dependencies.memory || resolved.source) return null;
+  const text = promptText(prompt).trim();
+  if (!text) return null;
+  try {
+    return await dependencies.memory.prepareUserTurn({ agentId, text });
+  } catch (error) {
+    dependencies.logger.warn({ err: error, agentId }, "Memory lookup failed; sending without it");
+    return null;
   }
 }
 
