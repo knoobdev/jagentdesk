@@ -125,6 +125,14 @@ interface WorkspaceLayoutStore {
     parentTabId: string,
   ) => string | null;
   openTabInBackground: (workspaceKey: string, target: WorkspaceTabTarget) => string | null;
+  /**
+   * Opens a focused draft tab only while the workspace has no tab at all (any pane or sheet).
+   * Every mounted screen of a workspace may ask in the same commit; the first one wins.
+   */
+  openDraftTabIfEmpty: (
+    workspaceKey: string,
+    target: Extract<WorkspaceTabTarget, { kind: "draft" }>,
+  ) => string | null;
   ensureExplorerPane: (workspaceKey: string) => EnsureExplorerPaneResult | null;
   openTabInExplorerPaneFocused: (
     workspaceKey: string,
@@ -511,6 +519,21 @@ export function createWorkspaceLayoutStore(
             }));
           }
           return result.tabId;
+        },
+        openDraftTabIfEmpty: (workspaceKey, target) => {
+          const normalizedWorkspaceKey = trimNonEmpty(workspaceKey);
+          if (!normalizedWorkspaceKey) {
+            return null;
+          }
+          const state = get();
+          const layout = getWorkspaceLayout(state.layoutByWorkspace, normalizedWorkspaceKey);
+          if (
+            collectAllTabs(layout.root).length > 0 ||
+            (state.sheetsByWorkspace[normalizedWorkspaceKey]?.length ?? 0) > 0
+          ) {
+            return null;
+          }
+          return state.openTabFocused(normalizedWorkspaceKey, target);
         },
         openChildTabFocused: (workspaceKey, target, parentTabId) => {
           const normalizedWorkspaceKey = trimNonEmpty(workspaceKey);

@@ -2,8 +2,7 @@ import { useIsCompactFormFactor } from "@/constants/layout";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { GitBranch, X } from "lucide-react-native";
-import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { useRouter } from "expo-router";
+import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { AdaptiveModalSheet, type SheetHeader } from "@/components/adaptive-modal-sheet";
 import { Button } from "@/components/ui/button";
 import { Field, FormTextInput } from "@/components/ui/form-field";
@@ -12,7 +11,9 @@ import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-
 import { useOrchestration } from "@/hooks/use-orchestration";
 import { startOrchestrationObjective } from "@/orchestration/start-objective";
 import { useSessionStore } from "@/stores/session-store";
-import { buildHostAgentDetailRoute } from "@/utils/host-routes";
+import { navigateToAgent } from "@/utils/navigate-to-agent";
+import type { Theme } from "@/styles/theme";
+import type { Agent } from "@/stores/session-store";
 import {
   ORCHESTRATION_ROLE_LABEL,
   ORCHESTRATION_ROUTE_LABEL,
@@ -37,6 +38,11 @@ function roleLabel(role: string | undefined, route: string | undefined): string 
   if (role === "peer") return route ? `Peer · ${route}` : "Peer";
   return role ?? "Peer";
 }
+
+const ThemedGitBranch = withUnistyles(GitBranch);
+const ThemedX = withUnistyles(X);
+const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
+const mutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 
 function BriefCard({ brief }: { brief: OrchestrationTaskBrief }) {
   return (
@@ -68,6 +74,45 @@ function BriefCard({ brief }: { brief: OrchestrationTaskBrief }) {
   );
 }
 
+interface OrchestrationRosterRowProps {
+  serverId: string;
+  workspaceId: string;
+  agent: Agent;
+}
+
+function OrchestrationRosterRow({ serverId, workspaceId, agent }: OrchestrationRosterRowProps) {
+  const role = agent.labels[ORCHESTRATION_ROLE_LABEL];
+  const route = agent.labels[ORCHESTRATION_ROUTE_LABEL];
+  // Reveal the role's tab in the mounted workspace; pushing a route would stack another copy.
+  const openThread = useCallback(() => {
+    navigateToAgent({ serverId, agentId: agent.id, workspaceId, pin: true });
+  }, [agent.id, serverId, workspaceId]);
+  return (
+    <View style={styles.agentRow} testID="orchestration-agent-row">
+      <View style={styles.agentRowLeft}>
+        <View
+          style={[
+            styles.statusDot,
+            agent.status === "running" ? styles.statusDotActive : styles.statusDotIdle,
+          ]}
+        />
+        <View style={styles.agentRowText}>
+          <Text style={styles.agentRole}>{roleLabel(role, route)}</Text>
+          <Text style={styles.bodyText}>
+            {agent.provider}/{agent.model ?? "default"}
+          </Text>
+        </View>
+      </View>
+      <View style={styles.agentRowRight}>
+        <Text style={styles.bodyText}>{agent.status}</Text>
+        <Pressable onPress={openThread} hitSlop={8} testID="orchestration-open-thread">
+          <Text style={styles.openThread}>Open thread</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 export function WorkspaceOrchestrationPanel({
   serverId,
   workspaceId,
@@ -77,8 +122,6 @@ export function WorkspaceOrchestrationPanel({
   openOnMount = false,
   hideLabel = false,
 }: WorkspaceOrchestrationPanelProps) {
-  const { theme } = useUnistyles();
-  const router = useRouter();
   const isCompact = useIsCompactFormFactor();
   const client = useHostRuntimeClient(serverId);
   const isConnected = useHostRuntimeIsConnected(serverId);
@@ -143,7 +186,7 @@ export function WorkspaceOrchestrationPanel({
     setPending(true);
     setError(null);
     try {
-      const { brief, started } = await startOrchestrationObjective({
+      const { brief: nextBrief, started } = await startOrchestrationObjective({
         client,
         config,
         cwd,
@@ -151,7 +194,7 @@ export function WorkspaceOrchestrationPanel({
         supervisor,
         rawRequest,
       });
-      setBrief(brief);
+      setBrief(nextBrief);
       if (!started) return; // needs clarification — keep modal open, show the brief
       requestRef.current = "";
       setRequestResetKey((key) => key + 1);
@@ -189,10 +232,13 @@ export function WorkspaceOrchestrationPanel({
     () => ({
       title: "Orchestration",
       subtitle: "Human → Supervisor → Lead → Peer",
-      leading: <GitBranch size={18} color={theme.colors.foregroundMuted} />,
+      leading: <ThemedGitBranch size={18} uniProps={mutedColorMapping} />,
     }),
-    [theme.colors.foregroundMuted],
+    [],
   );
+  const handleSendPress = useCallback(() => void handleSend(), [handleSend]);
+  const openPanel = useCallback(() => setVisible(true), []);
+  const closePanel = useCallback(() => setVisible(false), []);
 
   const statusBody = (
     <>
@@ -206,45 +252,14 @@ export function WorkspaceOrchestrationPanel({
               : "not started"}
           </Text>
         ) : (
-          roster.map((agent) => {
-            const role = agent.labels[ORCHESTRATION_ROLE_LABEL];
-            const route = agent.labels[ORCHESTRATION_ROUTE_LABEL];
-            const isActive = agent.status === "running";
-            return (
-              <View key={agent.id} style={styles.agentRow} testID="orchestration-agent-row">
-                <View style={styles.agentRowLeft}>
-                  <View
-                    style={[
-                      styles.statusDot,
-                      {
-                        backgroundColor: isActive
-                          ? theme.colors.statusSuccess
-                          : theme.colors.border,
-                      },
-                    ]}
-                  />
-                  <View style={styles.agentRowText}>
-                    <Text style={styles.agentRole}>{roleLabel(role, route)}</Text>
-                    <Text style={styles.bodyText}>
-                      {agent.provider}/{agent.model ?? "default"}
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.agentRowRight}>
-                  <Text style={styles.bodyText}>{agent.status}</Text>
-                  <Pressable
-                    onPress={() =>
-                      router.push(buildHostAgentDetailRoute(serverId, agent.id, workspaceId))
-                    }
-                    hitSlop={8}
-                    testID="orchestration-open-thread"
-                  >
-                    <Text style={styles.openThread}>Open thread</Text>
-                  </Pressable>
-                </View>
-              </View>
-            );
-          })
+          roster.map((agent) => (
+            <OrchestrationRosterRow
+              key={agent.id}
+              serverId={serverId}
+              workspaceId={workspaceId}
+              agent={agent}
+            />
+          ))
         )}
       </View>
       {peers.length > 0 ? (
@@ -294,7 +309,7 @@ export function WorkspaceOrchestrationPanel({
       <Button
         variant="default"
         testID="orchestration-send-request"
-        onPress={() => void handleSend()}
+        onPress={handleSendPress}
         loading={pending}
         disabled={pending}
       >
@@ -303,7 +318,7 @@ export function WorkspaceOrchestrationPanel({
       {error ? <Text style={styles.error}>{error}</Text> : null}
       {brief ? <BriefCard brief={brief} /> : null}
       {!brief && pending ? (
-        <LoadingSpinner size="small" color={theme.colors.foregroundMuted} />
+        <ThemedLoadingSpinner size="small" uniProps={mutedColorMapping} />
       ) : null}
     </>
   );
@@ -319,12 +334,12 @@ export function WorkspaceOrchestrationPanel({
     return (
       <View style={styles.dockColumn} testID="workspace-orchestration-dock">
         <View style={styles.dockHeader}>
-          <View style={{ flex: 1 }}>
+          <View style={styles.dockHeaderText}>
             <Text style={styles.cardTitle}>Orchestration</Text>
             <Text style={styles.bodyText}>Human → Supervisor → Lead → Peer</Text>
           </View>
           <Pressable onPress={onClose} testID="orchestration-dock-close" hitSlop={8}>
-            <X size={18} color={theme.colors.foregroundMuted} />
+            <ThemedX size={18} uniProps={mutedColorMapping} />
           </Pressable>
         </View>
         <ScrollView contentContainerStyle={styles.dockScroll}>
@@ -340,7 +355,7 @@ export function WorkspaceOrchestrationPanel({
         variant="outline"
         size="sm"
         leftIcon={GitBranch}
-        onPress={() => setVisible(true)}
+        onPress={openPanel}
         disabled={!isConnected}
         testID="workspace-orchestration-open"
         accessibilityLabel="Orchestration"
@@ -350,7 +365,7 @@ export function WorkspaceOrchestrationPanel({
       <AdaptiveModalSheet
         visible={visible}
         header={header}
-        onClose={() => setVisible(false)}
+        onClose={closePanel}
         desktopMaxWidth={680}
         testID="workspace-orchestration-panel"
       >
@@ -368,6 +383,7 @@ const styles = StyleSheet.create((theme) => ({
     borderLeftColor: theme.colors.border,
     backgroundColor: theme.colors.surface1,
   },
+  dockHeaderText: { flex: 1 },
   dockHeader: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -414,6 +430,8 @@ const styles = StyleSheet.create((theme) => ({
     fontWeight: theme.fontWeight.medium,
   },
   statusDot: { width: 8, height: 8, borderRadius: theme.borderRadius.full },
+  statusDotActive: { backgroundColor: theme.colors.statusSuccess },
+  statusDotIdle: { backgroundColor: theme.colors.border },
   openThread: {
     color: theme.colors.primary,
     fontSize: theme.fontSize.sm,

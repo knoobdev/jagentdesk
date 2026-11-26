@@ -1,16 +1,20 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { StyleSheet, useUnistyles } from "react-native-unistyles";
+import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { ChevronDown, ChevronRight } from "lucide-react-native";
-import { useRouter } from "expo-router";
-import { useSessionStore } from "@/stores/session-store";
-import { buildHostAgentDetailRoute } from "@/utils/host-routes";
+import { type Agent, useSessionStore } from "@/stores/session-store";
+import { navigateToAgent } from "@/utils/navigate-to-agent";
 import { MIN_EXPLORER_SIDEBAR_WIDTH } from "@/stores/panel-store";
 import { MAX_CONTENT_WIDTH } from "@/constants/layout";
+import type { Theme } from "@/styles/theme";
 import {
   ORCHESTRATION_ROLE_LABEL,
   ORCHESTRATION_ROUTE_LABEL,
 } from "@jagentdesk/protocol/orchestration";
+
+const ThemedChevronDown = withUnistyles(ChevronDown);
+const ThemedChevronRight = withUnistyles(ChevronRight);
+const mutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 
 const ROLE_ORDER: Record<string, number> = { supervisor: 0, lead: 1, peer: 2 };
 
@@ -62,8 +66,6 @@ export function OrchestrationAgentsColumn({
   workspaceId,
   compact = false,
 }: OrchestrationAgentsColumnProps) {
-  const { theme } = useUnistyles();
-  const router = useRouter();
   const sessionAgents = useSessionStore((state) => state.sessions[serverId]?.agents);
 
   const agents = useMemo(
@@ -100,38 +102,49 @@ export function OrchestrationAgentsColumn({
         <Text style={styles.headerSubtitle}>Human → Supervisor → Lead → Peer</Text>
       </View>
       <ScrollView contentContainerStyle={styles.scroll}>
-        {roster.map((agent) => {
-          const role = agent.labels[ORCHESTRATION_ROLE_LABEL];
-          const route = agent.labels[ORCHESTRATION_ROUTE_LABEL];
-          const isActive = agent.status === "running";
-          return (
-            <Pressable
-              key={agent.id}
-              style={styles.agentRow}
-              onPress={() =>
-                router.push(buildHostAgentDetailRoute(serverId, agent.id, workspaceId))
-              }
-              testID="orchestration-agent-row"
-            >
-              <View
-                style={[
-                  styles.statusDot,
-                  { backgroundColor: isActive ? theme.colors.statusSuccess : theme.colors.border },
-                ]}
-              />
-              <View style={styles.agentRowText}>
-                <Text style={styles.agentRole} numberOfLines={1}>
-                  {roleLabel(role, route)}
-                </Text>
-                <Text style={styles.agentMeta} numberOfLines={1}>
-                  {agent.provider}/{agent.model ?? "default"} · {agent.status}
-                </Text>
-              </View>
-            </Pressable>
-          );
-        })}
+        {roster.map((agent) => (
+          <OrchestrationAgentRow
+            key={agent.id}
+            serverId={serverId}
+            workspaceId={workspaceId}
+            agent={agent}
+          />
+        ))}
       </ScrollView>
     </View>
+  );
+}
+
+interface OrchestrationAgentRowProps {
+  serverId: string;
+  workspaceId: string;
+  agent: Agent;
+}
+
+function OrchestrationAgentRow({ serverId, workspaceId, agent }: OrchestrationAgentRowProps) {
+  const role = agent.labels[ORCHESTRATION_ROLE_LABEL];
+  const route = agent.labels[ORCHESTRATION_ROUTE_LABEL];
+  // Reveal the role's tab in the mounted workspace; pushing a route would stack another copy.
+  const openThread = useCallback(() => {
+    navigateToAgent({ serverId, agentId: agent.id, workspaceId, pin: true });
+  }, [agent.id, serverId, workspaceId]);
+  return (
+    <Pressable style={styles.agentRow} onPress={openThread} testID="orchestration-agent-row">
+      <View
+        style={[
+          styles.statusDot,
+          agent.status === "running" ? styles.statusDotActive : styles.statusDotIdle,
+        ]}
+      />
+      <View style={styles.agentRowText}>
+        <Text style={styles.agentRole} numberOfLines={1}>
+          {roleLabel(role, route)}
+        </Text>
+        <Text style={styles.agentMeta} numberOfLines={1}>
+          {agent.provider}/{agent.model ?? "default"} · {agent.status}
+        </Text>
+      </View>
+    </Pressable>
   );
 }
 
@@ -150,8 +163,8 @@ export function OrchestrationLeadPlanCard({
   serverId,
   workspaceId,
 }: OrchestrationLeadPlanCardProps) {
-  const { theme } = useUnistyles();
   const [expanded, setExpanded] = useState(false);
+  const toggleExpanded = useCallback(() => setExpanded((value) => !value), []);
   const sessionAgents = useSessionStore((state) => state.sessions[serverId]?.agents);
   const peers = useMemo(
     () =>
@@ -174,15 +187,15 @@ export function OrchestrationLeadPlanCard({
       <View style={styles.leadPlanTrack}>
         <View style={[styles.leadPlanCard, expanded && styles.leadPlanCardExpanded]}>
           <Pressable
-            onPress={() => setExpanded((value) => !value)}
+            onPress={toggleExpanded}
             style={styles.leadPlanHeader}
             accessibilityRole="button"
             testID="orchestration-lead-plan"
           >
             {expanded ? (
-              <ChevronDown size={12} color={theme.colors.foregroundMuted} />
+              <ThemedChevronDown size={12} uniProps={mutedColorMapping} />
             ) : (
-              <ChevronRight size={12} color={theme.colors.foregroundMuted} />
+              <ThemedChevronRight size={12} uniProps={mutedColorMapping} />
             )}
             <Text style={styles.leadPlanTitle} numberOfLines={1}>
               Lead plan · {peers.length} bounded assignment{peers.length === 1 ? "" : "s"}
@@ -259,6 +272,8 @@ const styles = StyleSheet.create((theme) => ({
   },
   agentMeta: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.xs },
   statusDot: { width: 8, height: 8, borderRadius: theme.borderRadius.full },
+  statusDotActive: { backgroundColor: theme.colors.statusSuccess },
+  statusDotIdle: { backgroundColor: theme.colors.border },
   // Lead-plan card in the Supervisor thread: centered + width-capped to match the
   // composer and the SubagentsTrack, and collapsible via its header row.
   leadPlanOuter: {
