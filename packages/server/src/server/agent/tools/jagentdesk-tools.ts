@@ -1,4 +1,5 @@
 import { SessionLedgerUpdateInputSchema } from "../session-ledger/ledger-schema.js";
+import { parseProviderModel } from "../failover/child-provider-policy.js";
 import { builtinServerRegistry } from "../../plugins/builtin/loaded.js";
 import type {
   BuiltinDaemonScope,
@@ -2069,6 +2070,37 @@ function createToolCatalog(
 
   if (callerAgentId) {
     registerTool(
+      "list_child_providers",
+      {
+        title: "List child providers",
+        description:
+          "List the providers and models you may use for a child agent on a provider other than your " +
+          "own, with the share of usage quota each has left (remainingPercent, resetsAt). The entry " +
+          "with the most quota left is marked suggested; pick it unless the task needs a specific " +
+          "model. When enabled is false, child agents run on your own provider unless the user named " +
+          "another one.",
+        inputSchema: {},
+        outputSchema: {
+          enabled: z.boolean(),
+          parentProvider: z.string(),
+          entries: z.array(
+            z.object({
+              provider: z.string(),
+              model: z.string().nullable(),
+              remainingPercent: z.number().nullable(),
+              resetsAt: z.string().nullable(),
+              suggested: z.boolean(),
+            }),
+          ),
+        },
+      },
+      async () => ({
+        content: [],
+        structuredContent: ensureValidJson(await agentManager.listChildProviders(callerAgentId)),
+      }),
+    );
+
+    registerTool(
       "update_session_ledger",
       {
         title: "Update session ledger",
@@ -2201,6 +2233,10 @@ function createToolCatalog(
       }
       const resolvedArgs = await resolveCreateAgentToolArgs(args);
       const { parsedArgs, worktree } = resolvedArgs;
+      const initialPrompt = await withChildProviderHandoff(
+        parsedArgs.provider,
+        parsedArgs.initialPrompt,
+      );
       let requestedBackground: boolean;
       let notifyOnFinish: boolean;
       if (resolvedArgs.kind === "agent-scoped") {
@@ -2232,7 +2268,7 @@ function createToolCatalog(
           kind: "mcp",
           provider: parsedArgs.provider,
           title: parsedArgs.title,
-          initialPrompt: parsedArgs.initialPrompt,
+          initialPrompt,
           cwd: resolvedArgs.cwd,
           workspaceId: resolvedArgs.workspaceId,
           thinking: parsedArgs.settings?.thinkingOptionId,
@@ -2304,6 +2340,22 @@ function createToolCatalog(
       return response;
     },
   );
+
+  /**
+   * Spec 40 §5: a child's provider must be the caller's own, an allowed one, or one the user
+   * named; a child on another provider starts with the caller's compact handoff.
+   */
+  async function withChildProviderHandoff(
+    provider: string | undefined,
+    prompt: string | undefined,
+  ): Promise<string | undefined> {
+    if (!callerAgentId) return prompt;
+    const { handoff } = await agentManager.prepareChildProvider(
+      callerAgentId,
+      parseProviderModel(provider),
+    );
+    return handoff && prompt ? `${handoff}\n\n${prompt}` : prompt;
+  }
 
   type ResolvedCreateAgentToolArgs =
     | {

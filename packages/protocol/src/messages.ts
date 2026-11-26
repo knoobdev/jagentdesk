@@ -407,6 +407,24 @@ const MutableBrowserToolsConfigSchema = z
   })
   .passthrough();
 
+/** A provider and model (null = the provider's default) in a continuity list (spec 40 §4–§5). */
+export const ProviderModelRefSchema = z.object({
+  provider: z.string(),
+  model: z.string().nullable(),
+});
+
+/** Spec 40 §4: switch in place along `order` when the provider reports a usage limit. */
+export const AgentFailoverConfigSchema = z.object({
+  enabled: z.boolean(),
+  order: z.array(ProviderModelRefSchema),
+});
+
+/** Spec 40 §5: child agents may pick from `allowed` instead of the parent's provider. */
+export const CrossProviderChildrenConfigSchema = z.object({
+  enabled: z.boolean(),
+  allowed: z.array(ProviderModelRefSchema),
+});
+
 export const MutableDaemonConfigSchema = z
   .object({
     mcp: z
@@ -446,6 +464,9 @@ export const MutableDaemonConfigSchema = z
     // does not and cannot override the underlying model's own judgment. Optional (not `.default`) so
     // existing MutableDaemonConfig literals stay valid; readers coalesce to "".
     operatorContext: z.string().optional(),
+    // COMPAT(crossProviderContinuity): added in v0.10.2; optional because older daemons omit it.
+    agentFailover: AgentFailoverConfigSchema.optional(),
+    crossProviderChildren: CrossProviderChildrenConfigSchema.optional(),
     terminalProfiles: z.array(TerminalProfileSchema).optional(),
     agentProfiles: z.array(AgentProfileSchema).optional(),
     orchestration: OrchestrationConfigSchema.default(createDefaultOrchestrationConfig()),
@@ -501,6 +522,8 @@ export const MutableDaemonConfigPatchSchema = z
     resumePrompt: z.string().optional(),
     appendSystemPrompt: z.string().optional(),
     operatorContext: z.string().optional(),
+    agentFailover: AgentFailoverConfigSchema.optional(),
+    crossProviderChildren: CrossProviderChildrenConfigSchema.optional(),
     terminalProfiles: z.array(TerminalProfileSchema).optional(),
     agentProfiles: z.array(AgentProfileSchema).optional(),
     orchestration: OrchestrationConfigPatchSchema.optional(),
@@ -1011,6 +1034,13 @@ export const AgentTimelineItemPayloadSchema: z.ZodType<AgentTimelineItem, unknow
         reason: z.string(),
         mode: z.string(),
         handoffId: z.string().nullable(),
+      })
+      .optional(),
+    usageLimit: z
+      .object({
+        provider: z.string(),
+        failover: z.string(),
+        suggestion: z.object({ provider: z.string(), model: z.string().nullable() }).nullable(),
       })
       .optional(),
   }),
@@ -2205,6 +2235,30 @@ export const ProviderInstallationUpdateSubscribeRequestMessageSchema = z.object(
 export const AgentLedgerGetRequestMessageSchema = z.object({
   type: z.literal("agent.ledger.get.request"),
   agentId: z.string(),
+  requestId: z.string(),
+});
+
+export const AgentContinuityGetRequestMessageSchema = z.object({
+  type: z.literal("agent.continuity.get.request"),
+  agentId: z.string(),
+  requestId: z.string(),
+});
+
+/** `null` clears the agent's override (back to the host setting); omitted leaves it alone. */
+export const AgentContinuitySetRequestMessageSchema = z.object({
+  type: z.literal("agent.continuity.set.request"),
+  agentId: z.string(),
+  failover: AgentFailoverConfigSchema.nullable().optional(),
+  crossProviderChildren: CrossProviderChildrenConfigSchema.nullable().optional(),
+  requestId: z.string(),
+});
+
+/** "Continue with …" on a usage-limit card: switch and resend the failed turn's message. */
+export const AgentFailoverContinueRequestMessageSchema = z.object({
+  type: z.literal("agent.failover.continue.request"),
+  agentId: z.string(),
+  provider: z.string(),
+  model: z.string().nullable(),
   requestId: z.string(),
 });
 
@@ -4769,6 +4823,9 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ProviderInstallationUpdateSubscribeRequestMessageSchema,
   ProviderUsageListRequestMessageSchema,
   AgentLedgerGetRequestMessageSchema,
+  AgentContinuityGetRequestMessageSchema,
+  AgentContinuitySetRequestMessageSchema,
+  AgentFailoverContinueRequestMessageSchema,
   UsageListReportsRequestMessageSchema,
   ResumeAgentRequestMessageSchema,
   ImportAgentRequestMessageSchema,
@@ -8623,6 +8680,46 @@ export const AgentLedgerGetResponseMessageSchema = z.object({
   }),
 });
 
+export const AgentContinuitySettingsSchema = z.object({
+  failover: AgentFailoverConfigSchema,
+  crossProviderChildren: CrossProviderChildrenConfigSchema,
+});
+
+export const AgentContinuityGetResponseMessageSchema = z.object({
+  type: z.literal("agent.continuity.get.response"),
+  payload: z.object({
+    requestId: z.string(),
+    agentId: z.string(),
+    host: AgentContinuitySettingsSchema.nullable(),
+    override: z
+      .object({
+        failover: AgentFailoverConfigSchema.nullable(),
+        crossProviderChildren: CrossProviderChildrenConfigSchema.nullable(),
+      })
+      .nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
+export const AgentContinuitySetResponseMessageSchema = z.object({
+  type: z.literal("agent.continuity.set.response"),
+  payload: z.object({
+    requestId: z.string(),
+    agentId: z.string(),
+    error: z.string().nullable(),
+  }),
+});
+
+export const AgentFailoverContinueResponseMessageSchema = z.object({
+  type: z.literal("agent.failover.continue.response"),
+  payload: z.object({
+    requestId: z.string(),
+    agentId: z.string(),
+    accepted: z.boolean(),
+    error: z.string().nullable(),
+  }),
+});
+
 export const ProviderUsageListResponseMessageSchema = z.object({
   type: z.literal("provider.usage.list.response"),
   payload: z.object({
@@ -9492,6 +9589,9 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ProviderInstallationUpdateClearedMessageSchema,
   ProviderUsageListResponseMessageSchema,
   AgentLedgerGetResponseMessageSchema,
+  AgentContinuityGetResponseMessageSchema,
+  AgentContinuitySetResponseMessageSchema,
+  AgentFailoverContinueResponseMessageSchema,
   UsageListReportsResponseMessageSchema,
   UsageListReportsUpdateMessageSchema,
   ListCommandsResponseSchema,
@@ -9897,6 +9997,12 @@ export type ProviderUsageBalance = z.infer<typeof ProviderUsageBalanceSchema>;
 export type ProviderUsageDetail = z.infer<typeof ProviderUsageDetailSchema>;
 
 export type SessionLedger = z.infer<typeof SessionLedgerSchema>;
+export type ProviderModelRef = z.infer<typeof ProviderModelRefSchema>;
+export type AgentFailoverConfig = z.infer<typeof AgentFailoverConfigSchema>;
+export type CrossProviderChildrenConfig = z.infer<typeof CrossProviderChildrenConfigSchema>;
+export type AgentContinuityGetPayload = z.infer<
+  typeof AgentContinuityGetResponseMessageSchema
+>["payload"];
 export type SessionLedgerHandoff = z.infer<typeof SessionLedgerHandoffSchema>;
 export type AgentLedgerGetPayload = z.infer<typeof AgentLedgerGetResponseMessageSchema>["payload"];
 

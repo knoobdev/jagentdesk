@@ -1,3 +1,11 @@
+import {
+  CROSS_PROVIDER_CHILDREN_DISABLED,
+  FAILOVER_DISABLED,
+  type CrossProviderChildrenConfig,
+  type FailoverConfig,
+} from "./agent/failover/failover-policy.js";
+import { ProviderQuotaTracker } from "./agent/failover/provider-quota.js";
+import { ProviderUsageService } from "../services/quota-fetcher/service.js";
 import { builtinServerRegistry } from "./plugins/builtin/loaded.js";
 import { createBuiltinCoreServices } from "./plugins/builtin/services.js";
 import {
@@ -527,6 +535,8 @@ export interface JAgentDeskDaemonConfig {
   downloadTokenTtlMs?: number;
   agentProviderSettings?: AgentProviderRuntimeSettingsMap;
   idleRuntimeCleanup?: boolean;
+  agentFailover?: FailoverConfig;
+  crossProviderChildren?: CrossProviderChildrenConfig;
   metadataGeneration?: {
     providers?: Array<{
       provider: string;
@@ -662,6 +672,7 @@ function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): Mutab
     resumePrompt: config.resumePrompt ?? "Resume working.",
     operatorContext: config.operatorContext ?? "",
     orchestration: config.orchestration ?? createDefaultOrchestrationConfig(),
+    ...continuityConfigFromStartup(config),
   };
 
   if (config.terminalProfiles !== undefined) {
@@ -1104,8 +1115,22 @@ export async function createJAgentDeskDaemon(
     claudeSpawnEnv: (providerId) => customProviderService.materializeClaudeEnv(providerId),
   });
   const initialAgentManagerState = providerSnapshotManager.getAgentManagerProviderState();
+  // Remaining quota per provider for failover and list_child_providers (spec 40 §4–§5).
+  const providerQuota = new ProviderQuotaTracker(new ProviderUsageService({ logger }));
   const agentManager: AgentManager = new AgentManager({
     pluginLifecycle: pluginRuntime,
+    resolveContinuityConfig: () => {
+      const current = daemonConfigStore.get();
+      return {
+        failover: current.agentFailover ?? FAILOVER_DISABLED,
+        crossProviderChildren: current.crossProviderChildren ?? CROSS_PROVIDER_CHILDREN_DISABLED,
+      };
+    },
+    isProviderUsageExhausted: (provider) => providerQuota.isExhausted(provider),
+    resolveProviderQuota: async (provider) => {
+      await providerQuota.refresh().catch(() => undefined);
+      return providerQuota.quota(provider);
+    },
     resolveProviderLabel: (provider) => providerSnapshotManager.getProviderLabel(provider),
     resolveModelContextWindow: async ({ provider, model }) =>
       resolveSnapshotContextWindow(providerSnapshotManager.getSnapshot(), provider, model),
@@ -1165,6 +1190,17 @@ export async function createJAgentDeskDaemon(
     report: (agentId, err) => logger.error({ agentId, err }, "Agent restart recovery failed"),
   });
   await restartRecovery.prepareStartup();
+  // Failover resends the failed turn's message the way a user send does (spec 40 §4).
+  agentManager.setFailoverResend(async (agentId, prompt) => {
+    await sendPromptToAgent({
+      agentId,
+      prompt,
+      agentManager,
+      agentStorage,
+      logger,
+      messageId: randomUUID(),
+    });
+  });
 
   // Spec 34.6 hot reload: after a custom provider save/delete, re-read the
   // persisted config, rebuild the provider registry (base overrides replaced,
@@ -2511,4 +2547,14 @@ function resolveSnapshotContextWindow(
     (model ? models.find((entry) => entry.id === model || entry.aliases?.includes(model)) : null) ??
     models.find((entry) => entry.isDefault);
   return match?.contextWindowMaxTokens ?? null;
+}
+
+function continuityConfigFromStartup(config: {
+  agentFailover?: FailoverConfig;
+  crossProviderChildren?: CrossProviderChildrenConfig;
+}): Pick<MutableDaemonConfig, "agentFailover" | "crossProviderChildren"> {
+  const result: Pick<MutableDaemonConfig, "agentFailover" | "crossProviderChildren"> = {};
+  if (config.agentFailover) result.agentFailover = config.agentFailover;
+  if (config.crossProviderChildren) result.crossProviderChildren = config.crossProviderChildren;
+  return result;
 }

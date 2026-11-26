@@ -1,3 +1,4 @@
+import { AgentContinuityOverridesSchema } from "./failover/failover-policy.js";
 import { promises as fs, type Dirent } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
@@ -119,6 +120,8 @@ const RAW_STORED_AGENT_SCHEMA = z.object({
   archivedAt: z.string().nullable().optional(),
   owner: AgentOwnerSchema.optional(),
   providerSessions: z.record(z.string(), PROVIDER_SESSION_SCHEMA).optional(),
+  /** Per-agent failover / child-provider overrides (spec 40 §4–§5). */
+  continuity: AgentContinuityOverridesSchema.optional(),
   /** Seq at which the current provider took over; absent until the first provider switch. */
   providerEnteredAtSeq: z.number().optional(),
 });
@@ -334,11 +337,14 @@ export class AgentStorage {
     });
   }
 
-  async updateProviderSessions(
+  /** Fields only the daemon's continuity paths write; snapshots carry them over. */
+  async patchRecordFields(
     agentId: string,
     mutate: (
       record: StoredAgentRecord,
-    ) => Pick<StoredAgentRecord, "providerSessions" | "providerEnteredAtSeq">,
+    ) => Partial<
+      Pick<StoredAgentRecord, "providerSessions" | "providerEnteredAtSeq" | "continuity">
+    >,
   ): Promise<void> {
     await this.load();
     await this.queueRecordMutation(agentId, (existing) => {
@@ -528,6 +534,7 @@ function carryProviderSessions(
   if (existing?.providerEnteredAtSeq !== undefined) {
     record.providerEnteredAtSeq = existing.providerEnteredAtSeq;
   }
+  if (existing?.continuity) record.continuity = existing.continuity;
 }
 
 const LEDGER_SUFFIX = ".ledger.json";

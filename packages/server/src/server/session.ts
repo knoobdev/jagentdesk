@@ -3879,6 +3879,12 @@ export class Session {
         return this.providerCatalogSession.handleProviderUsageListRequest(msg);
       case "agent.ledger.get.request":
         return this.handleAgentLedgerGetRequest(msg);
+      case "agent.continuity.get.request":
+        return this.handleAgentContinuityGetRequest(msg);
+      case "agent.continuity.set.request":
+        return this.handleAgentContinuitySetRequest(msg);
+      case "agent.failover.continue.request":
+        return this.handleAgentFailoverContinueRequest(msg);
       default:
         return undefined;
     }
@@ -9026,6 +9032,88 @@ export class Session {
         source,
       );
     }
+  }
+
+  private async handleAgentContinuityGetRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.continuity.get.request" }>,
+  ): Promise<void> {
+    try {
+      await this.ensureContinuityAgentLoaded(msg.agentId);
+      const override = await this.agentManager.getAgentContinuityOverrides(msg.agentId);
+      this.emit({
+        type: "agent.continuity.get.response",
+        payload: {
+          requestId: msg.requestId,
+          agentId: msg.agentId,
+          host: this.agentManager.getHostContinuityConfig(),
+          override: {
+            failover: override.failover ?? null,
+            crossProviderChildren: override.crossProviderChildren ?? null,
+          },
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emit({
+        type: "agent.continuity.get.response",
+        payload: {
+          requestId: msg.requestId,
+          agentId: msg.agentId,
+          host: null,
+          override: null,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+
+  private async handleAgentContinuitySetRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.continuity.set.request" }>,
+  ): Promise<void> {
+    let error: string | null = null;
+    try {
+      await this.ensureContinuityAgentLoaded(msg.agentId);
+      await this.agentManager.setAgentContinuityOverrides(msg.agentId, {
+        ...(msg.failover !== undefined ? { failover: msg.failover } : {}),
+        ...(msg.crossProviderChildren !== undefined
+          ? { crossProviderChildren: msg.crossProviderChildren }
+          : {}),
+      });
+    } catch (caught) {
+      error = caught instanceof Error ? caught.message : String(caught);
+    }
+    this.emit({
+      type: "agent.continuity.set.response",
+      payload: { requestId: msg.requestId, agentId: msg.agentId, error },
+    });
+  }
+
+  private async handleAgentFailoverContinueRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.failover.continue.request" }>,
+  ): Promise<void> {
+    let error: string | null = null;
+    try {
+      await this.ensureContinuityAgentLoaded(msg.agentId);
+      await this.agentManager.continueAfterUsageLimit(msg.agentId, {
+        provider: msg.provider,
+        model: msg.model,
+      });
+    } catch (caught) {
+      error = caught instanceof Error ? caught.message : String(caught);
+      this.sessionLogger.error({ err: caught, agentId: msg.agentId }, "Continue with failed");
+    }
+    this.emit({
+      type: "agent.failover.continue.response",
+      payload: { requestId: msg.requestId, agentId: msg.agentId, accepted: error === null, error },
+    });
+  }
+
+  private async ensureContinuityAgentLoaded(agentId: string): Promise<void> {
+    await ensureAgentLoaded(agentId, {
+      agentManager: this.agentManager,
+      agentStorage: this.agentStorage,
+      logger: this.sessionLogger,
+    });
   }
 
   private async handleAgentLedgerGetRequest(

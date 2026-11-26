@@ -424,6 +424,8 @@ export type AgentTimelineItem =
       message: string;
       /** Set on the row a provider switch appends (spec 40 §3). */
       providerSwitch?: ProviderSwitchNotice;
+      /** Set on the row a usage-limit failure appends when no failover ran (spec 40 §4). */
+      usageLimit?: UsageLimitNotice;
     }
   | CompactionTimelineItem
   | PluginTimelineItem;
@@ -437,6 +439,14 @@ export interface ProviderSwitchNotice {
   /** "resume" (native session resumed, delta sent) or "handoff" (new session, ledger sent). */
   mode: string;
   handoffId: string | null;
+}
+
+export interface UsageLimitNotice {
+  provider: string;
+  /** Why no failover ran: "off", "exhausted", "capped" or "repeat"; open string. */
+  failover: string;
+  /** The provider and model "Continue with …" moves the agent to, when one is enabled. */
+  suggestion: { provider: string; model: string | null } | null;
 }
 
 export type AgentStreamEvent =

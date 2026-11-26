@@ -25,6 +25,8 @@ export const SESSION_LEDGER_INSTRUCTION = [
     "worth remembering (with a one-line reason), open or finish a piece of work, or change what you would do " +
     "next. Keep entries short. Do not call it for trivial turns. Files, commands, errors and the user's " +
     "messages are recorded automatically; do not repeat them.",
+  "Before you create a child agent on a provider other than your own, call list_child_providers and " +
+    "pick the entry marked suggested unless the task needs a specific model.",
 ].join(" ");
 
 export interface LedgerDocumentInput {
@@ -152,7 +154,39 @@ export class SessionContinuity {
     return record;
   }
 
-  /** Renders a handoff without staging it (child agents get theirs as the first prompt). */
+  /**
+   * Spec 40 §5: a child on another provider gets its parent's ledger cut down to the goals and the
+   * files touched, instead of the parent's transcript.
+   */
+  async renderChildHandoff(input: {
+    parentId: string;
+    cwd: string;
+    rows: readonly LedgerTimelineRow[];
+    fromProvider: string;
+    toProvider: string;
+    budgetTokens: number;
+  }): Promise<string> {
+    const facts = collectTimelineLedgerFacts({ rows: input.rows, cwd: input.cwd });
+    const document = buildLedgerDocument({
+      facts: { ...facts, commands: [], errors: [], turns: [] },
+      notes: { decisions: [], openItems: [], nextStep: null },
+      recentTurns: 0,
+    });
+    return fitHandoff({
+      document,
+      budgetTokens: input.budgetTokens,
+      render: (current) =>
+        renderHandoffText({
+          document: current,
+          mode: "child",
+          agentId: input.parentId,
+          fromProvider: input.fromProvider,
+          toProvider: input.toProvider,
+        }),
+    }).text;
+  }
+
+  /** Renders a handoff without staging it. */
   async renderHandoff(input: StageHandoffInput): Promise<string> {
     const document = await this.buildDocument(input);
     return fitHandoff({

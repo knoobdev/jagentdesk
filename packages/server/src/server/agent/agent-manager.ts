@@ -89,6 +89,21 @@ import type {
   SessionLedgerUpdateInput,
 } from "./session-ledger/ledger-schema.js";
 import { getAgentProviderDefinition } from "@jagentdesk/protocol/provider-manifest";
+import { FailoverCoordinator } from "./failover/failover-coordinator.js";
+import {
+  checkChildProvider,
+  rankChildProviders,
+  type ChildProviderEntry,
+} from "./failover/child-provider-policy.js";
+import type { ProviderQuota } from "./failover/provider-quota.js";
+import {
+  CROSS_PROVIDER_CHILDREN_DISABLED,
+  FAILOVER_DISABLED,
+  type AgentContinuityOverrides,
+  type CrossProviderChildrenConfig,
+  type FailoverConfig,
+  type ProviderModelRef,
+} from "./failover/failover-policy.js";
 
 import { sanitizeAgentMetrics, withModelMetric } from "./agent-metrics.js";
 import type { StoredAgentRecord, AgentStorage } from "./agent-storage.js";
@@ -433,6 +448,15 @@ export interface AgentManagerOptions {
   /** Session ledgers (spec 40 §2); provider switches hand off through them. */
   sessionLedger?: SessionLedgerStore;
   resolveProviderLabel?: (provider: AgentProvider) => string;
+  /** Host failover and child-provider settings (spec 40 §4–§5); agent overrides win. */
+  resolveContinuityConfig?: () => {
+    failover: FailoverConfig;
+    crossProviderChildren: CrossProviderChildrenConfig;
+  };
+  /** True when Usage reports the provider out of quota. */
+  isProviderUsageExhausted?: (provider: AgentProvider) => boolean;
+  /** Remaining quota per provider from Usage, for list_child_providers. */
+  resolveProviderQuota?: (provider: AgentProvider) => Promise<ProviderQuota>;
   /** Context window of a model from the provider catalog, used to size handoffs. */
   resolveModelContextWindow?: (input: {
     provider: AgentProvider;
@@ -825,6 +849,8 @@ interface AgentMetadataPatch {
 }
 
 const SYSTEM_ERROR_PREFIX = "[System Error]";
+/** How long a provider switch waits for a running turn before giving up. */
+const SWITCH_WAIT_FOR_RUN_MS = 10 * 60 * 1000;
 
 function normalizePersistenceForConfig(
   handle: AgentPersistenceHandle | null,
@@ -1137,6 +1163,11 @@ export class AgentManager {
   private readonly continuity: SessionContinuity;
   private readonly resolveModelContextWindow?: AgentManagerOptions["resolveModelContextWindow"];
   private readonly resolveProviderLabel?: AgentManagerOptions["resolveProviderLabel"];
+  private readonly resolveContinuityConfig?: AgentManagerOptions["resolveContinuityConfig"];
+  private readonly failover: FailoverCoordinator;
+  private readonly resolveProviderQuota?: AgentManagerOptions["resolveProviderQuota"];
+  private failoverResend: ((agentId: string, prompt: AgentPromptInput) => Promise<void>) | null =
+    null;
 
   /**
    * In-flight host tool permission requests, keyed by requestId. Resolved when
@@ -1169,6 +1200,9 @@ export class AgentManager {
     this.continuity = createSessionContinuity(options);
     this.resolveModelContextWindow = options.resolveModelContextWindow;
     this.resolveProviderLabel = options.resolveProviderLabel;
+    this.resolveContinuityConfig = options.resolveContinuityConfig;
+    this.failover = this.createFailoverCoordinator(options);
+    this.resolveProviderQuota = options.resolveProviderQuota;
     this.rescueTimeouts = {
       reloadSessionCloseMs:
         options.rescueTimeouts?.reloadSessionCloseMs ?? RELOAD_SESSION_CLOSE_TIMEOUT_MS,
@@ -2646,13 +2680,21 @@ export class AgentManager {
 
   /** Waits for the running turn to end; a pending permission must be answered first. */
   private async waitForRunToSettle(agentId: string): Promise<void> {
+    const deadline = Date.now() + SWITCH_WAIT_FOR_RUN_MS;
     while (this.hasInFlightRun(agentId)) {
-      const result = await this.waitForAgentEvent(agentId);
-      if (result.permission) {
+      if (Date.now() > deadline) {
+        throw new Error(`Agent ${agentId} is still running; switch with whenBusy "interrupt"`);
+      }
+      const result = await this.waitForAgentEvent(agentId, {
+        signal: AbortSignal.timeout(1_000),
+      }).catch(() => null);
+      if (result?.permission) {
         throw new Error(
           `Agent ${agentId} is waiting for a permission; answer it or switch with whenBusy "interrupt"`,
         );
       }
+      // A run can stay tracked for a moment after its turn ended; let it settle.
+      await new Promise((settled) => setTimeout(settled, 50));
     }
   }
 
@@ -2837,7 +2879,7 @@ export class AgentManager {
         handoffId: handoff?.id ?? null,
       },
     });
-    await this.registry?.updateProviderSessions(agentId, () => ({
+    await this.registry?.patchRecordFields(agentId, () => ({
       providerSessions: input.providerSessions,
       providerEnteredAtSeq: appended.seq,
     }));
@@ -2851,6 +2893,165 @@ export class AgentManager {
       handoffId: handoff?.id ?? null,
       sessionId: registered.persistence?.sessionId ?? null,
     };
+  }
+
+  /** Sends a prompt the way a user send does; wired by the daemon (it records the message). */
+  setFailoverResend(resend: (agentId: string, prompt: AgentPromptInput) => Promise<void>): void {
+    this.failoverResend = resend;
+  }
+
+  private createFailoverCoordinator(options: AgentManagerOptions): FailoverCoordinator {
+    return new FailoverCoordinator({
+      resolveConfig: async (agentId) => (await this.resolveAgentContinuity(agentId)).failover,
+      listEnabledProviders: () =>
+        Array.from(this.providerDefinitions.entries())
+          .filter(([provider, definition]) => definition.enabled && this.clients.has(provider))
+          .map(([provider]) => provider),
+      isExhausted: (provider) => options.isProviderUsageExhausted?.(provider) ?? false,
+      switchProvider: async (agentId, target) => {
+        await this.switchAgentProvider(agentId, target.provider, target.model, {
+          reason: "failover",
+        });
+      },
+      resend: async (agentId, prompt) => {
+        if (!this.failoverResend) throw new Error("Failover resend is not wired");
+        await this.failoverResend(agentId, prompt);
+      },
+      readLastUserMessage: async (agentId) => {
+        const rows = this.fetchTimeline(agentId, { direction: "tail", limit: 0 }).rows;
+        const last = rows.findLast((row) => row.item.type === "user_message");
+        return last?.item.type === "user_message" ? last.item.text : null;
+      },
+      appendUsageLimitNotice: async (agentId, notice) => {
+        await this.appendTimelineItem(agentId, {
+          type: "notification",
+          level: "warning",
+          message: `${this.labelFor(notice.provider)} usage limit reached`,
+          usageLimit: notice,
+        });
+      },
+      logger: this.logger,
+    });
+  }
+
+  /** The agent's failover and child-provider settings: its own override, else the host's. */
+  async resolveAgentContinuity(agentId: string): Promise<{
+    failover: FailoverConfig;
+    crossProviderChildren: CrossProviderChildrenConfig;
+  }> {
+    const host = this.resolveContinuityConfig?.();
+    const record = await this.registry?.get(agentId);
+    return {
+      failover: record?.continuity?.failover ?? host?.failover ?? FAILOVER_DISABLED,
+      crossProviderChildren:
+        record?.continuity?.crossProviderChildren ??
+        host?.crossProviderChildren ??
+        CROSS_PROVIDER_CHILDREN_DISABLED,
+    };
+  }
+
+  getHostContinuityConfig(): {
+    failover: FailoverConfig;
+    crossProviderChildren: CrossProviderChildrenConfig;
+  } {
+    const host = this.resolveContinuityConfig?.();
+    return {
+      failover: host?.failover ?? FAILOVER_DISABLED,
+      crossProviderChildren: host?.crossProviderChildren ?? CROSS_PROVIDER_CHILDREN_DISABLED,
+    };
+  }
+
+  async getAgentContinuityOverrides(agentId: string): Promise<AgentContinuityOverrides> {
+    return (await this.registry?.get(agentId))?.continuity ?? {};
+  }
+
+  async setAgentContinuityOverrides(
+    agentId: string,
+    patch: AgentContinuityOverrides,
+  ): Promise<void> {
+    this.requireAgent(agentId);
+    const registry = this.requireRegistry();
+    await registry.patchRecordFields(agentId, (record) => {
+      const next: AgentContinuityOverrides = { ...record.continuity };
+      if (patch.failover !== undefined) next.failover = patch.failover;
+      if (patch.crossProviderChildren !== undefined) {
+        next.crossProviderChildren = patch.crossProviderChildren;
+      }
+      return { continuity: next };
+    });
+  }
+
+  /** Spec 40 §5: the caller's allowed child providers, with Usage quota and a suggestion. */
+  async listChildProviders(agentId: string): Promise<{
+    enabled: boolean;
+    parentProvider: AgentProvider;
+    entries: ChildProviderEntry[];
+  }> {
+    const agent = this.requireAgent(agentId);
+    const { crossProviderChildren } = await this.resolveAgentContinuity(agentId);
+    const quotas = new Map<string, ProviderQuota>();
+    for (const entry of crossProviderChildren.allowed) {
+      if (quotas.has(entry.provider)) continue;
+      quotas.set(
+        entry.provider,
+        (await this.resolveProviderQuota?.(entry.provider)) ?? {
+          remainingPercent: null,
+          resetsAt: null,
+        },
+      );
+    }
+    return {
+      enabled: crossProviderChildren.enabled,
+      parentProvider: agent.provider,
+      entries: crossProviderChildren.enabled
+        ? rankChildProviders({
+            allowed: crossProviderChildren.allowed,
+            quota: (provider) => quotas.get(provider) ?? { remainingPercent: null, resetsAt: null },
+          })
+        : [],
+    };
+  }
+
+  /**
+   * Checks a create_agent provider request from an agent against spec 40 §5 and returns the
+   * compact handoff a child on another provider starts with (null for a same-provider child).
+   */
+  async prepareChildProvider(
+    parentId: string,
+    requested: ProviderModelRef | null,
+  ): Promise<{ handoff: string | null }> {
+    const parent = this.requireAgent(parentId);
+    const { crossProviderChildren } = await this.resolveAgentContinuity(parentId);
+    const rows = this.fetchTimeline(parentId, { direction: "tail", limit: 0 }).rows;
+    const lastUser = rows.findLast((row) => row.item.type === "user_message");
+    const decision = checkChildProvider({
+      config: crossProviderChildren,
+      parentProvider: parent.provider,
+      requested,
+      lastUserMessage: lastUser?.item.type === "user_message" ? lastUser.item.text : null,
+      providerLabel: (provider) => this.labelFor(provider),
+    });
+    if (!decision.ok) throw new Error(decision.error);
+    if (!requested || requested.provider === parent.provider) return { handoff: null };
+    const contextWindow = await this.resolveModelContextWindow?.({
+      provider: requested.provider,
+      model: requested.model,
+    });
+    const handoff = await this.continuity.renderChildHandoff({
+      parentId,
+      cwd: parent.cwd,
+      rows,
+      fromProvider: this.labelFor(parent.provider),
+      toProvider: this.labelFor(requested.provider),
+      budgetTokens: handoffBudgetTokens(contextWindow),
+    });
+    return { handoff };
+  }
+
+  /** "Continue with …" on a usage-limit row: switch and resend the failed turn's message. */
+  async continueAfterUsageLimit(agentId: string, target: ProviderModelRef): Promise<void> {
+    this.requireAgent(agentId);
+    await this.failover.continueWith(agentId, target);
   }
 
   private labelFor(provider: AgentProvider): string {
@@ -3575,6 +3776,7 @@ export class AgentManager {
     const { agent, agentId, pendingRun, prompt, options, promptStart } = params;
     try {
       const { enriched, context, handoff } = await this.buildTurnPrompt(agent, prompt);
+      this.failover.rememberPrompt(agentId, prompt);
       if (promptStart?.admit?.() === false) {
         this.runs.settleForegroundRun(agentId, pendingRun.token);
         return null;
@@ -6126,6 +6328,7 @@ export class AgentManager {
     terminalDisposition: ActiveTurnTerminalDisposition;
   }): void {
     const { agent, event, eventTurnId, isForegroundEvent, terminalDisposition } = params;
+    if (isForegroundEvent) this.failover.settleTurn(agent.id);
     this.logger.trace(
       {
         agentId: agent.id,
@@ -6204,6 +6407,26 @@ export class AgentManager {
       options,
     );
     this.resolvePendingPermissionsForAgent(agent, event.provider, options, "Turn failed");
+    if (isForegroundEvent && !options?.fromHistory) {
+      this.trackBackgroundTask(this.handleFailoverAfterTurnFailure(agent.id, event));
+    }
+  }
+
+  private async handleFailoverAfterTurnFailure(
+    agentId: string,
+    event: Extract<AgentStreamEvent, { type: "turn_failed" }>,
+  ): Promise<void> {
+    try {
+      await this.failover.handleTurnFailure({
+        agentId,
+        provider: event.provider,
+        error: event.error,
+        code: event.code,
+        diagnostic: event.diagnostic,
+      });
+    } catch (error) {
+      this.logger.error({ err: error, agentId }, "Failover after a usage limit failed");
+    }
   }
 
   private onStreamTurnCanceled(params: {

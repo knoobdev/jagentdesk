@@ -4,8 +4,8 @@ import type {
   AgentOptionToggleControl,
 } from "@jagentdesk/protocol/agent-types";
 export type { AgentOptionControl, AgentOptionSelectControl, AgentOptionToggleControl };
-import type { ProviderSwitchNotice } from "@jagentdesk/protocol/agent-types";
-export type { ProviderSwitchNotice };
+import type { ProviderSwitchNotice, UsageLimitNotice } from "@jagentdesk/protocol/agent-types";
+export type { ProviderSwitchNotice, UsageLimitNotice };
 import type { AgentMessage } from "@jagentdesk/protocol/agent-message";
 import type { Options as ClaudeAgentOptions } from "@anthropic-ai/claude-agent-sdk";
 import type {
@@ -417,6 +417,8 @@ export type AgentTimelineItem =
       message: string;
       /** Set on the row a provider switch appends (spec 40 §3). */
       providerSwitch?: ProviderSwitchNotice;
+      /** Set on the row a usage-limit failure appends when no failover ran (spec 40 §4). */
+      usageLimit?: UsageLimitNotice;
     }
   | CompactionTimelineItem
   | PluginTimelineItem;

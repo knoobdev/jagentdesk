@@ -274,11 +274,21 @@ export function fitHandoff(input: {
 
 export function renderHandoffText(input: {
   document: LedgerDocument;
-  mode: "handoff" | "delta";
+  mode: "handoff" | "delta" | "child";
   agentId: string;
   fromProvider: string;
   toProvider: string;
 }): string {
+  if (input.mode === "child") {
+    return [
+      "<jagentdesk-session-handoff>",
+      `Context from your parent agent ${input.agentId} (running on ${input.fromProvider}): what the ` +
+        "user asked it, verbatim, and the files it has touched. Your own task follows after this block.",
+      "",
+      renderLedgerSections(input.document),
+      "</jagentdesk-session-handoff>",
+    ].join("\n");
+  }
   const intro =
     input.mode === "handoff"
       ? [
