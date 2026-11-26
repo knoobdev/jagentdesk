@@ -115,13 +115,23 @@ describe.runIf(ENABLED)("spec 41 memory on real Claude", () => {
       const afterSecret = await client.listMemories({ scope: "project", agentId: first.id });
       expect(afterSecret.memories.some((memory) => memory.text.includes("ghp_"))).toBe(false);
       const firstItems = await timeline(client, first.id);
-      const refused = firstItems.some(
+      writeResult("memory-first-agent-timeline", firstItems);
+      // Either the tool refused it, or the model declined to send a credential at all.
+      const secretCalls = firstItems.filter(
         (item) =>
           item.type === "tool_call" &&
           /remember/.test(item.name) &&
-          JSON.stringify(item).includes("secret"),
+          JSON.stringify(item.detail).includes("ghp_"),
       );
-      expect(refused).toBe(true);
+      expect(secretCalls.every((item) => JSON.stringify(item).includes('"secret"'))).toBe(true);
+      // The same validation behind the tool, through memory.save.
+      await expect(
+        client.saveMemory({
+          scope: "project",
+          agentId: first.id,
+          text: "CI deploy token is ghp_abcdefghijklmnopqrstuvwxyzABCDEFGHIJ12",
+        }),
+      ).rejects.toMatchObject({ code: "secret" });
 
       // A41.2
       const second = await client.createAgent({ ...CLAUDE, cwd: cwdA, title: "memory-a2" });
@@ -152,6 +162,7 @@ describe.runIf(ENABLED)("spec 41 memory on real Claude", () => {
         pnpmMemory: pnpm,
         secondAnswer: lastAssistantText(secondItems),
         thirdCards,
+        secretToolCalls: secretCalls.length,
         turnsStarted,
         sentTurns: sentTurns.count,
       });
@@ -170,7 +181,7 @@ describe.runIf(ENABLED)("spec 41 memory on real Claude", () => {
 const SEEDED_TURNS = 1_000;
 const FORK_STEP = 500;
 const FILLER =
-  "Context for this step: the build pipeline compiles the protocol package first, then the client, then the daemon, and each stage writes declarations that the next stage reads; when a stage is stale the type checker reports missing modules that are not really missing.";
+  "Context for this step: the build pipeline compiles the protocol package first, then the client, then the daemon, and each stage writes declarations that the next stage reads; when a stage is stale the type checker reports missing modules that are not really missing. Rebuilding the owning stack before diagnosing such errors saves an afternoon of chasing phantom type mismatches across workspaces.";
 
 function codeWord(step: number): string {
   return `CW${step.toString(36).toUpperCase()}${((step * 7919) % 9973).toString(36).toUpperCase()}`;
@@ -182,10 +193,19 @@ function seedTranscript(input: { templatePath: string; targetPath: string; sessi
     .split("\n")
     .filter((line) => line.trim())
     .map((line) => JSON.parse(line) as Record<string, unknown>);
-  const userTemplate = entries.find(
-    (entry) =>
-      entry.type === "user" && typeof (entry.message as { content?: unknown }).content === "string",
-  );
+  // The prompt the template agent was sent: a user entry carrying text, not a tool result.
+  const userTemplate = entries.find((entry) => {
+    if (entry.type !== "user" || entry.isMeta) return false;
+    const content = (entry.message as { content?: unknown }).content;
+    if (typeof content === "string") return content.includes("ready");
+    return (
+      Array.isArray(content) &&
+      content.some(
+        (block: { type?: string; text?: string }) =>
+          block.type === "text" && block.text?.includes("ready"),
+      )
+    );
+  });
   const assistantTemplate = entries.find((entry) => entry.type === "assistant");
   if (!userTemplate || !assistantTemplate) throw new Error("Template session has no turn");
   const lines: string[] = [];
@@ -321,7 +341,14 @@ describe.runIf(ENABLED)("spec 41 fast fork on real Claude", () => {
         "What was the code word in step 3? Reply in one line.",
       );
 
+      const usageOf = async (agentId: string) =>
+        (await client.fetchAgent(agentId))?.agent.lastUsage ?? null;
       const result = {
+        usage: {
+          parentNormalTurn: await usageOf(parent.id),
+          beforeFork: await usageOf(oldAgent.id),
+          afterFork: await usageOf(forkId),
+        },
         transcriptChars,
         approxTranscriptTokens: Math.round(transcriptChars / 4),
         timelineEntries,
