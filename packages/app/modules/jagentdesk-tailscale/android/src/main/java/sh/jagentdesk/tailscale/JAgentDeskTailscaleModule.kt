@@ -111,6 +111,9 @@ class JAgentDeskTailscaleModule : Module() {
     }
 
     Function("signNonce") { nonce: String ->
+      // Starting or resetting a Tailscale login replaces the bridge with one that
+      // has not loaded the device key yet; an empty signature would fail the hello.
+      bridge.prepareDeviceIdentity(stateDirectory().absolutePath)
       bridge.signNonce(nonce)
     }
   }

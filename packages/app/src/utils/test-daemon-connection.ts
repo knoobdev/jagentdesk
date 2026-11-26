@@ -6,7 +6,10 @@ import {
 } from "@jagentdesk/client/internal/daemon-client-transport";
 import { isNative } from "@/constants/platform";
 import { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
-import type { DaemonClientConfig } from "@jagentdesk/client/internal/daemon-client";
+import type {
+  DaemonClientConfig,
+  DaemonConnectStage,
+} from "@jagentdesk/client/internal/daemon-client";
 import type {
   DirectPipeHostConnection,
   DirectSocketHostConnection,
@@ -28,6 +31,8 @@ import { directTcpClientConfig } from "@/runtime/direct-tcp-client-config";
 
 export interface DaemonProbeClient {
   readonly lastError: string | null;
+  /** How far the attempt got (`DaemonClient.connectStage`). */
+  readonly connectStage?: DaemonConnectStage;
   connect(): Promise<void>;
   close(): Promise<void>;
   getLastServerInfoMessage(): { serverId: string; hostname: string | null } | null;
@@ -85,6 +90,25 @@ function pickBestReason(reason: string | null, lastError: string | null): string
   if (reason) return reason;
   if (lastError) return lastError;
   return "Unable to connect";
+}
+
+const TIMEOUT_STAGE_MESSAGES: Record<DaemonConnectStage, string> = {
+  connecting: "Connection timed out before the connection to the host opened.",
+  opened: "Connection timed out: the host did not ask this device to sign in.",
+  challenged: "Connection timed out: this device did not answer the host's sign-in challenge.",
+  signing: "Connection timed out while this device's key was signing in.",
+  hello_sent: "Connection timed out waiting for the host to accept this device.",
+};
+
+/** Says where a timed-out attempt stopped, and the error behind it when there was one. */
+export function describeConnectTimeout(client: {
+  connectStage?: DaemonConnectStage;
+  lastError: string | null;
+}): string {
+  const stage = client.connectStage ? TIMEOUT_STAGE_MESSAGES[client.connectStage] : null;
+  const lastError = normalizeNonEmptyString(client.lastError);
+  const base = stage ?? "Connection timed out";
+  return lastError && lastError !== "Connection timed out" ? `${base} (${lastError})` : base;
 }
 
 function isIncorrectPasswordFailure(input: {
@@ -315,11 +339,14 @@ export function connectAndProbe(
       };
 
       timer = setTimeout(() => {
+        // Read before close(): closing resets nothing here, but it may record its own error.
+        const message = describeConnectTimeout(client);
+        const lastError = client.lastError ?? null;
         void client.close().catch(() => undefined);
         rejectOnce(
-          new DaemonConnectionTestError("Connection timed out", {
+          new DaemonConnectionTestError(message, {
             reason: "Connection timed out",
-            lastError: client.lastError ?? null,
+            lastError,
           }),
         );
       }, timeoutMs);
