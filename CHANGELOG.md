@@ -26,6 +26,8 @@ A fix release for v0.10.0. Full notes: [docs/releases/v0.10.1.md](docs/releases/
   through the relay, with Tailscale optional (ADR-0056).
 - Bots: searchable Provider and Model pickers, slug from name, in-app help (empty-state card, field hints,
   How to ask, How bots work).
+- Full-width pages with one 32 px margin, a description line on every page, 14 px sidebar/buttons/menus, Tools
+  open by default under the main menu.
 - 44 px rows in History, Docker, Kubernetes, Databases, SSH servers, Schedules and bot items.
 - iOS IPA built with Xcode 26.
 
