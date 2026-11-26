@@ -37,19 +37,27 @@ describe("timeline snapshot restore", () => {
   test("a restored timeline pages and merges later rows exactly like the one it was taken from", () => {
     const live = new InMemoryAgentTimelineStore();
     live.initialize("agent", { epoch: "epoch-1" });
-    live.append("agent", { type: "user_message", text: "go", messageId: "u1" }, { turnId: "t1" });
-    live.append("agent", { type: "reasoning", text: "Think" }, { turnId: "t1" });
-    live.append("agent", { type: "reasoning", text: "ing" }, { turnId: "t1" });
-    live.append("agent", tool("running"), { turnId: "t1" });
-    live.append("agent", { type: "assistant_message", text: "Hel" }, { turnId: "t1" });
+    let clock = 0;
+    // Fixed timestamps: the copies below append at different instants.
+    const at = () => ({
+      turnId: "t1",
+      timestamp: new Date(Date.UTC(2026, 0, 1, 0, 0, clock++)).toISOString(),
+    });
+    live.append("agent", { type: "user_message", text: "go", messageId: "u1" }, at());
+    live.append("agent", { type: "reasoning", text: "Think" }, at());
+    live.append("agent", { type: "reasoning", text: "ing" }, at());
+    live.append("agent", tool("running"), at());
+    live.append("agent", { type: "assistant_message", text: "Hel" }, at());
 
     const restored = new InMemoryAgentTimelineStore();
     restored.restore("agent", JSON.parse(JSON.stringify(live.snapshot("agent"))));
 
     // Both receive the rest of the turn: a chunk continuing the reply and the tool's completion.
+    const rest = clock;
     for (const store of [live, restored]) {
-      store.append("agent", { type: "assistant_message", text: "lo" }, { turnId: "t1" });
-      store.append("agent", tool("completed"), { turnId: "t1" });
+      clock = rest;
+      store.append("agent", { type: "assistant_message", text: "lo" }, at());
+      store.append("agent", tool("completed"), at());
       store.stampTurnMetrics("agent", [{ label: "Duration", value: "4s" }], {
         turnId: "t1",
       });
@@ -211,6 +219,19 @@ describe("reopening a long Claude agent", () => {
     });
     expect(first.subagents).toHaveLength(2);
     expect(existsSync(path.join(root, "home", "agent-timelines", `${AGENT_ID}.json`))).toBe(true);
+
+    // Claude Code appends bookkeeping whenever a resumed session starts or exits, for example
+    // when the app lists the agent's slash commands. That is not a change of history.
+    appendFileSync(
+      history.transcriptPath,
+      `${[
+        { type: "tools-used", tools: ["Bash"], sessionId: history.sessionId },
+        { type: "mode", mode: "normal", sessionId: history.sessionId },
+        { type: "cost-state", sessionId: history.sessionId, totalCostUSD: 0, totalDuration: 975 },
+      ]
+        .map((record) => JSON.stringify(record))
+        .join("\n")}\n`,
+    );
 
     // A restore keeps the epoch, so the cursors a client holds stay valid. A replay mints one.
     const reopened = await openInFreshDaemon();

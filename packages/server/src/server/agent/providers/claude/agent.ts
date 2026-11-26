@@ -59,7 +59,11 @@ import {
 } from "./model-manifest.js";
 import { expandTilde } from "../../../../utils/path.js";
 import { parsePartialJsonObject } from "./partial-json.js";
-import { withClaudeReplayHistory, type ClaudeReplayHistory } from "./transcript-history.js";
+import {
+  readClaudeTranscriptTimelineMarker,
+  withClaudeReplayHistory,
+  type ClaudeReplayHistory,
+} from "./transcript-history.js";
 import { ClaudeSidechainTracker } from "./sidechain-tracker.js";
 import { readClaudeSubagentHandback } from "./subagent-handback.js";
 import { ClaudeTaskState } from "./task-state.js";
@@ -5909,7 +5913,11 @@ class ClaudeAgentSession implements AgentSession {
     this.historyPending = false;
   }
 
-  /** The transcript and its subagent transcripts, by size and modification time. */
+  /**
+   * Where the transcript's last timeline record ends, and the subagent transcripts by size and
+   * modification time. Claude Code appends bookkeeping to the transcript whenever a resumed
+   * session starts or exits; that must not count as a change of history.
+   */
   async readHistoryVersion(): Promise<string | null> {
     const sessionId = this.claudeSessionId;
     if (!sessionId) return null;
@@ -5922,6 +5930,9 @@ class ClaudeAgentSession implements AgentSession {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return `${sessionId}:none`;
       throw error;
     }
+    const marker =
+      (await readClaudeTranscriptTimelineMarker(historyPath)) ??
+      `${transcript.size}:${transcript.mtimeMs}`;
     const subagentsDir = path.join(path.dirname(historyPath), sessionId, "subagents");
     let subagentFiles = 0;
     let subagentBytes = 0;
@@ -5936,14 +5947,7 @@ class ClaudeAgentSession implements AgentSession {
         subagentMtimeMs = Math.max(subagentMtimeMs, stats.mtimeMs);
       }),
     );
-    return [
-      sessionId,
-      transcript.size,
-      transcript.mtimeMs,
-      subagentFiles,
-      subagentBytes,
-      subagentMtimeMs,
-    ].join(":");
+    return [sessionId, marker, subagentFiles, subagentBytes, subagentMtimeMs].join(":");
   }
 
   private async loadPersistedHistory(sessionId: string): Promise<void> {

@@ -15,9 +15,11 @@ A months-long agent has tens of megabytes of provider history, and replaying all
 took 12–50 s on a busy daemon. So the daemon keeps a snapshot of each agent's projected rows,
 epoch and provider-subagent cards in `$JAGENTDESK_HOME/agent-timelines/{agentId}.json`
 (`packages/server/src/server/agent/agent-timeline-snapshots.ts`), with a history version the
-provider reports (`AgentSession.readHistoryVersion`: the Claude transcript's and subagent
-transcripts' size and mtime, the Codex rollout's, OpenCode's session update time and newest
-message).
+provider reports (`AgentSession.readHistoryVersion`): where the Claude transcript's last
+timeline record ends plus the subagent transcripts' size and mtime, the Codex rollout's size and
+mtime, OpenCode's session update time and newest message. The Claude version skips trailing
+bookkeeping because Claude Code appends `cost-state`, `mode` and `tools-used` records every time
+a resumed session starts or exits, including the slash-command lookup the app runs on open.
 
 - Opening an agent restores the snapshot when the provider still reports the same version. The
   epoch is restored too, so cursors and cached ranges a client holds stay valid. Otherwise the
