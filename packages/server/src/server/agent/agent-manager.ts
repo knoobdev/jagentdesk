@@ -71,8 +71,24 @@ import {
   type AgentOptionControl,
 } from "./agent-sdk-types.js";
 import { buildArchivedAgentRecord, type ArchivedStoredAgentRecord } from "./agent-archive.js";
-import { buildAgentForkContextAttachment } from "./activity-curator.js";
-import type { AgentAttachment } from "@jagentdesk/protocol/messages";
+import type { StoredProviderSession } from "./agent-storage.js";
+import { SessionLedgerStore } from "./session-ledger/ledger-store.js";
+import { composeSystemPromptParts } from "./system-prompt.js";
+import {
+  SESSION_LEDGER_INSTRUCTION,
+  SessionContinuity,
+} from "./session-ledger/session-continuity.js";
+import { handoffBudgetTokens } from "./session-ledger/ledger-render.js";
+import type { LedgerTimelineRow } from "./session-ledger/ledger-builder.js";
+import type { LedgerMergeResult } from "./session-ledger/ledger-merge.js";
+import type {
+  HandoffReason,
+  LedgerHandoffRecord,
+  LedgerNote,
+  LedgerOpenItem,
+  SessionLedgerUpdateInput,
+} from "./session-ledger/ledger-schema.js";
+import { getAgentProviderDefinition } from "@jagentdesk/protocol/provider-manifest";
 
 import { sanitizeAgentMetrics, withModelMetric } from "./agent-metrics.js";
 import type { StoredAgentRecord, AgentStorage } from "./agent-storage.js";
@@ -414,6 +430,14 @@ export interface AgentManagerOptions {
   jagentdeskToolCatalogFactory?: JAgentDeskToolCatalogFactory;
   appendSystemPrompt?: string;
   operatorContext?: string;
+  /** Session ledgers (spec 40 §2); provider switches hand off through them. */
+  sessionLedger?: SessionLedgerStore;
+  resolveProviderLabel?: (provider: AgentProvider) => string;
+  /** Context window of a model from the provider catalog, used to size handoffs. */
+  resolveModelContextWindow?: (input: {
+    provider: AgentProvider;
+    model: string | null;
+  }) => Promise<number | null>;
   agentStreamCoalesceWindowMs?: number;
   rescueTimeouts?: AgentManagerRescueTimeouts;
   beforeSteerUnavailableFallback?: (input: {
@@ -434,6 +458,61 @@ function prependTurnContext(
   if (!context) return prompt;
   if (typeof prompt === "string") return `${context}\n\n${prompt}`;
   return [{ type: "text", text: context }, ...prompt];
+}
+
+export interface SwitchAgentProviderOptions {
+  /** A running turn is waited for by default; "interrupt" stops it first. */
+  whenBusy?: "wait" | "interrupt";
+  reason?: "manual" | "failover";
+}
+
+export interface SwitchAgentProviderResult {
+  mode: "resume" | "handoff";
+  fromProvider: AgentProvider;
+  toProvider: AgentProvider;
+  model: string | null;
+  handoffId: string | null;
+  sessionId: string | null;
+}
+
+export interface SessionLedgerProviderSession {
+  provider: string;
+  model: string | null;
+  sessionId: string | null;
+  turns: number;
+  lastUsedAt: string;
+  current: boolean;
+}
+
+export interface SessionLedgerView {
+  agentId: string;
+  markdown: string;
+  decisions: LedgerNote[];
+  openItems: LedgerOpenItem[];
+  nextStep: LedgerNote | null;
+  handoffs: LedgerHandoffRecord[];
+  providerSessions: SessionLedgerProviderSession[];
+}
+
+function providerLabel(provider: string): string {
+  try {
+    return getAgentProviderDefinition(provider).label;
+  } catch {
+    return provider;
+  }
+}
+
+function createSessionContinuity(options: AgentManagerOptions): SessionContinuity {
+  if (options.sessionLedger) return new SessionContinuity(options.sessionLedger);
+  const registry = options.registry;
+  const resolvePath = registry
+    ? (agentId: string) => registry.ledgerPathFor(agentId)
+    : async () => null;
+  return new SessionContinuity(new SessionLedgerStore(resolvePath, options.logger));
+}
+
+function countUserTurns(rows: readonly LedgerTimelineRow[], afterSeq: number): number {
+  return rows.filter((row) => row.seq > afterSeq && row.item.type === "user_message").length;
 }
 
 function stripSteerOptions(options?: AgentSteerOptions): AgentRunOptions | undefined {
@@ -1055,12 +1134,9 @@ export class AgentManager {
 
   private readonly onUsageBilled?: AgentManagerOptions["onUsageBilled"];
 
-  /**
-   * Chat-history snapshot staged by a mid-conversation provider switch, keyed by
-   * agentId. Consumed (and cleared) when the next user turn seeds the new
-   * provider with the prior conversation.
-   */
-  private readonly pendingProviderSwitchSeed = new Map<string, AgentAttachment>();
+  private readonly continuity: SessionContinuity;
+  private readonly resolveModelContextWindow?: AgentManagerOptions["resolveModelContextWindow"];
+  private readonly resolveProviderLabel?: AgentManagerOptions["resolveProviderLabel"];
 
   /**
    * In-flight host tool permission requests, keyed by requestId. Resolved when
@@ -1090,6 +1166,9 @@ export class AgentManager {
     this.appendSystemPrompt = options.appendSystemPrompt ?? "";
     this.setOperatorContext(options.operatorContext);
     this.logger = options.logger.child({ module: "agent", component: "agent-manager" });
+    this.continuity = createSessionContinuity(options);
+    this.resolveModelContextWindow = options.resolveModelContextWindow;
+    this.resolveProviderLabel = options.resolveProviderLabel;
     this.rescueTimeouts = {
       reloadSessionCloseMs:
         options.rescueTimeouts?.reloadSessionCloseMs ?? RELOAD_SESSION_CLOSE_TIMEOUT_MS,
@@ -2537,56 +2616,66 @@ export class AgentManager {
   }
 
   /**
-   * Switch a live agent to a DIFFERENT provider mid-conversation while keeping
-   * its history. A native provider session is not portable, so we snapshot the
-   * timeline as a provider-agnostic chat-history attachment, stand up a fresh
-   * session on the new provider (create, not resume — it has no handle), keep
-   * the existing timeline, and stage the snapshot so the NEXT user turn seeds
-   * the new provider with the prior conversation. A same-provider call is just a
-   * model change.
+   * Switch a live agent to a different provider mid-conversation (spec 40 §3). The agent keeps its
+   * id, timeline and workspace. A provider that ran this agent before resumes its own native
+   * session and gets only what changed since it left; a new provider gets a fresh session and the
+   * session ledger plus the last turns, fitted to 60 % of its model's context window. Either text
+   * is staged and rides on the next turn. A same-provider call is a model change.
    */
   async switchAgentProvider(
     agentId: string,
     provider: AgentProvider,
     modelId: string | null,
-  ): Promise<void> {
+    options: SwitchAgentProviderOptions = {},
+  ): Promise<SwitchAgentProviderResult | null> {
     if (this.requireSessionAgent(agentId).provider === provider) {
       await this.setAgentModel(agentId, modelId);
-      return;
+      return null;
     }
-    await this.trackAgentRegistrationOperation(
-      this.switchAgentProviderInternal(agentId, provider, modelId),
+    if (this.hasInFlightRun(agentId)) {
+      if (options.whenBusy === "interrupt") {
+        await this.cancelAgentRunBefore(agentId, "reload");
+      } else {
+        await this.waitForRunToSettle(agentId);
+      }
+    }
+    return this.trackAgentRegistrationOperation(
+      this.switchAgentProviderInternal(agentId, provider, modelId, options),
     );
+  }
+
+  /** Waits for the running turn to end; a pending permission must be answered first. */
+  private async waitForRunToSettle(agentId: string): Promise<void> {
+    while (this.hasInFlightRun(agentId)) {
+      const result = await this.waitForAgentEvent(agentId);
+      if (result.permission) {
+        throw new Error(
+          `Agent ${agentId} is waiting for a permission; answer it or switch with whenBusy "interrupt"`,
+        );
+      }
+    }
   }
 
   private async switchAgentProviderInternal(
     agentId: string,
     provider: AgentProvider,
     modelId: string | null,
-  ): Promise<void> {
+    options: SwitchAgentProviderOptions,
+  ): Promise<SwitchAgentProviderResult> {
     this.assertAcceptingAgentRegistrations();
-    let existing = this.requireSessionAgent(agentId);
-    if (this.hasInFlightRun(agentId)) {
-      await this.cancelAgentRunBefore(agentId, "reload");
-      existing = this.requireSessionAgent(agentId);
-    }
+    const existing = this.requireSessionAgent(agentId);
+    const rows = this.fetchTimeline(agentId, { direction: "tail", limit: 0 }).rows;
+    const record = await this.registry?.get(agentId);
+    const providerSessions = this.captureOutgoingProviderSession(existing, rows, record ?? null);
+    const target = providerSessions[provider] ?? null;
 
-    // Snapshot the conversation so the new provider opens with full context.
-    const timeline = this.fetchTimeline(agentId, { direction: "tail", limit: 0 });
-    const seed = buildAgentForkContextAttachment({
-      rows: timeline.rows,
-      agentTitle: existing.config.title ?? null,
-      cwd: existing.config.cwd,
-    });
-
-    // Provider-specific selections (mode/thinking/features/extra) do not map
-    // across providers — reset them and let the new provider pick its defaults.
-    const normalizedModelId =
-      typeof modelId === "string" && modelId.trim().length > 0 ? modelId : undefined;
+    // Provider-specific selections (mode/thinking/options/extra) do not map across providers;
+    // the new provider starts from its defaults.
+    const normalizedModelId = modelId?.trim() ? modelId : undefined;
     const newConfig = {
       ...existing.config,
       provider,
-      model: normalizedModelId,
+      model: normalizedModelId ?? target?.model ?? undefined,
       modeId: undefined,
       thinkingOptionId: undefined,
       providerOptions: undefined,
@@ -2603,9 +2692,14 @@ export class AgentManager {
       { workspaceId: existing.workspaceId },
     );
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
-
-    // The new provider has no native session handle → create a fresh session.
-    const session = await client.createSession(providerLaunchConfig, launchContext);
+    const opened = await this.openSwitchedSession({
+      agentId,
+      client,
+      target,
+      config: providerLaunchConfig,
+      launchContext,
+    });
+    const session = opened.session;
     await this.requireExternalMcpSupport(session, providerLaunchConfig, launchContext);
 
     let handedToRegistration = false;
@@ -2619,6 +2713,10 @@ export class AgentManager {
       }
 
       handedToRegistration = true;
+      const resumedPersistence =
+        opened.mode === "resume" && target
+          ? { persistence: session.describePersistence() ?? target.persistence }
+          : {};
       const registered = await this.registerSession(session, storedConfig, agentId, {
         launchedOptions: this.launchOptionsFor({ client, own: storedConfig.providerOptions }),
         metadata: existing.metadata,
@@ -2628,17 +2726,23 @@ export class AgentManager {
         createdAt: existing.createdAt,
         updatedAt: existing.updatedAt,
         lastUserMessageAt: existing.lastUserMessageAt,
-        // Keep the existing timeline; the new provider has no history to stream.
+        // Keep the existing timeline; the provider's own history is not replayed into it.
         historyPrimed: true,
+        ...resumedPersistence,
         lastUsage: existing.lastUsage,
         usageTotals: existing.usageTotals,
         lastError: existing.lastError,
         attention: existing.attention,
       });
-      // The next user turn carries the prior conversation to the new provider.
-      this.pendingProviderSwitchSeed.set(agentId, seed.attachment);
-      this.touchUpdatedAt(registered);
-      this.emitState(registered);
+      return await this.completeProviderSwitch({
+        registered,
+        rows,
+        fromProvider: existing.provider,
+        mode: opened.mode,
+        target,
+        providerSessions,
+        reason: options.reason ?? "manual",
+      });
     } finally {
       if (!handedToRegistration) {
         await this.closeUnregisteredSession(session);
@@ -2646,15 +2750,196 @@ export class AgentManager {
     }
   }
 
-  /**
-   * Take (and clear) any chat-history seed staged by a mid-conversation provider
-   * switch. Returned as an attachment to prepend to the next user turn's prompt.
-   */
-  consumeProviderSwitchSeed(agentId: string): AgentAttachment | null {
-    const seed = this.pendingProviderSwitchSeed.get(agentId);
-    if (!seed) return null;
-    this.pendingProviderSwitchSeed.delete(agentId);
-    return seed;
+  /** Records the outgoing provider's native session so a later switch back can resume it. */
+  private captureOutgoingProviderSession(
+    existing: ManagedAgent,
+    rows: readonly LedgerTimelineRow[],
+    record: StoredAgentRecord | null,
+  ): Record<string, StoredProviderSession> {
+    const providerSessions: Record<string, StoredProviderSession> = {
+      ...record?.providerSessions,
+    };
+    if (!existing.persistence) return providerSessions;
+    const enteredAtSeq = record?.providerEnteredAtSeq ?? 0;
+    const previous = providerSessions[existing.provider];
+    providerSessions[existing.provider] = {
+      persistence: existing.persistence,
+      model: existing.config.model ?? existing.runtimeInfo?.model ?? null,
+      lastTimelineSeq: this.timelineStore.getHead(existing.id).seq,
+      enteredAtSeq,
+      turns: (previous?.turns ?? 0) + countUserTurns(rows, enteredAtSeq),
+      lastUsedAt: new Date().toISOString(),
+    };
+    return providerSessions;
+  }
+
+  /** Resumes the target provider's own session when it has one, otherwise starts a new one. */
+  private async openSwitchedSession(input: {
+    agentId: string;
+    client: AgentClient;
+    target: StoredProviderSession | null;
+    config: AgentSessionConfig;
+    launchContext: AgentLaunchContext;
+  }): Promise<{ session: AgentSession; mode: "resume" | "handoff" }> {
+    const { client, target, config, launchContext } = input;
+    if (target) {
+      try {
+        const session = await client.resumeSession(target.persistence, config, launchContext);
+        return { session, mode: "resume" };
+      } catch (error) {
+        this.logger.warn(
+          { err: error, agentId: input.agentId, sessionId: target.persistence.sessionId },
+          "Provider session could not be resumed; starting a new one with a full handoff",
+        );
+      }
+    }
+    return { session: await client.createSession(config, launchContext), mode: "handoff" };
+  }
+
+  private async completeProviderSwitch(input: {
+    registered: ManagedAgent;
+    rows: readonly LedgerTimelineRow[];
+    fromProvider: AgentProvider;
+    mode: "resume" | "handoff";
+    target: StoredProviderSession | null;
+    providerSessions: Record<string, StoredProviderSession>;
+    reason: "manual" | "failover";
+  }): Promise<SwitchAgentProviderResult> {
+    const { registered, fromProvider, mode, reason } = input;
+    const agentId = registered.id;
+    const toProvider = registered.provider;
+    const model = registered.config.model ?? registered.runtimeInfo?.model ?? null;
+    const handoff = await this.stageProviderHandoff({
+      agentId,
+      cwd: registered.cwd,
+      rows: input.rows,
+      fromProvider,
+      toProvider,
+      model,
+      mode: mode === "resume" ? "delta" : "handoff",
+      sinceSeq: mode === "resume" ? input.target?.lastTimelineSeq : undefined,
+      reason,
+    });
+    const target = `${this.labelFor(toProvider)}${model ? ` · ${model}` : ""}`;
+    const appended = await this.appendTimelineItem(agentId, {
+      type: "notification",
+      level: "info",
+      message:
+        reason === "failover"
+          ? `${this.labelFor(fromProvider)} hit its usage limit — switched to ${target}`
+          : `Switched to ${target}`,
+      providerSwitch: {
+        fromProvider,
+        toProvider,
+        model,
+        reason,
+        mode,
+        handoffId: handoff?.id ?? null,
+      },
+    });
+    await this.registry?.updateProviderSessions(agentId, () => ({
+      providerSessions: input.providerSessions,
+      providerEnteredAtSeq: appended.seq,
+    }));
+    this.touchUpdatedAt(registered);
+    this.emitState(registered);
+    return {
+      mode,
+      fromProvider,
+      toProvider,
+      model,
+      handoffId: handoff?.id ?? null,
+      sessionId: registered.persistence?.sessionId ?? null,
+    };
+  }
+
+  private labelFor(provider: AgentProvider): string {
+    return this.resolveProviderLabel?.(provider) ?? providerLabel(provider);
+  }
+
+  private async stageProviderHandoff(input: {
+    agentId: string;
+    cwd: string;
+    rows: readonly LedgerTimelineRow[];
+    fromProvider: AgentProvider;
+    toProvider: AgentProvider;
+    model: string | null;
+    mode: "handoff" | "delta";
+    sinceSeq?: number;
+    reason: HandoffReason;
+  }): Promise<LedgerHandoffRecord | null> {
+    try {
+      const contextWindow = await this.resolveModelContextWindow?.({
+        provider: input.toProvider,
+        model: input.model,
+      });
+      return await this.continuity.stageHandoff({
+        ...input,
+        fromProvider: this.labelFor(input.fromProvider),
+        toProvider: this.labelFor(input.toProvider),
+        budgetTokens: handoffBudgetTokens(contextWindow),
+      });
+    } catch (error) {
+      this.logger.error({ err: error, agentId: input.agentId }, "Failed to stage provider handoff");
+      return null;
+    }
+  }
+
+  /** Merges notes the agent wrote with `update_session_ledger`, anchored to its latest seq. */
+  async updateSessionLedger(
+    agentId: string,
+    update: SessionLedgerUpdateInput,
+  ): Promise<LedgerMergeResult> {
+    this.requireAgent(agentId);
+    return this.continuity.updateNotes({
+      agentId,
+      update,
+      seq: this.timelineStore.getHead(agentId).seq,
+    });
+  }
+
+  async getSessionLedger(agentId: string): Promise<SessionLedgerView> {
+    const agent = this.requireAgent(agentId);
+    const rows = this.fetchTimeline(agentId, { direction: "tail", limit: 0 }).rows;
+    const [ledger, markdown, record] = await Promise.all([
+      this.continuity.read(agentId),
+      this.continuity.renderMarkdown({
+        agentId,
+        cwd: agent.cwd,
+        rows,
+        title: agent.config.title ?? null,
+      }),
+      this.registry?.get(agentId),
+    ]);
+    const enteredAtSeq = record?.providerEnteredAtSeq ?? 0;
+    const sessions: SessionLedgerProviderSession[] = Object.entries(record?.providerSessions ?? {})
+      .filter(([provider]) => provider !== agent.provider)
+      .map(([provider, entry]) => ({
+        provider,
+        model: entry.model ?? null,
+        sessionId: entry.persistence.sessionId,
+        turns: entry.turns ?? 0,
+        lastUsedAt: entry.lastUsedAt,
+        current: false,
+      }));
+    const previousCurrent = record?.providerSessions?.[agent.provider];
+    sessions.unshift({
+      provider: agent.provider,
+      model: agent.config.model ?? agent.runtimeInfo?.model ?? null,
+      sessionId: agent.persistence?.sessionId ?? null,
+      turns: (previousCurrent?.turns ?? 0) + countUserTurns(rows, enteredAtSeq),
+      lastUsedAt: (agent.lastUserMessageAt ?? agent.updatedAt).toISOString(),
+      current: true,
+    });
+    return {
+      agentId,
+      markdown,
+      decisions: ledger.decisions,
+      openItems: ledger.openItems,
+      nextStep: ledger.nextStep,
+      handoffs: ledger.handoffs,
+      providerSessions: sessions,
+    };
   }
 
   async setAgentModel(agentId: string, modelId: string | null): Promise<void> {
@@ -3289,14 +3574,14 @@ export class AgentManager {
   }): Promise<string | null> {
     const { agent, agentId, pendingRun, prompt, options, promptStart } = params;
     try {
-      const context = await this.turnContextProvider?.(agentId);
-      const enriched = prependTurnContext(prompt, context?.text);
+      const { enriched, context, handoff } = await this.buildTurnPrompt(agent, prompt);
       if (promptStart?.admit?.() === false) {
         this.runs.settleForegroundRun(agentId, pendingRun.token);
         return null;
       }
       const result = await agent.session.startTurn(enriched, options);
       context?.accepted();
+      if (handoff) await this.clearPendingHandoff(agentId, handoff.id);
       if (pendingRun.settled) {
         throw new Error(`Agent ${agentId} run was canceled before its turn started`);
       }
@@ -3354,6 +3639,44 @@ export class AgentManager {
         this.runs.settleForegroundRun(agentId, pendingRun.token);
       }
       throw error;
+    }
+  }
+
+  private async buildTurnPrompt(
+    agent: ActiveManagedAgent,
+    prompt: AgentPromptInput,
+  ): Promise<{
+    enriched: AgentPromptInput;
+    context: { text: string; accepted: () => void } | null | undefined;
+    handoff: { id: string; text: string } | null;
+  }> {
+    const context = await this.turnContextProvider?.(agent.id);
+    const handoff = await this.preparePendingHandoff(agent);
+    const enriched = prependTurnContext(prependTurnContext(prompt, handoff?.text), context?.text);
+    return { enriched, context, handoff };
+  }
+
+  /**
+   * The handoff a provider switch staged for this turn, if any. Also records the ledger's git base
+   * the first time an agent runs. Ledger trouble never blocks a turn.
+   */
+  private async preparePendingHandoff(
+    agent: ActiveManagedAgent,
+  ): Promise<{ id: string; text: string } | null> {
+    try {
+      await this.continuity.ensureGitBase(agent.id, agent.cwd);
+      return await this.continuity.peekPendingHandoff(agent.id);
+    } catch (error) {
+      this.logger.warn({ err: error, agentId: agent.id }, "Session ledger unavailable for turn");
+      return null;
+    }
+  }
+
+  private async clearPendingHandoff(agentId: string, handoffId: string): Promise<void> {
+    try {
+      await this.continuity.clearPendingHandoff(agentId, handoffId);
+    } catch (error) {
+      this.logger.warn({ err: error, agentId }, "Failed to clear staged handoff");
     }
   }
 
@@ -6571,23 +6894,32 @@ export class AgentManager {
       purpose: options.purpose,
       resolveDefaultModel: options.resolveDefaultModel,
     });
+    const mcpBaseUrl =
+      this.jagentdeskToolsEnabled &&
+      isJAgentDeskToolPolicyEnabled(this.resolveJAgentDeskToolPolicy(storedConfig.provider))
+        ? this.mcpBaseUrl
+        : null;
     const launchConfig = this.applyDaemonAppendSystemPrompt(
       withRuntimeJAgentDeskMcpServer({
         config: storedConfig,
         agentId,
-        mcpBaseUrl:
-          this.jagentdeskToolsEnabled &&
-          isJAgentDeskToolPolicyEnabled(this.resolveJAgentDeskToolPolicy(storedConfig.provider))
-            ? this.mcpBaseUrl
-            : null,
+        mcpBaseUrl,
         mcpAuthToken: this.mcpAuthToken,
       }),
+      { sessionLedgerTool: Boolean(mcpBaseUrl) },
     );
     return { storedConfig, launchConfig };
   }
 
-  private applyDaemonAppendSystemPrompt(config: AgentSessionConfig): AgentSessionConfig {
-    const daemonAppendSystemPrompt = this.appendSystemPrompt.trim();
+  private applyDaemonAppendSystemPrompt(
+    config: AgentSessionConfig,
+    options: { sessionLedgerTool?: boolean } = {},
+  ): AgentSessionConfig {
+    const daemonAppendSystemPrompt =
+      composeSystemPromptParts(
+        this.appendSystemPrompt,
+        options.sessionLedgerTool ? SESSION_LEDGER_INSTRUCTION : undefined,
+      ) ?? "";
     const operatorContext = this.operatorContext.trim();
     const next = { ...config };
     delete next.daemonAppendSystemPrompt;

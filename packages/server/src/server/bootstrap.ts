@@ -1106,6 +1106,9 @@ export async function createJAgentDeskDaemon(
   const initialAgentManagerState = providerSnapshotManager.getAgentManagerProviderState();
   const agentManager: AgentManager = new AgentManager({
     pluginLifecycle: pluginRuntime,
+    resolveProviderLabel: (provider) => providerSnapshotManager.getProviderLabel(provider),
+    resolveModelContextWindow: async ({ provider, model }) =>
+      resolveSnapshotContextWindow(providerSnapshotManager.getSnapshot(), provider, model),
     resolveJAgentDeskToolPolicy: (provider) =>
       resolveJAgentDeskToolPolicy(provider, daemonConfigStore.get().providers),
     pluginAgentTools: pluginRuntime,
@@ -2496,4 +2499,16 @@ export function connectIdleRuntimeCleanupConfig(
 ): () => void {
   cleanup.setEnabled(store.get().idleRuntimeCleanup !== false);
   return store.onFieldChange("idleRuntimeCleanup", (value) => cleanup.setEnabled(value !== false));
+}
+
+function resolveSnapshotContextWindow(
+  entries: ReturnType<ProviderSnapshotManager["getSnapshot"]>,
+  provider: string,
+  model: string | null,
+): number | null {
+  const models = entries.find((entry) => entry.provider === provider)?.models ?? [];
+  const match =
+    (model ? models.find((entry) => entry.id === model || entry.aliases?.includes(model)) : null) ??
+    models.find((entry) => entry.isDefault);
+  return match?.contextWindowMaxTokens ?? null;
 }

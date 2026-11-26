@@ -418,9 +418,26 @@ export type AgentTimelineItem =
   | ToolCallTimelineItem
   | { type: "todo"; items: AgentTaskItem[] }
   | { type: "error"; message: string }
-  | { type: "notification"; level: "info" | "warning" | "error"; message: string }
+  | {
+      type: "notification";
+      level: "info" | "warning" | "error";
+      message: string;
+      /** Set on the row a provider switch appends (spec 40 §3). */
+      providerSwitch?: ProviderSwitchNotice;
+    }
   | CompactionTimelineItem
   | PluginTimelineItem;
+
+export interface ProviderSwitchNotice {
+  fromProvider: string;
+  toProvider: string;
+  model: string | null;
+  /** "manual" or "failover"; open string so new reasons parse on old clients. */
+  reason: string;
+  /** "resume" (native session resumed, delta sent) or "handoff" (new session, ledger sent). */
+  mode: string;
+  handoffId: string | null;
+}
 
 export type AgentStreamEvent =
   | { type: "thread_started"; sessionId: string; provider: AgentProvider }

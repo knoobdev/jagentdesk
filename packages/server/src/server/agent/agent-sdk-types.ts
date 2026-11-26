@@ -4,6 +4,8 @@ import type {
   AgentOptionToggleControl,
 } from "@jagentdesk/protocol/agent-types";
 export type { AgentOptionControl, AgentOptionSelectControl, AgentOptionToggleControl };
+import type { ProviderSwitchNotice } from "@jagentdesk/protocol/agent-types";
+export type { ProviderSwitchNotice };
 import type { AgentMessage } from "@jagentdesk/protocol/agent-message";
 import type { Options as ClaudeAgentOptions } from "@anthropic-ai/claude-agent-sdk";
 import type {
@@ -409,7 +411,13 @@ export type AgentTimelineItem =
   | ToolCallTimelineItem
   | { type: "todo"; items: AgentTaskItem[] }
   | { type: "error"; message: string }
-  | { type: "notification"; level: "info" | "warning" | "error"; message: string }
+  | {
+      type: "notification";
+      level: "info" | "warning" | "error";
+      message: string;
+      /** Set on the row a provider switch appends (spec 40 §3). */
+      providerSwitch?: ProviderSwitchNotice;
+    }
   | CompactionTimelineItem
   | PluginTimelineItem;
 

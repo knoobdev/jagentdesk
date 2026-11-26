@@ -1003,6 +1003,16 @@ export const AgentTimelineItemPayloadSchema: z.ZodType<AgentTimelineItem, unknow
     type: z.literal("notification"),
     level: z.enum(["info", "warning", "error"]),
     message: z.string(),
+    providerSwitch: z
+      .object({
+        fromProvider: z.string(),
+        toProvider: z.string(),
+        model: z.string().nullable(),
+        reason: z.string(),
+        mode: z.string(),
+        handoffId: z.string().nullable(),
+      })
+      .optional(),
   }),
   ToolCallTimelineItemPayloadSchema,
   z.object({
@@ -2192,6 +2202,12 @@ export const ProviderInstallationUpdateSubscribeRequestMessageSchema = z.object(
   requestId: z.string(),
 });
 
+export const AgentLedgerGetRequestMessageSchema = z.object({
+  type: z.literal("agent.ledger.get.request"),
+  agentId: z.string(),
+  requestId: z.string(),
+});
+
 export const ProviderUsageListRequestMessageSchema = z.object({
   type: z.literal("provider.usage.list.request"),
   requestId: z.string(),
@@ -2388,6 +2404,8 @@ export const SwitchAgentProviderRequestMessageSchema = z.object({
   agentId: z.string(),
   provider: AgentProviderSchema,
   modelId: z.string().nullable().optional(),
+  /** A running turn is waited for unless this is "interrupt". */
+  whenBusy: z.enum(["wait", "interrupt"]).optional(),
   requestId: z.string(),
 });
 
@@ -4750,6 +4768,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ProviderInstallationUpdateRequestMessageSchema,
   ProviderInstallationUpdateSubscribeRequestMessageSchema,
   ProviderUsageListRequestMessageSchema,
+  AgentLedgerGetRequestMessageSchema,
   UsageListReportsRequestMessageSchema,
   ResumeAgentRequestMessageSchema,
   ImportAgentRequestMessageSchema,
@@ -5204,6 +5223,8 @@ export const ServerInfoStatusPayloadSchema = z
         speechSettings: z.boolean().optional(),
         // COMPAT(idleRuntimeCleanupSetting): added in v0.9.59, remove gate after 2027-05-24.
         idleRuntimeCleanupSetting: z.boolean().optional(),
+        // COMPAT(crossProviderContinuity): added in v0.10.2, remove gate after 2027-05-26.
+        crossProviderContinuity: z.boolean().optional(),
         // ADR-0051: released v0.9.x apps require this optional flag; retain forever.
         "terminal-restore-modes": z.boolean().optional(),
         // COMPAT(terminalInputModeReplay): added in v0.2.6, remove gate after 2027-02-02.
@@ -8551,6 +8572,57 @@ export const ProviderUsageSchema = z.object({
   error: z.string().nullable().optional(),
 });
 
+export const SessionLedgerNoteSchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  seq: z.number(),
+  at: z.string(),
+  closedSeq: z.number().nullable().optional(),
+  closedAt: z.string().nullable().optional(),
+});
+
+export const SessionLedgerHandoffSchema = z.object({
+  id: z.string(),
+  at: z.string(),
+  seq: z.number(),
+  fromProvider: z.string(),
+  toProvider: z.string(),
+  model: z.string().nullable(),
+  mode: z.string(),
+  reason: z.string(),
+  text: z.string(),
+  estimatedTokens: z.number(),
+  budgetTokens: z.number(),
+});
+
+export const SessionLedgerProviderSessionSchema = z.object({
+  provider: z.string(),
+  model: z.string().nullable(),
+  sessionId: z.string().nullable(),
+  turns: z.number(),
+  lastUsedAt: z.string(),
+  current: z.boolean(),
+});
+
+export const SessionLedgerSchema = z.object({
+  markdown: z.string(),
+  decisions: z.array(SessionLedgerNoteSchema),
+  openItems: z.array(SessionLedgerNoteSchema),
+  nextStep: SessionLedgerNoteSchema.nullable(),
+  handoffs: z.array(SessionLedgerHandoffSchema),
+  providerSessions: z.array(SessionLedgerProviderSessionSchema),
+});
+
+export const AgentLedgerGetResponseMessageSchema = z.object({
+  type: z.literal("agent.ledger.get.response"),
+  payload: z.object({
+    requestId: z.string(),
+    agentId: z.string(),
+    ledger: SessionLedgerSchema.nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
 export const ProviderUsageListResponseMessageSchema = z.object({
   type: z.literal("provider.usage.list.response"),
   payload: z.object({
@@ -9419,6 +9491,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ProviderInstallationUpdateProgressMessageSchema,
   ProviderInstallationUpdateClearedMessageSchema,
   ProviderUsageListResponseMessageSchema,
+  AgentLedgerGetResponseMessageSchema,
   UsageListReportsResponseMessageSchema,
   UsageListReportsUpdateMessageSchema,
   ListCommandsResponseSchema,
@@ -9822,6 +9895,10 @@ export type ProviderUsageWindow = z.infer<typeof ProviderUsageWindowSchema>;
 export type ProviderUsageBalance = z.infer<typeof ProviderUsageBalanceSchema>;
 
 export type ProviderUsageDetail = z.infer<typeof ProviderUsageDetailSchema>;
+
+export type SessionLedger = z.infer<typeof SessionLedgerSchema>;
+export type SessionLedgerHandoff = z.infer<typeof SessionLedgerHandoffSchema>;
+export type AgentLedgerGetPayload = z.infer<typeof AgentLedgerGetResponseMessageSchema>["payload"];
 
 export type ProviderUsageListResponseMessage = z.infer<
   typeof ProviderUsageListResponseMessageSchema

@@ -35,7 +35,12 @@ export interface AgentConfigOperations {
 
   setOptions(agentId: string, patch: ProviderOptionsPatch): Promise<void>;
 
-  switchProvider(agentId: string, provider: AgentProvider, modelId: string | null): Promise<void>;
+  switchProvider(
+    agentId: string,
+    provider: AgentProvider,
+    modelId: string | null,
+    options: { whenBusy?: "wait" | "interrupt" },
+  ): Promise<void>;
 
   setThinking(
     agentId: string,
@@ -115,7 +120,7 @@ export class AgentConfigSession {
   handleSwitchAgentProviderRequest(
     msg: Extract<SessionInboundMessage, { type: "switch_agent_provider_request" }>,
   ): Promise<void> {
-    const { agentId, provider, modelId, requestId } = msg;
+    const { agentId, provider, modelId, requestId, whenBusy } = msg;
     return this.applyConfigChange({
       agentId,
       requestId,
@@ -123,7 +128,7 @@ export class AgentConfigSession {
       logFields: { agentId, provider, modelId, requestId },
       failureText: "Failed to switch agent provider",
       run: async () => {
-        await this.operations.switchProvider(agentId, provider, modelId ?? null);
+        await this.operations.switchProvider(agentId, provider, modelId ?? null, { whenBusy });
         return undefined;
       },
       emitResponse: (payload) =>

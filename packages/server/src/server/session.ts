@@ -1452,8 +1452,9 @@ export class Session {
         setMode: async (agentId, modeId) =>
           (await setAgentModeCommand({ agentManager }, { agentId, modeId })).notice,
         setModel: (agentId, modelId) => agentManager.setAgentModel(agentId, modelId),
-        switchProvider: (agentId, provider, modelId) =>
-          agentManager.switchAgentProvider(agentId, provider, modelId),
+        switchProvider: async (agentId, provider, modelId, switchOptions) => {
+          await agentManager.switchAgentProvider(agentId, provider, modelId, switchOptions);
+        },
         setOptions: (agentId, patch) => agentManager.setAgentOptions(agentId, patch),
         setThinking: (agentId, thinkingOptionId) =>
           agentManager.setAgentThinkingOption(agentId, thinkingOptionId),
@@ -3876,6 +3877,8 @@ export class Session {
         return this.usageSession.handleListReports(msg);
       case "provider.usage.list.request":
         return this.providerCatalogSession.handleProviderUsageListRequest(msg);
+      case "agent.ledger.get.request":
+        return this.handleAgentLedgerGetRequest(msg);
       default:
         return undefined;
     }
@@ -4987,13 +4990,7 @@ export class Session {
     );
 
     const promptText = options?.spokenInput ? wrapSpokenInput(text) : text;
-    // If the agent just switched provider, prepend the prior conversation (staged
-    // as a chat-history attachment) so the new provider opens with full context.
-    const providerSwitchSeed = this.agentManager.consumeProviderSwitchSeed(agentId);
-    const effectiveAttachments = providerSwitchSeed
-      ? [providerSwitchSeed, ...(attachments ?? [])]
-      : attachments;
-    const prompt = buildAgentPrompt(promptText, images, effectiveAttachments);
+    const prompt = buildAgentPrompt(promptText, images, attachments);
 
     try {
       await sendPromptToAgent({
@@ -9028,6 +9025,39 @@ export class Session {
         },
         source,
       );
+    }
+  }
+
+  private async handleAgentLedgerGetRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.ledger.get.request" }>,
+  ): Promise<void> {
+    try {
+      await ensureAgentLoaded(msg.agentId, {
+        agentManager: this.agentManager,
+        agentStorage: this.agentStorage,
+        logger: this.sessionLogger,
+      });
+      const { agentId: _agentId, ...ledger } = await this.agentManager.getSessionLedger(
+        msg.agentId,
+      );
+      this.emit({
+        type: "agent.ledger.get.response",
+        payload: { requestId: msg.requestId, agentId: msg.agentId, ledger, error: null },
+      });
+    } catch (error) {
+      this.sessionLogger.error(
+        { err: error, agentId: msg.agentId },
+        "Failed to handle agent.ledger.get.request",
+      );
+      this.emit({
+        type: "agent.ledger.get.response",
+        payload: {
+          requestId: msg.requestId,
+          agentId: msg.agentId,
+          ledger: null,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
     }
   }
 

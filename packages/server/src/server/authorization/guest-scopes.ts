@@ -99,6 +99,8 @@ export function guestScopesForCapabilities(caps: SessionShareCapabilities): stri
       "set_agent_model_response",
       "switch_agent_provider_request",
       "switch_agent_provider_response",
+      "agent.ledger.get.request",
+      "agent.ledger.get.response",
       "set_agent_thinking_request",
       "set_agent_thinking_response",
       "set_agent_feature_request",

@@ -131,6 +131,7 @@ import {
   type RefreshProvidersSnapshotResponseMessage,
   type ProviderDiagnosticResponseMessage,
   type ProviderUsageListResponseMessage,
+  type AgentLedgerGetPayload,
   type DaemonGetStatusResponse,
   type DaemonGetPairingOfferResponse,
   type PairingDeviceListResponse,
@@ -5241,6 +5242,7 @@ export class DaemonClient {
     agentId: string,
     provider: AgentProvider,
     modelId: string | null,
+    options?: { whenBusy?: "wait" | "interrupt" },
   ): Promise<void> {
     const requestId = this.createRequestId();
     const message = SessionInboundMessageSchema.parse({
@@ -5248,6 +5250,7 @@ export class DaemonClient {
       agentId,
       provider,
       modelId,
+      ...(options?.whenBusy ? { whenBusy: options.whenBusy } : {}),
       requestId,
     });
     const payload = await this.sendRequest({
@@ -8626,6 +8629,20 @@ export class DaemonClient {
       active = false;
       unsubscribe();
     }
+  }
+
+  /** The session ledger of an agent (spec 40 §2), with its handoffs and provider sessions. */
+  async getAgentLedger(
+    agentId: string,
+    options?: { requestId?: string },
+  ): Promise<AgentLedgerGetPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"agent.ledger.get.response">({
+      requestId: options?.requestId,
+      message: {
+        type: "agent.ledger.get.request",
+        agentId,
+      },
+    });
   }
 
   async listProviderUsage(options?: { requestId?: string }): Promise<ProviderUsageListPayload> {

@@ -1,3 +1,4 @@
+import { SessionLedgerUpdateInputSchema } from "../session-ledger/ledger-schema.js";
 import { builtinServerRegistry } from "../../plugins/builtin/loaded.js";
 import type {
   BuiltinDaemonScope,
@@ -2065,6 +2066,45 @@ function createToolCatalog(
       };
     },
   );
+
+  if (callerAgentId) {
+    registerTool(
+      "update_session_ledger",
+      {
+        title: "Update session ledger",
+        description:
+          "Record decisions (with a one-line reason), open or finished work items, and the next step in " +
+          "this session's ledger. The ledger is what another model reads if this session moves to a " +
+          "different provider. Entries are merged: decisions and open items are appended, an item sent " +
+          'as {"text", "done": true} is closed, nextStep replaces the previous one.',
+        inputSchema: SessionLedgerUpdateInputSchema.shape,
+        outputSchema: {
+          added: z.object({ decisions: z.number(), openItems: z.number() }),
+          closed: z.number(),
+          nextStepChanged: z.boolean(),
+          openItems: z.array(z.object({ id: z.string(), text: z.string() })),
+        },
+      },
+      async (input) => {
+        const result = await agentManager.updateSessionLedger(
+          callerAgentId,
+          SessionLedgerUpdateInputSchema.parse(input),
+        );
+        const openItems = result.ledger.openItems
+          .filter((item) => item.closedSeq == null)
+          .map((item) => ({ id: item.id, text: item.text }));
+        return {
+          content: [],
+          structuredContent: ensureValidJson({
+            added: result.added,
+            closed: result.closed,
+            nextStepChanged: result.nextStepChanged,
+            openItems,
+          }),
+        };
+      },
+    );
+  }
 
   registerTool(
     "list_workspaces",
