@@ -69,6 +69,7 @@ export const zhCN: TranslationResources = {
       downloadFailed: "下载失败",
     },
     errors: {
+      unableToCopy: "无法复制",
       error: "错误",
       unableToSave: "无法保存",
       nameRequired: "名称必填",
@@ -341,6 +342,7 @@ export const zhCN: TranslationResources = {
       viewDiagram: "View diagram",
     },
     actions: {
+      copyQuote: "复制引用",
       copyCode: "复制代码",
       copyTurn: "复制回合",
       copyMessage: "复制消息",

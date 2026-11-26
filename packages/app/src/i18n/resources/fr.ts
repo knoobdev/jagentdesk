@@ -69,6 +69,7 @@ export const fr: TranslationResources = {
       downloadFailed: "\u00C9chec du t\u00E9l\u00E9chargement",
     },
     errors: {
+      unableToCopy: "Impossible de copier",
       folderOutsideWorkspace: "{{path}} is outside this workspace",
 
       error: "Erreur",
@@ -348,6 +349,7 @@ export const fr: TranslationResources = {
       viewDiagram: "View diagram",
     },
     actions: {
+      copyQuote: "Copier la citation",
       copyCode: "Copier le code",
       copyTurn: "Copier l\u2019\u00E9change",
       copyMessage: "Copier le message",

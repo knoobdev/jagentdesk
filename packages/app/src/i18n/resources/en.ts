@@ -68,6 +68,7 @@ export const en = {
       downloadFailed: "Download failed",
     },
     errors: {
+      unableToCopy: "Unable to copy",
       error: "Error",
       unableToSave: "Unable to save",
       nameRequired: "Name is required",
@@ -335,6 +336,7 @@ export const en = {
       viewDiagram: "View diagram",
     },
     actions: {
+      copyQuote: "Copy quote",
       copyCode: "Copy code",
       copyTurn: "Copy turn",
       copyMessage: "Copy message",

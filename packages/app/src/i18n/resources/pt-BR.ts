@@ -69,6 +69,7 @@ export const ptBR: TranslationResources = {
       downloadFailed: "Falha no download",
     },
     errors: {
+      unableToCopy: "Não foi possível copiar",
       error: "Erro",
       unableToSave: "Não foi possível salvar",
       nameRequired: "O nome é obrigatório",
@@ -343,6 +344,7 @@ export const ptBR: TranslationResources = {
       viewDiagram: "View diagram",
     },
     actions: {
+      copyQuote: "Copiar citação",
       copyCode: "Copiar código",
       copyTurn: "Copiar turno",
       copyMessage: "Copiar mensagem",

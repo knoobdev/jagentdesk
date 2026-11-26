@@ -69,6 +69,7 @@ export const ja: TranslationResources = {
       downloadFailed: "ダウンロード失敗",
     },
     errors: {
+      unableToCopy: "コピーできません",
       error: "エラー",
       unableToSave: "保存できません",
       nameRequired: "名前は必須です",
@@ -349,6 +350,7 @@ export const ja: TranslationResources = {
       viewDiagram: "View diagram",
     },
     actions: {
+      copyQuote: "引用をコピー",
       copyCode: "コードをコピー",
       copyTurn: "ターンをコピー",
       copyMessage: "メッセージをコピー",

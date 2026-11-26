@@ -69,6 +69,7 @@ export const ru: TranslationResources = {
       downloadFailed: "Загрузка не удалась",
     },
     errors: {
+      unableToCopy: "Не удалось скопировать",
       folderOutsideWorkspace: "{{path}} is outside this workspace",
 
       error: "Ошибка",
@@ -362,6 +363,7 @@ export const ru: TranslationResources = {
       viewDiagram: "View diagram",
     },
     actions: {
+      copyQuote: "Копировать цитату",
       copyCode: "Скопировать код",
       copyTurn: "Копировать ход",
       copyMessage: "Копировать сообщение",

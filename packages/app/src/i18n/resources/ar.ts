@@ -69,6 +69,7 @@ export const ar: TranslationResources = {
       downloadFailed: "فشل التنزيل",
     },
     errors: {
+      unableToCopy: "تعذر النسخ",
       error: "خطأ",
       unableToSave: "غير قادر على الحفظ",
       nameRequired: "الاسم مطلوب",
@@ -356,6 +357,7 @@ export const ar: TranslationResources = {
       viewDiagram: "View diagram",
     },
     actions: {
+      copyQuote: "نسخ الاقتباس",
       copyCode: "نسخ الرمز",
       copyTurn: "نسخ بدوره",
       copyMessage: "انسخ الرسالة",

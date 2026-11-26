@@ -69,6 +69,7 @@ export const es: TranslationResources = {
       downloadFailed: "Descarga fallida",
     },
     errors: {
+      unableToCopy: "No se pudo copiar",
       error: "Error",
       unableToSave: "No se puede guardar",
       nameRequired: "El nombre es obligatorio",
@@ -344,6 +345,7 @@ export const es: TranslationResources = {
       viewDiagram: "View diagram",
     },
     actions: {
+      copyQuote: "Copiar cita",
       copyCode: "Copiar código",
       copyTurn: "Copiar turno",
       copyMessage: "Copiar mensaje",
