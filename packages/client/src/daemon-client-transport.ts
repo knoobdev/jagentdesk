@@ -27,3 +27,11 @@ export {
   describeEndpointSecurityClose,
   type RelayE2eeTransportOptions,
 } from "./daemon-client-relay-e2ee-transport.js";
+export {
+  CONNECTION_DIAGNOSTICS_CAPACITY,
+  ConnectionDiagnosticsLog,
+  connectionDiagnostics,
+  formatConnectionDiagnosticEntry,
+  type ConnectionDiagnosticEntry,
+  type ConnectionDiagnosticValue,
+} from "./connection-diagnostics.js";

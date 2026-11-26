@@ -8,6 +8,7 @@ export {
   SecureChannelRejectedError,
 } from "./secure-channel.js";
 export type {
+  ClientHandshakeEvent,
   ClientSecureChannelOptions,
   DaemonSecureChannelOptions,
   SecureChannel,
