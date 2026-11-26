@@ -12025,6 +12025,60 @@ test("folds provider background work and clears it when the agent closes", async
   expect(manager.getAgentBackgroundWorkSummary(snapshot.id)).toBeUndefined();
 });
 
+// Spec 38 §4.4b: Codex/OpenCode timelines get the same background start/finish rows as Claude's.
+test("writes background start and finish rows for providers without their own", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-background-rows-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  let activeSession: TestAgentSession | null = null;
+  class BackgroundWorkClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      activeSession = new TestAgentSession(config);
+      return activeSession;
+    }
+  }
+  const manager = new AgentManager({
+    clients: { codex: new BackgroundWorkClient() },
+    registry: storage,
+    logger,
+    idFactory: () => "00000000-0000-4000-8000-000000000209",
+  });
+  const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+    workspaceId: undefined,
+  });
+  const backgroundRows = () =>
+    manager
+      .getTimeline(agent.id)
+      .filter((item) => item.type === "tool_call" && item.metadata?.source === "background_work");
+
+  activeSession?.pushEvent({
+    type: "background_work",
+    provider: "codex",
+    items: [{ id: "p1", kind: "shell", description: null, command: "npm test" }],
+  });
+  await vi.waitFor(() => expect(backgroundRows()).toHaveLength(1));
+  // A reset is not an end, and the same work listed again is not a new start.
+  activeSession?.pushEvent({ type: "background_work", provider: "codex", items: null });
+  activeSession?.pushEvent({
+    type: "background_work",
+    provider: "codex",
+    items: [{ id: "p1", kind: "shell", description: null, command: "npm test" }],
+  });
+  activeSession?.pushEvent({ type: "background_work", provider: "codex", items: [] });
+  await vi.waitFor(() => expect(backgroundRows()).toHaveLength(2));
+
+  expect(backgroundRows()).toEqual([
+    expect.objectContaining({
+      detail: expect.objectContaining({ label: "Started in background · npm test" }),
+      metadata: expect.objectContaining({ phase: "started", label: "npm test" }),
+    }),
+    expect.objectContaining({
+      detail: expect.objectContaining({ label: "Background task finished · npm test" }),
+      metadata: expect.objectContaining({ phase: "finished", durationMs: expect.any(Number) }),
+    }),
+  ]);
+  await manager.closeAgent(agent.id);
+});
+
 test("does not deliver an internal agent's background work to global subscribers", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-background-work-internal-"));
   const storage = new AgentStorage(join(workdir, "agents"), logger);

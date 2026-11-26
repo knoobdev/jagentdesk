@@ -115,6 +115,13 @@ be stopped. Clients list and stop it with `agent.background_work.list.request` a
 pane shows it per agent (`packages/app/src/background-work/`). Tracked background work keeps the
 runtime resident (see [Runtime residency](#runtime-residency)).
 
+The timeline shows "Started in background" and "Background task finished" rows. Claude's own
+timeline carries them (the `run_in_background` Bash call and its task notification). For every other
+provider the daemon writes them from the inventory (`agent/background-work/timeline.ts`): a row when
+an item first appears and one when a live update drops it, with the elapsed time. An inventory
+reset (`items: null` on reconnect) is not an end. The rows are `tool_call` items with
+`metadata.source: "background_work"`, so old clients show them as plain tool calls.
+
 ## Archive
 
 Archive is a **soft delete**: the agent record stays on disk with `archivedAt` set, the runtime is closed, and the agent disappears from active lists. Archive is **global** — it lives on the server and propagates to every connected client.

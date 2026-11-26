@@ -125,4 +125,41 @@ describe("background timeline rows", () => {
     expect(isBackgroundTimelineItem(foreground)).toBe(false);
     expect(isBackgroundTimelineItem(subagentNotice)).toBe(false);
   });
+
+  // Codex, OpenCode and other providers: rows the daemon writes from the background inventory.
+  it("reads the daemon's inventory rows for providers other than Claude", () => {
+    const inventoryStart = toolCall({
+      id: "f",
+      callId: "background_work:p1:1:started",
+      name: "background_work",
+      at: "2026-11-26T10:00:00Z",
+      detail: { type: "plain_text", label: "Started in background · npm test" },
+      metadata: { source: "background_work", phase: "started", label: "npm test" },
+    });
+    const inventoryFinish = toolCall({
+      id: "g",
+      callId: "background_work:p1:1:finished",
+      name: "background_work",
+      at: "2026-11-26T10:01:35Z",
+      detail: { type: "plain_text", label: "Background task finished · npm test" },
+      metadata: {
+        source: "background_work",
+        phase: "finished",
+        label: "npm test",
+        durationMs: 95_000,
+      },
+    });
+    expect(readBackgroundTimelineEvent(inventoryStart, () => undefined)).toEqual({
+      kind: "started",
+      label: "npm test",
+    });
+    expect(readBackgroundTimelineEvent(inventoryFinish, () => undefined)).toEqual({
+      kind: "finished",
+      label: "npm test",
+      durationMs: 95_000,
+      exitCode: null,
+    });
+    expect(isBackgroundTimelineItem(inventoryStart)).toBe(true);
+    expect(isBackgroundTimelineItem(inventoryFinish)).toBe(true);
+  });
 });

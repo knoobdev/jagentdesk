@@ -35,6 +35,29 @@ export function readBackgroundStart(item: StreamItem): BackgroundStart | null {
   return { command: data.detail.command, startedAtMs: item.timestamp.getTime() };
 }
 
+function readNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * A row the daemon writes from the provider-neutral background inventory, for providers whose
+ * own timeline does not show background starts and ends (Codex, OpenCode, …).
+ */
+function readInventoryRow(item: StreamItem): BackgroundTimelineEvent | null {
+  if (item.kind !== "tool_call" || item.payload.source !== "agent") return null;
+  const metadata = item.payload.data.metadata;
+  if (metadata?.source !== "background_work") return null;
+  const label = readString(metadata.label);
+  if (metadata.phase === "started" && label) return { kind: "started", label };
+  if (metadata.phase !== "finished") return null;
+  return {
+    kind: "finished",
+    label,
+    durationMs: readNumber(metadata.durationMs),
+    exitCode: readNumber(metadata.exitCode),
+  };
+}
+
 function readTaskNotification(item: ToolCallStreamItem): {
   summary: string;
   toolUseId: string | null;
@@ -54,7 +77,7 @@ function readTaskNotification(item: ToolCallStreamItem): {
  * in a group; the group then draws it as the same row.
  */
 export function isBackgroundTimelineItem(item: StreamItem): boolean {
-  if (readBackgroundStart(item)) return true;
+  if (readBackgroundStart(item) || readInventoryRow(item)) return true;
   if (item.kind !== "tool_call") return false;
   const notification = readTaskNotification(item);
   return notification !== null && FINISHED_SUMMARY.test(notification.summary);
@@ -66,6 +89,8 @@ export function readBackgroundTimelineEvent(
 ): BackgroundTimelineEvent | null {
   const start = readBackgroundStart(item);
   if (start) return { kind: "started", label: start.command };
+  const inventoryRow = readInventoryRow(item);
+  if (inventoryRow) return inventoryRow;
   const notification = readTaskNotification(item);
   if (!notification) return null;
   // The notification names the Bash call that started the task. Its summary is either Claude's
