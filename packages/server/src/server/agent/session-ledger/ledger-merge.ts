@@ -16,6 +16,7 @@ export interface LedgerMergeResult {
   ledger: StoredSessionLedger;
   added: { decisions: number; openItems: number };
   closed: number;
+  goalChanged: boolean;
   nextStepChanged: boolean;
 }
 
@@ -76,9 +77,25 @@ function mergeOpenItems(
   return { openItems, added, closed };
 }
 
+/** A single-value note (goal, next step): a non-empty different text replaces the old one. */
+function replaceNote(
+  current: LedgerNote | null,
+  incoming: string | undefined,
+  context: LedgerMergeContext,
+): { note: LedgerNote | null; changed: boolean } {
+  const text = incoming?.trim() ?? "";
+  if (!text || normalize(text) === normalize(current?.text ?? "")) {
+    return { note: current, changed: false };
+  }
+  return {
+    note: { id: context.createId(), text, seq: context.seq, at: context.at },
+    changed: true,
+  };
+}
+
 /**
  * Anchored merge: new decisions and open items are appended with the current seq, items marked
- * done are closed in place, and the next step is replaced. Nothing already written is rewritten,
+ * done are closed in place, and the goal and the next step are replaced. Nothing already written is rewritten,
  * so a later handoff can tell exactly which notes changed after a given seq.
  */
 export function mergeSessionLedgerUpdate(
@@ -88,20 +105,23 @@ export function mergeSessionLedgerUpdate(
 ): LedgerMergeResult {
   const decisions = mergeDecisions(ledger.decisions, update.decisions ?? [], context);
   const items = mergeOpenItems(ledger.openItems, update.openItems ?? [], context);
-  const nextStepText = update.nextStep?.trim() ?? "";
-  const nextStepChanged =
-    nextStepText.length > 0 && normalize(nextStepText) !== normalize(ledger.nextStep?.text ?? "");
-  const nextStep = nextStepChanged
-    ? { id: context.createId(), text: nextStepText, seq: context.seq, at: context.at }
-    : ledger.nextStep;
+  const goal = replaceNote(ledger.goal ?? null, update.goal, context);
+  const nextStep = replaceNote(ledger.nextStep, update.nextStep, context);
 
   return {
-    ledger: { ...ledger, decisions, openItems: items.openItems, nextStep },
+    ledger: {
+      ...ledger,
+      goal: goal.note,
+      decisions,
+      openItems: items.openItems,
+      nextStep: nextStep.note,
+    },
     added: {
       decisions: decisions.length - ledger.decisions.length,
       openItems: items.added,
     },
     closed: items.closed,
-    nextStepChanged,
+    goalChanged: goal.changed,
+    nextStepChanged: nextStep.changed,
   };
 }

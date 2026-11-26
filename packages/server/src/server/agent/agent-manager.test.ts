@@ -17,6 +17,7 @@ import {
   type AgentManagerEvent,
   type ManagedAgent,
 } from "./agent-manager.js";
+import { agentIdentityInstruction } from "./durable-context/instructions.js";
 import { AgentStorage } from "./agent-storage.js";
 import { InMemoryAgentTimelineStore } from "./agent-timeline-store.js";
 import { toAgentPayload } from "./agent-projections.js";
@@ -57,6 +58,10 @@ import type { ProviderDefinition } from "./provider-registry.js";
 
 import { OpenCodeV2AgentClient } from "./providers/opencode/v2/agent.js";
 import { V2Harness } from "./providers/opencode/test-utils/v2-harness.js";
+
+function identityLine(agentId: string, cwd: string): string {
+  return agentIdentityInstruction({ agentId, title: undefined, cwd, agentTools: false });
+}
 
 const DESKTOP_OPEN_AGENT_TAB_LABEL = getOpenAgentTabLabel("desktop-client");
 const MOBILE_OPEN_AGENT_TAB_LABEL = getOpenAgentTabLabel("mobile-client");
@@ -661,7 +666,9 @@ test("OpenCode persistence excludes launch-only instructions from storage and cl
     workspaceId: undefined,
   });
   try {
-    expect(harness.instructions.get("jagentdesk")).toBe("Daemon instruction\n\nPlugin instruction");
+    expect(harness.instructions.get("jagentdesk")).toBe(
+      `Daemon instruction\n\n${identityLine(agent.id, workdir)}\n\nPlugin instruction`,
+    );
     await manager.flush();
     const record = await storage.get(agent.id);
     expect(record?.persistence?.metadata).not.toHaveProperty("pluginAppendSystemPrompt");
@@ -2548,7 +2555,9 @@ test("createAgent injects daemon append system prompt at runtime only", async ()
   const record = await storage.get(snapshot.id);
 
   expect(client.createdConfigs[0]?.systemPrompt).toBe("Agent instructions.");
-  expect(client.createdConfigs[0]?.daemonAppendSystemPrompt).toBe("Daemon instructions.");
+  expect(client.createdConfigs[0]?.daemonAppendSystemPrompt).toBe(
+    `Daemon instructions.\n\n${identityLine(snapshot.id, workdir)}`,
+  );
   expect(snapshot.config).not.toHaveProperty("daemonAppendSystemPrompt");
   expect(record?.config?.systemPrompt).toBe("Agent instructions.");
   expect(record?.config).not.toHaveProperty("daemonAppendSystemPrompt");
@@ -2572,7 +2581,7 @@ test("daemon append system prompt is injected into Pi configs", async () => {
     idFactory: () => "00000000-0000-4000-8000-000000000104",
   });
 
-  await manager.createAgent(
+  const snapshot = await manager.createAgent(
     {
       provider: "pi",
       cwd: workdir,
@@ -2582,7 +2591,9 @@ test("daemon append system prompt is injected into Pi configs", async () => {
     { workspaceId: undefined },
   );
 
-  expect(client.createdConfigs[0]?.daemonAppendSystemPrompt).toBe("Daemon instructions.");
+  expect(client.createdConfigs[0]?.daemonAppendSystemPrompt).toBe(
+    `Daemon instructions.\n\n${identityLine(snapshot.id, workdir)}`,
+  );
 });
 
 test("setAgentMode persists the selected mode across session reload", async () => {
@@ -3083,6 +3094,7 @@ test("createAgent passes daemon launch env through the provider launch context",
     provider: "codex",
     cwd: workdir,
     model: "gpt-5.4",
+    daemonAppendSystemPrompt: identityLine(snapshot.id, workdir),
   });
   expect(client.lastLaunchContext).toEqual({
     agentId: snapshot.id,
@@ -11918,7 +11930,7 @@ test("plugin instructions are recomputed for each launch without changing saved 
   );
   expect(client.createdConfigs[0]).toMatchObject({
     systemPrompt: "Saved",
-    daemonAppendSystemPrompt: "Daemon",
+    daemonAppendSystemPrompt: `Daemon\n\n${identityLine(snapshot.id, workdir)}`,
     pluginAppendSystemPrompt: ["Plugin one", "Plugin two"],
   });
   expect(snapshot.config.systemPrompt).toBe("Saved");
@@ -11957,7 +11969,9 @@ test("plugin instructions are recomputed for each launch without changing saved 
     snapshot.id,
   );
   expect(client.resumeOverrides.at(-1)?.systemPrompt).toBe("Saved");
-  expect(client.resumeOverrides.at(-1)?.daemonAppendSystemPrompt).toBe("Daemon");
+  expect(client.resumeOverrides.at(-1)?.daemonAppendSystemPrompt).toBe(
+    `Daemon\n\n${identityLine(snapshot.id, workdir)}`,
+  );
   expect((await storage.get(snapshot.id))?.config?.systemPrompt).toBe("Saved");
 });
 

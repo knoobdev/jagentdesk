@@ -81,7 +81,7 @@ import {
 } from "./session-ledger/session-continuity.js";
 import { handoffBudgetTokens } from "./session-ledger/ledger-render.js";
 import { DurableContext } from "./durable-context/durable-context.js";
-import { LESSON_INSTRUCTION } from "./durable-context/instructions.js";
+import { agentIdentityInstruction, LESSON_INSTRUCTION } from "./durable-context/instructions.js";
 import type { DurableContextSettings, MemoryPort } from "./memory-port.js";
 import type { LedgerTimelineRow } from "./session-ledger/ledger-builder.js";
 import type { LedgerMergeResult } from "./session-ledger/ledger-merge.js";
@@ -570,6 +570,7 @@ export interface SessionLedgerProviderSession {
 export interface SessionLedgerView {
   agentId: string;
   markdown: string;
+  goal: LedgerNote | null;
   decisions: LedgerNote[];
   openItems: LedgerOpenItem[];
   nextStep: LedgerNote | null;
@@ -2012,6 +2013,21 @@ export class AgentManager {
       }).map((entry) => Object.assign({ seq: entry.seqEnd }, entry));
     }
     return this.timelineStore.getRows(id);
+  }
+
+  /**
+   * Committed timeline rows of any stored agent — loaded or not, archived, on any provider —
+   * without loading or resuming it (spec 42 §2b: agents read each other's history). Null when
+   * the agent is not loaded and the daemon keeps no durable timeline.
+   */
+  async readAgentTimelineRows(id: string): Promise<AgentTimelineRow[] | null> {
+    const normalizedId = validateAgentId(id, "readAgentTimelineRows");
+    if (this.agents.has(normalizedId)) return this.getTimelineRows(normalizedId);
+    if (!this.durableTimelineStore) return null;
+    return projectTimelineRows({
+      rows: await this.durableTimelineStore.getCommittedRows(normalizedId),
+      mode: "projected",
+    }).map((entry) => Object.assign({ seq: entry.seqEnd }, entry));
   }
 
   /** The timeline head of a loaded agent, or null when this agent is not loaded. Never loads. */
@@ -3522,6 +3538,7 @@ export class AgentManager {
     return {
       agentId,
       markdown,
+      goal: ledger.goal ?? null,
       decisions: ledger.decisions,
       openItems: ledger.openItems,
       nextStep: ledger.nextStep,
@@ -7779,7 +7796,15 @@ export class AgentManager {
         mcpBaseUrl,
         mcpAuthToken: this.mcpAuthToken,
       }),
-      { sessionLedgerTool: Boolean(mcpBaseUrl) },
+      {
+        sessionLedgerTool: Boolean(mcpBaseUrl),
+        identity: agentIdentityInstruction({
+          agentId,
+          title: storedConfig.title,
+          cwd: storedConfig.cwd,
+          agentTools: Boolean(mcpBaseUrl),
+        }),
+      },
     );
     return { storedConfig, launchConfig };
   }
@@ -7792,11 +7817,12 @@ export class AgentManager {
 
   private applyDaemonAppendSystemPrompt(
     config: AgentSessionConfig,
-    options: { sessionLedgerTool?: boolean } = {},
+    options: { sessionLedgerTool?: boolean; identity?: string } = {},
   ): AgentSessionConfig {
     const daemonAppendSystemPrompt =
       composeSystemPromptParts(
         this.appendSystemPrompt,
+        options.identity,
         options.sessionLedgerTool ? SESSION_LEDGER_INSTRUCTION : undefined,
         options.sessionLedgerTool && this.lessonLearningEnabled() ? LESSON_INSTRUCTION : undefined,
       ) ?? "";

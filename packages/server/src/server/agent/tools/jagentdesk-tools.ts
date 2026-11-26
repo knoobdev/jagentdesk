@@ -58,8 +58,9 @@ import {
   toAgentListItemPayload,
   toAgentPayload,
 } from "../agent-projections.js";
-import { curateAgentActivity } from "../activity-curator.js";
-import { selectItemsByProjectedLimit } from "../timeline-projection.js";
+import { pageAgentActivity } from "../activity-curator.js";
+import type { AgentTimelineRow } from "../agent-timeline-store-types.js";
+
 import { type AgentStorage, type StoredAgentRecord } from "../agent-storage.js";
 import { AgentNotFoundError, ensureAgentLoaded } from "../agent-loading.js";
 import { isStoredAgentProviderAvailable } from "../../persistence-hooks.js";
@@ -2124,14 +2125,17 @@ function createToolCatalog(
       {
         title: "Update session ledger",
         description:
-          "Record decisions (with a one-line reason), open or finished work items, and the next step in " +
-          "this session's ledger. The ledger is what another model reads if this session moves to a " +
-          "different provider. Entries are merged: decisions and open items are appended, an item sent " +
-          'as {"text", "done": true} is closed, nextStep replaces the previous one.',
+          "Record the current goal (the task the user is giving you now), decisions (with a one-line " +
+          "reason), open or finished work items, and the next step in this session's ledger. The ledger " +
+          "is what another model reads if this session moves to a different provider, and JAgentDesk " +
+          "repeats its goal and next step to you every turn. Entries are merged: decisions and open items " +
+          'are appended, an item sent as {"text", "done": true} is closed, goal and nextStep replace the ' +
+          "previous ones.",
         inputSchema: SessionLedgerUpdateInputSchema.shape,
         outputSchema: {
           added: z.object({ decisions: z.number(), openItems: z.number() }),
           closed: z.number(),
+          goalChanged: z.boolean(),
           nextStepChanged: z.boolean(),
           openItems: z.array(z.object({ id: z.string(), text: z.string() })),
         },
@@ -2149,6 +2153,7 @@ function createToolCatalog(
           structuredContent: ensureValidJson({
             added: result.added,
             closed: result.closed,
+            goalChanged: result.goalChanged,
             nextStepChanged: result.nextStepChanged,
             openItems,
           }),
@@ -3033,7 +3038,10 @@ function createToolCatalog(
     "list_agents",
     {
       title: "List agents",
-      description: "List recent agents as compact metadata.",
+      description:
+        "List agents on this host as compact metadata (id, title, provider, status). Defaults to your " +
+        "workspace; pass cwd for another one. Archived agents are not listed; read any agent's " +
+        "history, archived or not, by id with get_agent_activity.",
       inputSchema: {
         includeBackground: z.boolean().optional().default(false),
         includeArchived: z.boolean().optional().default(false),
@@ -4097,57 +4105,75 @@ function createToolCatalog(
     },
   );
 
+  /**
+   * An agent that is not loaded (idle, archived, another provider) is read from the durable
+   * timeline without resuming it; without one it is loaded the old way, which hydrates history.
+   */
+  async function readAgentActivityRows(agentId: string): Promise<AgentTimelineRow[]> {
+    const durable = agentManager.getAgent(agentId)
+      ? null
+      : await agentManager.readAgentTimelineRows(agentId);
+    if (durable && durable.length > 0) return durable;
+    await ensureAgentLoaded(agentId, { agentManager, agentStorage, logger: childLogger });
+    return agentManager.getTimelineRows(agentId);
+  }
+
   registerTool(
     "get_agent_activity",
     {
       title: "Get agent activity",
-      description: "Return recent agent timeline entries as a curated summary.",
+      description:
+        "Read any JAgentDesk agent's timeline on this host as a curated summary: live, idle or archived, " +
+        "on any provider, including your own id. Use this (with list_agents) to learn what another " +
+        "agent did; never search provider session folders such as ~/.claude or ~/.codex for it. " +
+        "Pages backwards: pass limit, then the returned nextBeforeSeq as beforeSeq for older entries.",
       inputSchema: {
         agentId: z.string(),
         limit: z
           .number()
           .optional()
           .describe("Optional limit for number of activities to include (most recent first)."),
+        beforeSeq: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe(
+            "Only entries older than this timeline seq (nextBeforeSeq of the previous page).",
+          ),
       },
       outputSchema: {
         agentId: z.string(),
         updateCount: z.number(),
         currentModeId: z.string().nullable(),
         content: z.string(),
+        isYou: z.boolean().optional(),
+        title: z.string().nullable().optional(),
+        provider: z.string().optional(),
+        archived: z.boolean().optional(),
+        nextBeforeSeq: z.number().nullable().optional(),
       },
     },
-    async ({ agentId, limit }) => {
-      await ensureAgentLoaded(agentId, {
-        agentManager,
-        agentStorage,
-        logger: childLogger,
-      });
-      const timeline = agentManager.getTimeline(agentId);
+    async ({ agentId, limit, beforeSeq }) => {
+      const rows = await readAgentActivityRows(agentId);
+      const record = await agentStorage.get(agentId);
       const snapshot = agentManager.getAgent(agentId);
-
-      const selection = selectItemsByProjectedLimit({
-        items: timeline,
-        direction: "tail",
-        limit: limit ?? 0,
-      });
-      const curatedContent = curateAgentActivity(selection.items);
-      const { totalProjected, shownProjected } = selection;
-
-      const noun = totalProjected === 1 ? "activity" : "activities";
-      const countHeader =
-        limit && shownProjected < totalProjected
-          ? `Showing ${shownProjected} of ${totalProjected} ${noun} (limited to ${limit})`
-          : `Showing all ${totalProjected} ${noun}`;
-
-      const contentWithCount = `${countHeader}\n\n${curatedContent}`;
-
+      const page = pageAgentActivity({ rows, limit, beforeSeq });
+      const isYou = Boolean(callerAgentId) && agentId === callerAgentId;
       return {
         content: [],
         structuredContent: ensureValidJson({
           agentId,
-          updateCount: timeline.length,
+          updateCount: rows.length,
           currentModeId: snapshot?.currentModeId ?? null,
-          content: contentWithCount,
+          content: isYou
+            ? page.content.replace("\n\n", "\n(This is your own timeline.)\n\n")
+            : page.content,
+          isYou,
+          title: snapshot?.config?.title ?? record?.title ?? null,
+          provider: snapshot?.provider ?? record?.provider,
+          archived: Boolean(record?.archivedAt),
+          nextBeforeSeq: page.nextBeforeSeq,
         }),
       };
     },

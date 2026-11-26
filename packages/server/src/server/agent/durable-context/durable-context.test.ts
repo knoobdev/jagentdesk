@@ -104,7 +104,7 @@ describe("re-grounding block (spec 42 §2)", () => {
     expect(unresolvedErrors(facts)).toEqual([]);
   });
 
-  it("stays within 3 000 tokens for a long session and never cuts the next step", () => {
+  it("stays within 3 000 tokens for a long session and never cuts the goal, the next step or the newest message", () => {
     const rows: LedgerTimelineRow[] = [];
     let seq = 0;
     for (let turn = 0; turn < 400; turn += 1) {
@@ -119,6 +119,7 @@ describe("re-grounding block (spec 42 §2)", () => {
     const document = buildRegroundingDocument({
       facts,
       notes: {
+        goal: note("Ship the migration of every module", seq - 3),
         decisions: Array.from({ length: 80 }, (_, i) => note(`Decision ${i} with a reason`, i)),
         openItems: Array.from({ length: 30 }, (_, i) => note(`Open item ${i}`, i)),
         nextStep,
@@ -130,25 +131,56 @@ describe("re-grounding block (spec 42 §2)", () => {
     expect(fitted.estimatedTokens).toBeLessThanOrEqual(REGROUNDING_TOKEN_CAP);
     expect(estimateTokens(fitted.text)).toBeLessThanOrEqual(REGROUNDING_TOKEN_CAP);
     expect(fitted.text).toContain("Ship module-399 and then open the PR");
-    // The first message and the latest one survive; the middle is summarized by a count.
-    expect(fitted.text).toContain("Turn 0:");
+    expect(fitted.text).toContain("Ship the migration of every module");
+    // The newest messages survive, newest first; the oldest are cut and counted.
     expect(fitted.text).toContain("Turn 399:");
-    expect(fitted.text).toMatch(/\(\d+ earlier messages left out to fit\)/);
+    expect(fitted.text).not.toContain("Turn 0:");
+    expect(fitted.text.indexOf("Turn 399:")).toBeLessThan(fitted.text.indexOf("Turn 398:"));
+    expect(fitted.text).toMatch(/\(\d+ older messages left out to fit\)/);
     expect(fitted.text.endsWith("</jagentdesk-where-we-are>")).toBe(true);
   });
 
-  it("recites Goal · Next · Open in under 120 tokens", () => {
+  it("recites Goal · Next · Open in under 120 tokens, marked as context", () => {
     const line = renderRecitation({
       goal: "Build the importer ".repeat(100),
       nextStep: "Run the tests ".repeat(100),
       openCount: 4,
     });
-    expect(line).toMatch(/^\(JAgentDesk recitation\) Goal: .+ · Next: .+ · Open: 4$/);
-    expect(estimateTokens(line ?? "")).toBeLessThanOrEqual(RECITATION_TOKEN_CAP);
-    expect(renderRecitation({ goal: null, nextStep: "x", openCount: 0 })).toBeNull();
-    expect(renderRecitation({ goal: "Fix it", nextStep: null, openCount: 0 })).toBe(
-      "(JAgentDesk recitation) Goal: Fix it · Next: — · Open: 0",
+    expect(line).toMatch(
+      /^\[JAgentDesk context, not a new request\] Goal: .+ · Next: .+ · Open: 4$/,
     );
+    expect(estimateTokens(line ?? "")).toBeLessThanOrEqual(RECITATION_TOKEN_CAP);
+  });
+
+  it("leaves empty parts out and sends no line when all are empty", () => {
+    expect(renderRecitation({ goal: null, nextStep: null, openCount: 0 })).toBeNull();
+    expect(renderRecitation({ goal: "  ", nextStep: "", openCount: 0 })).toBeNull();
+    expect(renderRecitation({ goal: "Fix it", nextStep: null, openCount: 0 })).toBe(
+      "[JAgentDesk context, not a new request] Goal: Fix it",
+    );
+    expect(renderRecitation({ goal: null, nextStep: "Run lint", openCount: 2 })).toBe(
+      "[JAgentDesk context, not a new request] Next: Run lint · Open: 2",
+    );
+  });
+
+  it("lists the user's messages newest first with their time", () => {
+    const facts = collectTimelineLedgerFacts({
+      rows: [
+        { ...user(1, "Read the old report"), timestamp: "2026-11-01T09:12:00.000Z" },
+        { ...user(2, "Continue"), timestamp: "2026-11-20T16:40:00.000Z" },
+      ],
+    });
+    const { text } = fitRegroundingBlock(
+      buildRegroundingDocument({
+        facts,
+        notes: { decisions: [], openItems: [], nextStep: null },
+        memories: [],
+        memoriesAttached: false,
+      }),
+    );
+    expect(text).toContain("Earlier requests, newest first. Older ones may already be done");
+    expect(text).toContain("2026-11-20 16:40Z:\n> Continue");
+    expect(text.indexOf("> Continue")).toBeLessThan(text.indexOf("> Read the old report"));
   });
 });
 
@@ -262,7 +294,9 @@ describe("DurableContext", () => {
       text.indexOf("</jagentdesk-where-we-are>"),
     );
     expect(text).toContain("Use pnpm");
-    expect(text.trimEnd().endsWith("Open: 0")).toBe(true);
+    // No goal, next step or open item recorded yet: no recitation line at all.
+    expect(text).not.toContain("[JAgentDesk context");
+    expect(text.trimEnd().endsWith("What did we decide?")).toBe(true);
     await turn!.accepted({ messageId: "m1" });
     expect(commits).toBe(1);
     expect(appended.at(-1)).toEqual(
@@ -276,10 +310,34 @@ describe("DurableContext", () => {
     expect(view.regroundings[0].text.startsWith("<jagentdesk-where-we-are>")).toBe(true);
 
     const next = await durable.prepareTurn(agent, "And now?");
-    expect(texts(next!.prompt)).not.toContain("<jagentdesk-where-we-are>");
-    expect(texts(next!.prompt)).toContain(
-      "(JAgentDesk recitation) Goal: Migrate the importer to pnpm",
-    );
+    expect(next).toBeNull();
+  });
+
+  it("never recites an old user message as the goal; recites the ledger goal once the agent sets it", async () => {
+    rows = [];
+    for (let index = 0; index < 220; index += 1) {
+      rows.push({
+        seq: rows.length + 1,
+        timestamp: "2026-11-01T08:00:00.000Z",
+        item: { type: "user_message", text: `Old request ${index}` },
+      });
+      rows.push({
+        seq: rows.length + 1,
+        item: { type: "assistant_message", text: `Done ${index}` },
+      });
+    }
+    rows.push({ seq: rows.length + 1, item: { type: "user_message", text: "Continue" } });
+    const turn = await durable.prepareTurn(agent, "Continue");
+    expect(turn).toBeNull();
+
+    await store.update(agent.id, (ledger) => ({
+      ...ledger,
+      goal: note("Write the changelog", 441),
+    }));
+    const withGoal = await durable.prepareTurn(agent, "Continue");
+    const text = texts(withGoal!.prompt);
+    expect(text).toContain("[JAgentDesk context, not a new request] Goal: Write the changelog");
+    expect(text).not.toContain("Old request 0");
   });
 
   it("does not repeat memories already attached to the message", async () => {
@@ -315,8 +373,8 @@ describe("DurableContext", () => {
     const first = await durable.prepareTurn(full, "next");
     expect(texts(first!.prompt)).toContain(LEDGER_NUDGE_TEXT);
     await first!.accepted({});
-    const second = await durable.prepareTurn(full, "next again");
-    expect(texts(second!.prompt)).not.toContain(LEDGER_NUDGE_TEXT);
+    // Nothing else to add (no ledger notes yet), so the second turn is left as it is.
+    expect(await durable.prepareTurn(full, "next again")).toBeNull();
     await compact();
     const afterCompaction = await durable.prepareTurn(full, "after");
     expect(texts(afterCompaction!.prompt)).toContain(LEDGER_NUDGE_TEXT);
@@ -360,8 +418,7 @@ describe("DurableContext", () => {
   it("a fresh session (rollover) drops the pending block and starts a new cycle", async () => {
     await compact();
     await durable.onFreshSession(agent.id);
-    const turn = await durable.prepareTurn(agent, "hi");
-    expect(texts(turn!.prompt)).not.toContain("<jagentdesk-where-we-are>");
+    expect(await durable.prepareTurn(agent, "hi")).toBeNull();
   });
 
   it("keeps Claude's PostCompact summary on the compaction record", async () => {

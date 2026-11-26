@@ -69,6 +69,11 @@ export const StoredSessionLedgerSchema = z.object({
   agentId: z.string(),
   /** Git state when the ledger first saw the agent; edited-file diffs are taken against it. */
   git: z.object({ root: z.string(), baseCommit: z.string() }).nullable().optional(),
+  /**
+   * The task the user is giving the agent now, written by the agent itself (spec 40 §2, 42 §2).
+   * The per-turn recitation reads its Goal from here and nowhere else.
+   */
+  goal: LedgerNoteSchema.nullable().optional(),
   decisions: z.array(LedgerNoteSchema),
   openItems: z.array(LedgerOpenItemSchema),
   nextStep: LedgerNoteSchema.nullable(),
@@ -117,6 +122,12 @@ export function emptySessionLedger(agentId: string): StoredSessionLedger {
 
 /** Input of the `update_session_ledger` tool. */
 export const SessionLedgerUpdateInputSchema = z.object({
+  goal: z
+    .string()
+    .optional()
+    .describe(
+      "The task the user is giving you now, in one line. Set it when the user gives you a new task; it replaces the old goal.",
+    ),
   decisions: z
     .array(z.string())
     .optional()

@@ -25,6 +25,7 @@ import type {
   AgentRunResult,
   AgentSession,
   AgentStreamEvent,
+  AgentTimelineItem,
   ProviderSnapshotEntry,
 } from "./agent-sdk-types.js";
 import type { ProviderSnapshotManager } from "./provider-snapshot-manager.js";
@@ -218,6 +219,7 @@ interface TestDeps {
 
 function buildAgentManagerSpies() {
   const getAgent = vi.fn();
+  const getTimeline = vi.fn().mockReturnValue([]);
   return {
     createAgent: vi.fn(),
     waitForAgentEvent: vi.fn().mockResolvedValue({
@@ -240,7 +242,16 @@ function buildAgentManagerSpies() {
     listAgents: vi.fn().mockReturnValue([]),
     getAgentBackgroundWorkSummary: vi.fn().mockReturnValue(undefined),
     effectiveOptionsFor: (_provider: string, own: Record<string, unknown> | undefined) => own ?? {},
-    getTimeline: vi.fn().mockReturnValue([]),
+    getTimeline,
+    // The loaded timeline as rows, seq from 1, like the in-memory store.
+    getTimelineRows: vi.fn(async (agentId: string) =>
+      (getTimeline(agentId) as AgentTimelineItem[]).map((item, index) => ({
+        seq: index + 1,
+        timestamp: "",
+        item,
+      })),
+    ),
+    readAgentTimelineRows: vi.fn().mockResolvedValue(null),
     resumeAgentFromPersistence: vi.fn(),
     hydrateTimelineFromProvider: vi.fn().mockResolvedValue(undefined),
     appendTimelineItem: vi.fn().mockResolvedValue(undefined),
@@ -6383,7 +6394,7 @@ describe("agent snapshot MCP serialization", () => {
     ]);
   });
 
-  it("loads archived agents before reading get_agent_activity", async () => {
+  it("loads archived agents before reading get_agent_activity when no durable timeline exists", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     const record = createStoredRecord({ id: "archived-activity-agent" });
     const snapshot = {
@@ -6391,6 +6402,7 @@ describe("agent snapshot MCP serialization", () => {
       currentModeId: "default",
     } as ManagedAgent;
     spies.agentManager.getAgent
+      .mockReturnValueOnce(null)
       .mockReturnValueOnce(null)
       .mockReturnValue(snapshot)
       .mockReturnValue(snapshot);
@@ -6425,6 +6437,79 @@ describe("agent snapshot MCP serialization", () => {
       "archived-activity-agent",
       { broadcast: expect.any(Function) },
     );
+  });
+
+  it("get_agent_activity reads an unloaded archived agent from its durable timeline without resuming it, and pages back", async () => {
+    const { agentManager, agentStorage, spies } = createTestDeps();
+    spies.agentManager.getAgent.mockReturnValue(null);
+    spies.agentStorage.get.mockResolvedValue(
+      createStoredRecord({
+        id: "archived-other-provider",
+        provider: "codex",
+        archivedAt: "2026-11-02T00:00:00.000Z",
+      }),
+    );
+    const durableRows = Array.from({ length: 6 }, (_, index) => ({
+      seq: index + 1,
+      timestamp: "2026-11-01T00:00:00.000Z",
+      item:
+        index % 2 === 0
+          ? ({ type: "user_message", text: `question ${index / 2}` } as const)
+          : ({ type: "assistant_message", text: `answer ${(index - 1) / 2}` } as const),
+    }));
+    spies.agentManager.readAgentTimelineRows.mockResolvedValue(durableRows);
+
+    const server = await createAgentMcpServer({
+      agentManager,
+      agentStorage,
+      logger,
+      providerSnapshotManager: createClaudeOnlyManager(),
+      callerAgentId: "caller-agent",
+    });
+    const tool = registeredTool(server, "get_agent_activity");
+    const latest = await tool.handler({ agentId: "archived-other-provider", limit: 2 });
+    expect(latest.structuredContent).toEqual(
+      expect.objectContaining({
+        agentId: "archived-other-provider",
+        archived: true,
+        provider: "codex",
+        isYou: false,
+        nextBeforeSeq: 5,
+      }),
+    );
+    expect(String(latest.structuredContent.content)).toContain("question 2");
+    expect(String(latest.structuredContent.content)).not.toContain("question 1");
+
+    const older = await tool.handler({
+      agentId: "archived-other-provider",
+      limit: 2,
+      beforeSeq: 5,
+    });
+    expect(String(older.structuredContent.content)).toContain("question 1");
+    expect(String(older.structuredContent.content)).toContain("answer 1");
+    expect(String(older.structuredContent.content)).not.toContain("question 2");
+    expect(older.structuredContent.nextBeforeSeq).toBe(3);
+    expect(spies.agentManager.resumeAgentFromPersistence).not.toHaveBeenCalled();
+  });
+
+  it("get_agent_activity tells an agent that the id is its own", async () => {
+    const { agentManager, agentStorage, spies } = createTestDeps();
+    spies.agentManager.getAgent.mockReturnValue(
+      createManagedAgent({ id: "caller-agent", currentModeId: "default" }),
+    );
+    spies.agentManager.getTimeline.mockReturnValue([{ type: "user_message", text: "hello" }]);
+    const server = await createAgentMcpServer({
+      agentManager,
+      agentStorage,
+      logger,
+      providerSnapshotManager: createClaudeOnlyManager(),
+      callerAgentId: "caller-agent",
+    });
+    const response = await registeredTool(server, "get_agent_activity").handler({
+      agentId: "caller-agent",
+    });
+    expect(response.structuredContent.isYou).toBe(true);
+    expect(String(response.structuredContent.content)).toContain("This is your own timeline.");
   });
 
   it("get_agent_activity limit counts projected messages, not raw deltas", async () => {

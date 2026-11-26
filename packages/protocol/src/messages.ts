@@ -8758,6 +8758,9 @@ export const SessionLedgerRegroundingSchema = z.object({
 
 export const SessionLedgerSchema = z.object({
   markdown: z.string(),
+  // COMPAT(ledgerGoal): added in v0.11.1; older daemons omit it.
+  /** The task the agent recorded with update_session_ledger { goal }. */
+  goal: SessionLedgerNoteSchema.nullable().optional(),
   decisions: z.array(SessionLedgerNoteSchema),
   openItems: z.array(SessionLedgerNoteSchema),
   nextStep: SessionLedgerNoteSchema.nullable(),

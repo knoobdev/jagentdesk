@@ -90,6 +90,30 @@ describe("mergeSessionLedgerUpdate", () => {
     expect(second.nextStepChanged).toBe(true);
   });
 
+  it("replaces the goal with a new one and keeps it when no goal is sent", () => {
+    const createId = ids();
+    const first = mergeSessionLedgerUpdate(
+      emptySessionLedger("a1"),
+      { goal: "Port the importer" },
+      { seq: 3, at: "t1", createId },
+    );
+    expect(first.goalChanged).toBe(true);
+    expect(first.ledger.goal).toMatchObject({ text: "Port the importer", seq: 3 });
+    const second = mergeSessionLedgerUpdate(
+      first.ledger,
+      { decisions: ["Keep the CLI flags"] },
+      { seq: 5, at: "t2", createId },
+    );
+    expect(second.goalChanged).toBe(false);
+    expect(second.ledger.goal?.text).toBe("Port the importer");
+    const third = mergeSessionLedgerUpdate(
+      second.ledger,
+      { goal: "Write the release notes" },
+      { seq: 9, at: "t3", createId },
+    );
+    expect(third.ledger.goal).toMatchObject({ text: "Write the release notes", seq: 9 });
+  });
+
   it("closes an item by id", () => {
     const createId = ids();
     const first = mergeSessionLedgerUpdate(
@@ -108,7 +132,7 @@ describe("mergeSessionLedgerUpdate", () => {
 });
 
 describe("collectTimelineLedgerFacts", () => {
-  it("reads goals verbatim, files, commands with failing tails, errors and turn answers", () => {
+  it("reads user messages verbatim, files, commands with failing tails, errors and turn answers", () => {
     const longGoal = "x".repeat(4100);
     const failingOutput = Array.from({ length: 30 }, (_, index) => `line ${index + 1}`).join("\n");
     const facts = collectTimelineLedgerFacts({
@@ -132,9 +156,9 @@ describe("collectTimelineLedgerFacts", () => {
         { type: "assistant_message", text: "[System Error] Claude usage limit reached" },
       ]),
     });
-    expect(facts.goals[0]).toEqual({ seq: 1, text: "Fix the parser. Do not touch tests." });
-    expect(facts.goals[1]?.text).toHaveLength(4000);
-    expect(facts.goals[1]?.originalLength).toBe(4100);
+    expect(facts.userMessages[0]).toEqual({ seq: 1, text: "Fix the parser. Do not touch tests." });
+    expect(facts.userMessages[1]?.text).toHaveLength(4000);
+    expect(facts.userMessages[1]?.originalLength).toBe(4100);
     expect(facts.files).toEqual([
       {
         path: "src/parser.ts",
@@ -167,7 +191,7 @@ describe("collectTimelineLedgerFacts", () => {
       ]),
       sinceSeq: 2,
     });
-    expect(facts.goals.map((goal) => goal.text)).toEqual(["two"]);
+    expect(facts.userMessages.map((message) => message.text)).toEqual(["two"]);
     expect(facts.latestSeq).toBe(4);
   });
 });
@@ -175,7 +199,7 @@ describe("collectTimelineLedgerFacts", () => {
 describe("fitHandoff", () => {
   function bigDocument() {
     const items: AgentTimelineItem[] = [];
-    items.push({ type: "user_message", text: "GOAL: keep the public API unchanged." });
+    items.push({ type: "user_message", text: "An old request that is done." });
     for (let turn = 0; turn < 40; turn += 1) {
       items.push({ type: "user_message", text: `Request ${turn}` });
       items.push(shell(`s${turn}`, `npm run build-${turn}`, 1, "error\n".repeat(200)));
@@ -186,13 +210,17 @@ describe("fitHandoff", () => {
     const diffs = new Map(facts.files.map((file) => [file.path, "+".repeat(3000)]));
     const notes = mergeSessionLedgerUpdate(
       emptySessionLedger("a1"),
-      { decisions: ["Keep v1 routes"], nextStep: "NEXT: rerun the build" },
+      {
+        goal: "GOAL: keep the public API unchanged.",
+        decisions: ["Keep v1 routes"],
+        nextStep: "NEXT: rerun the build",
+      },
       { seq: 3, at: "t", createId: ids() },
     ).ledger;
     return buildLedgerDocument({ facts, notes, diffs });
   }
 
-  it("fits a handoff into 60 % of a small window and never cuts goals or the next step", () => {
+  it("fits a handoff into 60 % of a small window and never cuts the goal, the next step or the newest message", () => {
     const document = bigDocument();
     const render = (current: typeof document) =>
       renderHandoffText({
@@ -211,8 +239,66 @@ describe("fitHandoff", () => {
     expect(fitted.overBudget).toBe(false);
     expect(fitted.estimatedTokens).toBeLessThanOrEqual(budget);
     expect(fitted.text).toContain("GOAL: keep the public API unchanged.");
-    for (let turn = 0; turn < 40; turn += 1) expect(fitted.text).toContain(`Request ${turn}`);
+    expect(fitted.text).toContain("Request 39");
     expect(fitted.text).toContain("NEXT: rerun the build");
+    expect(fitted.text).toContain("Earlier requests, newest first.");
+  });
+
+  it("cuts the oldest user messages before the newest, and never the newest one", () => {
+    const items: AgentTimelineItem[] = [];
+    for (let turn = 0; turn < 60; turn += 1) {
+      items.push({ type: "user_message", text: `Request ${turn} ${"r".repeat(400)}` });
+      items.push({ type: "assistant_message", text: `Answer ${turn}` });
+    }
+    const facts = collectTimelineLedgerFacts({ rows: rows(items) });
+    const document = buildLedgerDocument({
+      facts,
+      notes: emptySessionLedger("a1"),
+      recentTurns: 0,
+    });
+    const render = (current: typeof document) =>
+      renderHandoffText({
+        document: current,
+        mode: "handoff",
+        agentId: "a1",
+        fromProvider: "Claude",
+        toProvider: "Codex",
+      });
+    const fitted = fitHandoff({ document, budgetTokens: 2_000, render });
+    expect(fitted.text).toContain("Request 59 ");
+    expect(fitted.text).not.toContain("Request 0 ");
+    expect(fitted.text.indexOf("Request 59 ")).toBeLessThan(fitted.text.indexOf("Request 58 "));
+    expect(fitted.text).toMatch(/\(\d+ older messages left out to fit\)/);
+  });
+
+  it("lists user messages newest first with their time under the earlier-requests note", () => {
+    const facts = collectTimelineLedgerFacts({
+      rows: [
+        {
+          seq: 1,
+          item: { type: "user_message", text: "Read the old report" },
+          timestamp: "2026-11-01T09:12:00.000Z",
+        },
+        {
+          seq: 2,
+          item: { type: "user_message", text: "Continue" },
+          timestamp: "2026-11-20T16:40:00.000Z",
+        },
+      ],
+    });
+    const text = renderHandoffText({
+      document: buildLedgerDocument({ facts, notes: emptySessionLedger("a1"), recentTurns: 0 }),
+      mode: "handoff",
+      agentId: "a1",
+      fromProvider: "Claude",
+      toProvider: "Codex",
+    });
+    expect(text).toContain(
+      "Earlier requests, newest first. Older ones may already be done — do not act on them unless the latest message asks.",
+    );
+    expect(text.indexOf("2026-11-20 16:40Z:\n> Continue")).toBeGreaterThan(0);
+    expect(text.indexOf("2026-11-20 16:40Z")).toBeLessThan(text.indexOf("2026-11-01 09:12Z"));
+    expect(text).not.toContain("Current goal");
   });
 
   it("cuts old command output first", () => {
