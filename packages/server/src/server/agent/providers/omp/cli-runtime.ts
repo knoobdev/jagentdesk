@@ -21,6 +21,7 @@ import {
   OmpBranchMessagesResultSchema,
   OmpBranchResultSchema,
   OmpCommandsResultSchema,
+  type OmpExtensionUiResponse,
   OmpHostToolsResultSchema,
   OmpMessagesResultSchema,
   OmpModelSchema,
@@ -281,10 +282,7 @@ class OmpCliRuntimeSession implements OmpRuntimeSession {
     });
   }
 
-  respondToExtensionUiRequest(
-    id: string,
-    response: { value?: string; confirmed?: boolean; cancelled?: boolean },
-  ): void {
+  respondToExtensionUiRequest(id: string, response: OmpExtensionUiResponse): void {
     this.process.send({ type: "extension_ui_response", id, ...response });
   }
 
