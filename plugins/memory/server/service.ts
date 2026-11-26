@@ -11,6 +11,7 @@ import type {
 import {
   DEFAULT_MEMORY_SETTINGS,
   MEMORY_PLUGIN_ID,
+  MEMORY_REMEMBERED_ITEM_KIND,
   MEMORY_USED_ITEM_KIND,
   MEMORY_USED_ITEM_VERSION,
   type MemoryRecord,
@@ -101,7 +102,35 @@ export class MemoryService {
       },
     });
     this.changed(result.memory);
+    if (input.agentId) await this.showRemembered(input.agentId, result.memory);
     return result;
+  }
+
+  /**
+   * "Remembered · …" (spec 41 §2) as its own timeline row: a folded turn hides its tool calls,
+   * but daemon plugin rows stay visible.
+   */
+  private async showRemembered(agentId: string, memory: MemoryRecord): Promise<void> {
+    try {
+      await this.deps.agentManager.appendTimelineItem(agentId, {
+        type: "plugin",
+        id: `memory-remembered:${memory.id}`,
+        pluginId: MEMORY_PLUGIN_ID,
+        kind: MEMORY_REMEMBERED_ITEM_KIND,
+        version: 1,
+        data: {
+          memory: {
+            id: memory.id,
+            scope: memory.scope,
+            text: memory.text,
+            tags: [...memory.tags],
+            pinned: memory.pinned,
+          },
+        },
+      });
+    } catch (error) {
+      this.deps.logger.warn({ err: error, agentId }, "Could not show the remembered memory");
+    }
   }
 
   /** The `search_memory` tool; the results join this turn's "Used N memories" card. */

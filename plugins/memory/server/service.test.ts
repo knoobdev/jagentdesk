@@ -60,6 +60,17 @@ describe("MemoryService", () => {
       projectId: "proj-a",
       source: { by: "agent", agentId: "agent-a", provider: "claude" },
     });
+    // The "Remembered · …" row lands in the saving agent's timeline.
+    expect(harness.appended.shift()).toEqual({
+      agentId: "agent-a",
+      item: expect.objectContaining({
+        type: "plugin",
+        id: `memory-remembered:${saved.memory.id}`,
+        pluginId: "memory",
+        kind: "memory-remembered",
+        data: { memory: expect.objectContaining({ id: saved.memory.id, scope: "project" }) },
+      }),
+    });
 
     const injection = await harness.service.prepareUserTurn({
       agentId: "agent-a2",
@@ -146,7 +157,9 @@ describe("MemoryService", () => {
     });
     await injection!.commit({ messageId: "m" });
     await harness.service.search({ agentId: "agent-a2", query: "port" });
-    const last = harness.appended.at(-1)!.item;
+    const last = harness.appended.findLast(
+      (entry) => entry.item.type === "plugin" && entry.item.kind === "memory-used",
+    )!.item;
     expect(last).toMatchObject({ id: "memory-used:turn-of-agent-a2" });
     expect(
       (last as { data: { memories: { id: string; kind: string }[] } }).data.memories.map(

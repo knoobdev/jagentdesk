@@ -7,6 +7,13 @@ export const MEMORY_PLUGIN_ID = "memory";
 /** Plugin timeline item kind for the per-turn "Used N memories" chip. */
 export const MEMORY_USED_ITEM_KIND = "memory-used";
 export const MEMORY_USED_ITEM_VERSION = 1;
+/** Plugin timeline item kind for the "Remembered · …" row with Undo and Edit. */
+export const MEMORY_REMEMBERED_ITEM_KIND = "memory-remembered";
+
+/** The `memory-remembered` row's data: the memory as the tool saved it. */
+export interface MemoryRememberedItemData {
+  memory: Pick<MemoryRecord, "id" | "scope" | "text" | "tags" | "pinned">;
+}
 
 export type MemoryScope = "project" | "global";
 

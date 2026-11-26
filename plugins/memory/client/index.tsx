@@ -1,9 +1,9 @@
 import { Brain } from "lucide-react-native";
 import type { BuiltinClientHost } from "../../../packages/app/src/plugins/builtin/host-api";
-import { MEMORY_USED_ITEM_KIND } from "../shared/types";
+import { MEMORY_REMEMBERED_ITEM_KIND, MEMORY_USED_ITEM_KIND } from "../shared/types";
 import { MemoryInspectorTab } from "./inspector-tab";
 import { RememberThisAction } from "./remember-action";
-import { matchRememberToolCall, RememberedCard } from "./remembered-card";
+import { RememberedRow } from "./remembered-card";
 import { MemoryScreen } from "./screen";
 import { MemorySettingsSection } from "./settings-section";
 import { MemoryUsedChip } from "./used-chip";
@@ -21,11 +21,7 @@ export function register(app: BuiltinClientHost) {
   app.mobileDrawerEntry(destination);
   app.screen("memory", MemoryScreen);
   app.timelineRenderer(MEMORY_USED_ITEM_KIND, MemoryUsedChip);
-  app.toolCallRenderer("remember", {
-    placements: ["inline"],
-    match: matchRememberToolCall,
-    Card: RememberedCard,
-  });
+  app.timelineRenderer(MEMORY_REMEMBERED_ITEM_KIND, RememberedRow);
   app.messageAction("remember-this", RememberThisAction);
   app.settingsSection("memory", MemorySettingsSection);
   app.inspectorTab({ id: "memory", title: "Memory", icon: Brain, component: MemoryInspectorTab });
