@@ -1,8 +1,12 @@
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, test } from "vitest";
 
 import { createTestLogger } from "../../../../test-utils/test-logger.js";
 import type { AgentSession, AgentStreamEvent } from "../../agent-sdk-types.js";
 import { CodexAppServerAgentClient } from "../codex-app-server-agent.js";
+import { readCodexThreadHistoryVersion } from "./thread-history.js";
 import {
   createFakeCodexAppServer,
   type FakeCodexAppServer,
@@ -223,5 +227,33 @@ describe("Codex thread history", () => {
       await session.close();
     }
     appServer.assertNoErrors();
+  });
+});
+
+describe("Codex history version", () => {
+  test("changes when the rollout grows and names the thread", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "codex-history-version-"));
+    try {
+      const rollout = path.join(root, "rollout.jsonl");
+      writeFileSync(rollout, '{"type":"session_meta"}\n');
+      const client = {
+        request: async (method: string) => {
+          if (method !== "thread/read") throw new Error(`unexpected ${method}`);
+          return { thread: { id: "thread-1", path: rollout, updatedAt: 1 } };
+        },
+      };
+      const before = await readCodexThreadHistoryVersion(client, "thread-1");
+      expect(before).toMatch(/^thread-1:/);
+      expect(await readCodexThreadHistoryVersion(client, "thread-1")).toBe(before);
+      appendFileSync(rollout, '{"type":"event_msg"}\n');
+      expect(await readCodexThreadHistoryVersion(client, "thread-1")).not.toBe(before);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("falls back to the thread's update time without a rollout path", async () => {
+    const client = { request: async () => ({ thread: { id: "thread-1", updatedAt: 42 } }) };
+    expect(await readCodexThreadHistoryVersion(client, "thread-1")).toBe("thread-1:updated:42");
   });
 });

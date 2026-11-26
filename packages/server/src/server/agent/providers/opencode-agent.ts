@@ -5008,6 +5008,32 @@ class OpenCodeAgentSession implements AgentSession {
     );
   }
 
+  /** The session's update time and revert point, and its newest message's progress. */
+  async readHistoryVersion(): Promise<string | null> {
+    await this.reconnectIfServerExited();
+    const [sessionResponse, newest] = await Promise.all([
+      this.client.session.get({ sessionID: this.sessionId, directory: this.config.cwd }),
+      this.client.session.messages({
+        sessionID: this.sessionId,
+        directory: this.config.cwd,
+        limit: 1,
+      }),
+    ]);
+    const session = sessionResponse.error ? null : sessionResponse.data;
+    if (!session || newest.error || !newest.data) return null;
+    const last = newest.data.at(-1);
+    const completed =
+      last?.info.role === "assistant" ? (last.info.time.completed ?? "open") : "user";
+    return [
+      this.sessionId,
+      session.time.updated,
+      session.revert?.messageID ?? "",
+      last?.info.id ?? "",
+      completed,
+      last?.parts.length ?? 0,
+    ].join(":");
+  }
+
   async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
     await this.reconnectIfServerExited();
     const sessionResponse = await this.client.session.get({

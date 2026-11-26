@@ -107,6 +107,7 @@ import {
   type CodexHistoryStatus,
   CodexThreadHistoryTooLargeError,
   readCodexThreadHistory,
+  readCodexThreadHistoryVersion,
 } from "./codex/thread-history.js";
 import {
   materializeProviderImage,
@@ -5127,6 +5128,11 @@ export class CodexAppServerAgentSession implements AgentSession {
     return () => {
       this.subscribers.delete(callback);
     };
+  }
+
+  async readHistoryVersion(): Promise<string | null> {
+    if (!this.client || !this.currentThreadId) return null;
+    return readCodexThreadHistoryVersion(this.client, this.currentThreadId);
   }
 
   async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
