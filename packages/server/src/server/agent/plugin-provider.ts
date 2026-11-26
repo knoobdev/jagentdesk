@@ -84,6 +84,7 @@ import { runProviderTurn } from "./providers/provider-runner.js";
 import { StaleProviderSessionError } from "./stale-provider-session-error.js";
 import { isDeepStrictEqual } from "node:util";
 import { readPluginOptionState } from "./plugin-provider-options.js";
+import { ToolPolicyUnsupportedError } from "./provider-options.js";
 
 interface Deferred<Value> {
   promise: Promise<Value>;
@@ -321,6 +322,12 @@ class ProviderRuntime {
       throw new Error(`Provider session already exists: ${input.sessionId}`);
     }
     const connection = await this.getConnection();
+    if (input.config.toolPolicy && !connection.capabilities.includes("permission.tool_policy")) {
+      throw new ToolPolicyUnsupportedError(
+        this.registration.id,
+        `Provider '${this.registration.id}' cannot preapprove exact MCP tools: its connection does not offer permission.tool_policy`,
+      );
+    }
     requireProviderCapabilities(connection.capabilities, {
       type: "session.open",
       requestId: "capability-check",
@@ -419,6 +426,12 @@ class ProviderRuntime {
       pending.reject(
         signal?.reason instanceof Error ? signal.reason : new Error("Provider request aborted"),
       );
+      // Without the cancel, a provider keeps the abandoned work and whatever it spawned (#10734).
+      if (connection.capabilities.includes("request.cancel")) {
+        void connection
+          .send({ type: "request.cancel", requestId: input.requestId })
+          .catch(() => undefined);
+      }
     };
     signal?.addEventListener("abort", abort, { once: true });
     try {
@@ -1041,6 +1054,8 @@ function createPluginProviderDefinition(
     requiresConfiguration: registration.requiresConfiguration,
     defaultModeId: null,
     modes: [],
+    // Each connection negotiates permission.tool_policy, so the registry lets a policy through and
+    // ProviderRuntime.openSession refuses it with ToolPolicyUnsupportedError when it is not offered.
     supportsExactMcpPreapproval: true,
     createClient,
   };
@@ -2255,13 +2270,20 @@ function encodePersistence(persistence: ProviderPersistence): string {
   return `plugin:${JSON.stringify(persistence)}`;
 }
 
+// Providers whose agents were saved by the generic ACP provider before they became plugins.
+const FORMER_ACP_PROVIDERS = new Set<string>([
+  // COMPAT(gooseProvider): added in v0.17.0, remove after 2027-05-20 once legacy handles have migrated.
+  "goose",
+  // COMPAT(hermesProvider): added in v0.17.4, remove after 2027-05-23 once legacy handles have migrated.
+  "hermes",
+]);
+
 function decodePersistence(handle: AgentPersistenceHandle): ProviderPersistence {
   const fromMetadata = handle.metadata?.pluginProviderPersistence;
   if (fromMetadata !== undefined) {
     return ProviderPersistenceSchema.parse(fromMetadata);
   }
-  // COMPAT(gooseProvider): added in v0.17.0, remove after 2027-05-20 once legacy handles have migrated.
-  if (handle.provider === "goose" && !handle.sessionId.startsWith("plugin:")) {
+  if (FORMER_ACP_PROVIDERS.has(handle.provider) && !handle.sessionId.startsWith("plugin:")) {
     return { version: 1, data: { sessionId: handle.sessionId } };
   }
   return decodePersistenceId(handle.sessionId);

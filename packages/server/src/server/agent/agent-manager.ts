@@ -13,7 +13,7 @@ import { AgentTurnChangedError } from "./agent-prompt.js";
 import { continuesAssistantMessage, projectTimelineRows } from "./timeline-projection.js";
 import { isDefaultAgentCreateConfigUnattended } from "./create-agent-mode.js";
 import { isStaleProviderSessionError } from "./stale-provider-session-error.js";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import { stat } from "node:fs/promises";
 import {
   AGENT_LIFECYCLE_STATUSES,
@@ -161,6 +161,7 @@ import {
   type ProviderSubagentDescriptor,
   type ProviderSubagentStoreEvent,
 } from "./provider-subagents/store.js";
+import { withTimeout } from "../../utils/promise-timeout.js";
 import {
   AgentBackgroundWorkStore,
   isDaemonBackgroundWorkItem,
@@ -185,6 +186,7 @@ import {
 const RELOAD_SESSION_CLOSE_TIMEOUT_MS = 3_000;
 
 const INTERRUPT_SESSION_TIMEOUT_MS = 2_000;
+const IMPORTABLE_SESSION_LIST_TIMEOUT_MS = 90_000;
 
 const STORED_AGENT_CAPABILITIES: AgentCapabilityFlags = {
   supportsStreaming: false,
@@ -405,22 +407,26 @@ interface HydrateTimelineOptions {
   broadcastTimeline?: boolean;
 }
 
-export type ImportablePersistedAgentQueryOptions = ListImportableSessionsOptions & {
+export type ImportablePersistedAgentQueryOptions = Omit<ListImportableSessionsOptions, "signal"> & {
   /**
    * When set, only providers in this set are scanned, in addition to the
    * built-in importable allowlist + enabled + non-derived rules.
    */
   providerFilter?: Set<string>;
-  onProviderError?: (error: ImportableSessionProviderError) => void;
 };
-
-export interface ImportableSessionProviderError {
-  provider: string;
-  message: string;
-}
 
 export interface ManagedImportableProviderSession extends ImportableProviderSession {
   provider: AgentProvider;
+}
+
+export interface ImportableSessionProviderError {
+  provider: AgentProvider;
+  message: string;
+}
+
+export interface ManagedImportableSessionsResult {
+  sessions: ManagedImportableProviderSession[];
+  providerErrors: ImportableSessionProviderError[];
 }
 
 export type AgentAttentionCallback = (params: {
@@ -1825,41 +1831,59 @@ export class AgentManager {
 
   async listImportableSessions(
     options?: ImportablePersistedAgentQueryOptions,
-  ): Promise<ManagedImportableProviderSession[]> {
+  ): Promise<ManagedImportableSessionsResult> {
     const providerEntries = Array.from(this.clients.entries()).filter(
       ([provider, client]) =>
         client.capabilities.supportsSessionListing &&
         !!client.listImportableSessions &&
         this.isProviderImportable(provider, options?.providerFilter),
     );
-    const sessionLists = await Promise.all(
+    const providerResults = await Promise.all(
       providerEntries.map(async ([provider, client]) => {
+        const cancellation = new AbortController();
         try {
-          return (
-            await client.listImportableSessions!({
+          const sessions = await withTimeout(
+            client.listImportableSessions!({
+              signal: cancellation.signal,
               limit: options?.limit,
+              query: options?.query,
+              scanLimit: options?.scanLimit,
               cwd: options?.cwd,
-            })
-          ).map((session) => Object.assign(session, { provider }));
+            }),
+            IMPORTABLE_SESSION_LIST_TIMEOUT_MS,
+            `Timed out listing importable sessions for provider '${provider}' after ${IMPORTABLE_SESSION_LIST_TIMEOUT_MS}ms`,
+          );
+          return {
+            sessions: sessions
+              .filter((session) => matchesImportableSessionQuery(session, options?.query))
+              .map((session) => Object.assign(session, { provider })),
+            error: null,
+          };
         } catch (error) {
+          cancellation.abort(error);
           this.logger.warn(
             { err: error, provider },
             "Failed to list importable sessions for provider",
           );
-          options?.onProviderError?.({
-            provider,
-            message: error instanceof Error ? error.message : String(error),
-          });
-          return [];
+          return {
+            sessions: [],
+            error: {
+              provider,
+              message: error instanceof Error ? error.message : String(error),
+            },
+          };
         }
       }),
     );
-    const sessions: ManagedImportableProviderSession[] = sessionLists.flat();
+    const sessions = providerResults.flatMap((result) => result.sessions);
 
     const limit = options?.limit ?? 20;
-    return sessions
-      .sort((a, b) => b.lastActivityAt.getTime() - a.lastActivityAt.getTime())
-      .slice(0, limit);
+    return {
+      sessions: sessions
+        .sort((a, b) => b.lastActivityAt.getTime() - a.lastActivityAt.getTime())
+        .slice(0, limit),
+      providerErrors: providerResults.flatMap((result) => (result.error ? [result.error] : [])),
+    };
   }
 
   private isProviderImportable(
@@ -2097,6 +2121,11 @@ export class AgentManager {
 
   getAgentBackgroundWorkSummary(agentId: string) {
     return this.backgroundWork.summary(agentId);
+  }
+
+  /** The live session started work that will start another turn by itself. */
+  hasPendingWakeup(agentId: string): boolean {
+    return this.agents.get(agentId)?.session.hasPendingWakeup?.() ?? false;
   }
 
   private publishBackgroundWork(agentId: string, items: AgentBackgroundWorkItem[] | null): void {
@@ -4093,19 +4122,8 @@ export class AgentManager {
     options?: AgentRunOptions,
     onAccepted?: () => void,
   ): Promise<boolean> {
-    if (
-      this.collectingRuntimes.has(agentId) ||
-      this.inFlightAgentCloses.has(agentId) ||
-      !this.agents.has(agentId)
-    ) {
-      await this.waitForAgentClose(agentId);
-      await ensureAgentLoaded(agentId, {
-        agentManager: this,
-        agentStorage: this.requireRegistry(),
-        logger: this.logger,
-      });
-    }
-    const agent = await this.ensureInteractiveSession(agentId);
+    const agent = await this.findOutOfBandRecipient(agentId);
+    if (!agent) return false;
     const handler = agent.session.tryHandleOutOfBand?.(prompt);
     if (!handler) {
       return false;
@@ -4144,6 +4162,34 @@ export class AgentManager {
       }
     });
     return true;
+  }
+
+  private async findOutOfBandRecipient(agentId: string): Promise<ActiveManagedAgent | null> {
+    const live = this.agents.get(agentId);
+    const collecting =
+      this.collectingRuntimes.has(agentId) || this.inFlightAgentCloses.has(agentId);
+    if (live?.session && !collecting && !this.historySessions.has(live.session)) {
+      return live;
+    }
+    if (collecting || !live) {
+      await this.waitForAgentClose(agentId);
+      const storage = this.requireRegistry();
+      // Normal dispatch owns unarchiving. Decline without loading archived history.
+      if ((await storage.get(agentId))?.archivedAt) return null;
+      await ensureAgentLoaded(agentId, {
+        agentManager: this,
+        agentStorage: storage,
+        logger: this.logger,
+      });
+    }
+    return this.trackAgentRegistrationOperation(
+      this.runLifecycleMutation(agentId, async () => {
+        const record = await this.registry?.get(agentId);
+        // Restore closes any history session. Normal dispatch can reopen the stored agent.
+        if (record && (record.archivedAt || !this.agents.get(agentId)?.session)) return null;
+        return this.upgradeHistorySessionUnlocked(this.requireSessionAgent(agentId));
+      }),
+    );
   }
 
   async appendTimelineItem(
@@ -4352,9 +4398,16 @@ export class AgentManager {
   private async ensureInteractiveSessionUnlocked(agentId: string): Promise<ActiveManagedAgent> {
     const record = await this.registry?.get(agentId);
     if (record?.archivedAt) throw new Error(`Agent is archived: ${agentId}`);
-    const agent = this.requireSessionAgent(agentId);
-    if (this.historySessions.has(agent.session)) await this.reloadAgentSessionInternal(agentId);
-    return this.requireSessionAgent(agentId);
+    return this.upgradeHistorySessionUnlocked(this.requireSessionAgent(agentId));
+  }
+
+  private async upgradeHistorySessionUnlocked(
+    agent: ActiveManagedAgent,
+  ): Promise<ActiveManagedAgent> {
+    if (!this.historySessions.has(agent.session)) return agent;
+    // Reload validates the directory before releasing readable history.
+    await this.reloadAgentSessionInternal(agent.id);
+    return this.requireSessionAgent(agent.id);
   }
 
   /** Inside the agent's lane: transparently reopens a retired plugin session before applying config. */
@@ -8114,6 +8167,18 @@ export class AgentManager {
     }
     return agent;
   }
+}
+
+function matchesImportableSessionQuery(
+  session: ImportableProviderSession,
+  rawQuery: string | undefined,
+): boolean {
+  const query = rawQuery?.trim().toLowerCase();
+  if (!query) return true;
+  const cwdBasename = basename(session.cwd.replaceAll("\\", "/"));
+  return [session.title, session.firstPromptPreview, session.lastPromptPreview, cwdBasename].some(
+    (value) => value?.toLowerCase().includes(query),
+  );
 }
 
 export function commandMayHaveChangedExternalState(command: string): boolean {

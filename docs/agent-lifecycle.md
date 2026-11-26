@@ -57,6 +57,17 @@ Users can also detach an existing subagent from the subagents track. Detach is d
 
 `notifyOnFinish` defaults to `true` for agent-scoped creation and background prompt follow-ups because most delegated work needs to report back to the creating agent. Set it to `false` only for truly fire-and-forget agents or prompts.
 
+A turn end is not always a finished child. When the child ends its turn with work that will start
+its next turn by itself, the caller gets one `message` notice ("ended its turn but is still
+working") and the subscription keeps following the child. That work is a running turn, queued
+messages, a pending provider wake-up (`AgentSession.hasPendingWakeup`: Claude background tasks,
+task notifications and one-shot wake-ups), or the child's own outstanding finish subscriptions.
+Heartbeats, recurring crons and other daemon background items never count: they are external
+triggers, not work the caller waits for. Later turn ends stay silent until nothing is pending,
+which sends `finished`. `followingSince` is saved in `finish-subscriptions.json` before the notice,
+so a restart resumes following without repeating it. Following ends after 24 hours with an "is
+still working" notice. Children on another host report their first turn end as `finished`.
+
 ## Agent messages
 
 Agent sends default to `queue`. The recipient finishes its running turn, including compaction,

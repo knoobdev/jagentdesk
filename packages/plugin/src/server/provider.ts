@@ -22,6 +22,7 @@ export const PROVIDER_CAPABILITIES = [
   "session.unarchive",
   "permission",
   "permission.tool_policy",
+  "request.cancel",
   "timeline.plugin",
 ] as const;
 
@@ -376,7 +377,13 @@ export type ProviderInput =
   | { type: "session.archive"; requestId: string; persistence: ProviderPersistence }
   | { type: "session.unarchive"; requestId: string; persistence: ProviderPersistence }
   | { type: "session.can_stop_runtime"; requestId: string; sessionId: string }
-  | { type: "session.close"; requestId: string; sessionId: string };
+  | { type: "session.close"; requestId: string; sessionId: string }
+  /**
+   * JAgentDesk stopped waiting for the request with this `requestId`, such as a catalogue refresh that
+   * passed its deadline. Stop its work and release what it started; JAgentDesk ignores later events for
+   * it. Sent only when the connection offers `request.cancel`.
+   */
+  | { type: "request.cancel"; requestId: string };
 
 export interface ProviderThinkingOption {
   id: string;
@@ -791,6 +798,8 @@ export function requiredProviderCapabilities(input: ProviderInput): readonly Pro
   switch (input.type) {
     case "session.can_stop_runtime":
       return ["session.can_stop_runtime"];
+    case "request.cancel":
+      return ["request.cancel"];
     case "catalog":
     case "session.interrupt":
     case "session.close":
@@ -1133,6 +1142,7 @@ export const ProviderInputSchema: z.ZodType<ProviderInput> = z.discriminatedUnio
     })
     .strict(),
   z.object({ type: z.literal("session.close"), requestId: idSchema, sessionId: idSchema }).strict(),
+  z.object({ type: z.literal("request.cancel"), requestId: idSchema }).strict(),
 ]);
 
 const modeSchema = z

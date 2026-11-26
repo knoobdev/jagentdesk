@@ -70,7 +70,7 @@ export function useImportSession({
       return;
     }
     chooseHost({
-      title: t("importSession.title"),
+      title: t("importSession.chooseHostTitle"),
       onChooseHost: openForHost,
     });
   }, [chooseHost, openForHost, serverId, t]);

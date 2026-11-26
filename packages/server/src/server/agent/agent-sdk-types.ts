@@ -596,8 +596,12 @@ export interface AgentSlashCommand {
 }
 
 export interface ListImportableSessionsOptions {
+  /** Aborts provider work when the caller stops waiting for a listing. */
+  signal?: AbortSignal;
   providerOptions?: ProviderOptions;
   limit?: number;
+  /** Optional case-insensitive descriptor search text. */
+  query?: string;
   /**
    * How many candidate sessions to scan before ranking down to `limit`. Lets a
    * host-wide search page deeper than the returned window; capped by the provider.
@@ -887,6 +891,11 @@ export interface AgentSession {
    * An optional additional veto: missing methods use daemon baseline eligibility;
    * implemented checks that reject or return false keep the runtime resident. */
   canStopRuntime?(): Promise<boolean>;
+  /**
+   * True while work this session started will start another turn by itself, such as a
+   * background task that reports back when it ends. Recurring triggers do not count.
+   */
+  hasPendingWakeup?(): boolean;
 
   /** Release live runtime resources without archiving or deleting the durable native session. */
   close(): Promise<void>;

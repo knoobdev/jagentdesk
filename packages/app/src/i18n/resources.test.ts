@@ -281,6 +281,7 @@ describe("translation resources", () => {
 
   it("includes workspace and panel keys for the Batch 4A migration", () => {
     expect(en.importSession.title).toBe("Import session");
+    expect(en.importSession.chooseHostTitle).toBe("Import from host");
     expect(en.importSession.status.connectHost).toBe("Connect to a host to import sessions");
     expect(en.importSession.actions.refresh).toBe("Refresh sessions");
     expect(en.workspace.fileExplorer.sort.name).toBe("Name");
@@ -294,6 +295,9 @@ describe("translation resources", () => {
     expect(en.workspace.browser.controls.enterUrl).toBe("Enter URL");
     expect(en.workspace.terminal.hostDisconnected).toBe("Host is not connected");
     expect(en.panels.file.directoryMissing).toBe("Workspace directory not found.");
+    expect(en.openProject.tiles.importSession.description).toBe(
+      "Open a Claude Code, Codex or other session you started in a terminal",
+    );
   });
 
   it("includes workspace Git and review keys for the Batch 4B migration", () => {

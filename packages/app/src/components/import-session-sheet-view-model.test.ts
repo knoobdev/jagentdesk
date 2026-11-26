@@ -4,10 +4,16 @@ import {
   aggregateSessionEntries,
   ALL_FILTER_VALUE,
   buildProviderLabelMap,
-  collectErroredProviderLabels,
+  collectProviderErrorRows,
   computeEmptyState,
+  formatDirectoryLabel,
   getPromptPreview,
   getSessionTitle,
+  hasMoreSessions,
+  nextPageLimit,
+  PER_PROVIDER_LIMIT,
+  resolveDirectoryLabel,
+  resolveImportTarget,
   resolveProvidersToFetch,
   requiresImportSessionsHostUpgrade,
   type SessionsQueryResult,
@@ -167,27 +173,222 @@ describe("sumFilteredAlreadyImportedCount", () => {
   });
 });
 
-describe("collectErroredProviderLabels", () => {
-  it("returns no labels when no providers are being fetched", () => {
-    expect(collectErroredProviderLabels(null, [], new Map())).toEqual([]);
+describe("collectProviderErrorRows", () => {
+  it("returns no rows when no providers are being fetched", () => {
+    expect(collectProviderErrorRows(null, [], new Map())).toEqual([]);
   });
 
-  it("returns labels for each errored provider, falling back to provider id", () => {
-    const labels = collectErroredProviderLabels(
+  it("returns a row for each provider whose request failed", () => {
+    const rows = collectProviderErrorRows(
       ["claude", "codex"],
       [settled(undefined, { isError: true }), settled({ entries: [] })],
       new Map([["claude", "Claude Code"]]),
     );
-    expect(labels).toEqual(["Claude Code"]);
+    expect(rows).toEqual([
+      { provider: "claude", label: "Claude Code", message: null, retrying: false },
+    ]);
+  });
+
+  it("returns a row for a provider the daemon reported as failed in a good response", () => {
+    const rows = collectProviderErrorRows(
+      ["codex"],
+      [
+        settled({
+          entries: [],
+          providerErrors: [{ provider: "codex", message: "timed out" }],
+        }),
+      ],
+      new Map([["codex", "Codex"]]),
+    );
+    expect(rows).toEqual([
+      { provider: "codex", label: "Codex", message: "timed out", retrying: false },
+    ]);
   });
 
   it("uses provider id when the label map has no entry", () => {
-    const labels = collectErroredProviderLabels(
+    const rows = collectProviderErrorRows(
       ["codex"],
       [settled(undefined, { isError: true })],
       new Map(),
     );
-    expect(labels).toEqual(["codex"]);
+    expect(rows).toEqual([{ provider: "codex", label: "codex", message: null, retrying: false }]);
+  });
+
+  it("shows the current request failure instead of an older provider error", () => {
+    const query = {
+      ...settled(
+        { entries: [], providerErrors: [{ provider: "codex", message: "old provider failure" }] },
+        { isError: true },
+      ),
+      error: new Error("  Connection closed. Reconnect the host and retry.  "),
+    };
+    expect(collectProviderErrorRows(["codex"], [query], new Map())).toEqual([
+      {
+        provider: "codex",
+        label: "codex",
+        message: "Connection closed. Reconnect the host and retry.",
+        retrying: false,
+      },
+    ]);
+  });
+
+  it("keeps the provider failure visible while its retry is in flight", () => {
+    const query = {
+      ...settled({
+        entries: [],
+        providerErrors: [{ provider: "codex", message: "Run codex login and retry." }],
+      }),
+      isFetching: true,
+    };
+    expect(collectProviderErrorRows(["codex"], [query], new Map())).toEqual([
+      {
+        provider: "codex",
+        label: "codex",
+        message: "Run codex login and retry.",
+        retrying: true,
+      },
+    ]);
+  });
+});
+
+describe("nextPageLimit", () => {
+  it("grows the per-provider limit one step at a time", () => {
+    expect(nextPageLimit(PER_PROVIDER_LIMIT)).toBe(45);
+    expect(nextPageLimit(45)).toBe(90);
+    expect(nextPageLimit(90)).toBe(200);
+  });
+
+  it("stops at the protocol ceiling", () => {
+    expect(nextPageLimit(200)).toBe(200);
+  });
+});
+
+describe("hasMoreSessions", () => {
+  it("reports more when a provider filled the requested page", () => {
+    expect(hasMoreSessions([settled({ entries: [entry(), entry()] })], 2)).toBe(true);
+  });
+
+  it("reports no more once every provider returned a short page", () => {
+    expect(hasMoreSessions([settled({ entries: [entry()] })], 2)).toBe(false);
+  });
+
+  it("reports no more at the last page size, however full the page is", () => {
+    expect(hasMoreSessions([settled({ entries: [entry(), entry()] })], 200)).toBe(false);
+  });
+
+  it("keeps reporting more while the next page replaces placeholder rows", () => {
+    expect(
+      hasMoreSessions([settled({ entries: [entry()] }, { isPlaceholderData: true })], 45),
+    ).toBe(true);
+  });
+});
+
+describe("resolveDirectoryLabel", () => {
+  const projects = [
+    { rootPath: "/home/me/jagentdesk", name: "jagentdesk" },
+    { rootPath: "/home/me/jagentdesk/packages/app", name: "jagentdesk app" },
+  ];
+
+  it("names the project root after the project alone", () => {
+    expect(resolveDirectoryLabel("/home/me/jagentdesk", projects)).toEqual({ name: "jagentdesk" });
+  });
+
+  it("qualifies a worktree under the project with its path below the root", () => {
+    expect(
+      resolveDirectoryLabel("/home/me/jagentdesk/.dev/worktrees/abc/zebra", [projects[0]!]),
+    ).toEqual({ name: "jagentdesk", detail: ".dev/worktrees/abc/zebra" });
+  });
+
+  it("tells two worktrees of the same project apart", () => {
+    const zebra = resolveDirectoryLabel("/home/me/jagentdesk/.dev/worktrees/abc/zebra", [
+      projects[0]!,
+    ]);
+    const otter = resolveDirectoryLabel("/home/me/jagentdesk/.dev/worktrees/def/otter", [
+      projects[0]!,
+    ]);
+    expect(zebra).not.toEqual(otter);
+    expect([zebra.detail, otter.detail]).toEqual([
+      ".dev/worktrees/abc/zebra",
+      ".dev/worktrees/def/otter",
+    ]);
+  });
+
+  it("picks the most specific project root containing the directory", () => {
+    expect(resolveDirectoryLabel("/home/me/jagentdesk/packages/app/src", projects)).toEqual({
+      name: "jagentdesk app",
+      detail: "src",
+    });
+  });
+
+  it("ignores trailing slashes on both sides", () => {
+    expect(
+      resolveDirectoryLabel("/home/me/jagentdesk/", [
+        { rootPath: "/home/me/jagentdesk/", name: "p" },
+      ]),
+    ).toEqual({ name: "p" });
+  });
+
+  it("does not match a project root that is only a string prefix", () => {
+    expect(resolveDirectoryLabel("/home/me/jagentdesk-fork", projects)).toEqual({
+      name: "/home/me/jagentdesk-fork",
+    });
+  });
+
+  it("falls back to the path when no project owns the directory", () => {
+    expect(resolveDirectoryLabel("/tmp/scratch", projects)).toEqual({ name: "/tmp/scratch" });
+  });
+});
+
+describe("formatDirectoryLabel", () => {
+  it("shows the project name alone at its root", () => {
+    expect(formatDirectoryLabel({ name: "jagentdesk" })).toBe("jagentdesk");
+  });
+
+  it("appends the path under the root so worktrees of one project read apart", () => {
+    expect(formatDirectoryLabel({ name: "jagentdesk", detail: ".dev/worktrees/zebra" })).toBe(
+      "jagentdesk · .dev/worktrees/zebra",
+    );
+  });
+});
+
+describe("resolveImportTarget", () => {
+  it("trusts a scoped listing, whose rows the daemon already matched realpath-aware", () => {
+    expect(
+      resolveImportTarget({
+        entryCwd: "/private/repo/jagentdesk",
+        workspaceCwd: "/repo/jagentdesk",
+        workspaceId: "ws-1",
+        isScopedListing: true,
+      }),
+    ).toEqual({ workspaceId: "ws-1", crossWorkspace: false });
+  });
+
+  it("keeps the current workspace for a Show-all row in that workspace's directory", () => {
+    expect(
+      resolveImportTarget({
+        entryCwd: "/repo/jagentdesk/",
+        workspaceCwd: "/repo/jagentdesk",
+        workspaceId: "ws-1",
+        isScopedListing: false,
+      }),
+    ).toEqual({ workspaceId: "ws-1", crossWorkspace: false });
+  });
+
+  it("drops the workspace for a Show-all row from another directory, which the daemon rejects", () => {
+    expect(
+      resolveImportTarget({
+        entryCwd: "/repo/other",
+        workspaceCwd: "/repo/jagentdesk",
+        workspaceId: "ws-1",
+        isScopedListing: false,
+      }),
+    ).toEqual({ crossWorkspace: true });
+  });
+
+  it("treats a sheet with no workspace as cross-workspace", () => {
+    expect(resolveImportTarget({ entryCwd: "/repo/jagentdesk", isScopedListing: false })).toEqual({
+      crossWorkspace: true,
+    });
   });
 });
 
@@ -236,6 +437,7 @@ describe("computeEmptyState", () => {
     isQueryingProviders: true,
     allQueriesSettled: true,
     selectedProvider: ALL_FILTER_VALUE,
+    hasQuery: false,
     aggregatedCount: 0,
     visibleCount: 0,
     totalAlreadyImportedCount: 0,
@@ -272,6 +474,15 @@ describe("computeEmptyState", () => {
       showEmptyState: true,
       emptyStateTitle: "No recent sessions to import.",
     });
+  });
+
+  it("says nothing matched when a query narrowed the list to nothing", () => {
+    const result = computeEmptyState({
+      ...baseInputs,
+      hasQuery: true,
+      totalAlreadyImportedCount: 4,
+    });
+    expect(result.emptyStateTitle).toBe("No sessions match your search.");
   });
 
   it("shows the already-imported message when imported entries were filtered out", () => {

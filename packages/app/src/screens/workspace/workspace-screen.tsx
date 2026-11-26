@@ -111,6 +111,7 @@ import { WorkspaceActions } from "@/git/workspace-actions";
 import { WorkspaceOpenInEditorButton } from "@/screens/workspace/workspace-open-in-editor-button";
 import { WorkspaceScriptsButton } from "@/screens/workspace/workspace-scripts-button";
 import { ImportSessionSheet } from "@/components/import-session-sheet";
+import { useNavigateToImportedAgent } from "@/hooks/use-import-session";
 import { useToast } from "@/contexts/toast-context";
 import { selectIsFileExplorerOpen, usePanelStore } from "@/stores/panel-store";
 import { type ExplorerCheckoutContext } from "@/stores/explorer-checkout-context";
@@ -2723,6 +2724,9 @@ function WorkspaceScreenContent({
     },
     [persistenceKey],
   );
+  // A "Show all" import can land in another workspace entirely; that
+  // agent has no tab here, so it opens its own workspace instead.
+  const navigateToImportedAgent = useNavigateToImportedAgent(normalizedServerId);
   const handleImportedAgent = useCallback(
     (agentId: string) => {
       if (!persistenceKey) {
@@ -4558,6 +4562,7 @@ function WorkspaceScreenContent({
                 workspaceId={normalizedWorkspaceId}
                 onClose={closeImportSheet}
                 onImportedAgent={handleImportedAgent}
+                onImported={navigateToImportedAgent}
               />
               <WorkspaceTabRenameModal
                 renamingTab={renameModalTab}

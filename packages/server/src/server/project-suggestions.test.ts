@@ -57,12 +57,12 @@ function agentHistory(
   providerErrors: ImportableSessionProviderError[] = [],
 ): Pick<AgentManager, "listImportableSessions"> {
   return {
-    listImportableSessions: async (options) => {
-      providerErrors.forEach((error) => options?.onProviderError?.(error));
-      return sessions.filter(
+    listImportableSessions: async (options) => ({
+      sessions: sessions.filter(
         (entry) => !options?.providerFilter || options.providerFilter.has(entry.provider),
-      );
-    },
+      ),
+      providerErrors,
+    }),
   };
 }
 

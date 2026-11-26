@@ -4,19 +4,19 @@ A provider is an agent backend: the daemon spawns its CLI or runtime, maps its e
 
 ## Where providers come from
 
-| Source                     | Providers                                                                        | Code                                                                   |
-| -------------------------- | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| Built-in, direct           | `claude`, `codex`, `opencode`, `pi`, `omp` (OMP is disabled by default)          | `packages/server/src/server/agent/providers/`                          |
-| Built-in, ACP              | `copilot`                                                                        | `providers/copilot-acp-agent.ts`                                       |
-| Bundled provider plugins   | Muse Code, Antigravity (enabled by default); Hoplite, fx, goose (off by default) | `plugins/<id>-provider/`                                               |
-| Config-defined (`extends`) | Profiles of a built-in provider, generic ACP agents, custom API providers        | [custom-providers.md](custom-providers.md)                             |
-| Development only           | `mock`, `mock-slow` (listed only with `JAGENTDESK_NODE_ENV=development`)         | `providers/mock-load-test-agent.ts`, `providers/mock-slow-provider.ts` |
+| Source                     | Providers                                                                                | Code                                                                   |
+| -------------------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Built-in, direct           | `claude`, `codex`, `opencode`, `pi`, `omp` (OMP is disabled by default)                  | `packages/server/src/server/agent/providers/`                          |
+| Built-in, ACP              | `copilot`                                                                                | `providers/copilot-acp-agent.ts`                                       |
+| Bundled provider plugins   | Muse Code, Antigravity, Hermes (enabled by default); Hoplite, fx, goose (off by default) | `plugins/<id>-provider/`                                               |
+| Config-defined (`extends`) | Profiles of a built-in provider, generic ACP agents, custom API providers                | [custom-providers.md](custom-providers.md)                             |
+| Development only           | `mock`, `mock-slow` (listed only with `JAGENTDESK_NODE_ENV=development`)                 | `providers/mock-load-test-agent.ts`, `providers/mock-slow-provider.ts` |
 
 An `extends: "acp"` entry whose ID is `cursor`, `kimi`, `kiro` or `traecli` gets a dedicated ACP client (`providers/<name>-acp-agent.ts`) instead of `GenericACPAgentClient`. The in-app ACP catalog (`packages/app/src/data/acp-provider-catalog.ts`) writes those entries.
 
 ## Choosing an integration
 
-- **Provider plugin.** Use this for an agent that speaks ACP or that you want to ship outside core. The plugin calls `server.registerProvider(...)`; ACP agents pass `runAcpProvider({ id, label, command, ... })` from `@jagentdesk/plugin/server/acp` (see `plugins/goose-provider/server/provider.ts`). Bundled provider plugins appear in Settings → host → Plugins → Built-in with per-host switches, and a missing CLI shows its unavailable reason there. A registration with `requiresConfiguration: true` activates only while `agents.providers` contains its ID. Plugin runtime behavior is in [plugins.md](plugins.md#runtime-contracts).
+- **Provider plugin.** Use this for an agent that speaks ACP or that you want to ship outside core. The plugin calls `server.registerProvider(...)`; ACP agents pass `runAcpProvider({ id, label, command, ... })` from `@jagentdesk/plugin/server/acp` (see `plugins/goose-provider/server/provider.ts`). Bundled provider plugins appear in Settings → host → Plugins → Built-in with per-host switches, and a missing CLI shows its unavailable reason there. A registration with `requiresConfiguration: true` activates only while `agents.providers` contains its ID. Hermes is on by default for that reason: it does nothing until `agents.providers.hermes` exists. An `extends: "acp"` entry for goose or Hermes migrates to the bundled provider on load and keeps a custom command; Hermes agents saved by the generic adapter resume with their mode translated (`plugins/hermes-provider/server/legacy-modes.ts`). The ACP shim builds the standard row for each ACP tool `kind` (`packages/plugin/src/server/acp-internal/tool-call-detail.ts`). A `toolCall` transformer sees the raw `input`, `output` and `content`, and a `detail` it sets replaces the standard row. Parse vendor display text defensively and return the call unchanged when the shape does not match (`plugins/hermes-provider/server/terminal-command.ts`). Plugin runtime behavior is in [plugins.md](plugins.md#runtime-contracts).
 - **Built-in ACP.** Subclass `ACPAgentClient` (`providers/acp-agent.ts`). The base class owns process spawning, stdio transport, session lifecycle, streaming, permissions and catalog discovery. You supply `provider`, `defaultCommand`, `defaultModes` and `capabilities`, and override `isAvailable()` only to add credential checks.
 - **Direct.** Implement `AgentClient` and `AgentSession` from `packages/server/src/server/agent/agent-sdk-types.ts`. You own process management, streaming, permissions and persistence.
 
@@ -64,6 +64,8 @@ What re-probes a provider:
 - **A config change to that provider** (a custom provider save, a daemon config patch, a changed base it extends). `stageMutableProviderConfig` diffs each provider's override, runtime settings and enabled state; only the changed providers get a new client and go back to loading. Every other provider keeps its client, entries and in-flight loads. Rebuilding every client on each save leaked one owned `opencode serve` per edit and re-ran Claude model discovery in every cached cwd. A replaced client gets `retire()`: OpenCode v2 stops its idle owned server, and one still serving sessions stops when the last session releases it.
 
 A custom API provider's refresh asks its models endpoint first (`checkApiProviderEndpoint`), before any provider process starts. A refusal (401, 403, 429, unreachable) puts it in `error`, and the background schedule skips it until its config changes or someone refreshes it. Concurrent refreshes of one provider share one endpoint check, and Claude shares one model-discovery process across cwds.
+
+A refresh stops at its deadline (`JAGENTDESK_PROVIDER_REFRESH_TIMEOUT_MS`, default 120 s). A plugin provider's connection is shared with its running sessions, so the bridge cannot close it at the deadline; it sends `request.cancel` for the abandoned catalogue request instead, and the provider stops that request's work. The ACP shim stops the probe process it started for that request.
 
 Do not add focus, selector-open or config-reload refreshes. Registry and config replacement may update label, description, default mode, enabled state and membership, but must not spawn provider processes for providers whose config did not change.
 

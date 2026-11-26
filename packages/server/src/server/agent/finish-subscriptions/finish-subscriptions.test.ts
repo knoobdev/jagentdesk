@@ -28,6 +28,8 @@ function createParentManager() {
     pendingPermissions: new Map(),
   };
   const prompts: unknown[] = [];
+  const pendingWakeup = { value: false };
+  const listeners = new Set<(event: unknown) => void>();
   const streamAgent = vi.fn(
     (_agentId: string, prompt: unknown, _options: unknown, promptStart?: ForegroundPromptStart) => {
       if (promptStart) {
@@ -48,7 +50,11 @@ function createParentManager() {
     hasPendingPermissions: vi.fn(() => false),
     replaceAgentRun: vi.fn(),
     streamAgent,
-    subscribe: vi.fn(() => () => {}),
+    subscribe: vi.fn((listener: (event: unknown) => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    }),
+    hasPendingWakeup: vi.fn(() => pendingWakeup.value),
     onStop: vi.fn(() => () => {}),
     canSteer: vi.fn(() => false),
     getLastAssistantMessage: vi.fn(async () => "Child answer"),
@@ -58,7 +64,10 @@ function createParentManager() {
       agentId === "child" ? { id: "child", title: "Child task", labels: {} } : null,
     ),
   } as unknown as AgentStorage;
-  return { agentManager, agentStorage, prompts, streamAgent };
+  const emit = (event: unknown) => {
+    for (const listener of listeners) listener(event);
+  };
+  return { agentManager, agentStorage, prompts, streamAgent, pendingWakeup, emit };
 }
 
 describe("durable finish subscriptions", () => {
@@ -225,5 +234,129 @@ describe("durable finish subscriptions", () => {
     await vi.waitFor(async () => expect(await store.list()).toEqual([]));
     expect(reconcile).toHaveBeenCalledTimes(1);
     expect(after.prompts).toHaveLength(1);
+  });
+});
+
+describe("following a child that ended its turn while still working (Paseo #10864)", () => {
+  let home: string;
+
+  beforeEach(async () => {
+    home = await mkdtemp(join(tmpdir(), "jagentdesk-finish-following-"));
+  });
+  afterEach(async () => {
+    await rm(home, { recursive: true, force: true });
+  });
+
+  async function restoreFollowing(after: ReturnType<typeof createParentManager>) {
+    const store = FinishSubscriptionStore.forHome(home, logger);
+    const reconcile = vi.fn(
+      async (record: FinishSubscriptionRecord, _signal: AbortSignal, ids: readonly string[]) => {
+        await setupFinishNotification({
+          agentManager: after.agentManager,
+          agentStorage: after.agentStorage,
+          childAgentId: record.childAgentId,
+          callerAgentId: record.callerAgentId,
+          restoredSubscriptionId: record.id,
+          restoredSubscriptionIds: ids,
+          restoredFollowingSince: record.followingSince,
+          logger,
+        }).ready;
+      },
+    );
+    await restoreFinishSubscriptions({
+      agentManager: after.agentManager,
+      store,
+      reconcile,
+      isArchived: async () => false,
+      logger,
+    });
+    return { store, reconcile };
+  }
+
+  test("a restored follow resumes silently and reports finished once the work drains", async () => {
+    const saved = FinishSubscriptionStore.forHome(home, logger);
+    const id = await saved.add({
+      childAgentId: "child",
+      callerAgentId: "parent",
+      requireParentOwnership: false,
+    });
+    const since = new Date().toISOString();
+    await saved.markFollowing([id], since);
+
+    const after = createParentManager();
+    configureAgentMessageDelivery(after.agentManager, { quietMs: 0 });
+    after.pendingWakeup.value = true;
+    const { store, reconcile } = await restoreFollowing(after);
+    expect(reconcile.mock.calls[0]![0]).toMatchObject({ followingSince: since });
+
+    // The still-working notice was sent before the restart; it is not repeated.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(after.prompts).toEqual([]);
+    expect(await store.list()).toHaveLength(1);
+
+    after.pendingWakeup.value = false;
+    after.emit({ type: "background_work", agentId: "child", items: [] });
+    await vi.waitFor(() => expect(after.prompts).toHaveLength(1));
+    expect(parseAgentMessages(String(after.prompts[0]))).toMatchObject([
+      {
+        source: { kind: "agent-notification", agentId: "child", event: "finished" },
+        text: expect.stringContaining("Child answer"),
+      },
+    ]);
+    await vi.waitFor(async () => expect(await store.list()).toEqual([]));
+  });
+
+  test("a restored follow past the follow limit ends with an is-still-working notice", async () => {
+    const saved = FinishSubscriptionStore.forHome(home, logger);
+    const id = await saved.add({
+      childAgentId: "child",
+      callerAgentId: "parent",
+      requireParentOwnership: false,
+    });
+    await saved.markFollowing([id], new Date(Date.now() - 25 * 60 * 60_000).toISOString());
+
+    const after = createParentManager();
+    configureAgentMessageDelivery(after.agentManager, { quietMs: 0 });
+    after.pendingWakeup.value = true;
+    const { store } = await restoreFollowing(after);
+
+    await vi.waitFor(() => expect(after.prompts).toHaveLength(1));
+    expect(parseAgentMessages(String(after.prompts[0]))).toMatchObject([
+      {
+        source: { kind: "agent-notification", agentId: "child", event: "message" },
+        text: expect.stringContaining(
+          "Agent child (Child task) is still working: background work that will wake it.",
+        ),
+      },
+    ]);
+    await vi.waitFor(async () => expect(await store.list()).toEqual([]));
+  });
+
+  test("a restored child with pending work starts following and tells the caller once", async () => {
+    const saved = FinishSubscriptionStore.forHome(home, logger);
+    await saved.add({
+      childAgentId: "child",
+      callerAgentId: "parent",
+      requireParentOwnership: false,
+    });
+
+    const after = createParentManager();
+    configureAgentMessageDelivery(after.agentManager, { quietMs: 0 });
+    after.pendingWakeup.value = true;
+    const { store } = await restoreFollowing(after);
+
+    await vi.waitFor(() => expect(after.prompts).toHaveLength(1));
+    expect(parseAgentMessages(String(after.prompts[0]))).toMatchObject([
+      {
+        source: { kind: "agent-notification", agentId: "child", event: "message" },
+        text: expect.stringContaining("ended its turn but is still working"),
+      },
+    ]);
+    await vi.waitFor(async () =>
+      expect(await FinishSubscriptionStore.forHome(home, logger).list()).toMatchObject([
+        { childAgentId: "child", followingSince: expect.any(String) },
+      ]),
+    );
+    expect(await store.list()).toHaveLength(1);
   });
 });
