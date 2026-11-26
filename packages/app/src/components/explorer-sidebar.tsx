@@ -472,7 +472,7 @@ function ExplorerSidebarContent({
             onOpenFile={onOpenFile}
           />
         )}
-        {resolvedTab === "ledger" && <LedgerPane serverId={serverId} />}
+        {resolvedTab === "ledger" && <LedgerPane serverId={serverId} workspaceId={workspaceId} />}
         {resolvedTab === "pr" && (
           <PrTabContent
             serverId={serverId}

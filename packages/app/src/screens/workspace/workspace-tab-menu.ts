@@ -160,7 +160,8 @@ function getCloseButtonTestId(tab: WorkspaceTabDescriptor): string {
   if (
     tab.target.kind === "files" ||
     tab.target.kind === "changes_tree" ||
-    tab.target.kind === "pull_request"
+    tab.target.kind === "pull_request" ||
+    tab.target.kind === "ledger"
   )
     return `workspace-${tab.target.kind}-close`;
   return `workspace-file-close-${encodeFilePathForPathSegment(tab.target.path)}`;

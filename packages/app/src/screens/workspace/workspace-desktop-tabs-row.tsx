@@ -1,3 +1,4 @@
+import { useHostFeature } from "@/runtime/host-features";
 import { getPanelManifest, panelCanLaunchInPane } from "@/panels/panel-manifest";
 import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
 import { buildWorkspaceTabPersistenceKey, type WorkspaceTabTarget } from "@/workspace-tabs/model";
@@ -1500,12 +1501,16 @@ function ExplorerAddTabMenu({
 }) {
   const { t } = useTranslation();
   const plugins = useInstalledPlugins();
+  const ledgerSupported = useHostFeature(serverId, "crossProviderContinuity");
   const workspaceKey = buildWorkspaceTabPersistenceKey({ serverId, workspaceId })!;
   const items = useMemo(
     () => [
       { target: { kind: "files" } as const, label: t("workspace.tabs.explorer.files") },
       { target: { kind: "changes_tree" } as const, label: t("workspace.tabs.explorer.changes") },
       { target: { kind: "pull_request" } as const, label: t("panels.pullRequest.label") },
+      ...(ledgerSupported
+        ? [{ target: { kind: "ledger" } as const, label: t("continuity.ledger.tab") }]
+        : []),
       { target: { kind: "working_diff" } as const, label: t("panels.diff.changesSubtitle") },
       ...plugins
         .filter((plugin) => plugin.serverId === serverId)
@@ -1526,7 +1531,7 @@ function ExplorerAddTabMenu({
             })),
         ),
     ],
-    [plugins, serverId, t],
+    [ledgerSupported, plugins, serverId, t],
   );
   const kinds = tabs.map((item) => item.tab.kind);
   return (

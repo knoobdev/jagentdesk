@@ -471,7 +471,8 @@ function getFallbackTabOptionDescription(
   if (
     tab.target.kind === "files" ||
     tab.target.kind === "changes_tree" ||
-    tab.target.kind === "pull_request"
+    tab.target.kind === "pull_request" ||
+    tab.target.kind === "ledger"
   )
     return tab.target.kind;
   return tab.target.path;
@@ -1985,7 +1986,8 @@ function WorkspaceChromeRow({
 function resolveExplorerPanelKind(
   tab: string,
   isGit: boolean,
-): "files" | "changes_tree" | "pull_request" {
+): "files" | "changes_tree" | "pull_request" | "ledger" {
+  if (tab === "ledger") return "ledger";
   if (!isGit || tab === "files") return "files";
   return tab === "pr" ? "pull_request" : "changes_tree";
 }

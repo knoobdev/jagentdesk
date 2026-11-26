@@ -1,4 +1,5 @@
 import { ProviderSwitchRow } from "@/continuity/provider-switch-row";
+import { buildProviderSegments } from "@/continuity/provider-segments";
 import { UsageLimitRow } from "@/continuity/usage-limit-row";
 import { useChatOutlineRail } from "@/chat-rail";
 import { SubagentLaunchMarker } from "@/subagents/launch-marker";
@@ -1063,17 +1064,23 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
 
     const bottomTurnFooterHost = streamLayout.auxiliaryTurnFooter;
 
+    // Rows written before a provider switch keep the provider that wrote them.
+    const providerSegments = useMemo(
+      () => buildProviderSegments(effectiveStreamItems),
+      [effectiveStreamItems],
+    );
     const renderStreamItem = useCallback<RenderStreamItem>(
       (item, originalLayoutItem) => {
         const layoutItem =
           originalLayoutItem.item === item ? originalLayoutItem : { ...originalLayoutItem, item };
         const rawContent = renderStreamItemContent(layoutItem);
+        const segment = providerSegments.get(item.id);
         const content = isGumloop
           ? wrapGumloopAgentItem({
               layoutItem,
               content: rawContent,
-              provider: context.provider,
-              model: agentModelLabel(context),
+              provider: segment?.provider ?? context.provider,
+              model: segment ? segment.model : agentModelLabel(context),
             })
           : rawContent;
         return renderStreamItemWithTurnFooter({
@@ -1090,6 +1097,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         getTurnIndent,
         handleForkAssistantTurn,
         isGumloop,
+        providerSegments,
         readOnly,
         renderStreamItemContent,
         streamRenderStrategy,

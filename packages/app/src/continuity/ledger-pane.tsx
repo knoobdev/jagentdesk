@@ -8,6 +8,9 @@ import { MarkdownRenderer } from "@/components/markdown/renderer";
 import { Button } from "@/components/ui/button";
 import { useHostFeature } from "@/runtime/host-features";
 import { useSessionStore } from "@/stores/session-store";
+import { collectAllPanes } from "@/stores/workspace-layout-actions";
+import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
+import { buildWorkspaceTabPersistenceKey } from "@/workspace-tabs/model";
 import { formatTimeAgo } from "@/utils/time";
 import { HandoffSheet } from "./handoff-sheet";
 import { providerDisplayLabel, useAgentLedger } from "./use-agent-ledger";
@@ -90,11 +93,40 @@ function Handoffs({
   );
 }
 
+const AGENT_TAB_PREFIX = "agent_";
+
+/** The agent of the workspace's focused tab, else the host's focused agent. */
+function useLedgerAgentId(serverId: string, workspaceId: string | null): string | null {
+  const focusedAgentId = useSessionStore(
+    (state) => state.sessions[serverId]?.focusedAgentId ?? null,
+  );
+  const workspaceKey = workspaceId
+    ? buildWorkspaceTabPersistenceKey({ serverId, workspaceId })
+    : null;
+  const tabAgentId = useWorkspaceLayoutStore((state) => {
+    const layout = workspaceKey ? state.layoutByWorkspace[workspaceKey] : undefined;
+    if (!layout) return null;
+    const panes = collectAllPanes(layout.root);
+    const focused = panes.find((pane) => pane.id === layout.focusedPaneId);
+    const tabId = [focused, ...panes]
+      .map((pane) => pane?.focusedTabId)
+      .find((id) => id?.startsWith(AGENT_TAB_PREFIX));
+    return tabId ? tabId.slice(AGENT_TAB_PREFIX.length) : null;
+  });
+  return tabAgentId ?? focusedAgentId;
+}
+
 /** Inspector tab: the focused agent's session ledger, read-only, exportable as Markdown. */
-export function LedgerPane({ serverId }: { serverId: string }) {
+export function LedgerPane({
+  serverId,
+  workspaceId = null,
+}: {
+  serverId: string;
+  workspaceId?: string | null;
+}) {
   const { t } = useTranslation();
   const supported = useHostFeature(serverId, "crossProviderContinuity");
-  const agentId = useSessionStore((state) => state.sessions[serverId]?.focusedAgentId ?? null);
+  const agentId = useLedgerAgentId(serverId, workspaceId);
   const ledger = useAgentLedger({ serverId, agentId, enabled: supported });
   const [viewing, setViewing] = useState<SessionLedgerHandoff | null>(null);
   const closeHandoff = useCallback(() => setViewing(null), []);

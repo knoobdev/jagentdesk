@@ -1,5 +1,6 @@
 import {
   filesPanelRegistration,
+  ledgerPanelRegistration,
   changesTreePanelRegistration,
   pullRequestPanelRegistration,
 } from "./explorer-panels";
@@ -23,6 +24,7 @@ export function ensurePanelsRegistered(): void {
   registerPanel(filesPanelRegistration);
   registerPanel(changesTreePanelRegistration);
   registerPanel(pullRequestPanelRegistration);
+  registerPanel(ledgerPanelRegistration);
   registerPanel(draftPanelRegistration);
   registerPanel(agentPanelRegistration);
   registerPanel(providerSubagentPanelRegistration);

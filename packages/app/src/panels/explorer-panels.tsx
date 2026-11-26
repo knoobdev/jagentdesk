@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { View } from "react-native";
-import { FolderTree, GitPullRequest, ListTree } from "lucide-react-native";
+import { BookText, FolderTree, GitPullRequest, ListTree } from "lucide-react-native";
+import { LedgerPane } from "@/continuity/ledger-pane";
 import { useTranslation } from "react-i18next";
 import { usePaneContext } from "@/panels/pane-context";
 import type { PanelRegistration } from "@/panels/panel-registry";
@@ -47,6 +48,22 @@ function ChangesTreePanel() {
   ) : (
     <View />
   );
+}
+function LedgerPanel() {
+  const { serverId, workspaceId } = usePaneContext();
+  return <LedgerPane serverId={serverId} workspaceId={workspaceId} />;
+}
+function useLedgerDescriptor() {
+  const { t } = useTranslation();
+  const label = t("continuity.ledger.tab");
+  return {
+    label,
+    subtitle: label,
+    tooltip: label,
+    titleState: "ready" as const,
+    icon: BookText,
+    statusBucket: null,
+  };
 }
 function PullRequestPanel() {
   const { serverId, workspaceId } = usePaneContext();
@@ -117,6 +134,11 @@ export const changesTreePanelRegistration: PanelRegistration<"changes_tree"> = {
   kind: "changes_tree",
   component: ChangesTreePanel,
   useDescriptor: useChangesDescriptor,
+};
+export const ledgerPanelRegistration: PanelRegistration<"ledger"> = {
+  kind: "ledger",
+  component: LedgerPanel,
+  useDescriptor: useLedgerDescriptor,
 };
 export const pullRequestPanelRegistration: PanelRegistration<"pull_request"> = {
   kind: "pull_request",

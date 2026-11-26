@@ -90,6 +90,14 @@ const manifests = {
     compactSheet: null,
     resourceKey: () => "changes_tree",
   },
+  ledger: {
+    kind: "ledger",
+    supportedHosts: ["explorer"],
+    showCloseButton: true,
+    singleton: true,
+    compactSheet: null,
+    resourceKey: () => "ledger",
+  },
   files: {
     kind: "files",
     supportedHosts: ["explorer"],
