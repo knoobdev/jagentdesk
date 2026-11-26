@@ -14,9 +14,11 @@ import {
   isCurrentBranchBase,
   canMergeIntoLocalBase,
   narrowPullRequestState,
+  readUpstreamState,
   type BuildGitActionsInput,
   type GitAction,
   type GitActions,
+  type GitUpstreamState,
 } from "@/git/policy";
 import { deriveMergeCapability } from "@/git/merge-capability";
 import type { CheckoutPrMergeMethod } from "@jagentdesk/protocol/messages";
@@ -127,6 +129,8 @@ interface DerivedGitActionsState {
   behindOfOrigin: number | null;
   hasPullRequest: boolean;
   hasRemote: boolean;
+  hasFirstPushRemote: boolean;
+  upstream: GitUpstreamState;
   isJAgentDeskOwnedWorktree: boolean;
   isOnBaseBranch: boolean;
   canMergeLocally: boolean;
@@ -178,6 +182,8 @@ function deriveGitActionsState(args: DeriveGitActionsStateArgs): DerivedGitActio
     ...extractGitCommitCounts(gitStatus),
     hasPullRequest: Boolean(prStatus?.url),
     hasRemote: gitStatus?.hasRemote ?? false,
+    hasFirstPushRemote: (gitStatus?.firstPushRemote ?? null) !== null,
+    upstream: gitStatus ? readUpstreamState(gitStatus) : "unknown",
     isJAgentDeskOwnedWorktree,
     isOnBaseBranch: isCurrentBranchBase(gitStatus?.currentBranch, baseRef),
     canMergeLocally: canMergeIntoLocalBase(gitStatus?.currentBranch, baseRef),
@@ -666,6 +672,8 @@ export function useGitActions({ serverId, cwd, icons }: UseGitActionsInput): Use
     behindOfOrigin,
     hasPullRequest,
     hasRemote,
+    hasFirstPushRemote,
+    upstream,
     isJAgentDeskOwnedWorktree,
     isOnBaseBranch,
     canMergeLocally,
@@ -697,6 +705,8 @@ export function useGitActions({ serverId, cwd, icons }: UseGitActionsInput): Use
       pullRequestMergeable: prStatus?.mergeable ?? "UNKNOWN",
       mergeCapability: deriveMergeCapability(prStatus?.forgeSpecific, prStatus?.github),
       hasRemote,
+      hasFirstPushRemote,
+      upstream,
       isJAgentDeskOwnedWorktree,
       isOnBaseBranch,
       canMergeLocally,
@@ -805,6 +815,8 @@ export function useGitActions({ serverId, cwd, icons }: UseGitActionsInput): Use
   }, [
     isGit,
     hasRemote,
+    hasFirstPushRemote,
+    upstream,
     hasPullRequest,
     prStatus?.url,
     prStatus?.state,
