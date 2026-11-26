@@ -1,4 +1,4 @@
-import { gumloopListStyles } from "./list-styles";
+import { GUMLOOP_PAGE_GUTTER, gumloopListStyles } from "./list-styles";
 import { useMemo } from "react";
 import { Text, View } from "react-native";
 import { History, House, Plus } from "lucide-react-native";
@@ -13,6 +13,10 @@ import { useNewWorkspaceNavigate } from "@/components/sidebar/use-app-nav";
 import { AgentList } from "@/components/agent-list";
 import { buildSessionsRoute } from "@/utils/host-routes";
 import type { Theme } from "@/styles/theme";
+
+/** Home's one-line description (spec 38 §4.1, A38.4j). */
+const HOME_DESCRIPTION =
+  "Your latest agents on every host. Open one to pick it up, or start a new one.";
 
 function viewHistory() {
   router.push(buildSessionsRoute());
@@ -36,7 +40,13 @@ export function GumloopHome() {
   return (
     <View style={desktop ? styles.desktopPage : styles.page} testID="gumloop-home">
       {desktop ? (
-        <PageHeader icon={House} title="Home" actions={actions} testID="gumloop-home-header" />
+        <PageHeader
+          icon={House}
+          title="Home"
+          description={HOME_DESCRIPTION}
+          actions={actions}
+          testID="gumloop-home-header"
+        />
       ) : (
         // The compact header (spec 38 §5) already shows "Home"; the page only carries its actions.
         <View style={styles.header}>
@@ -77,7 +87,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
   desktopPage: { flex: 1, backgroundColor: theme.colors.surface0 },
   // The page header keeps 16px under its title row for every page; Home's label sits 8px under
   // it (spec 38 §4.1).
-  desktopBody: { flex: 1, paddingHorizontal: 82, marginTop: -theme.spacing[2] },
+  desktopBody: { flex: 1, paddingHorizontal: GUMLOOP_PAGE_GUTTER, marginTop: -theme.spacing[2] },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 16 },
   actions: { flexDirection: "row", gap: 10 },
   body: { flex: 1, marginTop: theme.spacing[2] },

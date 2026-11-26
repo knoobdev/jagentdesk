@@ -1,4 +1,5 @@
 import { StyleSheet } from "react-native-unistyles";
+import { GUMLOOP_PAGE_GUTTER } from "@/components/gumloop-shell/list-styles";
 export const styles = StyleSheet.create((theme) => ({
   screen: { flex: 1, minWidth: 0, backgroundColor: theme.colors.surface0 },
   body: {
@@ -62,9 +63,15 @@ export const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[2],
     flexDirection: "row",
   },
-  // The Gumloop page header owns the 82 px page rail; tabs sit on the title's left edge.
+  // The Gumloop page header owns the shared page gutter; tabs sit on the title's left edge. The
+  // bot's panels carry their own 16 px inset, so the body adds the rest of the gutter.
   gumloopTabs: { gap: theme.spacing[2], flexDirection: "row" },
-  gumloopBody: { flex: 1, minHeight: 0, minWidth: 0, paddingHorizontal: 82 - theme.spacing[4] },
+  gumloopBody: {
+    flex: 1,
+    minHeight: 0,
+    minWidth: 0,
+    paddingHorizontal: GUMLOOP_PAGE_GUTTER - theme.spacing[4],
+  },
   permissions: { maxHeight: "40%", flexShrink: 1 },
   composer: { paddingHorizontal: theme.spacing[3], gap: theme.spacing[2] },
   message: { padding: theme.spacing[3], gap: theme.spacing[1] },

@@ -11,6 +11,7 @@ import { useIsFocused } from "expo-router/react-navigation";
 import { CalendarClock, Plus } from "lucide-react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { PageHeader } from "@/components/headers/page-header";
+import { useGumloopPageGutterStyle } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { HostFilter } from "@/components/hosts/host-filter";
 import { ALL_HOSTS_OPTION_ID } from "@/components/hosts/host-picker";
 import { ScheduleFormSheet } from "@/components/schedules/schedule-form-sheet";
@@ -240,6 +241,7 @@ function SchedulesScreenBody({
   onEdit: (schedule: AggregatedSchedule) => void;
 }): ReactElement {
   const bodyState = resolveSchedulesScreenBodyState({ loadState, showLoadError });
+  const gutter = useGumloopPageGutterStyle();
 
   if (bodyState.kind === "loading") {
     return (
@@ -276,7 +278,7 @@ function SchedulesScreenBody({
     schedulesContent = <SchedulesEndedEmptyState />;
   } else {
     schedulesContent = (
-      <View style={styles.filterEmpty}>
+      <View style={[styles.filterEmpty, gutter]}>
         <SchedulesEmptyState onCreate={onCreate} testID="schedules-empty" />
       </View>
     );
@@ -284,7 +286,7 @@ function SchedulesScreenBody({
 
   return (
     <View style={styles.body}>
-      <View style={styles.filterRow}>
+      <View style={[styles.filterRow, gutter]}>
         <View style={styles.filterRowControls}>
           {showHostFilter ? (
             <HostFilter
@@ -350,8 +352,9 @@ function SchedulesEndedEmptyState(): ReactElement {
 }
 
 function ScheduleHostErrorsBanner({ errors }: { errors: ScheduleHostError[] }): ReactElement {
+  const gutter = useGumloopPageGutterStyle();
   return (
-    <View style={styles.errorsBannerWrap}>
+    <View style={[styles.errorsBannerWrap, gutter]}>
       <View style={styles.errorsBanner} testID="schedules-host-errors">
         {errors.map((error) => (
           <Text key={error.serverId} style={styles.errorsBannerText}>

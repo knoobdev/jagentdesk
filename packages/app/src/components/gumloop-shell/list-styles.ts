@@ -2,12 +2,25 @@ import { StyleSheet } from "react-native-unistyles";
 import type { Theme } from "@/styles/theme";
 
 /**
+ * Left and right page gutter of every Gumloop desktop page: the page header, its tabs, filters,
+ * search fields, lists and cards all start and end 32 px inside the content pane, with no max
+ * width and no centring (spec 38 §4.1, A38.4i). Use `gumloopListStyles.pageContent` (or this
+ * number) instead of a page-local padding, so every page shares one left edge.
+ */
+export const GUMLOOP_PAGE_GUTTER = 32;
+
+/**
  * Shared list geometry and muted column headers for Gumloop screens.
  */
 export const gumloopListStyles = StyleSheet.create((theme: Theme) => ({
   /** Home's embedded list: the "Recent activity" label above sets the spacing. */
   embeddedContent: { paddingHorizontal: 0, paddingTop: 0, gap: 0 },
-  pageContent: { width: "100%", maxWidth: "100%", alignSelf: "stretch", paddingHorizontal: 82 },
+  pageContent: {
+    width: "100%",
+    maxWidth: "100%",
+    alignSelf: "stretch",
+    paddingHorizontal: GUMLOOP_PAGE_GUTTER,
+  },
   /** Rows sit flush; the page header already leaves 16px above the first group label. */
   listContent: { paddingTop: 0, gap: 0 },
   // Group labels ("Today", a compose project…) are 14/600, 16px under the previous group's last

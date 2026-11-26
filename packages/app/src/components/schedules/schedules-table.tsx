@@ -2,6 +2,7 @@ import { useCallback, useState, type ReactElement } from "react";
 import { View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { ScheduleRow, type ScheduleRowPending } from "@/components/schedules/schedule-row";
+import { useGumloopPageGutterStyle } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { useScheduleMutations } from "@/hooks/use-schedule-mutations";
 import type { AggregatedSchedule } from "@/hooks/use-schedules";
 import type { ScheduleDerivedState } from "@/schedules/schedule-derivation";
@@ -37,8 +38,9 @@ interface SchedulesTableProps {
  * a destructive confirm) and delegate editing upward.
  */
 export function SchedulesTable({ rows, onEditSchedule }: SchedulesTableProps): ReactElement {
+  const gutter = useGumloopPageGutterStyle();
   return (
-    <View style={styles.listContent} testID="schedules-table">
+    <View style={[styles.listContent, gutter]} testID="schedules-table">
       <View style={settingsStyles.card}>
         {rows.map((row, index) => (
           <SchedulesTableRow

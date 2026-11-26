@@ -5,6 +5,8 @@ import { SidebarViewPicker } from "@/plugins/sidebar-view/picker";
 import { AppearanceText as Text } from "@/appearance/text";
 import { Portal } from "@gorhom/portal";
 import { GUMLOOP_PANEL_HOST } from "@/components/gumloop-shell/sidebar-state";
+import { GUMLOOP_PAGE_GUTTER } from "@/components/gumloop-shell/list-styles";
+import { settingsPageDescription } from "@/screens/settings/page-description";
 import { useGumloopDesktopShell } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { usePluginDisplayName } from "@/plugins/plugin-list";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
@@ -151,9 +153,21 @@ import { navigateToLastWorkspace } from "@/stores/navigation-active-workspace-st
 // View model
 // ---------------------------------------------------------------------------
 
-function SettingsDesktopHeader({ title, children }: { title: string; children: ReactNode }) {
+function SettingsDesktopHeader({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
   const gumloop = useGumloopDesktopShell(true);
-  return gumloop ? <PageHeader icon={Settings} title={title} description="" /> : children;
+  return gumloop ? (
+    <PageHeader icon={Settings} title={title} description={description} />
+  ) : (
+    children
+  );
 }
 
 export type SettingsView =
@@ -722,6 +736,7 @@ function HostPicker({
   onAddHost,
   enableBuiltInDaemonOption,
 }: HostPickerProps) {
+  const gumloop = useGumloopDesktopShell(true);
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const triggerRef = useRef<View | null>(null);
@@ -775,7 +790,13 @@ function HostPicker({
             <HostStatusDot serverId={activeHost.serverId} />
           </View>
         ) : null}
-        <Text style={sidebarStyles.pickerTriggerLabel} numberOfLines={1}>
+        <Text
+          style={[
+            sidebarStyles.pickerTriggerLabel,
+            gumloop && sidebarStyles.gumloopPickerTriggerLabel,
+          ]}
+          numberOfLines={1}
+        >
           {activeHost?.label ?? t("settings.groups.host")}
         </Text>
       </ComboboxTrigger>
@@ -788,7 +809,11 @@ function SidebarGroup({ label, children }: { label?: string; children: ReactNode
   const gumloop = useGumloopDesktopShell(true);
   return (
     <View style={[sidebarStyles.group, gumloop && sidebarStyles.gumloopList]}>
-      {label ? <Text style={sidebarStyles.groupLabel}>{label}</Text> : null}
+      {label ? (
+        <Text style={gumloop ? sidebarStyles.gumloopGroupLabel : sidebarStyles.groupLabel}>
+          {label}
+        </Text>
+      ) : null}
       <View style={[sidebarStyles.island, gumloop && sidebarStyles.gumloopIsland]}>{children}</View>
     </View>
   );
@@ -1444,7 +1469,10 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
         )}
         <WindowChromeRegion corners="top-right">
           <View style={desktopStyles.contentPane} testID="settings-detail-pane">
-            <SettingsDesktopHeader title={detailHeader?.title ?? "Settings"}>
+            <SettingsDesktopHeader
+              title={detailHeader?.title ?? "Settings"}
+              description={settingsPageDescription(view)}
+            >
               <ScreenHeader
                 borderless={!detailHeader}
                 left={desktopDetailHeaderLeft}
@@ -1492,7 +1520,13 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     backgroundColor: theme.chrome.pageCanvas,
   },
-  gumloopContent: { maxWidth: 1134, paddingHorizontal: 82, paddingTop: 0, alignSelf: "stretch" },
+  // Full width on the shared page gutter, like every Gumloop page (spec 38 §4.1, A38.4i).
+  gumloopContent: {
+    maxWidth: "100%",
+    paddingHorizontal: GUMLOOP_PAGE_GUTTER,
+    paddingTop: 0,
+    alignSelf: "stretch",
+  },
   content: {
     padding: theme.spacing[4],
     paddingTop: theme.spacing[6],
@@ -1557,6 +1591,14 @@ const sidebarStyles = StyleSheet.create((theme) => ({
   gumloopContainer: { paddingHorizontal: 10, paddingBottom: 16 },
   gumloopIsland: { gap: 3 },
   gumloopList: { paddingHorizontal: 0, gap: 3 },
+  // Group titles read like the sidebar's Tools and Projects headings: 14 px muted (spec 38 §4.2).
+  gumloopGroupLabel: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.normal,
+    color: theme.colors.foregroundMuted,
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+  },
   desktopContainer: {
     width: SETTINGS_DESKTOP_SIDEBAR_WIDTH,
     flexShrink: 1,
@@ -1638,6 +1680,7 @@ const sidebarStyles = StyleSheet.create((theme) => ({
     color: theme.colors.foreground,
     fontWeight: theme.fontWeight.normal,
   },
+  gumloopPickerTriggerLabel: { fontSize: theme.fontSize.sm, fontWeight: "500" },
   // Match the setting items' icon footprint so the host label aligns with them.
   pickerTriggerDot: {
     width: densityIconBox("md"),
