@@ -11,6 +11,7 @@ import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { specModeBubbleText } from "@/components/spec-mode-bubble-text";
 import { useBuiltinUserMessageBody } from "@/plugins/builtin/surfaces";
+import { MessageFeatureActions } from "@/agent-stream/message-actions-context";
 import { parseSpecModeMessage, type SpecModeMessage } from "@jagentdesk/protocol/spec-mode";
 import { TurnMetricsButton } from "@/components/turn-metrics";
 import type { AgentMetric } from "@jagentdesk/protocol/agent-types";
@@ -631,6 +632,7 @@ export const UserMessage = memo(function UserMessage({
               containerStyle={userMessageStylesheet.copyButton}
               accessibilityLabel={t("message.actions.copyMessage")}
             />
+            <MessageFeatureActions role="user" getContent={getMessageContent} />
           </View>
         ) : null}
       </View>
@@ -755,6 +757,7 @@ export const AssistantTurnFooter = memo(function AssistantTurnFooter({
         />
       ) : null}
       {canFork ? <AssistantForkMenu onFork={handleFork} /> : null}
+      {getContent ? <MessageFeatureActions role="assistant" getContent={getContent} /> : null}
       {hasMetrics ? <TurnMetricsButton metrics={metrics} /> : null}
       {durationLabel ? (
         <Pressable

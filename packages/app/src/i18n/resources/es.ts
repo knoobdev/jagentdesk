@@ -1,11 +1,13 @@
 import { sshModuleStrings } from "./ssh-modules";
 import { builtinPluginStrings } from "./builtin-plugins";
 import { botsStrings } from "./bots";
+import { memoryStrings } from "./memory";
 import { type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const es: TranslationResources = {
   bots: botsStrings,
+  memory: memoryStrings,
   builtinPlugins: builtinPluginStrings,
   ssh: sshModuleStrings,
   pluginCombobox: {
@@ -352,6 +354,17 @@ export const es: TranslationResources = {
       forkUnavailable: "Actualiza el host para usar esto.",
       forkMissingWorkspace: "Este agente no está en un espacio de trabajo.",
       forkFailed: "No se pudo bifurcar el chat",
+      forkPreparing: "Preparando la bifurcación…",
+      forkRetry: "Reintentar",
+      forkedFrom: "Bifurcado de {{title}}",
+      forkedFromUnknown: "Bifurcado de otro agente",
+      forkShowEarlier: "Mostrar mensajes anteriores",
+      forkLoadOlder: "Cargar mensajes más antiguos",
+      forkHideEarlier: "Ocultar mensajes anteriores",
+      forkOpenOriginal: "Abrir original",
+      forkYou: "Tú",
+      forkAgent: "Agente",
+      forkToolCalls: "{{count}} llamadas a herramientas",
       openFile: "Abrir archivo",
       copied: "Copiado",
     },

@@ -26,6 +26,8 @@ export type {
   BuiltinComposerDockProps,
   BuiltinUserMessageBodyProps,
   BuiltinTurnPreparation,
+  BuiltinMessageActionProps,
+  BuiltinInspectorTab,
 } from "./host";
 
 // Packages installed only in packages/app resolve for features through the host API.

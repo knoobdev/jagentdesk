@@ -1,11 +1,13 @@
 import { sshModuleStrings } from "./ssh-modules";
 import { builtinPluginStrings } from "./builtin-plugins";
 import { botsStrings } from "./bots";
+import { memoryStrings } from "./memory";
 import { type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ar: TranslationResources = {
   bots: botsStrings,
+  memory: memoryStrings,
   builtinPlugins: builtinPluginStrings,
   ssh: sshModuleStrings,
   pluginCombobox: {
@@ -364,6 +366,17 @@ export const ar: TranslationResources = {
       forkUnavailable: "حدّث المضيف لاستخدام هذا.",
       forkMissingWorkspace: "هذا الوكيل ليس في مساحة عمل.",
       forkFailed: "فشل تفريع المحادثة",
+      forkPreparing: "جارٍ تجهيز التفريع…",
+      forkRetry: "إعادة المحاولة",
+      forkedFrom: "مُفرَّع من {{title}}",
+      forkedFromUnknown: "مُفرَّع من وكيل آخر",
+      forkShowEarlier: "عرض الرسائل السابقة",
+      forkLoadOlder: "تحميل رسائل أقدم",
+      forkHideEarlier: "إخفاء الرسائل السابقة",
+      forkOpenOriginal: "فتح الأصل",
+      forkYou: "أنت",
+      forkAgent: "الوكيل",
+      forkToolCalls: "{{count}} استدعاءات أدوات",
       openFile: "افتح الملف",
       copied: "منقول",
     },

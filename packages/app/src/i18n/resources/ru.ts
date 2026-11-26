@@ -1,11 +1,13 @@
 import { sshModuleStrings } from "./ssh-modules";
 import { builtinPluginStrings } from "./builtin-plugins";
 import { botsStrings } from "./bots";
+import { memoryStrings } from "./memory";
 import { type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ru: TranslationResources = {
   bots: botsStrings,
+  memory: memoryStrings,
   builtinPlugins: builtinPluginStrings,
   ssh: sshModuleStrings,
   pluginCombobox: {
@@ -369,6 +371,17 @@ export const ru: TranslationResources = {
       forkUnavailable: "Обновите хост, чтобы использовать это.",
       forkMissingWorkspace: "Этот агент не находится в рабочем пространстве.",
       forkFailed: "Не удалось форкнуть чат",
+      forkPreparing: "Готовим форк…",
+      forkRetry: "Повторить",
+      forkedFrom: "Форк из {{title}}",
+      forkedFromUnknown: "Форк из другого агента",
+      forkShowEarlier: "Показать предыдущие сообщения",
+      forkLoadOlder: "Загрузить более старые сообщения",
+      forkHideEarlier: "Скрыть предыдущие сообщения",
+      forkOpenOriginal: "Открыть оригинал",
+      forkYou: "Вы",
+      forkAgent: "Агент",
+      forkToolCalls: "Вызовов инструментов: {{count}}",
       turnStats: "Статистика ответа",
       openFile: "Открыть файл",
       copied: "Скопировано",

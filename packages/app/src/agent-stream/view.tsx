@@ -1,4 +1,6 @@
 import { useChatOutlineRail } from "@/chat-rail";
+import { MessageActionsAgentContext } from "./message-actions-context";
+import { isGuestShareMode } from "@/screens/share/guest-share-mode";
 import { SubagentLaunchMarker } from "@/subagents/launch-marker";
 import { useRevealedText } from "@/hooks/use-revealed-text";
 import { createStreamPresentation } from "./presentation";
@@ -387,6 +389,10 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     );
     const streamHead = providedStreamHead ?? sessionStreamHead;
     const forkAgent = useForkAgent({ serverId: resolvedServerId, toast, readOnly });
+    const messageActionsAgent = useMemo(
+      () => (readOnly || isGuestShareMode() ? null : { serverId: resolvedServerId, agentId }),
+      [readOnly, resolvedServerId, agentId],
+    );
     const supportsAgentForkContextCursor = useSessionStore(
       (state) =>
         state.sessions[resolvedServerId]?.serverInfo?.features?.agentForkContextCursor === true,
@@ -1237,71 +1243,73 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     );
 
     return (
-      <ToolCallSheetProvider>
-        <AssistantSelectionCopySurface style={stylesheet.container}>
-          <MessageOuterSpacingProvider disableOuterSpacing>
-            <ChatFind
-              agentId={agentId}
-              serverId={resolvedServerId}
-              epoch={timelineEpoch}
-              items={chatFindItems}
-              viewportRef={viewportRef}
-              revealLoadedMessage={revealLoadedMessage}
-              visibleMessageIds={chatFindVisibleMessageIds}
-            >
-              <ToolCallExpansionContext.Provider value={toolCallExpansion}>
-                {streamRenderStrategy.render({
-                  readingRowReplacements: projectedToolCalls.readingRowReplacements,
-                  agentId,
-                  segments: renderModel.segments,
-                  historyRowRevision,
-                  liveHeadRowRevision: expandedToolCallGroups,
-                  boundary,
-                  renderers,
-                  listEmptyComponent,
-                  viewportRef,
-                  routeBottomAnchorRequest,
-                  isAuthoritativeHistoryReady,
-                  onNearBottomChange: setIsNearBottom,
-                  onReadingPositionChange: chatOutline.reportReadingPosition,
-                  onNearHistoryStart: loadOlder,
-                  isLoadingOlderHistory: isLoadingOlder,
-                  hasOlderHistory: hasOlder,
-                  olderHistoryProgressKey: progressKey,
-                  scrollEnabled: streamScrollEnabled,
-                  contentMaxWidth,
-                  outlineInset: outlineInset,
-                  listStyle: stylesheet.list,
-                  baseListContentContainerStyle: stylesheet.listContentContainer,
-                  forwardListContentContainerStyle: stylesheet.forwardListContentContainer,
-                })}
-              </ToolCallExpansionContext.Provider>
-            </ChatFind>
-          </MessageOuterSpacingProvider>
-          {outlineInset > 0 ? (
-            <ChatOutlineRail
-              prompts={chatOutline.prompts}
-              activePrompt={chatOutline.activePrompt}
-              onJumpToPrompt={chatOutline.jumpToPrompt}
-            />
-          ) : null}
-          {(!isNearBottom || isTimelineDetached) && (
-            <View style={stylesheet.scrollToBottomContainer} pointerEvents="box-none">
-              <Animated.View entering={scrollIndicatorFadeIn} exiting={scrollIndicatorFadeOut}>
-                <Pressable
-                  style={stylesheet.scrollToBottomButton}
-                  onPress={scrollToBottom}
-                  accessibilityRole="button"
-                  accessibilityLabel={t("agentStream.scrollToBottom")}
-                  testID="scroll-to-bottom-button"
-                >
-                  <ChevronDown size={24} color={stylesheet.scrollToBottomIcon.color} />
-                </Pressable>
-              </Animated.View>
-            </View>
-          )}
-        </AssistantSelectionCopySurface>
-      </ToolCallSheetProvider>
+      <MessageActionsAgentContext.Provider value={messageActionsAgent}>
+        <ToolCallSheetProvider>
+          <AssistantSelectionCopySurface style={stylesheet.container}>
+            <MessageOuterSpacingProvider disableOuterSpacing>
+              <ChatFind
+                agentId={agentId}
+                serverId={resolvedServerId}
+                epoch={timelineEpoch}
+                items={chatFindItems}
+                viewportRef={viewportRef}
+                revealLoadedMessage={revealLoadedMessage}
+                visibleMessageIds={chatFindVisibleMessageIds}
+              >
+                <ToolCallExpansionContext.Provider value={toolCallExpansion}>
+                  {streamRenderStrategy.render({
+                    readingRowReplacements: projectedToolCalls.readingRowReplacements,
+                    agentId,
+                    segments: renderModel.segments,
+                    historyRowRevision,
+                    liveHeadRowRevision: expandedToolCallGroups,
+                    boundary,
+                    renderers,
+                    listEmptyComponent,
+                    viewportRef,
+                    routeBottomAnchorRequest,
+                    isAuthoritativeHistoryReady,
+                    onNearBottomChange: setIsNearBottom,
+                    onReadingPositionChange: chatOutline.reportReadingPosition,
+                    onNearHistoryStart: loadOlder,
+                    isLoadingOlderHistory: isLoadingOlder,
+                    hasOlderHistory: hasOlder,
+                    olderHistoryProgressKey: progressKey,
+                    scrollEnabled: streamScrollEnabled,
+                    contentMaxWidth,
+                    outlineInset: outlineInset,
+                    listStyle: stylesheet.list,
+                    baseListContentContainerStyle: stylesheet.listContentContainer,
+                    forwardListContentContainerStyle: stylesheet.forwardListContentContainer,
+                  })}
+                </ToolCallExpansionContext.Provider>
+              </ChatFind>
+            </MessageOuterSpacingProvider>
+            {outlineInset > 0 ? (
+              <ChatOutlineRail
+                prompts={chatOutline.prompts}
+                activePrompt={chatOutline.activePrompt}
+                onJumpToPrompt={chatOutline.jumpToPrompt}
+              />
+            ) : null}
+            {(!isNearBottom || isTimelineDetached) && (
+              <View style={stylesheet.scrollToBottomContainer} pointerEvents="box-none">
+                <Animated.View entering={scrollIndicatorFadeIn} exiting={scrollIndicatorFadeOut}>
+                  <Pressable
+                    style={stylesheet.scrollToBottomButton}
+                    onPress={scrollToBottom}
+                    accessibilityRole="button"
+                    accessibilityLabel={t("agentStream.scrollToBottom")}
+                    testID="scroll-to-bottom-button"
+                  >
+                    <ChevronDown size={24} color={stylesheet.scrollToBottomIcon.color} />
+                  </Pressable>
+                </Animated.View>
+              </View>
+            )}
+          </AssistantSelectionCopySurface>
+        </ToolCallSheetProvider>
+      </MessageActionsAgentContext.Provider>
     );
   },
 );

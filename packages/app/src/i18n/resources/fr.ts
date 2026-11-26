@@ -1,11 +1,13 @@
 import { sshModuleStrings } from "./ssh-modules";
 import { builtinPluginStrings } from "./builtin-plugins";
 import { botsStrings } from "./bots";
+import { memoryStrings } from "./memory";
 import { type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const fr: TranslationResources = {
   bots: botsStrings,
+  memory: memoryStrings,
   builtinPlugins: builtinPluginStrings,
   ssh: sshModuleStrings,
   pluginCombobox: {
@@ -356,6 +358,17 @@ export const fr: TranslationResources = {
       forkUnavailable: "Mettez \u00E0 jour l\u2019h\u00F4te pour utiliser cette fonction.",
       forkMissingWorkspace: "Cet agent n\u2019est dans aucun espace de travail.",
       forkFailed: "Impossible de forker la conversation",
+      forkPreparing: "Préparation du fork…",
+      forkRetry: "Réessayer",
+      forkedFrom: "Forké depuis {{title}}",
+      forkedFromUnknown: "Forké depuis un autre agent",
+      forkShowEarlier: "Afficher les messages précédents",
+      forkLoadOlder: "Charger des messages plus anciens",
+      forkHideEarlier: "Masquer les messages précédents",
+      forkOpenOriginal: "Ouvrir l’original",
+      forkYou: "Vous",
+      forkAgent: "Agent",
+      forkToolCalls: "{{count}} appels d’outils",
       openFile: "Ouvrir le fichier",
       copied: "Copié",
     },
