@@ -290,6 +290,7 @@ export const ru: TranslationResources = {
       implement: "Осуществлять",
       question: "Как бы вы хотели продолжить?",
       proposedPlan: "Предлагаемый план",
+      notPending: "Этот запрос больше не ожидает ответа",
     },
   },
   agentPanel: {

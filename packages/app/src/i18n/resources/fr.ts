@@ -274,6 +274,7 @@ export const fr: TranslationResources = {
       implement: "Impl\u00E9menter",
       question: "Comment souhaitez-vous proc\u00E9der\u00A0?",
       proposedPlan: "Plan proposé",
+      notPending: "Cette demande n'est plus en attente",
     },
   },
   agentPanel: {
