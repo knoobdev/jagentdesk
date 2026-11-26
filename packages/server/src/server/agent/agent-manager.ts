@@ -13,7 +13,7 @@ import { AgentTurnChangedError } from "./agent-prompt.js";
 import { continuesAssistantMessage, projectTimelineRows } from "./timeline-projection.js";
 import { isDefaultAgentCreateConfigUnattended } from "./create-agent-mode.js";
 import { isStaleProviderSessionError } from "./stale-provider-session-error.js";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import { stat } from "node:fs/promises";
 import {
   AGENT_LIFECYCLE_STATUSES,
@@ -160,6 +160,7 @@ import {
   type ProviderSubagentDescriptor,
   type ProviderSubagentStoreEvent,
 } from "./provider-subagents/store.js";
+import { withTimeout } from "../../utils/promise-timeout.js";
 import {
   AgentBackgroundWorkStore,
   isDaemonBackgroundWorkItem,
@@ -184,6 +185,7 @@ import {
 const RELOAD_SESSION_CLOSE_TIMEOUT_MS = 3_000;
 
 const INTERRUPT_SESSION_TIMEOUT_MS = 2_000;
+const IMPORTABLE_SESSION_LIST_TIMEOUT_MS = 8_000;
 
 const STORED_AGENT_CAPABILITIES: AgentCapabilityFlags = {
   supportsStreaming: false,
@@ -410,16 +412,20 @@ export type ImportablePersistedAgentQueryOptions = ListImportableSessionsOptions
    * built-in importable allowlist + enabled + non-derived rules.
    */
   providerFilter?: Set<string>;
-  onProviderError?: (error: ImportableSessionProviderError) => void;
 };
-
-export interface ImportableSessionProviderError {
-  provider: string;
-  message: string;
-}
 
 export interface ManagedImportableProviderSession extends ImportableProviderSession {
   provider: AgentProvider;
+}
+
+export interface ImportableSessionProviderError {
+  provider: AgentProvider;
+  message: string;
+}
+
+export interface ManagedImportableSessionsResult {
+  sessions: ManagedImportableProviderSession[];
+  providerErrors: ImportableSessionProviderError[];
 }
 
 export type AgentAttentionCallback = (params: {
@@ -1813,41 +1819,56 @@ export class AgentManager {
 
   async listImportableSessions(
     options?: ImportablePersistedAgentQueryOptions,
-  ): Promise<ManagedImportableProviderSession[]> {
+  ): Promise<ManagedImportableSessionsResult> {
     const providerEntries = Array.from(this.clients.entries()).filter(
       ([provider, client]) =>
         client.capabilities.supportsSessionListing &&
         !!client.listImportableSessions &&
         this.isProviderImportable(provider, options?.providerFilter),
     );
-    const sessionLists = await Promise.all(
+    const providerResults = await Promise.all(
       providerEntries.map(async ([provider, client]) => {
         try {
-          return (
-            await client.listImportableSessions!({
+          const sessions = await withTimeout(
+            client.listImportableSessions!({
               limit: options?.limit,
+              query: options?.query,
+              scanLimit: options?.scanLimit,
               cwd: options?.cwd,
-            })
-          ).map((session) => Object.assign(session, { provider }));
+            }),
+            IMPORTABLE_SESSION_LIST_TIMEOUT_MS,
+            `Timed out listing importable sessions for provider '${provider}' after ${IMPORTABLE_SESSION_LIST_TIMEOUT_MS}ms`,
+          );
+          return {
+            sessions: sessions
+              .filter((session) => matchesImportableSessionQuery(session, options?.query))
+              .map((session) => Object.assign(session, { provider })),
+            error: null,
+          };
         } catch (error) {
           this.logger.warn(
             { err: error, provider },
             "Failed to list importable sessions for provider",
           );
-          options?.onProviderError?.({
-            provider,
-            message: error instanceof Error ? error.message : String(error),
-          });
-          return [];
+          return {
+            sessions: [],
+            error: {
+              provider,
+              message: error instanceof Error ? error.message : String(error),
+            },
+          };
         }
       }),
     );
-    const sessions: ManagedImportableProviderSession[] = sessionLists.flat();
+    const sessions = providerResults.flatMap((result) => result.sessions);
 
     const limit = options?.limit ?? 20;
-    return sessions
-      .sort((a, b) => b.lastActivityAt.getTime() - a.lastActivityAt.getTime())
-      .slice(0, limit);
+    return {
+      sessions: sessions
+        .sort((a, b) => b.lastActivityAt.getTime() - a.lastActivityAt.getTime())
+        .slice(0, limit),
+      providerErrors: providerResults.flatMap((result) => (result.error ? [result.error] : [])),
+    };
   }
 
   private isProviderImportable(
@@ -8093,6 +8114,18 @@ export class AgentManager {
     }
     return agent;
   }
+}
+
+function matchesImportableSessionQuery(
+  session: ImportableProviderSession,
+  rawQuery: string | undefined,
+): boolean {
+  const query = rawQuery?.trim().toLowerCase();
+  if (!query) return true;
+  const cwdBasename = basename(session.cwd.replaceAll("\\", "/"));
+  return [session.title, session.firstPromptPreview, session.lastPromptPreview, cwdBasename].some(
+    (value) => value?.toLowerCase().includes(query),
+  );
 }
 
 export function commandMayHaveChangedExternalState(command: string): boolean {

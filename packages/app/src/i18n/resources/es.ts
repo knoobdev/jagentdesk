@@ -449,7 +449,13 @@ export const es: TranslationResources = {
     turnFooter: { workedFor: "Trabaj\u00F3 durante {{duration}}" },
   },
   importSession: {
+    chooseHostTitle: "Importar desde el host",
     title: "Importar sesión",
+    searchPlaceholder: "Buscar sesiones...",
+    scope: {
+      host: "Sesiones en {{host}}",
+      workspace: "Este espacio de trabajo",
+    },
     filters: {
       all: "Todo",
     },
@@ -458,12 +464,13 @@ export const es: TranslationResources = {
       updateHost: "Actualice el host para importar sesiones.",
       noProviders: "No hay proveedores importables habilitados.",
       loading: "Cargando sesiones recientes...",
-      failedAll: "No se pudieron cargar las sesiones recientes.",
-      failedProviders: "No se pudieron cargar sesiones para{{providers}}.",
+      failedProvider: "No se pudieron cargar las sesiones de {{provider}}",
       failedImport: "No se pudo importar la sesión seleccionada.",
     },
     actions: {
       refresh: "Actualizar sesiones",
+      showAll: "Mostrar todo",
+      loadMore: "Cargar más",
     },
     preview: {
       untitledSession: "Sesión sin título",
@@ -471,6 +478,7 @@ export const es: TranslationResources = {
     },
     empty: {
       noRecent: "No hay sesiones recientes para importar.",
+      noMatches: "Ninguna sesión coincide con tu búsqueda.",
       alreadyImported: "Todas las sesiones recientes ya están importadas.",
       noProviderSessions: "No se encontraron sesiones{{provider}}.",
     },

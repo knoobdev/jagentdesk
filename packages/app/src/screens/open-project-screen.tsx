@@ -9,6 +9,7 @@ import { FolderOpen, Inbox, Plug, Smartphone } from "lucide-react-native";
 import { JAgentDeskLogo } from "@/components/icons/jagentdesk-logo";
 import { MenuHeader } from "@/components/headers/menu-header";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
+import { useImportSession } from "@/hooks/use-import-session";
 import { useHostChooser } from "@/hosts/host-chooser";
 import { usePanelStore } from "@/stores/panel-store";
 import {
@@ -18,12 +19,8 @@ import {
   HEADER_TOP_PADDING_MOBILE,
 } from "@/constants/layout";
 import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
-import { buildHostAgentDetailRoute, buildSettingsHostSectionRoute } from "@/utils/host-routes";
-import { ImportSessionSheet } from "@/components/import-session-sheet";
-import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import { useOpenProject } from "@/hooks/use-open-project";
+import { buildSettingsHostSectionRoute } from "@/utils/host-routes";
 import { usePairDeviceModalStore } from "@/stores/pair-device-modal-store";
-import type { Href } from "expo-router";
 
 const WINDOW_CONTENT_DATASET = { "window-content": "" };
 
@@ -32,12 +29,9 @@ export function OpenProjectScreen() {
   const router = useRouter();
   const openDesktopAgentList = usePanelStore((s) => s.openDesktopAgentList);
   const openProjectPicker = useOpenAddProject();
+  const importSession = useImportSession();
   const chooseHost = useHostChooser();
   const localServerId = useLocalDaemonServerId();
-  const [importServerId, setImportServerId] = useState<string | null>(null);
-  const importClient = useHostRuntimeClient(importServerId ?? "");
-  const openImportedProject = useOpenProject(importServerId);
-  const [isImportSheetOpen, setIsImportSheetOpen] = useState(false);
   const openPairDeviceModal = usePairDeviceModalStore((state) => state.open);
 
   const isCompactLayout = useIsCompactFormFactor();
@@ -58,30 +52,6 @@ export function OpenProjectScreen() {
       openPairDeviceModal(localServerId);
     }
   }, [localServerId, openPairDeviceModal]);
-
-  const handleOpenImportSession = useCallback(() => {
-    chooseHost({
-      title: "Import from host",
-      onChooseHost: (serverId) => {
-        setImportServerId(serverId);
-        setIsImportSheetOpen(true);
-      },
-    });
-  }, [chooseHost]);
-  const handleCloseImportSession = useCallback(() => setIsImportSheetOpen(false), []);
-
-  const handleImported = useCallback(
-    (agent: { id: string; cwd: string }) => {
-      if (!importServerId) return;
-      void (async () => {
-        const result = await openImportedProject(agent.cwd);
-        if (result.ok) {
-          router.push(buildHostAgentDetailRoute(importServerId, agent.id) as Href);
-        }
-      })();
-    },
-    [importServerId, openImportedProject, router],
-  );
 
   const handleOpenProviders = useCallback(() => {
     chooseHost({
@@ -118,7 +88,7 @@ export function OpenProjectScreen() {
               icon={Inbox}
               title={t("openProject.tiles.importSession.title")}
               description={t("openProject.tiles.importSession.description")}
-              onPress={handleOpenImportSession}
+              onPress={importSession.open}
               testID="open-project-import-session"
             />
             <HomeTile
@@ -140,13 +110,7 @@ export function OpenProjectScreen() {
           </View>
         </View>
       </ScrollView>
-      <ImportSessionSheet
-        visible={isImportSheetOpen}
-        client={importClient}
-        serverId={importServerId}
-        onClose={handleCloseImportSession}
-        onImported={handleImported}
-      />
+      {importSession.sheet}
     </View>
   );
 }

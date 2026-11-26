@@ -42,6 +42,7 @@ import {
   ExternalLink,
   GitBranch,
   GitPullRequest,
+  Import,
   Settings,
   MoreVertical,
   Plus,
@@ -243,6 +244,7 @@ interface SidebarWorkspaceListProps {
   onRefresh?: () => void;
   onWorkspacePress?: () => void;
   onAddProject?: () => void;
+  onImportSession?: () => void;
   listFooterComponent?: ReactElement | null;
   // Rendered inside the scroll area, below the Pinned section and above the workspace
   // list. Holds the "Workspaces" section header so pinned items sit above it.
@@ -1943,6 +1945,7 @@ export function SidebarWorkspaceList({
   onRefresh: _onRefresh,
   onWorkspacePress,
   onAddProject,
+  onImportSession,
   listFooterComponent,
   listHeaderComponent,
   navigationHeaderComponent,
@@ -2003,6 +2006,7 @@ export function SidebarWorkspaceList({
         shortcutIndexByWorkspaceKey={shortcutIndexByWorkspaceKey}
         onWorkspacePress={onWorkspacePress}
         onAddProject={onAddProject}
+        onImportSession={onImportSession}
         listFooterComponent={listFooterComponent}
         listHeaderComponent={listHeaderComponent}
         parentGestureRef={parentGestureRef}
@@ -2071,6 +2075,7 @@ function ProjectModeList({
   shortcutIndexByWorkspaceKey,
   onWorkspacePress,
   onAddProject,
+  onImportSession,
   listFooterComponent,
   listHeaderComponent,
   navigationHeaderComponent,
@@ -2415,6 +2420,16 @@ function ProjectModeList({
             onPress={onAddProject}
           >
             {t("sidebar.actions.addProject")}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            leftIcon={Import}
+            style={styles.emptyAction}
+            textStyle={styles.emptyActionText}
+            onPress={onImportSession}
+          >
+            {t("importSession.title")}
           </Button>
         </View>
       ) : (

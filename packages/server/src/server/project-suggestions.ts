@@ -48,14 +48,12 @@ export async function listProjectSuggestions(
 ): Promise<ListProjectSuggestionsResult> {
   const now = input.now ?? new Date();
   const since = parseSince(input.request.since, now);
-  const providerErrors: ListProjectSuggestionsResult["providerErrors"] = [];
   const listing = await input.agentManager.listImportableSessions({
-    onProviderError: (error) => providerErrors.push(error),
     limit: SESSION_SCAN_LIMIT,
     scanLimit: SESSION_SCAN_LIMIT,
     providerFilter: input.request.providers ? new Set(input.request.providers) : undefined,
   });
-  const sessions = listing.filter(
+  const sessions = listing.sessions.filter(
     (session) => session.lastActivityAt.getTime() >= since && !isMetadataGenerationSession(session),
   );
 
@@ -77,7 +75,7 @@ export async function listProjectSuggestions(
     .sort((a, b) => b.lastActivityAt - a.lastActivityAt)
     .slice(0, input.request.limit ?? DEFAULT_LIMIT)
     .map(toSuggestion);
-  return { suggestions, providerErrors };
+  return { suggestions, providerErrors: listing.providerErrors };
 }
 
 interface SuggestionGroup {

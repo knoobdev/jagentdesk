@@ -7578,9 +7578,26 @@ async function collectRecentClaudeSessions(
 interface ClaudeSessionDescriptorAccumulator {
   sessionId: string | null;
   cwd: string | null;
-  title: string | null;
+  customTitle: string | null;
+  aiTitle: string | null;
+  firstPromptTitle: string | null;
   firstPromptPreview: string | null;
   lastPromptPreview: string | null;
+}
+
+const CLAUDE_IMPORT_DESCRIPTOR_RECORD_PATTERN = /"type"\s*:\s*"(?:user|custom-title|ai-title)"/;
+const CLAUDE_SESSION_ID_KEY_PATTERN = /"sessionId"\s*:/;
+const CLAUDE_CWD_KEY_PATTERN = /"cwd"\s*:/;
+
+function shouldParseClaudeSessionDescriptorLine(
+  line: string,
+  acc: ClaudeSessionDescriptorAccumulator,
+): boolean {
+  return (
+    CLAUDE_IMPORT_DESCRIPTOR_RECORD_PATTERN.test(line) ||
+    (!acc.sessionId && CLAUDE_SESSION_ID_KEY_PATTERN.test(line)) ||
+    (!acc.cwd && CLAUDE_CWD_KEY_PATTERN.test(line))
+  );
 }
 
 function applyClaudeSessionEntryToAccumulator(
@@ -7603,12 +7620,18 @@ function applyClaudeSessionEntryToAccumulator(
   if (!acc.cwd && typeof entry.cwd === "string") {
     acc.cwd = entry.cwd;
   }
+  if (entry.type === "custom-title" && typeof entry.customTitle === "string") {
+    acc.customTitle = normalizeClaudeSessionTitle(entry.customTitle);
+    return;
+  }
+  if (entry.type === "ai-title" && typeof entry.aiTitle === "string") {
+    acc.aiTitle = normalizeClaudeSessionTitle(entry.aiTitle);
+    return;
+  }
   if (entry.type === "user" && entry.message) {
     const text = extractClaudeUserText(entry.message);
     if (text) {
-      if (!acc.title) {
-        acc.title = text;
-      }
+      acc.firstPromptTitle ??= text;
       const preview = normalizeImportablePromptPreview(text);
       acc.firstPromptPreview ??= preview;
       acc.lastPromptPreview = preview;
@@ -7625,7 +7648,9 @@ async function parseClaudeSessionDescriptor(
   const acc: ClaudeSessionDescriptorAccumulator = {
     sessionId: null,
     cwd: null,
-    title: null,
+    customTitle: null,
+    aiTitle: null,
+    firstPromptTitle: null,
     firstPromptPreview: null,
     lastPromptPreview: null,
   };
@@ -7635,8 +7660,8 @@ async function parseClaudeSessionDescriptor(
   const record: Buffer[] = [];
   const stream = fs.createReadStream(filePath, { highWaterMark: 64 * 1024, signal });
   function applyRecord(): void {
-    const line = Buffer.concat(record).toString("utf8").trim();
-    if (!line) return;
+    const line = Buffer.concat(record).toString("utf8");
+    if (!line || !shouldParseClaudeSessionDescriptorLine(line, acc)) return;
     let entry: unknown;
     try {
       entry = JSON.parse(line);
@@ -7664,7 +7689,7 @@ async function parseClaudeSessionDescriptor(
     stream.destroy();
   }
 
-  const { sessionId, cwd, title } = acc;
+  const { sessionId, cwd } = acc;
 
   if (!sessionId || !cwd) {
     return null;
@@ -7673,7 +7698,11 @@ async function parseClaudeSessionDescriptor(
   return {
     providerHandleId: sessionId,
     cwd,
-    title: (title ?? "").trim() || `Claude session ${sessionId.slice(0, 8)}`,
+    title:
+      acc.customTitle ??
+      acc.aiTitle ??
+      normalizeClaudeSessionTitle(acc.firstPromptTitle) ??
+      `Claude session ${sessionId.slice(0, 8)}`,
     firstPromptPreview: acc.firstPromptPreview,
     lastPromptPreview: acc.lastPromptPreview,
     lastActivityAt: mtime,

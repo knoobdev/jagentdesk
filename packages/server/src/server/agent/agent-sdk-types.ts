@@ -598,6 +598,8 @@ export interface AgentSlashCommand {
 export interface ListImportableSessionsOptions {
   providerOptions?: ProviderOptions;
   limit?: number;
+  /** Optional case-insensitive descriptor search text. */
+  query?: string;
   /**
    * How many candidate sessions to scan before ranking down to `limit`. Lets a
    * host-wide search page deeper than the returned window; capped by the provider.

@@ -471,7 +471,13 @@ export const ru: TranslationResources = {
     },
   },
   importSession: {
+    chooseHostTitle: "Импорт с хоста",
     title: "Импортировать сеанс",
+    searchPlaceholder: "Поиск сеансов...",
+    scope: {
+      host: "Сеансы на {{host}}",
+      workspace: "Это рабочее пространство",
+    },
     filters: {
       all: "Все",
     },
@@ -480,12 +486,13 @@ export const ru: TranslationResources = {
       updateHost: "Обновите хост для импорта сеансов.",
       noProviders: "Импортируемые поставщики не включены.",
       loading: "Загрузка последних сеансов...",
-      failedAll: "Не удалось загрузить последние сеансы.",
-      failedProviders: "Не удалось загрузить сеансы для{{providers}}.",
+      failedProvider: "Не удалось загрузить сеансы {{provider}}",
       failedImport: "Не удалось импортировать выбранный сеанс.",
     },
     actions: {
       refresh: "Обновить сеансы",
+      showAll: "Показать все",
+      loadMore: "Загрузить ещё",
     },
     preview: {
       untitledSession: "Сессия без названия",
@@ -493,6 +500,7 @@ export const ru: TranslationResources = {
     },
     empty: {
       noRecent: "Нет последних сеансов для импорта.",
+      noMatches: "Нет сеансов, соответствующих поиску.",
       alreadyImported: "Все последние сеансы уже импортированы.",
       noProviderSessions: "Сеансы{{provider}}не найдены.",
     },
