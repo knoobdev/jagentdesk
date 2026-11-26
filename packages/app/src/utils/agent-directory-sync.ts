@@ -108,7 +108,6 @@ export function removeAgentDirectoryReplica(serverId: string, agentId: string): 
   store.setAgents(serverId, removeKey);
   store.setAgentDetails(serverId, removeKey);
   store.setQueuedMessages(serverId, removeKey);
-  store.setAgentTimelineCursor(serverId, removeKey);
   store.setInitializingAgents(serverId, removeKey);
   store.setPendingPermissions(serverId, (current) => {
     const next = new Map(current);
@@ -117,9 +116,8 @@ export function removeAgentDirectoryReplica(serverId: string, agentId: string): 
     }
     return next.size === current.size ? current : next;
   });
-  store.setAgentAuthoritativeHistoryApplied(serverId, agentId, false);
-  store.setAgentStreamTail(serverId, removeKey);
-  store.clearAgentStreamHead(serverId, agentId);
+  // Deleting the agent destroys its transcript: rows, cursors, paging and sync marks.
+  store.releaseAgentTimeline(serverId, agentId);
   store.applyAgentTurnLiveness(serverId, agentId, { type: "destructive_close" });
   useSessionStore.setState((state) => {
     if (!state.agentLastActivity.has(agentId)) return state;
