@@ -301,7 +301,7 @@ describe("resolvePinnedUsage", () => {
     ]);
   });
 
-  it("leaves out a pinned window that no report has, or that reports no percent", () => {
+  it("skips a pinned window that no report has, or that reports no percent", () => {
     const noPercent = report({
       sourceId: "opencode",
       sourceLabel: "OpenCode",
@@ -311,12 +311,71 @@ describe("resolvePinnedUsage", () => {
       [claude, noPercent],
       preferences([
         { sourceId: "claude", windowId: "monthly" },
+        { sourceId: "claude", windowId: "weekly" },
         { sourceId: "codex", windowId: "weekly" },
         { sourceId: "opencode", windowId: "monthly" },
       ]),
     );
 
-    expect(items).toEqual([]);
+    expect(items.map((item) => item.key)).toEqual(["claude:default/weekly"]);
+  });
+
+  it("falls back to the default pins when no pinned window is reported any more", () => {
+    // The user's host on 2026-11-26: Claude stopped sending its 5-hour window, Codex sends
+    // session and weekly. The saved pins named only the 5-hour windows.
+    const claudeNow = report({
+      sourceId: "claude",
+      sourceLabel: "Claude",
+      windows: [
+        { id: "weekly", label: "Weekly", shortLabel: "wk", usedPct: 97, summary: true },
+        { id: "weekly_model_fable", label: "Weekly · Fable", shortLabel: "wk Fable", usedPct: 40 },
+      ],
+    });
+    const codexNow = report({
+      sourceId: "codex",
+      sourceLabel: "Codex",
+      windows: [
+        { id: "session", label: "Session", shortLabel: "5h", usedPct: 2, summary: true },
+        { id: "weekly", label: "Weekly", shortLabel: "wk", usedPct: 0, summary: true },
+      ],
+    });
+    const stale = preferences([
+      { sourceId: "claude", windowId: "five_hour" },
+      { sourceId: "codex", windowId: "five_hour" },
+    ]);
+
+    expect(windows([claudeNow, codexNow], stale).map((item) => item.key)).toEqual([
+      "claude:default/weekly",
+      "codex:default/session",
+      "codex:default/weekly",
+    ]);
+    expect(windows([claudeNow, codexNow], preferences([])).map((item) => item.key)).toEqual([
+      "claude:default/weekly",
+      "codex:default/session",
+      "codex:default/weekly",
+    ]);
+  });
+
+  it("falls back to defaults among the shown cards when the pinned source is turned off", () => {
+    const prefs: UsagePreferences = {
+      ...preferences([{ sourceId: "claude", windowId: "weekly" }]),
+      cardVisibility: { [claude.id]: false },
+    };
+    expect(windows([claude, codex], prefs).map((item) => item.key)).toEqual([
+      "codex:default/weekly",
+    ]);
+  });
+
+  it("is empty only when no source reports a window with data", () => {
+    const noPercent = report({
+      sourceId: "opencode",
+      sourceLabel: "OpenCode",
+      windows: [{ id: "monthly", label: "Monthly" }],
+    });
+    expect(windows([noPercent], preferences([{ sourceId: "claude", windowId: "weekly" }]))).toEqual(
+      [],
+    );
+    expect(windows([], preferences(null))).toEqual([]);
   });
 
   it("shows a pin once per account of the source", () => {
