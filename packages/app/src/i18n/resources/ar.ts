@@ -105,6 +105,8 @@ export const ar: TranslationResources = {
       addProject: "\u0625\u0636\u0627\u0641\u0629 \u0645\u0634\u0631\u0648\u0639",
       home: "\u0628\u064A\u062A",
       copyBrowserHostName: "نسخ اسم مضيف المتصفح",
+      profileGroupLabel: "الملف الشخصي",
+      profileSearchKeywords: "ملف شخصي تطبيق ملف شخصي ملف الوكيل إعداد مسبق",
       modelGroupLabel: "\u0627\u0644\u0646\u0645\u0648\u0630\u062C",
       modelSearchKeywords:
         "\u062A\u0628\u062F\u064A\u0644 \u0627\u0644\u0646\u0645\u0648\u0630\u062C \u062A\u063A\u064A\u064A\u0631 \u0627\u0644\u0646\u0645\u0648\u0630\u062C \u062A\u0639\u064A\u064A\u0646 \u0627\u0644\u0646\u0645\u0648\u0630\u062C \u0627\u062E\u062A\u064A\u0627\u0631 \u0627\u0644\u0646\u0645\u0648\u0630\u062C",
@@ -1700,6 +1702,7 @@ export const ar: TranslationResources = {
     createProfile: "إنشاء ملف شخصي",
     noMatchesForQuery: 'لا توجد نماذج تطابق "{{query}}"',
     providers: "المزودون",
+    models: "النماذج",
     model: "النموذج",
   },
   providerCatalog: {

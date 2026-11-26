@@ -108,6 +108,8 @@ export const ru: TranslationResources = {
         "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043F\u0440\u043E\u0435\u043A\u0442",
       home: "\u0413\u043B\u0430\u0432\u043D\u0430\u044F",
       copyBrowserHostName: "Скопировать имя хоста браузера",
+      profileGroupLabel: "Профиль",
+      profileSearchKeywords: "профиль применить профиль профиль агента пресет",
       modelGroupLabel: "\u041C\u043E\u0434\u0435\u043B\u044C",
       modelSearchKeywords:
         "\u0421\u043C\u0435\u043D\u0438\u0442\u044C, \u0438\u0437\u043C\u0435\u043D\u0438\u0442\u044C, \u0432\u044B\u0431\u0440\u0430\u0442\u044C \u0438\u043B\u0438 \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C \u043C\u043E\u0434\u0435\u043B\u044C",
@@ -1739,6 +1741,7 @@ export const ru: TranslationResources = {
     createProfile: "Создать профиль",
     noMatchesForQuery: "Нет моделей, соответствующих «{{query}}»",
     providers: "Провайдеры",
+    models: "Модели",
     model: "Модель",
   },
   providerCatalog: {

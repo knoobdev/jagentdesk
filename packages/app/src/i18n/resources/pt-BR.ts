@@ -104,6 +104,8 @@ export const ptBR: TranslationResources = {
       addProject: "Adicionar projeto",
       home: "In\u00EDcio",
       copyBrowserHostName: "Copiar o nome do host do navegador",
+      profileGroupLabel: "Perfil",
+      profileSearchKeywords: "perfil aplicar perfil perfil do agente predefinição",
       modelGroupLabel: "Modelo",
       modelSearchKeywords: "trocar modelo mudar modelo definir modelo selecionar modelo",
       thinkingGroupLabel: "Racioc\u00EDnio",
@@ -1681,6 +1683,7 @@ export const ptBR: TranslationResources = {
     createProfile: "Criar perfil",
     noMatchesForQuery: "Nenhum modelo corresponde a «{{query}}»",
     providers: "Provedores",
+    models: "Modelos",
     model: "Modelo",
   },
   providerCatalog: {

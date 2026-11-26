@@ -103,6 +103,8 @@ export const en = {
       addProject: "Add project",
       home: "Home",
       copyBrowserHostName: "Copy browser host name",
+      profileGroupLabel: "Profile",
+      profileSearchKeywords: "profile apply profile agent profile preset",
       modelGroupLabel: "Model",
       modelSearchKeywords: "switch model change model set model select model",
       thinkingGroupLabel: "Thinking",
@@ -1716,6 +1718,7 @@ export const en = {
     createProfile: "Create profile",
     noMatchesForQuery: 'No models match "{{query}}"',
     providers: "Providers",
+    models: "Models",
     model: "Model",
   },
   providerCatalog: {

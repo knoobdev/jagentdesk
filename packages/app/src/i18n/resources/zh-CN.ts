@@ -104,6 +104,8 @@ export const zhCN: TranslationResources = {
       addProject: "\u6DFB\u52A0 project",
       home: "\u9996\u9875",
       copyBrowserHostName: "复制浏览器宿主名称",
+      profileGroupLabel: "配置文件",
+      profileSearchKeywords: "配置文件 应用配置文件 代理配置文件 预设",
       modelGroupLabel: "\u6A21\u578B",
       modelSearchKeywords:
         "\u5207\u6362\u6A21\u578B \u66F4\u6539\u6A21\u578B \u8BBE\u7F6E\u6A21\u578B \u9009\u62E9\u6A21\u578B",
@@ -1636,6 +1638,7 @@ export const zhCN: TranslationResources = {
     createProfile: "创建配置文件",
     noMatchesForQuery: "没有与“{{query}}”匹配的模型",
     providers: "提供方",
+    models: "模型",
     model: "模型",
   },
   providerCatalog: {

@@ -340,6 +340,7 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
       metadata,
       agentControls: buildDraftAgentControls({
         formState,
+        effectiveModelId,
         optionControls: draftOptionControls,
         options: draftShownOptions,
         onSetOption: setDraftOption,

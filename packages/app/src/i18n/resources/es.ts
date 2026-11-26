@@ -104,6 +104,8 @@ export const es: TranslationResources = {
       addProject: "Agregar proyecto",
       home: "Hogar",
       copyBrowserHostName: "Copiar el nombre del host del navegador",
+      profileGroupLabel: "Perfil",
+      profileSearchKeywords: "perfil aplicar perfil perfil de agente preajuste",
       modelGroupLabel: "Modelo",
       modelSearchKeywords: "cambiar modelo modificar modelo establecer modelo seleccionar modelo",
       thinkingGroupLabel: "Razonamiento",
@@ -1697,6 +1699,7 @@ export const es: TranslationResources = {
     createProfile: "Crear perfil",
     noMatchesForQuery: "Ningún modelo coincide con «{{query}}»",
     providers: "Proveedores",
+    models: "Modelos",
     model: "Modelo",
   },
   providerCatalog: {

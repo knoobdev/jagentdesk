@@ -105,6 +105,8 @@ export const fr: TranslationResources = {
       addProject: "Ajouter un projet",
       home: "Accueil",
       copyBrowserHostName: "Copier le nom de l’hôte du navigateur",
+      profileGroupLabel: "Profil",
+      profileSearchKeywords: "profil appliquer un profil profil d'agent préréglage",
       modelGroupLabel: "Mod\u00E8le",
       modelSearchKeywords:
         "changer de mod\u00E8le modifier le mod\u00E8le d\u00E9finir le mod\u00E8le s\u00E9lectionner le mod\u00E8le model",
@@ -1718,6 +1720,7 @@ export const fr: TranslationResources = {
     createProfile: "Créer un profil",
     noMatchesForQuery: "Aucun modèle ne correspond à « {{query}} »",
     providers: "Fournisseurs",
+    models: "Modèles",
     model: "Modèle",
   },
   providerCatalog: {
