@@ -30,6 +30,11 @@ import {
 } from "@/pairing/pending-pairing-offer";
 import { parseAppPairingOffer } from "@/pairing/offer";
 import { pairAppDevice } from "@/pairing/sas-client";
+import { claimPairingExchange } from "@/pairing/active-exchange";
+import { isNative } from "@/constants/platform";
+import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
+
+const KEEP_AWAKE_TAG = "pair-verify";
 
 export default function PairVerifyScreen() {
   const router = useRouter();
@@ -87,6 +92,15 @@ export default function PairVerifyScreen() {
     const route = decision.route;
     started.current = true;
     const controller = new AbortController();
+    // A deep link or scan delivered twice mounts a second screen for the same
+    // link. Its hello would be refused as "in use" and hide the screen that owns
+    // the exchange, so step back to that one instead.
+    const exchange = claimPairingExchange(pk, controller);
+    if (!exchange) {
+      if (router.canGoBack()) router.back();
+      else setError("This pairing link is already open on this device.");
+      return;
+    }
     abort.current = controller;
     const deadline = performance.now() + 120000;
     const timer = setInterval(() => {
@@ -153,10 +167,16 @@ export default function PairVerifyScreen() {
       );
     })()
       .catch((reason) => {
-        if (!controller.signal.aborted)
-          setError(reason instanceof Error ? reason.message : String(reason));
+        if (controller.signal.aborted) return;
+        setError(reason instanceof Error ? reason.message : String(reason));
+        // The daemon ends the attempt on any failure; resuming this link later
+        // (pair-start restores a saved offer) can only fail again.
+        void clearPendingPairingOffer();
       })
-      .finally(() => clearInterval(timer));
+      .finally(() => {
+        clearInterval(timer);
+        exchange.release();
+      });
     // Connection state changes do not replace an exchange which already owns its socket.
   }, [pending, status, router, upsertConnectionFromOffer]);
   useEffect(
@@ -166,6 +186,15 @@ export default function PairVerifyScreen() {
     },
     [],
   );
+  // iOS suspends the app when the screen auto-locks (30 s is a common setting),
+  // and a suspended app's pairing socket dies while the user compares codes.
+  useEffect(() => {
+    if (!isNative) return;
+    void activateKeepAwakeAsync(KEEP_AWAKE_TAG).catch(() => undefined);
+    return () => {
+      void deactivateKeepAwake(KEEP_AWAKE_TAG).catch(() => undefined);
+    };
+  }, []);
   const accept = useCallback(() => {
     setConfirmed(true);
     confirmation.current?.(true);

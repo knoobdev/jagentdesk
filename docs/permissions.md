@@ -68,6 +68,20 @@ path cannot enroll a new device, so apps older than v0.10.0 cannot pair a new de
 with a v0.10.0 daemon; update the app and generate a new link. Existing paired keys
 keep working.
 
+The daemon holds one attempt at a time. A new link replaces the open one, and the
+first device to send `pair_hello` owns it until it ends. If that device's socket drops,
+the attempt ends; reconnecting cannot resume it, so the device needs a new link. Every
+refusal and every host-side end reaches the device as `pair_error` with a `reason`
+(`replaced`, `expired`, `in_use`, `connection_lost`, …) before the socket closes, and
+the daemon logs each step as `pairing_sas_*` without keys, nonces or codes. Relays
+replace the daemon's close code, so the close alone cannot tell the device why.
+
+The device pings every 10 seconds while the user compares codes. Mobile networks and
+suspended apps drop a silent socket in well under the two-minute window. Anything
+that starts an exchange must start it once per link: the desktop "Pair a device"
+panel begins an attempt only when it opens or the user asks for a new code, never
+when the host runtime swaps its client, and a phone opens one exchange per link.
+
 A tailnet enrollment pins the verified connection's node identity for every device
 kind. The Go tsnet bridge looks up the peer with WhoIs before it reads any
 application bytes (`packages/server/go/tsnet-bridge/main.go`). A missing bridge

@@ -38,6 +38,8 @@ export const HostPairingResponseSchemas = [
       label: z.string().optional(),
       kind: DeviceKindSchema.optional(),
       state: z.enum(["waiting", "comparing", "completed", "cancelled"]),
+      /** Why a `cancelled` attempt ended (`PairingEndReason`). Absent from older daemons. */
+      reason: z.string().optional(),
     }),
   }),
   z.object({
@@ -68,3 +70,34 @@ export const PairConfirmSchema = z.object({
   pk: z.string(),
   accepted: z.boolean(),
 });
+/**
+ * Why an SAS pairing attempt ended, or why the daemon refused a `pair_hello` /
+ * `pair_confirm`. Sent as `pair_error.reason` and `pairing.sas.changed.reason`.
+ * The wire fields are plain strings so a newer daemon can add a reason without
+ * breaking an older app; readers map the values they know.
+ */
+export const PAIRING_END_REASONS = [
+  "expired",
+  "replaced",
+  "host_cancelled",
+  "client_cancelled",
+  "in_use",
+  "connection_lost",
+  "unknown_link",
+  "completed",
+  "bad_key",
+  "node_changed",
+  "daemon_stopped",
+] as const;
+export type PairingEndReason = (typeof PAIRING_END_REASONS)[number];
+/**
+ * `code` keeps the spec 05 error codes (`pairing_expired`, `pairing_in_use`,
+ * `pairing_bad_key`, `node_changed`); daemons before 0.10.2 send only
+ * `code: "pairing_failed"`.
+ */
+export const PairErrorSchema = z.object({
+  type: z.literal("pair_error"),
+  code: z.string(),
+  reason: z.string().optional(),
+});
+export type PairError = z.infer<typeof PairErrorSchema>;

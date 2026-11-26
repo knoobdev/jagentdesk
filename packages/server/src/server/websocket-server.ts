@@ -940,11 +940,15 @@ export class VoiceAssistantWebSocketServer {
     this.hubRelationships = hubRelationships ?? null;
     this.pairing = pairing ?? null;
     this.sasPairing = pairing
-      ? new SasPairing(pairing.devices, (message) => {
-          for (const session of this.listTrustedSessions()) {
-            if (session.getPermissions().includes("access.manage")) session.publish(message);
-          }
-        })
+      ? new SasPairing(
+          pairing.devices,
+          (message) => {
+            for (const session of this.listTrustedSessions()) {
+              if (session.getPermissions().includes("access.manage")) session.publish(message);
+            }
+          },
+          this.logger.child({ module: "pairing-sas" }),
+        )
       : null;
     this.pluginRuntime = pluginRuntime ?? null;
     this.agentManager = agentManager;
@@ -1634,7 +1638,7 @@ export class VoiceAssistantWebSocketServer {
 
   public async close(): Promise<void> {
     this.prepareForShutdown();
-    this.sasPairing?.cancel();
+    this.sasPairing?.cancel("daemon_stopped");
     await this.connectedHosts.close();
     this.unsubscribeSpeechReadiness?.();
     this.unsubscribeSpeechReadiness = null;
@@ -2969,7 +2973,7 @@ export class VoiceAssistantWebSocketServer {
       error?: Error;
     },
   ): Promise<void> {
-    this.sasPairing?.disconnected(ws);
+    this.sasPairing?.disconnected(ws, { code: details.code });
     this.hostLinks.get(ws)?.close();
     this.hostLinks.delete(ws);
     this.applicationSocketLease.release(ws);
@@ -3573,6 +3577,7 @@ export class VoiceAssistantWebSocketServer {
           parsed,
           pendingConnection.identity.tailnetNodeId,
           pendingConnection.identity.transport,
+          pendingConnection.connectionLogger,
         )
       )
         return;
