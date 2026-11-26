@@ -64,6 +64,10 @@ export function Field({ label, children, hint, error, testID }: FieldProps) {
 
 type FormTextInputProps = AdaptiveTextInputProps & {
   size?: FieldControlSize;
+  /** A glyph inside the field before the text, such as a search icon. */
+  leading?: ReactNode;
+  /** The value is rejected; the border and focus ring turn to the danger color. */
+  invalid?: boolean;
 };
 
 type FlatFormTextInputStyle = ViewStyle & TextStyle;
@@ -152,7 +156,7 @@ function assignTextInputRef(forwardedRef: ForwardedRef<TextInput>, node: TextInp
 }
 
 export const FormTextInput = forwardRef<TextInput, FormTextInputProps>(function FormTextInput(
-  { size = "md", style, onFocus, onBlur, editable, ...props },
+  { size = "md", leading, invalid = false, style, onFocus, onBlur, editable, ...props },
   ref,
 ) {
   const [focused, setFocused] = useState(false);
@@ -188,6 +192,7 @@ export const FormTextInput = forwardRef<TextInput, FormTextInputProps>(function 
     ({ hovered = false }: PressableStateCallbackType & { hovered?: boolean }) => [
       formInputStyles.chrome,
       chromeSizeStyle,
+      leading ? formInputStyles.chromeWithLeading : null,
       resolveControlInteractionStyles(
         {
           controlRest: formInputStyles.controlRest,
@@ -201,13 +206,15 @@ export const FormTextInput = forwardRef<TextInput, FormTextInputProps>(function 
           disabled: isDisabled,
         },
       ),
+      invalid ? formInputStyles.controlInvalid : null,
       splitStyle.chromeStyle,
     ],
-    [chromeSizeStyle, focused, isDisabled, splitStyle.chromeStyle],
+    [chromeSizeStyle, focused, invalid, isDisabled, leading, splitStyle.chromeStyle],
   );
 
   return (
     <Pressable disabled={isDisabled} style={chromeStyle}>
+      {leading}
       <AdaptiveTextInput
         ref={setInputRef}
         editable={editable}
@@ -248,6 +255,11 @@ const formInputStyles = StyleSheet.create((theme) => {
     chrome: {
       backgroundColor: theme.colors.surface2,
     },
+    chromeWithLeading: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: theme.spacing[2],
+    },
     chromeSm: {
       ...geometry.fieldControlSm,
     },
@@ -265,6 +277,11 @@ const formInputStyles = StyleSheet.create((theme) => {
     },
     controlDisabled: {
       ...geometry.controlDisabled,
+    },
+    // Matches the inline error under the field (docs/design.md, Errors).
+    controlInvalid: {
+      borderColor: theme.colors.palette.red[300],
+      outlineColor: theme.colors.palette.red[300],
     },
     input: {
       flex: 1,
