@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import type { AgentPermissionResponse } from "../agent-sdk-types.js";
 import {
   buildHostToolInstructions,
+  JAGENTDESK_TOOLS_STAY_INSTRUCTION,
   registerHostToolGroupTools,
   TURN_ON_HOST_TOOLS_TOOL,
   type HostToolGroupState,
@@ -125,10 +126,11 @@ describe("turn_on_host_tools (spec 04 §27b.2)", () => {
 
 describe("buildHostToolInstructions", () => {
   test("lists groups that are off, points at the tool and rules out a new session", () => {
-    const [off, ...rest] = buildHostToolInstructions([
+    const [stay, off, ...rest] = buildHostToolInstructions([
       group({ id: "browser-tools" }),
       group({ id: "docker", launched: true }),
     ]);
+    expect(stay).toBe(JAGENTDESK_TOOLS_STAY_INSTRUCTION);
     expect(off).toContain("Browser tools (`browser-tools`)");
     expect(off).not.toContain("`docker`");
     expect(off).toContain(TURN_ON_HOST_TOOLS_TOOL);
@@ -141,14 +143,23 @@ describe("buildHostToolInstructions", () => {
     const instructions = buildHostToolInstructions([
       group({ id: "browser-tools", launched: true, on: true }),
     ]);
-    expect(instructions).toHaveLength(1);
-    expect(instructions[0]).toContain("`browser_*` tools");
-    expect(instructions[0]).toContain("`open`, `xdg-open`, `start`, `Start-Process`");
-    expect(instructions[0]).toContain("Playwright");
-    expect(instructions[0]).toContain("never fall back to the system browser");
+    expect(instructions).toHaveLength(2);
+    expect(instructions[1]).toContain("`browser_*` tools");
+    expect(instructions[1]).toContain("`open`, `xdg-open`, `start`, `Start-Process`");
+    expect(instructions[1]).toContain("Playwright");
+    expect(instructions[1]).toContain("never fall back to the system browser");
   });
 
-  test("nothing to say when every group is on and browser tools are absent", () => {
-    expect(buildHostToolInstructions([group({ id: "docker", launched: true })])).toEqual([]);
+  test("only the tools-stay rule when every group is on and browser tools are absent", () => {
+    expect(buildHostToolInstructions([group({ id: "docker", launched: true })])).toEqual([
+      JAGENTDESK_TOOLS_STAY_INSTRUCTION,
+    ]);
+  });
+
+  test("the tools-stay rule answers Claude Code's removed-tools notice", () => {
+    expect(JAGENTDESK_TOOLS_STAY_INSTRUCTION).toContain("only the tools it names changed");
+    expect(JAGENTDESK_TOOLS_STAY_INSTRUCTION).toContain(
+      "Never tell the user that the JAgentDesk tools are disconnected",
+    );
   });
 });

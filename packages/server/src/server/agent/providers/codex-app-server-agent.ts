@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { createExternalProcessEnv } from "../../jagentdesk-env.js";
 import { CodexBackgroundInventory } from "./codex/background-inventory.js";
 import { validateProviderOptions, assertChangesAreLive } from "../provider-options.js";
@@ -42,9 +43,13 @@ import {
   type ProviderRefreshContext,
   type ResolveAgentDefaultModeInput,
   type AgentOptionControl,
+  type JAgentDeskToolsHealth,
 } from "../agent-sdk-types.js";
 import { importSessionFromPersistence } from "../provider-session-import.js";
-import { isInternalJAgentDeskMcpServer } from "../runtime-mcp-config.js";
+import {
+  isInternalJAgentDeskMcpServer,
+  JAGENTDESK_MCP_SERVER_NAME,
+} from "../runtime-mcp-config.js";
 import { runProviderRefreshActivity } from "../provider-refresh-deadline.js";
 import { type Logger } from "pino";
 import { type ChildProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
@@ -57,6 +62,7 @@ import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { renderPromptAttachmentAsText } from "../prompt-attachments.js";
 import { CODEX_PROVIDER_BROWSER_SKILLS } from "../system-browser.js";
+import { codexHiddenConnectorArgs, readCodexMcpServerTables } from "../provider-connectors.js";
 import { composeAgentSystemPrompt } from "../system-prompt.js";
 import { CodexInstructionSnapshot } from "./codex/instruction-snapshot.js";
 import {
@@ -5833,6 +5839,38 @@ export class CodexAppServerAgentSession implements AgentSession {
     }
   }
 
+  /**
+   * Spec 04 §27b.0. Reads the thread's own MCP connection. A thread that does not exist yet
+   * starts with this runtime's fresh config on the turn, so there is nothing to check.
+   */
+  async checkJAgentDeskTools({ signal }: { signal: AbortSignal }): Promise<JAgentDeskToolsHealth> {
+    const serverConfig = this.config.mcpServers?.[JAGENTDESK_MCP_SERVER_NAME];
+    if (!serverConfig || !isInternalJAgentDeskMcpServer(serverConfig)) return { status: "unknown" };
+    if (!this.connected || !this.client || !this.currentThreadId) return { status: "unknown" };
+    const client = this.client;
+    const threadId = this.currentThreadId;
+    while (true) {
+      signal.throwIfAborted();
+      let response: unknown;
+      try {
+        response = await client.request(
+          "mcpServerStatus/list",
+          { threadId, serverName: JAGENTDESK_MCP_SERVER_NAME, detail: "toolsAndAuthOnly" },
+          10_000,
+        );
+      } catch (error) {
+        // COMPAT(codexMcpServerStatus): added in v0.10.2, remove after 2027-05-26 once Codex floor has mcpServerStatus/list.
+        if (error instanceof CodexAppServerRpcError && error.code === -32601) {
+          return { status: "unknown" };
+        }
+        throw error;
+      }
+      const health = codexJAgentDeskToolsHealth(toObjectRecord(response)?.data);
+      if (health) return health;
+      await delay(200, undefined, { signal });
+    }
+  }
+
   async listCommands(): Promise<AgentSlashCommand[]> {
     const prompts = await listCodexCustomPrompts(this.codexHome);
     if (!this.connected) {
@@ -8090,6 +8128,42 @@ export function codexProviderBrowserOverrides(): string[] {
   return ["-c", `skills.config=[${entries.join(",")}]`];
 }
 
+/** One `mcpServerStatus/list` answer as tools health; null while the server is still starting. */
+function codexJAgentDeskToolsHealth(data: unknown): JAgentDeskToolsHealth | null {
+  const entry = (Array.isArray(data) ? data : [])
+    .map(toObjectRecord)
+    .find((item) => item?.name === JAGENTDESK_MCP_SERVER_NAME);
+  if (!entry) {
+    return { status: "missing", reason: "the jagentdesk MCP server is not loaded in Codex" };
+  }
+  const runtimeStatus = typeof entry.runtimeStatus === "string" ? entry.runtimeStatus : null;
+  if (runtimeStatus === "starting" || runtimeStatus === "notStarted") return null;
+  const tools = toObjectRecord(entry.tools);
+  if (tools && Object.keys(tools).length > 0 && runtimeStatus !== "failed") return { status: "ok" };
+  if (typeof entry.toolsError === "string") {
+    return {
+      status: "missing",
+      reason: `the jagentdesk MCP server failed to list tools: ${entry.toolsError}`,
+    };
+  }
+  if (runtimeStatus && runtimeStatus !== "connected") {
+    return { status: "missing", reason: `the jagentdesk MCP server is ${runtimeStatus}` };
+  }
+  return { status: "missing", reason: "the jagentdesk MCP server listed no tools" };
+}
+
+/** Spec 29.4: the user's own Atlassian/Jira MCP servers stay off while JAgentDesk's Jira tools run. */
+async function codexHiddenConnectorOverrides(
+  environment: NodeJS.ProcessEnv,
+  families: readonly string[] | undefined,
+): Promise<string[]> {
+  if (!families?.length) return [];
+  const toml = await fs
+    .readFile(path.join(resolveCodexHomeDir(environment), "config.toml"), "utf8")
+    .catch(() => "");
+  return codexHiddenConnectorArgs(families, readCodexMcpServerTables(toml));
+}
+
 export class CodexAppServerAgentClient implements AgentClient {
   readonly provider = CODEX_PROVIDER;
   readonly capabilities = CODEX_APP_SERVER_CAPABILITIES;
@@ -8239,12 +8313,14 @@ export class CodexAppServerAgentClient implements AgentClient {
     goalsEnabled?: boolean;
     agentId?: string;
     inAppBrowser?: boolean;
+    hideProviderConnectors?: string[];
   }): Promise<() => ChildProcessWithoutNullStreams> {
     const processPort = this.deps.appServerProcess ?? defaultCodexAppServerProcess;
     const launchPrefix = await processPort.resolvePrefix({ runtimeSettings: this.runtimeSettings });
     const args = [
       ...launchPrefix.args,
       ...(options.inAppBrowser ? codexProviderBrowserOverrides() : []),
+      ...(await codexHiddenConnectorOverrides(options.environment, options.hideProviderConnectors)),
       "app-server",
     ];
     if (options.goalsEnabled) {
@@ -8311,6 +8387,7 @@ export class CodexAppServerAgentClient implements AgentClient {
       goalsEnabled,
       agentId: launchContext?.agentId,
       inAppBrowser: launchContext?.inAppBrowser,
+      hideProviderConnectors: launchContext?.hideProviderConnectors,
     });
     const session = new CodexAppServerAgentSession(
       sessionConfig,
@@ -8348,6 +8425,7 @@ export class CodexAppServerAgentClient implements AgentClient {
       goalsEnabled,
       agentId: launchContext?.agentId,
       inAppBrowser: launchContext?.inAppBrowser,
+      hideProviderConnectors: launchContext?.hideProviderConnectors,
     });
     const session = new CodexAppServerAgentSession(
       merged,

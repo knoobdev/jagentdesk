@@ -18,6 +18,8 @@ export interface HostToolSetSource {
   instructions(agentId: string): string[];
   /** The adopted tool groups include the JAgentDesk in-app browser. */
   inAppBrowser(agentId: string): boolean;
+  /** Provider-owned connector families the adopted tool groups replace (spec 29.4). */
+  replacedProviderConnectors?(agentId: string): string[];
 }
 
 export interface HostToolSetDiff {

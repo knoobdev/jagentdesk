@@ -22,7 +22,11 @@ import {
 } from "../../../../custom-providers/materialization.js";
 import { resolveExternalOpenCodeServer, type ExternalOpenCodeServer } from "./external-server.js";
 import { selectOpenCodeService, type OpenCodeServiceSelection } from "./service-selection.js";
-import { bridgeBindings, connectSharedService } from "./shared-service.js";
+import {
+  bridgeBindings,
+  connectSharedService,
+  type OpenCodeSessionToolsStatus,
+} from "./shared-service.js";
 import {
   hasManagedBridge,
   openCodeConfigDirectory,
@@ -39,6 +43,8 @@ export interface V2Connection {
   bindSession(sessionId: string, cwd: string): Promise<void>;
   unbindSession(sessionId: string, cwd: string): Promise<void>;
   refreshLocation(cwd: string, signal?: AbortSignal): Promise<void>;
+  /** Spec 04 §27b.0: the bridge plugin's tools for one session; null when the plugin cannot tell. */
+  sessionToolsStatus(sessionId: string, cwd: string): Promise<OpenCodeSessionToolsStatus | null>;
   readonly exited: Promise<Error>;
 }
 interface Generation {
@@ -49,6 +55,8 @@ interface Generation {
   bindSession(sessionId: string, cwd: string): Promise<void>;
   unbindSession(sessionId: string, cwd: string): Promise<void>;
   refreshLocation(cwd: string, signal?: AbortSignal): Promise<void>;
+  /** Spec 04 §27b.0: the bridge plugin's tools for one session; null when the plugin cannot tell. */
+  sessionToolsStatus(sessionId: string, cwd: string): Promise<OpenCodeSessionToolsStatus | null>;
 }
 export interface V2RuntimeOptions {
   logger: Logger;
@@ -196,6 +204,7 @@ export class V2Runtime {
       bindSession: generation.bindSession,
       unbindSession: generation.unbindSession,
       refreshLocation: generation.refreshLocation,
+      sessionToolsStatus: generation.sessionToolsStatus,
       exited: generation.exited,
     };
   }

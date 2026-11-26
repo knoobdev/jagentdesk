@@ -56,8 +56,13 @@ function listGroups(groups: HostToolGroupState[]): string {
  * System instructions for one launch. The off list is built from the tool groups the runtime
  * opens with, so it stays true until the next launch.
  */
+export const JAGENTDESK_TOOLS_STAY_INSTRUCTION =
+  "Your JAgentDesk tools (the `jagentdesk` MCP server, or tools named `jagentdesk_*`) stay connected for the whole conversation; JAgentDesk checks them before every message. A notice that some of them are no longer available means only the tools it names changed: search for the others again before deciding a tool is missing. If a JAgentDesk tool call fails, report its error. Never tell the user that the JAgentDesk tools are disconnected or gone from this session.";
+
 export function buildHostToolInstructions(groups: HostToolGroupState[]): string[] {
-  const instructions: string[] = [];
+  // Spec 04 §27b.0: after a resume, Claude Code summarises removed tools as
+  // "mcp__jagentdesk__* (N) no longer available", which models read as every tool being gone.
+  const instructions: string[] = [JAGENTDESK_TOOLS_STAY_INSTRUCTION];
   const off = groups.filter((group) => !group.launched);
   const browserOn = groups.some((group) => group.id === BROWSER_TOOLS_GROUP_ID && group.launched);
   if (off.length) {

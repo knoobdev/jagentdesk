@@ -1,7 +1,11 @@
 import { createExternalProcessEnv } from "../../../jagentdesk-env.js";
 import { ClaudeResultMeter } from "./metrics.js";
 import { ClaudeRuntimeSafety } from "./runtime-safety.js";
-import { setImmediate } from "node:timers/promises";
+import { setImmediate, setTimeout as delay } from "node:timers/promises";
+import {
+  claudeDeniedConnectorServers,
+  claudeDisallowedConnectorTools,
+} from "../../provider-connectors.js";
 import { validateProviderOptions, assertChangesAreLive } from "../../provider-options.js";
 import { type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -21,6 +25,7 @@ import {
   type CanUseTool,
   type HookCallback,
   type McpServerConfig as ClaudeSdkMcpServerConfig,
+  type McpServerStatus,
   type PermissionMode,
   type PermissionResult,
   type PermissionUpdate,
@@ -162,6 +167,7 @@ import {
   type ToolCallDetail,
   type AgentDraftControls,
   type AgentOptionControl,
+  type JAgentDeskToolsHealth,
 } from "../../agent-sdk-types.js";
 import { importSessionFromPersistence } from "../../provider-session-import.js";
 import { runProviderRefreshActivity } from "../../provider-refresh-deadline.js";
@@ -546,6 +552,8 @@ interface ClaudeAgentSessionOptions {
   launchEnv?: Record<string, string>;
   /** JAgentDesk browser tools are on for this launch (spec 04 §27b.3). */
   inAppBrowser?: boolean;
+  /** Provider connectors JAgentDesk tools replace in this launch (spec 29.4). */
+  hideProviderConnectors?: string[];
   persistSession?: boolean;
   logger: Logger;
   queryFactory?: ClaudeQueryFactory;
@@ -711,6 +719,13 @@ function summarizeClaudeOptionsForLog(options: ClaudeOptions): ClaudeOptionsLogS
     persistSession: typeof options.persistSession === "boolean" ? options.persistSession : null,
     fastMode: readClaudeFastModeSetting(options.settings),
   };
+}
+
+function claudeMissingToolsReason(entry: McpServerStatus | undefined): string {
+  if (!entry) return "the jagentdesk MCP server is not loaded in Claude Code";
+  if (entry.status === "connected") return "the jagentdesk MCP server listed no tools";
+  const detail = entry.error ? `: ${entry.error}` : "";
+  return `the jagentdesk MCP server is ${entry.status}${detail}`;
 }
 
 function readClaudeFastModeSetting(settings: ClaudeOptions["settings"]): boolean | null {
@@ -1781,6 +1796,7 @@ export class ClaudeAgentClient implements AgentClient {
       agentId: launchContext?.agentId,
       launchEnv: launchContext?.env,
       inAppBrowser: launchContext?.inAppBrowser,
+      hideProviderConnectors: launchContext?.hideProviderConnectors,
       persistSession: options?.persistSession,
       logger: this.logger,
       queryFactory: this.queryFactory,
@@ -1813,6 +1829,7 @@ export class ClaudeAgentClient implements AgentClient {
       agentId: launchContext?.agentId,
       launchEnv: launchContext?.env,
       inAppBrowser: launchContext?.inAppBrowser,
+      hideProviderConnectors: launchContext?.hideProviderConnectors,
       logger: this.logger,
       queryFactory: this.queryFactory,
       resolveBinary: this.resolveBinary,
@@ -2507,6 +2524,7 @@ class ClaudeAgentSession implements AgentSession {
   private readonly agentId?: string;
 
   private readonly inAppBrowser: boolean;
+  private readonly hideProviderConnectors: readonly string[];
 
   private readonly defaults?: { agents?: Record<string, AgentDefinition> };
 
@@ -2713,6 +2731,7 @@ class ClaudeAgentSession implements AgentSession {
     this.launchEnv = options.launchEnv;
     this.agentId = options.agentId;
     this.inAppBrowser = options.inAppBrowser === true;
+    this.hideProviderConnectors = options.hideProviderConnectors ?? [];
     this.defaults = options.defaults;
     this.runtimeSettings = options.runtimeSettings;
     this.persistSession = options.persistSession;
@@ -3472,6 +3491,36 @@ class ClaudeAgentSession implements AgentSession {
     );
   }
 
+  /**
+   * Spec 04 §27b.0. Claude connects MCP servers on its own after launch and only reports a
+   * lost server through the model's context, so the daemon asks before each turn. One
+   * in-place reconnect is tried; the caller restarts the runtime if that is not enough.
+   */
+  async checkJAgentDeskTools({ signal }: { signal: AbortSignal }): Promise<JAgentDeskToolsHealth> {
+    const serverConfig = this.config.mcpServers?.[JAGENTDESK_MCP_SERVER_NAME];
+    if (!serverConfig || !isInternalJAgentDeskMcpServer(serverConfig)) return { status: "unknown" };
+    const query = await this.ensureQuery();
+    let reconnected = false;
+    while (true) {
+      signal.throwIfAborted();
+      const entry = (await query.mcpServerStatus()).find(
+        (status) => status.name === JAGENTDESK_MCP_SERVER_NAME,
+      );
+      if (entry?.status === "pending") {
+        await delay(200, undefined, { signal });
+        continue;
+      }
+      if (entry?.status === "connected" && (entry.tools?.length ?? 0) > 0) return { status: "ok" };
+      const reason = claudeMissingToolsReason(entry);
+      if (reconnected || !entry) return { status: "missing", reason };
+      reconnected = true;
+      this.logger.warn({ reason }, "Reconnecting Claude's JAgentDesk MCP server before the turn");
+      await query.reconnectMcpServer(JAGENTDESK_MCP_SERVER_NAME).catch((error: unknown) => {
+        this.logger.warn({ err: error }, "Claude JAgentDesk MCP reconnect failed");
+      });
+    }
+  }
+
   async listCommands(): Promise<AgentSlashCommand[]> {
     const q = await this.ensureQuery();
     const commands = await q.supportedCommands();
@@ -4156,17 +4205,20 @@ class ClaudeAgentSession implements AgentSession {
     if (this.claudeSessionId && !this.pendingFreshSessionId) {
       base.resume = this.claudeSessionId;
     }
-    if (this.runtimeSettings?.disallowedTools?.length) {
-      base.disallowedTools = [
-        ...(base.disallowedTools ?? []),
-        ...this.runtimeSettings.disallowedTools,
-      ];
-    }
-    if (this.inAppBrowser) {
-      // Claude in Chrome would open pages in the user's real Chrome instead of the app.
-      base.disallowedTools = [...(base.disallowedTools ?? []), CLAUDE_PROVIDER_BROWSER_TOOL_RULE];
+    const launchDisallowed = this.launchDisallowedTools();
+    if (launchDisallowed.length) {
+      base.disallowedTools = [...(base.disallowedTools ?? []), ...launchDisallowed];
     }
     return base;
+  }
+
+  private launchDisallowedTools(): string[] {
+    return [
+      ...(this.runtimeSettings?.disallowedTools ?? []),
+      // Claude in Chrome would open pages in the user's real Chrome instead of the app.
+      ...(this.inAppBrowser ? [CLAUDE_PROVIDER_BROWSER_TOOL_RULE] : []),
+      ...claudeDisallowedConnectorTools(this.hideProviderConnectors),
+    ];
   }
 
   private async buildSettingsOptions(
@@ -4177,13 +4229,24 @@ class ClaudeAgentSession implements AgentSession {
     // Internal agents do daemon work such as naming a branch, so the user's and
     // project's hooks must not run for them.
     const disableAllHooks = this.config.internal === true;
-    if (fastMode === null && !input.ultracode && !disableAllHooks) {
+    const deniedConnectors = claudeDeniedConnectorServers(this.hideProviderConnectors);
+    if (fastMode === null && !input.ultracode && !disableAllHooks && !deniedConnectors.length) {
       return {};
     }
+    const userDenied = (providerOptions.settings as Record<string, unknown> | undefined)
+      ?.deniedMcpServers;
     const updates = {
       ...(fastMode === null ? {} : { fastMode }),
       ...(input.ultracode ? { ultracode: true } : {}),
       ...(disableAllHooks ? { disableAllHooks: true } : {}),
+      ...(deniedConnectors.length
+        ? {
+            deniedMcpServers: [
+              ...(Array.isArray(userDenied) ? userDenied : []),
+              ...deniedConnectors,
+            ],
+          }
+        : {}),
     };
     // The SDK replaces extraArgs.settings with Options.settings, so a user's
     // `--settings` would be dropped whenever JAgentDesk sets flag settings. Fold it in.

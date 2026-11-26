@@ -41,7 +41,10 @@ export type AgentRunController = Pick<
   | "replaceAgentRun"
   | "steerOrReplaceActiveTurn"
   | "streamAgent"
-> & { reloadAgentSession(agentId: string): Promise<unknown> };
+> & {
+  reloadAgentSession(agentId: string): Promise<unknown>;
+  ensureJAgentDeskTools?(agentId: string): Promise<void>;
+};
 
 export interface StartAgentRunOptions {
   idleOnly?: boolean;
@@ -156,6 +159,7 @@ export async function startAgentRun(
   try {
     try {
       await agentManager.reloadStalePluginSession(agentId);
+      await agentManager.ensureJAgentDeskTools?.(agentId);
       return await startAgentRunInner(agentManager, agentId, prompt, logger, options, promptStart);
     } catch (error) {
       if (!isStaleProviderSessionError(error)) throw error;

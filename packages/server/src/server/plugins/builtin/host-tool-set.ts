@@ -7,7 +7,7 @@ import {
   type HostToolGroupState,
 } from "../../agent/tools/host-tool-groups.js";
 import { builtinPluginsWithToolPrefixes } from "./gates.js";
-import type { BuiltinServerRegistry } from "./host.js";
+import type { BuiltinAgentLaunchHints, BuiltinServerRegistry } from "./host.js";
 import type { BuiltinPluginState } from "./state.js";
 
 /**
@@ -17,6 +17,8 @@ import type { BuiltinPluginState } from "./state.js";
 export function createBuiltinHostToolSet(input: {
   state: BuiltinPluginState;
   registry: Pick<BuiltinServerRegistry, "agentToolPluginIds">;
+  /** Launch hints of the adopted built-ins (instructions, replaced provider connectors). */
+  launchHints?: (ids: ReadonlySet<string>) => BuiltinAgentLaunchHints;
 }): { source: HostToolSetSource; groups: HostToolGroups } {
   const { state } = input;
   const toolGroupIds = new Set<string>([
@@ -57,7 +59,12 @@ export function createBuiltinHostToolSet(input: {
     adopt: (agentId) => {
       state.adoptForAgent(agentId);
     },
-    instructions: (agentId) => buildHostToolInstructions(groups.list(agentId)),
+    instructions: (agentId) => [
+      ...buildHostToolInstructions(groups.list(agentId)),
+      ...(input.launchHints?.(state.forAgent(agentId)).instructions ?? []),
+    ],
+    replacedProviderConnectors: (agentId) =>
+      input.launchHints?.(state.forAgent(agentId)).replacesProviderConnectors ?? [],
     inAppBrowser: (agentId) => state.forAgent(agentId).has(BROWSER_TOOLS_GROUP_ID),
   };
   return { source, groups };

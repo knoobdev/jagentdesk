@@ -26,6 +26,7 @@ export type {
   BuiltinDaemonSlot,
   BuiltinAgentToolContext,
   BuiltinBotTriggerContext,
+  BuiltinAgentLaunchHints,
   BuiltinBotTriggerSource,
   BuiltinProvidedServices,
   BuiltinServiceHandle,

@@ -212,6 +212,7 @@ export class V2Harness {
     bindSession: async () => {},
     unbindSession: async () => {},
     refreshLocation: async () => {},
+    sessionToolsStatus: async () => null,
     client: this.api,
     release: async () => {
       this.releases += 1;
