@@ -309,6 +309,23 @@ export class OpenCodeV2Session implements AgentSession {
     this.emit({ ...event, ...(this.turns.id ? { turnId: this.turns.id } : {}) });
   }
 
+  /** The session's update time and revert point, and its newest message's progress. */
+  async readHistoryVersion(): Promise<string | null> {
+    await this.reconnectIfExited();
+    const [info, newest] = await Promise.all([
+      this.client.session.get({ sessionID: this.id }),
+      this.client.message.list({ sessionID: this.id, order: "desc", limit: 1 }),
+    ]);
+    const last = newest.data[0];
+    return [
+      this.id,
+      info.time.updated,
+      JSON.stringify(info.revert ?? null),
+      last?.id ?? "",
+      JSON.stringify(last && "time" in last ? last.time : null),
+    ].join(":");
+  }
+
   async *streamHistory() {
     await this.reconnectIfExited();
     const history = new V2Timeline(false);

@@ -118,6 +118,11 @@ import {
   InMemoryAgentTimelineStore,
   type SeedAgentTimelineOptions,
 } from "./agent-timeline-store.js";
+import type {
+  AgentTimelineSnapshotCapture,
+  AgentTimelineSnapshots,
+  StoredAgentTimelineSnapshot,
+} from "./agent-timeline-snapshots.js";
 import {
   type AgentTimelineFetchOptions,
   type AgentTimelineFetchResult,
@@ -258,6 +263,14 @@ interface StopAgentBackgroundWorkOptions {
   itemId: string;
   stopToken: string;
   canManageAutomation?: boolean;
+}
+
+/**
+ * A restored or retained timeline is already held, so the session's history is never streamed.
+ * Whatever the session reads later to index turns must not stay in memory.
+ */
+function discardHeldHistoryReplay(agent: ActiveManagedAgent, restoring: boolean): void {
+  if (agent.historyPrimed && restoring) agent.session.discardHistoryReplay?.();
 }
 
 async function resolveResumePurpose(
@@ -473,6 +486,8 @@ export interface AgentManagerOptions {
   onWorkspaceStateMayHaveChanged?: (params: { cwd: string }) => void;
   timelineStore?: InMemoryAgentTimelineStore;
   durableTimelineStore?: AgentTimelineStore;
+  /** Projected-timeline snapshots that let a reopened agent skip its provider replay. */
+  timelineSnapshots?: AgentTimelineSnapshots;
   terminalManager?: TerminalManager | null;
   mcpBaseUrl?: string;
   mcpAuthToken?: string;
@@ -1175,6 +1190,8 @@ export class AgentManager {
 
   private readonly durableTimelineStore?: AgentTimelineStore;
 
+  private readonly timelineSnapshots?: AgentTimelineSnapshots;
+
   private readonly previousStatuses = new Map<string, AgentLifecycleStatus>();
 
   private readonly backgroundTasks = new Set<Promise<void>>();
@@ -1296,6 +1313,7 @@ export class AgentManager {
     this.idFactory = options.idFactory ?? (() => randomUUID());
     this.registry = options.registry;
     this.durableTimelineStore = options?.durableTimelineStore;
+    this.timelineSnapshots = this.attachTimelineSnapshots(options.timelineSnapshots);
     this.onAgentAttention = options?.onAgentAttention;
     this.onUsageBilled = options?.onUsageBilled;
     this.onWorkspaceStateMayHaveChanged = options?.onWorkspaceStateMayHaveChanged;
@@ -2271,6 +2289,11 @@ export class AgentManager {
     } as AgentSessionConfig;
     // A history load reads an archived agent whose working directory may be gone, so only
     // an interactive resume requires the directory to exist.
+    const startedAt = performance.now();
+    const phases: Record<string, number> = {};
+    const mark = (phase: string) => {
+      phases[phase] = Math.round(performance.now() - startedAt);
+    };
     const record = this.registry ? await this.registry.get(resolvedAgentId) : null;
     const purpose = await resolveResumePurpose(record, resumeOptions?.purpose, mergedConfig.cwd);
     const currentResumeOptions = { purpose } satisfies AgentResumeSessionOptions;
@@ -2281,9 +2304,11 @@ export class AgentManager {
       resolvedAgentId,
       { purpose, env: launchEnv },
     );
+    mark("config");
 
     const client = this.requireClient(handle.provider);
     const available = await client.isAvailable();
+    mark("available");
     if (!available) {
       throw new Error(
         `Provider '${handle.provider}' is not available. Please ensure the CLI is installed.`,
@@ -2301,6 +2326,7 @@ export class AgentManager {
         ...resumeLaunchIdentity(record, mergedConfig, options),
       },
     );
+    mark("launchContext");
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
     const launchedOptions = this.launchOptionsFor({ client, own: storedConfig.providerOptions });
     const session = await client.resumeSession(
@@ -2309,10 +2335,18 @@ export class AgentManager {
       launchContext,
       currentResumeOptions,
     );
+    mark("providerResume");
     if (purpose === "history") this.historySessions.add(session);
     await this.requireExternalMcpSupport(session, providerLaunchConfig, launchContext);
+    const timelineSnapshot = await this.readValidTimelineSnapshot(resolvedAgentId, handle, session);
+    mark("timelineSnapshot");
+    this.logger.debug(
+      { agentId: resolvedAgentId, provider: handle.provider, purpose, phases },
+      "agent.resume.phases",
+    );
     return this.registerSession(session, storedConfig, resolvedAgentId, {
       launchedOptions,
+      timelineSnapshot,
       ...options,
       // The caller read its metadata before this turn in the lane; a setMetadata queued ahead of
       // it has saved a newer record, the one the open hooks saw.
@@ -2412,6 +2446,7 @@ export class AgentManager {
       });
       for (const event of imported.providerSubagentEvents ?? []) {
         const update = this.providerSubagents.apply(agent.id, event.provider, event.event);
+        this.timelineSnapshots?.markChanged(agent.id);
         this.dispatch({ type: "provider_subagent", event: update });
       }
       return agent;
@@ -2714,6 +2749,8 @@ export class AgentManager {
     );
     await this.drainSessionEvents(agentId);
     if (canClose && !canClose()) return false;
+    // The snapshot needs the live session to name the history the timeline came from.
+    await this.timelineSnapshots?.flush(agentId);
     let closeError: unknown;
     try {
       await agent.session.close();
@@ -2762,6 +2799,7 @@ export class AgentManager {
         id: subagent.id,
         status: "canceled",
       });
+      this.timelineSnapshots?.markChanged(parentAgentId);
       this.dispatch({ type: "provider_subagent", event });
     }
   }
@@ -5377,7 +5415,102 @@ export class AgentManager {
   }
 
   async deleteCommittedTimeline(agentId: string): Promise<void> {
+    await this.timelineSnapshots?.delete(agentId);
     await this.durableTimelineStore?.deleteAgent(agentId);
+  }
+
+  /**
+   * Reads the agent's timeline snapshot when the provider still reports the history it was
+   * projected from. A retained timeline, a missing snapshot or a changed history returns null,
+   * and the agent replays its provider history as before.
+   */
+  private async readValidTimelineSnapshot(
+    agentId: string,
+    handle: AgentPersistenceHandle,
+    session: AgentSession,
+  ): Promise<StoredAgentTimelineSnapshot | null> {
+    if (!this.timelineSnapshots || !session.readHistoryVersion || this.timelineStore.has(agentId)) {
+      return null;
+    }
+    const startedAt = performance.now();
+    const [snapshot, historyVersion] = await Promise.all([
+      this.timelineSnapshots.read(agentId),
+      session.readHistoryVersion().catch((error: unknown) => {
+        this.logger.warn({ err: error, agentId }, "Failed to read provider history version");
+        return null;
+      }),
+    ]);
+    if (!snapshot) return null;
+    const current =
+      historyVersion !== null &&
+      snapshot.provider === handle.provider &&
+      snapshot.sessionId === handle.sessionId &&
+      snapshot.historyVersion === historyVersion;
+    this.logger.info(
+      {
+        agentId,
+        provider: handle.provider,
+        rows: snapshot.timeline.rows.length,
+        current,
+        durationMs: Math.round(performance.now() - startedAt),
+      },
+      current
+        ? "Restoring agent timeline from snapshot"
+        : "Agent timeline snapshot is outdated; replaying provider history",
+    );
+    return current ? snapshot : null;
+  }
+
+  private attachTimelineSnapshots(
+    snapshots: AgentTimelineSnapshots | undefined,
+  ): AgentTimelineSnapshots | undefined {
+    snapshots?.attach((agentId) => this.captureTimelineSnapshot(agentId));
+    return snapshots;
+  }
+
+  private isTimelineSettled(agent: LiveManagedAgent): boolean {
+    return (
+      (agent.lifecycle === "idle" || agent.lifecycle === "error") &&
+      agent.activeForegroundTurnId === null &&
+      !this.runs.hasRun(agent.id) &&
+      !agent.pendingReplacement &&
+      !this.sessionEventTails.has(agent.id) &&
+      !this.providerSubagents.list(agent.id).some((child) => child.status === "running")
+    );
+  }
+
+  private async captureTimelineSnapshot(agentId: string): Promise<AgentTimelineSnapshotCapture> {
+    const agent = this.agents.get(agentId);
+    const sessionId = agent?.persistence?.sessionId;
+    if (
+      !agent ||
+      !sessionId ||
+      !agent.historyPrimed ||
+      !agent.session.readHistoryVersion ||
+      !this.timelineStore.has(agentId)
+    ) {
+      return { status: "skip" };
+    }
+    if (!this.isTimelineSettled(agent)) return { status: "busy" };
+    const historyVersion = await agent.session.readHistoryVersion();
+    if (historyVersion === null) return { status: "skip" };
+    // Rows are captured after the version, so they hold at least the history it names.
+    if (this.agents.get(agentId) !== agent || !this.isTimelineSettled(agent)) {
+      return { status: "busy" };
+    }
+    return {
+      status: "ready",
+      snapshot: {
+        version: 1,
+        agentId,
+        provider: agent.provider,
+        sessionId,
+        historyVersion,
+        writtenAt: new Date().toISOString(),
+        timeline: this.timelineStore.snapshot(agentId),
+        subagents: this.providerSubagents.snapshotParent(agentId),
+      },
+    };
   }
 
   async getLastAssistantMessage(agentId: string): Promise<string | null> {
@@ -5625,6 +5758,8 @@ export class AgentManager {
       timeline?: AgentTimelineItem[];
       timelineRows?: AgentTimelineRow[];
       timelineNextSeq?: number;
+      /** A validated snapshot of this agent's projected timeline, restored instead of a replay. */
+      timelineSnapshot?: StoredAgentTimelineSnapshot | null;
       persistence?: AgentPersistenceHandle;
       historyPrimed?: boolean;
       lastUsage?: AgentUsage;
@@ -5689,6 +5824,7 @@ export class AgentManager {
       });
 
       managed.launchEnv = launchEnv;
+      discardHeldHistoryReplay(managed, options.restoring === true);
 
       // Read history before publishing the agent: a provider failure must leave the
       // session unregistered so the registration catch closes it.
@@ -5799,6 +5935,7 @@ export class AgentManager {
           timeline?: AgentTimelineItem[];
           timelineRows?: AgentTimelineRow[];
           timelineNextSeq?: number;
+          timelineSnapshot?: StoredAgentTimelineSnapshot | null;
           persistence?: AgentPersistenceHandle;
           createdAt?: Date;
           updatedAt?: Date;
@@ -5806,6 +5943,12 @@ export class AgentManager {
       | undefined;
   }): Promise<{ durableTimelineHasRows: boolean }> {
     const { agentId, now, options } = params;
+    const snapshot = options?.timelineSnapshot;
+    if (snapshot && !this.timelineStore.has(agentId)) {
+      this.timelineStore.restore(agentId, snapshot.timeline);
+      this.providerSubagents.restoreParent(agentId, snapshot.subagents);
+      return { durableTimelineHasRows: true };
+    }
     const timelineAlreadyPrimed = this.timelineStore.has(agentId);
     const explicitTimelineSeed = buildExplicitTimelineSeedForRegister(now, options);
     const shouldSeedFromDurable =
@@ -6074,6 +6217,7 @@ export class AgentManager {
   ): Promise<void> {
     if (event.type === "provider_subagent") {
       const update = this.providerSubagents.apply(agent.id, event.provider, event.event);
+      this.timelineSnapshots?.markChanged(agent.id);
       this.dispatch({ type: "provider_subagent", event: update });
       return;
     }
@@ -6279,6 +6423,7 @@ export class AgentManager {
     }
     for (const event of providerSubagentEvents) {
       const update = this.providerSubagents.apply(agent.id, event.provider, event.event);
+      this.timelineSnapshots?.markChanged(agent.id);
       if (broadcast) {
         this.dispatch({ type: "provider_subagent", event: update });
       }
@@ -6358,6 +6503,7 @@ export class AgentManager {
     const providerSubagentEvents: AgentManagerEvent[] = [];
     for (const event of historySubagentEvents) {
       const update = this.providerSubagents.apply(agent.id, event.provider, event.event);
+      this.timelineSnapshots?.markChanged(agent.id);
       const managerEvent: AgentManagerEvent = { type: "provider_subagent", event: update };
       if (deferredBroadcast) {
         providerSubagentEvents.push(managerEvent);
@@ -7297,6 +7443,7 @@ export class AgentManager {
   }
 
   private enqueueDurableTimelineAppend(agentId: string, row: AgentTimelineRow): void {
+    this.timelineSnapshots?.markChanged(agentId);
     if (!this.durableTimelineStore) {
       return;
     }
@@ -7326,6 +7473,7 @@ export class AgentManager {
   }
 
   private enqueueDurableTimelineUpdate(agentId: string, row: AgentTimelineRow): void {
+    this.timelineSnapshots?.markChanged(agentId);
     if (!this.durableTimelineStore) return;
     const task = this.durableTimelineStore.updateCommittedRow(agentId, row).catch((err) => {
       this.logger.error(

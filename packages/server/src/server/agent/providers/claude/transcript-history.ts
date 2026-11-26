@@ -313,3 +313,61 @@ async function optionalDirectory(directory: string) {
     throw error;
   }
 }
+
+// Records the replay turns into timeline items. Claude Code also appends bookkeeping records
+// (`cost-state`, `mode`, `tools-used`, `last-prompt`, API request journals) every time a resumed
+// session starts or exits, even when no message was sent.
+const TIMELINE_RECORD_TYPES = new Set([
+  "user",
+  "assistant",
+  "system",
+  "attachment",
+  "queue-operation",
+]);
+const MARKER_CHUNK_BYTES = 256 * 1024;
+const MARKER_SCAN_LIMIT_BYTES = 16 * 1024 * 1024;
+
+/**
+ * Where the transcript's last timeline record ends, and its uuid. Bookkeeping appended after it
+ * leaves the marker unchanged; a new message, tool result or notification moves it. Null when no
+ * timeline record lies within the scan limit, or the transcript is missing.
+ */
+export async function readClaudeTranscriptTimelineMarker(file: string): Promise<string | null> {
+  let fd: FileHandle;
+  try {
+    fd = await fs.open(file, "r");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  try {
+    let end = (await fd.stat()).size;
+    // Bytes after `end` that start mid-line: the tail of a record the next chunk completes.
+    let carry: Buffer = Buffer.alloc(0);
+    let scanned = 0;
+    while (end > 0 && scanned < MARKER_SCAN_LIMIT_BYTES) {
+      const start = Math.max(0, end - MARKER_CHUNK_BYTES);
+      const chunk = Buffer.allocUnsafe(end - start);
+      const { bytesRead } = await fd.read(chunk, 0, chunk.length, start);
+      scanned += bytesRead;
+      const data = Buffer.concat([chunk.subarray(0, bytesRead), carry]);
+      let lineEnd = data.length;
+      for (;;) {
+        const newline = lineEnd === 0 ? -1 : data.lastIndexOf(10, lineEnd - 1);
+        if (newline === -1 && start > 0) break;
+        const entry = parseRecord(data.toString("utf8", newline + 1, lineEnd));
+        if (entry && typeof entry.type === "string" && TIMELINE_RECORD_TYPES.has(entry.type)) {
+          const { uuid } = entry as { uuid?: unknown };
+          return `${start + lineEnd}:${typeof uuid === "string" ? uuid : ""}`;
+        }
+        if (newline === -1) return null;
+        lineEnd = newline;
+      }
+      carry = Buffer.from(data.subarray(0, lineEnd));
+      end = start;
+    }
+    return null;
+  } finally {
+    await fd.close();
+  }
+}

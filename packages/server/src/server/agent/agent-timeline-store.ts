@@ -16,6 +16,13 @@ export interface SeedAgentTimelineOptions {
   timestamp?: string;
 }
 
+/** The projected state of one timeline, enough to restore it without its source events. */
+export interface AgentTimelineSnapshot {
+  epoch: string;
+  nextSeq: number;
+  rows: ProjectedTimelineRow[];
+}
+
 interface AgentTimelineState {
   epoch: string;
   projection: TimelineProjection;
@@ -51,6 +58,26 @@ export class InMemoryAgentTimelineStore {
 
   delete(agentId: string): void {
     this.states.delete(agentId);
+  }
+
+  snapshot(agentId: string): AgentTimelineSnapshot {
+    const state = this.requireState(agentId);
+    return { epoch: state.epoch, nextSeq: state.nextSeq, rows: state.projection.getRows() };
+  }
+
+  /**
+   * Restores a snapshot with its epoch, so cursors a client holds for it stay valid. The store
+   * takes ownership of the snapshot's rows.
+   */
+  restore(agentId: string, snapshot: AgentTimelineSnapshot): void {
+    const projection = TimelineProjection.fromProjectedRows(snapshot.rows);
+    const lastSeq = snapshot.rows.reduce((max, row) => Math.max(max, row.seqEnd), 0);
+    this.states.set(agentId, {
+      epoch: snapshot.epoch,
+      projection,
+      minSeq: snapshot.rows[0]?.seqStart ?? 0,
+      nextSeq: Math.max(snapshot.nextSeq, lastSeq + 1),
+    });
   }
 
   getItems(agentId: string): AgentTimelineItem[] {

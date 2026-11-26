@@ -246,6 +246,7 @@ import {
   type WorkspaceFileOpenRequest,
 } from "@/workspace/file-open";
 import { RenderProfile } from "@/utils/render-profiler";
+import { planTimelineTailFetch } from "@/timeline/timeline-sync-plan";
 import { useWorkspaceCheckoutStatus } from "@/screens/workspace/use-workspace-checkout-status";
 import { WorkspaceOrchestrationPanel } from "@/screens/workspace/orchestration-workspace-panel";
 import {
@@ -3377,8 +3378,8 @@ function WorkspaceScreenContent({
         const sessionState = useSessionStore.getState().sessions[normalizedServerId];
         const currentCursor = sessionState?.agentTimelineCursor.get(agentId);
         await getHostRuntimeStore().fetchAgentTimeline(normalizedServerId, agentId, {
-          direction: "tail",
-          projection: "projected",
+          // One page, like opening the agent; older history loads as the user scrolls up.
+          ...planTimelineTailFetch(),
           ...(currentCursor
             ? { cursor: { epoch: currentCursor.epoch, seq: currentCursor.endSeq } }
             : {}),

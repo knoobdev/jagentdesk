@@ -1255,3 +1255,35 @@ test("OpenCode v2 runtime safety follows descendant locations before releasing t
     await session.close();
   }
 });
+
+describe("OpenCode v2 history version", () => {
+  test("changes when a message lands or the session reverts", async () => {
+    const harness = new V2Harness();
+    harness.api.message.list = async (input) => {
+      const ordered = input.order === "desc" ? harness.history.toReversed() : harness.history;
+      return { data: ordered.slice(0, input.limit ?? ordered.length), cursor: {} };
+    };
+    harness.history.push({ id: "u1", type: "user", text: "first", time: { created: 1 } });
+    const client = new OpenCodeV2AgentClient({
+      logger: createTestLogger(),
+      runtime: harness.runtime,
+    });
+    const created = await client.createSession({ provider: "opencode", cwd: "/tmp/project" });
+    const handle = created.describePersistence()!;
+    await created.close();
+    const session = await client.resumeSession(handle, { cwd: "/tmp/project" });
+    try {
+      const first = await session.readHistoryVersion!();
+      expect(await session.readHistoryVersion!()).toBe(first);
+
+      harness.history.push({ id: "u2", type: "user", text: "second", time: { created: 2 } });
+      const second = await session.readHistoryVersion!();
+      expect(second).not.toBe(first);
+
+      harness.info.revert = { messageID: "u2" } as NonNullable<typeof harness.info.revert>;
+      expect(await session.readHistoryVersion!()).not.toBe(second);
+    } finally {
+      await session.close();
+    }
+  });
+});
