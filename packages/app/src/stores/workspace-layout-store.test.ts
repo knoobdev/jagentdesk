@@ -367,6 +367,33 @@ describe("workspace-layout-store actions", () => {
     ]);
   });
 
+  it("opens one draft when several screens of an empty workspace seed it in the same commit", () => {
+    const workspaceKey = createWorkspaceKey();
+    const store = workspaceLayoutStore.getState();
+
+    const seeded = ["draft_a", "draft_b", "draft_c", "draft_d"].map((draftId) =>
+      store.openDraftTabIfEmpty(workspaceKey, { kind: "draft", draftId }),
+    );
+
+    const layout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
+    expect(seeded).toEqual(["draft_a", null, null, null]);
+    expect(collectAllTabs(layout.root).map((tab) => tab.tabId)).toEqual(["draft_a"]);
+  });
+
+  it("does not seed a draft while any pane still has a tab", () => {
+    useWorkspaceLayoutIds("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    const workspaceKey = createWorkspaceKey();
+    const store = workspaceLayoutStore.getState();
+    const agentTabId = store.openTabFocused(workspaceKey, { kind: "agent", agentId: "agent-1" });
+    store.splitPaneEmpty(workspaceKey, { targetPaneId: "main", position: "right" });
+
+    expect(store.openDraftTabIfEmpty(workspaceKey, { kind: "draft", draftId: "draft_x" })).toBe(
+      null,
+    );
+    const layout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
+    expect(collectAllTabs(layout.root).map((tab) => tab.tabId)).toEqual([agentTabId]);
+  });
+
   it("updates an existing file tab when opening the same path at a new line range", () => {
     const workspaceKey = createWorkspaceKey();
     const store = workspaceLayoutStore.getState();

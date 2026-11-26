@@ -209,7 +209,7 @@ import {
 } from "@/screens/workspace/workspace-pane-content";
 import { useMountedTabSet } from "@/screens/workspace/use-mounted-tab-set";
 import { WorkspaceFocusProvider } from "@/workspace/focus";
-import { shouldSeedEmptyWorkspaceDraft } from "@/screens/workspace/workspace-empty-draft-seed";
+import { resolveEmptyWorkspaceDraftSeed } from "@/screens/workspace/workspace-empty-draft-seed";
 import {
   buildBulkCloseConfirmationMessage,
   type BulkCloseConfirmationLabels,
@@ -2760,40 +2760,44 @@ function WorkspaceScreenContent({
     normalizedWorkspaceId,
   ]);
 
+  const openWorkspaceDraftTabIfEmpty = useWorkspaceLayoutStore(
+    (state) => state.openDraftTabIfEmpty,
+  );
   useEffect(() => {
-    if (
-      !shouldSeedEmptyWorkspaceDraft({
-        isRouteFocused,
-        hasPersistenceKey: Boolean(persistenceKey),
-        hasWorkspaceDirectory: Boolean(workspaceDirectory),
-        hasHydratedWorkspaceLayoutStore,
-        hasHydratedAgents,
-        hasLoadedTerminals: terminalsQuery.isSuccess,
-        activeAgentCount: workspaceAgentVisibility.activeAgentIds.size,
-        terminalCount: terminals.length,
-        tabCount: tabs.length,
-      })
-    ) {
-      emptyWorkspaceSeedRef.current = null;
+    const decision = resolveEmptyWorkspaceDraftSeed({
+      workspaceKey: `${normalizedServerId}:${normalizedWorkspaceId}`,
+      seededWorkspaceKey: emptyWorkspaceSeedRef.current,
+      isRouteFocused,
+      hasPersistenceKey: Boolean(persistenceKey),
+      hasWorkspaceDirectory: Boolean(workspaceDirectory),
+      hasHydratedWorkspaceLayoutStore,
+      hasHydratedAgents,
+      hasLoadedTerminals: terminalsQuery.isSuccess,
+      activeAgentCount: workspaceAgentVisibility.activeAgentIds.size,
+      terminalCount: terminals.length,
+      tabCount: uiTabs.length,
+    });
+    emptyWorkspaceSeedRef.current = decision.seededWorkspaceKey;
+    if (!decision.seed || !persistenceKey) {
       return;
     }
-    const workspaceKey = `${normalizedServerId}:${normalizedWorkspaceId}`;
-    if (emptyWorkspaceSeedRef.current === workspaceKey) {
-      return;
-    }
-    emptyWorkspaceSeedRef.current = workspaceKey;
-    openWorkspaceDraftTab();
+    // The store re-checks emptiness so another mounted screen of this workspace that seeded in
+    // the same commit does not add a second draft.
+    openWorkspaceDraftTabIfEmpty(persistenceKey, {
+      kind: "draft",
+      draftId: generateDraftId(),
+    });
   }, [
     normalizedServerId,
     normalizedWorkspaceId,
-    openWorkspaceDraftTab,
+    openWorkspaceDraftTabIfEmpty,
     persistenceKey,
     hasHydratedAgents,
     hasHydratedWorkspaceLayoutStore,
     isRouteFocused,
     terminals.length,
     terminalsQuery.isSuccess,
-    tabs.length,
+    uiTabs.length,
     workspaceDirectory,
     workspaceAgentVisibility.activeAgentIds.size,
   ]);
