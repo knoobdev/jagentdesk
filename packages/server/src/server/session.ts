@@ -150,6 +150,7 @@ import {
   type AgentTimelineFetchDirection,
   type AgentTimelineFetchResult,
   type ManagedAgent,
+  NativeForkUnavailableError,
 } from "./agent/agent-manager.js";
 import { buildTimelinePromptIndex } from "./agent/timeline-prompt-index.js";
 import { ProviderSnapshotManager } from "./agent/provider-snapshot-manager.js";
@@ -169,6 +170,11 @@ import {
 } from "./agent/agent-projections.js";
 import { buildAgentForkContextAttachment } from "./agent/activity-curator.js";
 import { buildAgentPrompt } from "./agent/prompt-attachments.js";
+import {
+  startsWithCommand,
+  withMemoryBlock,
+  type MemoryTurnInjection,
+} from "./agent/memory-port.js";
 import { type StructuredGenerationDaemonConfig } from "./agent/structured-generation-providers.js";
 import {
   getAgentStreamEventTurnId,
@@ -3419,6 +3425,8 @@ export class Session {
         return this.handleProviderSubagentTimelineRequest(msg, source);
       case "agent.timeline.set_subscription.request":
         return this.handleAgentTimelineSubscription(msg, source);
+      case "agent.fork.request":
+        return this.handleAgentForkRequest(msg);
       case "agent.fork_context.request":
         return this.handleAgentForkContextRequest(msg);
       default:
@@ -5398,6 +5406,7 @@ export class Session {
           jagentdeskHome: this.jagentdeskHome,
           worktreesRoot: this.worktreesRoot,
           providerSnapshotManager: this.providerSnapshotManager,
+          memory: this.pluginRuntime?.builtinDaemon?.enabledPort("memory") ?? null,
         },
         {
           kind: "session",
@@ -9087,6 +9096,55 @@ export class Session {
     }
   }
 
+  /** Fast fork (spec 41 §6): a native provider fork, never a transcript replay. */
+  private async handleAgentForkRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.fork.request" }>,
+  ): Promise<void> {
+    try {
+      await ensureAgentLoaded(msg.agentId, {
+        agentManager: this.agentManager,
+        agentStorage: this.agentStorage,
+        logger: this.sessionLogger,
+      });
+      const existing = msg.forkAgentId ? this.agentManager.getAgent(msg.forkAgentId) : null;
+      // A Retry after the fork already landed answers with that agent instead of forking twice.
+      const agent =
+        existing ??
+        (await this.agentManager.forkAgent(msg.agentId, {
+          boundary:
+            msg.boundaryCursor ??
+            this.agentManager.forkBoundaryForMessage(msg.agentId, msg.boundaryMessageId),
+          agentId: msg.forkAgentId,
+          title: msg.title ?? null,
+        }));
+      await this.agentUpdates.forwardLiveAgent(agent);
+      this.emit({
+        type: "agent.fork.response",
+        payload: {
+          requestId: msg.requestId,
+          agentId: msg.agentId,
+          agent: await this.buildAgentPayload(agent),
+          error: null,
+          code: null,
+        },
+      });
+    } catch (error) {
+      const unavailable = error instanceof NativeForkUnavailableError;
+      if (!unavailable)
+        this.sessionLogger.error({ err: error, agentId: msg.agentId }, "Failed to fork agent");
+      this.emit({
+        type: "agent.fork.response",
+        payload: {
+          requestId: msg.requestId,
+          agentId: msg.agentId,
+          agent: null,
+          error: getErrorMessage(error),
+          code: unavailable ? error.code : null,
+        },
+      });
+    }
+  }
+
   private async prepareAgentMessage(agentId: string, text: string): Promise<void> {
     await ensureAgentLoaded(agentId, {
       agentManager: this.agentManager,
@@ -9097,6 +9155,53 @@ export class Session {
     if (stored && !stored.title && !stored.lastUserMessageAt) {
       const { provisionalTitle } = resolveCreateAgentTitles({ initialPrompt: text });
       if (provisionalTitle) await this.agentManager.setTitle(agentId, provisionalTitle);
+    }
+  }
+
+  /** The provider prompt for a sent message, with Memory auto-inject (spec 41 §3.1). */
+  private async buildSendPrompt(
+    msg: Extract<SessionInboundMessage, { type: "send_agent_message_request" }>,
+    agentId: string,
+    specPhaseText: string | null,
+  ): Promise<{ prompt: AgentPromptInput; memory: MemoryTurnInjection | null }> {
+    // A person's message gets memories, not an agent sender's.
+    const memory = msg.sourceAgentId ? null : await this.prepareTurnMemory(agentId, msg.text);
+    const commandFirst =
+      specPhaseText !== null ||
+      Boolean(this.messageSkillIds(msg.skillIds, false)?.length) ||
+      startsWithCommand(msg.text);
+    const prompt = withMemoryBlock(
+      buildAgentPrompt(specPhaseText ?? msg.text, msg.images, msg.attachments),
+      memory,
+      { commandFirst },
+    );
+    return { prompt, memory };
+  }
+
+  private async prepareTurnMemory(
+    agentId: string,
+    text: string,
+  ): Promise<MemoryTurnInjection | null> {
+    const memory = this.pluginRuntime?.builtinDaemon?.enabledPort("memory");
+    if (!memory || !text.trim()) return null;
+    try {
+      return await memory.prepareUserTurn({ agentId, text });
+    } catch (error) {
+      this.sessionLogger.warn({ err: error, agentId }, "Memory lookup failed; sending without it");
+      return null;
+    }
+  }
+
+  private async commitTurnMemory(
+    agentId: string,
+    memory: MemoryTurnInjection | null,
+    messageId: string | undefined,
+  ): Promise<void> {
+    if (!memory) return;
+    try {
+      await memory.commit({ messageId: messageId ?? null });
+    } catch (error) {
+      this.sessionLogger.warn({ err: error, agentId }, "Could not record the memories a turn used");
     }
   }
 
@@ -9208,7 +9313,7 @@ export class Session {
       // The command must lead the turn, so attached skills are not prefixed to it.
       const specMode = this.pluginRuntime?.builtinDaemon?.enabledPort("specMode");
       const specPhase = await specMode?.prepareUserMessage(agentId, msg.text);
-      const prompt = buildAgentPrompt(specPhase?.text ?? msg.text, msg.images, msg.attachments);
+      const { prompt, memory } = await this.buildSendPrompt(msg, agentId, specPhase?.text ?? null);
       this.sessionLogger.trace(
         {
           agentId,
@@ -9270,6 +9375,7 @@ export class Session {
       // A steered message was injected into the already-running turn — there is
       // no new run to wait for, so ack immediately (like an out-of-band prompt).
       if (!dispatchResult || dispatchResult.disposition !== "turn_started") {
+        await this.commitTurnMemory(agentId, memory, msg.messageId);
         this.emit({
           type: "send_agent_message_response",
           payload: {
@@ -9284,6 +9390,7 @@ export class Session {
 
       try {
         await waitForAgentRunStartWithTimeout(this.agentManager, agentId, dispatchResult.started);
+        await this.commitTurnMemory(agentId, memory, msg.messageId);
       } catch (error) {
         this.emit({
           type: "send_agent_message_response",

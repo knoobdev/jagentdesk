@@ -854,6 +854,13 @@ export interface AgentSession {
 
   revertConversation?(input: { messageId: string }): Promise<void>;
 
+  /**
+   * Fast fork (spec 41 §6): copies the provider conversation into a new provider session that ends
+   * before the turn `beforeUserMessageId` opened (the whole conversation when null) and returns
+   * its handle. This session is unchanged; nothing is replayed into a prompt.
+   */
+  forkConversation?(input: { beforeUserMessageId: string | null }): Promise<AgentPersistenceHandle>;
+
   revertFiles?(input: { messageId: string }): Promise<void>;
 
   revertBoth?(input: { messageId: string }): Promise<void>;

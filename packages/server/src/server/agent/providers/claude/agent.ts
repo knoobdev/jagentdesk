@@ -3482,6 +3482,41 @@ class ClaudeAgentSession implements AgentSession {
     });
   }
 
+  async forkConversation(input: {
+    beforeUserMessageId: string | null;
+  }): Promise<AgentPersistenceHandle> {
+    await this.ensureHistoryReady();
+    const sessionId = this.claudeSessionId;
+    const transcriptPath = sessionId ? await this.resolveHistoryPath(sessionId) : null;
+    if (!sessionId || !transcriptPath) {
+      throw new Error("This Claude agent has no conversation to fork yet");
+    }
+    let upToMessageId: string | undefined;
+    if (input.beforeUserMessageId) {
+      const target = await this.resolveConversationRewindTarget(input.beforeUserMessageId);
+      if (target.kind === "fresh-session") {
+        throw new Error("Fork from a reply: the selected turn has no answered turn before it");
+      }
+      upToMessageId = target.messageId;
+    }
+    // The SDK copies the transcript file on disk (fresh UUIDs); it never reaches a prompt.
+    const fork = await this.rewindSdk.forkSession(sessionId, {
+      ...(upToMessageId ? { upToMessageId } : {}),
+      transcriptPath,
+    });
+    const {
+      providerOptions: _providerOptions,
+      pluginAppendSystemPrompt: _pluginAppendSystemPrompt,
+      ...persistedConfig
+    } = this.config;
+    return {
+      provider: "claude",
+      sessionId: fork.sessionId,
+      nativeHandle: fork.sessionId,
+      metadata: { ...persistedConfig },
+    };
+  }
+
   async revertFiles(input: { messageId: string }): Promise<void> {
     await this.ensureHistoryReady();
     const messageId = await this.resolveClaudeMessageId(input.messageId);
