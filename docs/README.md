@@ -64,6 +64,7 @@ release notes live in [`releases/`](releases/v0.11.0.md).
 - [unistyles.md](unistyles.md) — Unistyles rules and gotchas.
 - [hover.md](hover.md) — the hover pattern.
 - [menus.md](menus.md) — the menu engine.
+- [drag-reorder.md](drag-reorder.md) — reorderable lists, the scroll view that hosts the drag, grips.
 - [floating-panels.md](floating-panels.md) — anchored popovers.
 - [forms.md](forms.md) — form architecture.
 - [mobile-panels.md](mobile-panels.md) — compact panels, gestures and sheets.

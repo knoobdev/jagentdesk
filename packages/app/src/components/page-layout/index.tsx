@@ -9,10 +9,15 @@ import { GUMLOOP_PAGE_GUTTER } from "@/components/gumloop-shell/list-styles";
 import { useGumloopDesktopShell } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { BackHeader } from "@/components/headers/back-header";
 import { PageHeader } from "@/components/headers/page-header";
+import { withContentDrag } from "@/components/ui/content-drag";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { SPACING } from "@/styles/theme";
 
-const PageScrollView = Platform.OS === "android" ? KeyboardAwareScrollView : ScrollView;
+// Rows on a page drag to reorder, so the page stops scrolling while a drag holds the touch.
+const PageScrollView =
+  Platform.OS === "android"
+    ? withContentDrag(KeyboardAwareScrollView)
+    : withContentDrag(ScrollView);
 
 interface PageLayoutProps {
   title?: string;
