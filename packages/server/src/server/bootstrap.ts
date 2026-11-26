@@ -58,7 +58,8 @@ import { randomUUID } from "node:crypto";
 import { getHostName } from "./host-name.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { createMcpHandler } from "@modelcontextprotocol/server";
+import { toNodeHandler } from "@modelcontextprotocol/node";
 import type { Logger } from "pino";
 import { z } from "zod";
 import { createBranchChangeRouteHandler } from "./script-route-branch-handler.js";
@@ -1990,30 +1991,23 @@ export async function createJAgentDeskDaemon(
     const agentMcpRoute = "/mcp/agents";
     const normalizeAgentMcpProtocol = createAgentMcpProtocolNormalizer(logger);
 
+    // Stateless serving: createMcpHandler builds a fresh server per request and
+    // serves both protocol eras — modern 2026-07-28 (per-request envelope) and
+    // 2025-era clients through its stateless legacy fallback. No per-session
+    // state is retained between requests, matching the previous
+    // `sessionIdGenerator: undefined` transport.
     const createAgentMcpSession = async (callerAgentId?: string) => {
       const agentMcpServer = await createAgentMcpServer(
         createAgentToolHostDependencies({ callerAgentId }),
       );
 
-      // Stateless mode: each HTTP request builds a fresh server + transport that is
-      // torn down when the response closes, so no per-session state is retained between
-      // requests. The agent control plane only lists and calls tools, neither of which
-      // needs cross-request state, so sessions would only pin memory for the life of the
-      // daemon (agents that exit without a clean DELETE never get reaped).
-      const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: undefined,
-        // NOTE: We enforce a Vite-like host allowlist at the app/websocket layer.
-        // StreamableHTTPServerTransport's built-in check requires exact Host header matches.
-        enableDnsRebindingProtection: false,
-      });
-      Object.assign(transport, {
+      const handler = createMcpHandler(() => agentMcpServer, {
+        legacy: "stateless",
         onerror: (err: Error) => {
           logger.error({ err }, "Agent MCP transport error");
         },
       });
-
-      await agentMcpServer.connect(transport);
-      return { server: agentMcpServer, transport };
+      return { handler };
     };
 
     const runAgentMcpRequest = async (
@@ -2068,18 +2062,18 @@ export async function createJAgentDeskDaemon(
         } else if (Array.isArray(callerAgentIdRaw) && typeof callerAgentIdRaw[0] === "string") {
           callerAgentId = callerAgentIdRaw[0];
         }
-        const { server, transport } = await createAgentMcpSession(callerAgentId);
-        normalizeAgentMcpProtocol({ request: req, transport, callerAgentId });
-        res.on("close", () => {
-          void transport.close();
-          void server.close();
-        });
-
-        await transport.handleRequest(
-          req as unknown as IncomingMessage,
-          res as unknown as ServerResponse,
-          req.body,
-        );
+        normalizeAgentMcpProtocol({ request: req, callerAgentId });
+        const { handler } = await createAgentMcpSession(callerAgentId);
+        try {
+          // express.json() already consumed the stream, so hand the parsed body over.
+          await toNodeHandler(handler)(
+            req as unknown as IncomingMessage,
+            res as unknown as ServerResponse,
+            req.body,
+          );
+        } finally {
+          await handler.close();
+        }
       } catch (err) {
         logger.error({ err }, "Failed to handle Agent MCP request");
         if (!res.headersSent) {

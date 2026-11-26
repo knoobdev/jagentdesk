@@ -12,6 +12,7 @@ import { z } from "zod";
 
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import { createAgentMcpServer } from "./mcp-server.js";
+import { createMcpHandler } from "@modelcontextprotocol/server";
 import { setDefaultAgentMessageDeliveryTimingForTests } from "./agent-prompt.js";
 import { AgentManager, type ManagedAgent } from "./agent-manager.js";
 import { AgentStorage, type StoredAgentRecord } from "./agent-storage.js";
@@ -6513,4 +6514,59 @@ it("list_hosts returns a record accepted by the real MCP client", async () => {
     await client.close();
     await server.close();
   }
+});
+
+describe("modern MCP protocol (2026-07-28)", () => {
+  // 2026-07-28 clients skip initialize and carry the protocol version and
+  // capabilities on every request. Drive createMcpHandler directly so this
+  // covers the modern path: widening the accepted version list alone would
+  // keep the legacy tests green without serving it.
+  const modernRequest = (id: number, method: string): Request =>
+    new Request("http://localhost/mcp/agents", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        "mcp-protocol-version": "2026-07-28",
+        // SEP-2243: modern requests must also repeat the method in a header.
+        "mcp-method": method,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id,
+        method,
+        params: {
+          _meta: {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientCapabilities": {},
+            "io.modelcontextprotocol/clientInfo": { name: "test-client", version: "1.0.0" },
+          },
+        },
+      }),
+    });
+
+  it("answers a per-request modern envelope and lists catalog tools", async () => {
+    const server = await createAgentMcpServer({
+      agentManager: new BoundaryAgentManagerFake() as unknown as AgentManager,
+      agentStorage: new BoundaryAgentStorageFake() as unknown as AgentStorage,
+      providerSnapshotManager:
+        new BoundaryProviderSnapshotManagerFake() as unknown as ProviderSnapshotManager,
+      logger: createTestLogger(),
+    });
+    const handler = createMcpHandler(() => server, { legacy: "stateless" });
+
+    try {
+      const response = await handler.fetch(modernRequest(1, "tools/list"));
+      expect(response.status).toBe(200);
+      const payload = (await response.json()) as {
+        result?: { tools?: Array<{ name: string }> };
+      };
+      const names = (payload.result?.tools ?? []).map((tool) => tool.name);
+      expect(names.length).toBeGreaterThan(0);
+      expect(names).toContain("list_agents");
+    } finally {
+      await handler.close();
+      await server.close();
+    }
+  });
 });
