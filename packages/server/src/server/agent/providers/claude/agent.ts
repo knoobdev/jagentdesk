@@ -1124,37 +1124,11 @@ function isTruthyEnvValue(value: string | undefined): boolean {
   );
 }
 
-function claudeAutoModeUnavailableOn(env: NodeJS.ProcessEnv): "Bedrock" | "Vertex" | null {
-  if (isTruthyEnvValue(env.CLAUDE_CODE_USE_BEDROCK)) {
-    return "Bedrock";
-  }
-  if (isTruthyEnvValue(env.CLAUDE_CODE_USE_VERTEX)) {
-    return "Vertex";
-  }
-  return null;
-}
-
-function assertClaudeModeCanRun(mode: PermissionMode, env: NodeJS.ProcessEnv): void {
-  if (mode !== "auto") {
-    return;
-  }
-  const transport = claudeAutoModeUnavailableOn(env);
-  if (transport === null) {
-    return;
-  }
-  throw new Error(
-    `Claude Auto mode requires the Anthropic API and is not supported when Claude Code uses ${transport}. Select another permission mode or unset the ${transport === "Bedrock" ? "CLAUDE_CODE_USE_BEDROCK" : "CLAUDE_CODE_USE_VERTEX"} environment variable.`,
-  );
-}
-
-function claudeModeCatalog(env: NodeJS.ProcessEnv): {
-  modes: AgentMode[];
-  defaultModeId: PermissionMode;
-} {
-  if (claudeAutoModeUnavailableOn(env)) {
-    return { modes: DEFAULT_MODES.filter((mode) => mode.id !== "auto"), defaultModeId: "default" };
-  }
-  return { modes: DEFAULT_MODES, defaultModeId: "auto" };
+function claudeDefaultMode(env: NodeJS.ProcessEnv): PermissionMode {
+  return isTruthyEnvValue(env.CLAUDE_CODE_USE_BEDROCK) ||
+    isTruthyEnvValue(env.CLAUDE_CODE_USE_VERTEX)
+    ? "default"
+    : "auto";
 }
 
 function coerceSessionMetadata(metadata: AgentMetadata | undefined): Partial<AgentSessionConfig> {
@@ -1965,10 +1939,10 @@ export class ClaudeAgentClient implements AgentClient {
         discoveredModelIds,
       ),
     );
-    const modeCatalog = claudeModeCatalog(env);
     return {
       models,
-      ...modeCatalog,
+      modes: DEFAULT_MODES,
+      defaultModeId: claudeDefaultMode(env),
       ...(incomplete ? { incomplete } : {}),
     };
   }
@@ -1978,7 +1952,7 @@ export class ClaudeAgentClient implements AgentClient {
   }
 
   async resolveDefaultModeId({ env: launchEnv }: ResolveAgentDefaultModeInput): Promise<string> {
-    return claudeModeCatalog(this.buildProviderEnv(launchEnv)).defaultModeId;
+    return claudeDefaultMode(this.buildProviderEnv(launchEnv));
   }
 
   private buildProviderEnv(launchEnv?: Record<string, string>): NodeJS.ProcessEnv {
@@ -3171,7 +3145,6 @@ class ClaudeAgentSession implements AgentSession {
     }
 
     const normalized = isPermissionMode(modeId) ? modeId : "default";
-    assertClaudeModeCanRun(normalized, this.buildSdkEnv());
     const previousMode = this.currentMode;
     const previousQuery = this.query;
     const activeQuery = await this.ensureQuery(normalized);
@@ -4252,7 +4225,6 @@ class ClaudeAgentSession implements AgentSession {
       await this.resolveSpawnEnvOverlay(),
     );
     this.harnessEnvironment = createExternalProcessEnv({}, sdkEnv);
-    assertClaudeModeCanRun(permissionMode, sdkEnv);
 
     const claudeBinary = await this.resolveBinary();
     this.logger.debug(
