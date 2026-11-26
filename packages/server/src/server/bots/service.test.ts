@@ -1,13 +1,13 @@
 import { AgentStorage, parseStoredAgentRecord } from "../agent/agent-storage.js";
 import { createRestartRecovery } from "../agent/restart-recovery/index.js";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
 import { afterEach, expect, it } from "vitest";
 import type { Bot, BotItem } from "@jagentdesk/protocol/bots/types";
 import type { ReviewFinding } from "@jagentdesk/protocol/review/types";
-import { BotStorage } from "./storage.js";
+import { BotStorage, DEFAULT_BOT_IDENTITY } from "./storage.js";
 import { BotsService } from "./service.js";
 import type { BotRuntime, BotRuntimeEvent, BotReviewRole } from "./runtime.js";
 
@@ -89,6 +89,37 @@ async function createBot(service: BotsService) {
     defaultRepo: "/repo",
   });
 }
+it("creates a bot with an empty identity and seeds SOUL.md with the default (A37.5.1)", async () => {
+  const { service } = setup();
+  const created = await service.handle({
+    type: "bots.create.request",
+    requestId: "create",
+    bot: {
+      slug: "heocon",
+      name: "heocon",
+      identity: "",
+      provider: "claude",
+      model: "default",
+      modeId: "default",
+    },
+  });
+  const bot = (created as { bot: Bot }).bot;
+  expect(bot.identity).toBe(DEFAULT_BOT_IDENTITY);
+  const listed = await service.handle({ type: "bots.list.request", requestId: "list" });
+  expect((listed as { bots: Bot[] }).bots.map((b) => b.slug)).toEqual(["heocon"]);
+  const soul = readFileSync(join(service.storage.botHome(bot), "SOUL.md"), "utf8");
+  expect(soul).toBe(`# heocon\n\n${DEFAULT_BOT_IDENTITY}\n`);
+  const cleared = await service.update(bot.id, { identity: "  " });
+  expect(cleared.identity).toBe(DEFAULT_BOT_IDENTITY);
+  const withoutField = await service.create({
+    slug: "no-field",
+    name: "No field",
+    provider: "claude",
+    model: "default",
+    modeId: "default",
+  });
+  expect(withoutField.identity).toBe(DEFAULT_BOT_IDENTITY);
+});
 it("runs three reviews, sends two fix rounds, then escalates with the findings", async () => {
   const { service, runtime } = setup();
   const b = await createBot(service);

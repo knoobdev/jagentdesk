@@ -117,7 +117,7 @@ const ServerRow = memo(function ServerRow({
   const tags = server.tags?.length ? ` · ${server.tags.join(", ")}` : "";
   return (
     <Pressable
-      style={[styles.trow, rowIndentStyle(depth)]}
+      style={[styles.trow, styles.trowTwoLine, rowIndentStyle(depth)]}
       onPress={handleConnect}
       disabled={busy}
       testID={`servers-row-${server.id}`}

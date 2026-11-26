@@ -42,11 +42,11 @@ interface AgentListProps {
   contentContainerStyle?: StyleProp<ViewStyle>;
   showAttentionIndicator?: boolean;
   showHostColumn?: boolean;
-  /** "compact" is the Home recent-activity list: 44px rows and tight day labels (spec 38 §4.1). */
-  density?: AgentListDensity;
+  /** "embedded" is Home's recent activity, whose first day label sits 12px under its own label. */
+  placement?: AgentListPlacement;
 }
 
-type AgentListDensity = "comfortable" | "compact";
+type AgentListPlacement = "page" | "embedded";
 
 type DateSectionKey = "today" | "yesterday" | "thisWeek" | "thisMonth" | "older";
 
@@ -232,7 +232,6 @@ function SessionRowTrailingAttention({
 function SessionRow({
   agent,
   isMobile,
-  compact,
   selectedAgentId,
   showAttentionIndicator,
   showHostColumn,
@@ -241,7 +240,6 @@ function SessionRow({
 }: {
   agent: AggregatedAgent;
   isMobile: boolean;
-  compact: boolean;
   selectedAgentId?: string;
   showAttentionIndicator: boolean;
   showHostColumn: boolean;
@@ -267,15 +265,13 @@ function SessionRow({
     ({ pressed, hovered = false }: PressableStateCallbackType & { hovered?: boolean }) => [
       styles.row,
       isGumloop && gumloopListStyles.row,
-      // Stacked phone rows keep their padding; only the 44px floor applies.
-      isGumloop &&
-        compact &&
-        (isMobile ? gumloopListStyles.compactRowStacked : gumloopListStyles.compactRow),
+      // Stacked phone rows are two lines and keep their padding.
+      isGumloop && (isMobile ? gumloopListStyles.rowTwoLine : gumloopListStyles.rowFlush),
       isSelected && styles.rowSelected,
       Boolean(hovered) && styles.rowHovered,
       pressed && styles.rowPressed,
     ],
-    [compact, isGumloop, isMobile, isSelected],
+    [isGumloop, isMobile, isSelected],
   );
 
   const handlePress = useCallback(() => onPress(agent), [onPress, agent]);
@@ -309,8 +305,11 @@ function SessionRow({
             iconSize={theme.iconSize.xs}
             color={theme.colors.foregroundMuted}
           />
-          <View style={styles.providerIconWrap}>
-            <ProviderIcon size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />
+          <View style={isGumloop ? gumloopListStyles.rowIconCircle : styles.providerIconWrap}>
+            <ProviderIcon
+              size={isGumloop ? theme.iconSize.md : theme.iconSize.sm}
+              color={theme.colors.foregroundMuted}
+            />
           </View>
           <Text style={sessionTitleStyle} numberOfLines={1}>
             {agent.title || t("agentList.fallbackTitle")}
@@ -401,7 +400,7 @@ export function AgentList({
   contentContainerStyle,
   showAttentionIndicator = true,
   showHostColumn = false,
-  density = "comfortable",
+  placement = "page",
 }: AgentListProps) {
   const { theme } = useUnistyles();
   const { t } = useTranslation();
@@ -494,7 +493,7 @@ export function AgentList({
     return result;
   }, [agents]);
 
-  const compact = density === "compact";
+  const embedded = placement === "embedded";
   const renderItem: ListRenderItem<FlatListItem> = useCallback(
     ({ item, index }) => {
       if (item.type === "header") {
@@ -503,11 +502,13 @@ export function AgentList({
             <View
               style={[
                 gumloopListStyles.groupRow,
-                compact && gumloopListStyles.compactGroupRow,
-                compact && index === 0 && gumloopListStyles.compactFirstGroupRow,
+                index === 0 &&
+                  (embedded
+                    ? gumloopListStyles.embeddedFirstGroupRow
+                    : gumloopListStyles.firstGroupRow),
               ]}
             >
-              <View style={[gumloopListStyles.groupPill, compact && gumloopListStyles.compactPill]}>
+              <View style={gumloopListStyles.groupPill}>
                 <Text style={gumloopListStyles.groupPillText}>
                   {formatDateSectionLabel(t, item.section)}
                 </Text>
@@ -525,7 +526,6 @@ export function AgentList({
         <SessionRow
           agent={item.agent}
           isMobile={isMobile}
-          compact={compact}
           selectedAgentId={selectedAgentId}
           showAttentionIndicator={showAttentionIndicator}
           showHostColumn={showHostColumn}
@@ -535,7 +535,7 @@ export function AgentList({
       );
     },
     [
-      compact,
+      embedded,
       handleAgentLongPress,
       handleAgentPress,
       isGumloop,
@@ -576,8 +576,8 @@ export function AgentList({
   );
 
   const listContentStyle = useMemo(
-    () => [styles.listContent, contentContainerStyle],
-    [contentContainerStyle],
+    () => [styles.listContent, isGumloop && gumloopListStyles.listContent, contentContainerStyle],
+    [contentContainerStyle, isGumloop],
   );
   return (
     <>

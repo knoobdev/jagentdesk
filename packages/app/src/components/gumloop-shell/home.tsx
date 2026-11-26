@@ -49,7 +49,7 @@ export function GumloopHome() {
           <AgentList
             agents={recent}
             showHostColumn={hosts.length > 1}
-            density="compact"
+            placement="embedded"
             contentContainerStyle={gumloopListStyles.embeddedContent}
           />
         ) : (

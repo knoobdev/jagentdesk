@@ -33,6 +33,19 @@ export const styles = StyleSheet.create((theme) => ({
     borderRadius: theme.borderRadius.md,
     backgroundColor: theme.colors.surface1,
   },
+  /** Classic keeps the body's 16px between item buttons. */
+  itemList: { gap: theme.spacing[4] },
+  /** Gumloop rows sit flush on their dividers. */
+  itemListFlush: { gap: 0 },
+  itemRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[3],
+    paddingHorizontal: theme.spacing[2],
+  },
+  itemRowActive: { backgroundColor: theme.colors.surface2 },
+  itemStatus: { width: 96, fontSize: 14, color: theme.colors.foregroundMuted },
+  itemTitle: { flex: 1, minWidth: 0, fontSize: 14, color: theme.colors.foreground },
   selected: { borderColor: theme.colors.accent, backgroundColor: theme.colors.surface2 },
   sidebar: { flex: 1, backgroundColor: theme.colors.surfaceSidebar },
   sidebarBody: { padding: theme.spacing[3], gap: theme.spacing[3] },
@@ -57,5 +70,19 @@ export const styles = StyleSheet.create((theme) => ({
   message: { padding: theme.spacing[3], gap: theme.spacing[1] },
   userMessage: { backgroundColor: theme.colors.surface2, borderRadius: theme.borderRadius.md },
   editor: { minHeight: 300, textAlignVertical: "top", fontFamily: theme.fontFamily.mono },
+  // Spec 37 §37.5.2: in-place help is 13 px foregroundMuted.
+  hint: { color: theme.colors.foregroundMuted, fontSize: 13, lineHeight: 18 },
+  hintCode: {
+    color: theme.colors.foreground,
+    fontFamily: theme.fontFamily.mono,
+    fontSize: theme.fontSize.code,
+    backgroundColor: theme.colors.surface2,
+  },
+  helpTitle: { color: theme.colors.foreground, fontSize: 13, fontWeight: "600", lineHeight: 18 },
+  helpSteps: { gap: theme.spacing[1] },
+  helpSection: { gap: theme.spacing[1] },
+  howToAsk: { paddingHorizontal: theme.spacing[3], gap: theme.spacing[1] },
+  /** Takes the empty history's space so How to ask sits on the composer. */
+  grow: { flex: 1 },
   warning: { color: theme.colors.foreground, fontSize: theme.fontSize.base },
 }));
