@@ -22,6 +22,7 @@ import { describe, expect, test } from "vitest";
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import type { AgentClient, AgentStreamEvent } from "./agent-sdk-types.js";
 import { PluginAgentClientRegistry } from "./plugin-provider.js";
+import { ToolPolicyUnsupportedError } from "./provider-options.js";
 import { runProviderRefreshWithDeadline } from "./provider-refresh-deadline.js";
 import {
   isStaleProviderSessionError,
@@ -2541,3 +2542,70 @@ test.each(["goose", "hermes"])(
     }
   },
 );
+
+describe("plugin provider tool policy", () => {
+  const toolMcpServers = { tools: { type: "http" as const, url: "http://127.0.0.1:1/mcp" } };
+  const grants = { preapproved: [{ kind: "mcp" as const, server: "tools", tool: "reply" }] };
+
+  async function createWithToolPolicy(
+    capabilities: ProviderConnection["capabilities"],
+    toolPolicy: { preapproved: (typeof grants)["preapproved"] },
+  ) {
+    const logger = createTestLogger();
+    const harness = createProviderHarness({ capabilities });
+    const plugins = new PluginAgentClientRegistry(logger);
+    plugins.replace([harness.registration]);
+    const registry = buildProviderRegistry(logger, { pluginProviders: plugins.definitions() });
+    const manager = new AgentManager({
+      logger,
+      clients: { "plugin-direct": registry["plugin-direct"].createClient(logger) },
+      providerDefinitions: { "plugin-direct": registry["plugin-direct"] },
+    });
+    const created = manager
+      .createAgent(
+        { provider: "plugin-direct", cwd: tmpdir(), mcpServers: toolMcpServers, toolPolicy },
+        undefined,
+        { workspaceId: undefined },
+      )
+      .then(
+        (agent) => ({ agent, error: null }),
+        (error: unknown) => ({ agent: null, error }),
+      );
+    const result = await created;
+    const opened = harness.inputs.filter((input) => input.type === "session.open");
+    await Promise.all(manager.listAgents().map((item) => manager.closeAgent(item.id)));
+    await plugins.shutdown();
+    return { ...result, opened };
+  }
+
+  test.each([
+    ["exact grants", grants],
+    ["an empty grant list", { preapproved: [] }],
+  ])(
+    "a plugin without permission.tool_policy refuses %s with ToolPolicyUnsupportedError",
+    async (_label, toolPolicy) => {
+      const result = await createWithToolPolicy(CAPABILITIES, toolPolicy);
+
+      expect(result.error).toBeInstanceOf(ToolPolicyUnsupportedError);
+      expect(result.error).toMatchObject({
+        code: "tool_policy_unsupported",
+        provider: "plugin-direct",
+      });
+      expect(result.opened).toEqual([]);
+    },
+  );
+
+  test.each([
+    ["exact grants", grants],
+    ["an empty grant list", { preapproved: [] }],
+  ])("a plugin with permission.tool_policy opens with %s", async (_label, toolPolicy) => {
+    const result = await createWithToolPolicy(
+      [...CAPABILITIES, "permission.tool_policy"],
+      toolPolicy,
+    );
+
+    expect(result.error).toBeNull();
+    expect(result.opened).toHaveLength(1);
+    expect(result.opened[0]).toMatchObject({ config: { toolPolicy } });
+  });
+});
