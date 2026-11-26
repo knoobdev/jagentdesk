@@ -12,18 +12,36 @@ interface EventsSub {
 export class DockerStreams extends SharedDockerStreams {
   private generation = 0;
   private readonly events = new Map<string, EventsSub>();
+  // A subscribe waits for the first `docker ps` before it starts `docker events`. An unsubscribe that
+  // lands in that wait must stop the watcher from starting; otherwise it is never killed.
+  private readonly pending = new Map<string, symbol>();
   override async subscribeSnapshot(
     subscriptionId: string,
     emit: (snapshot: DockerSnapshot) => void,
   ): Promise<void> {
     this.unsubscribeSnapshot(subscriptionId);
+    const token = Symbol(subscriptionId);
+    this.pending.set(subscriptionId, token);
     const generation = this.generation;
-    const snapshot = await this.service.list();
-    if (generation !== this.generation) return;
+    let snapshot: DockerSnapshot;
+    try {
+      snapshot = await this.service.list();
+    } catch (error) {
+      if (this.pending.get(subscriptionId) === token) this.pending.delete(subscriptionId);
+      throw error;
+    }
+    const stillWanted = this.pending.get(subscriptionId) === token;
+    if (stillWanted) this.pending.delete(subscriptionId);
+    if (!stillWanted || generation !== this.generation) return;
     emit(snapshot);
     const child = spawnProcess("docker", ["events", "--format", "{{json .}}"]);
     const sub: EventsSub = { child, debounce: null };
     this.events.set(subscriptionId, sub);
+    child.on("exit", () => {
+      if (this.events.get(subscriptionId) !== sub) return;
+      if (sub.debounce) clearTimeout(sub.debounce);
+      this.events.delete(subscriptionId);
+    });
     child.stdout?.on("data", () => {
       if (sub.debounce) return;
       sub.debounce = setTimeout(() => {
@@ -41,6 +59,7 @@ export class DockerStreams extends SharedDockerStreams {
     child.on("error", () => {});
   }
   override unsubscribeSnapshot(subscriptionId: string): void {
+    this.pending.delete(subscriptionId);
     const sub = this.events.get(subscriptionId);
     if (!sub) return;
     if (sub.debounce) clearTimeout(sub.debounce);
@@ -49,7 +68,8 @@ export class DockerStreams extends SharedDockerStreams {
   }
   override disposeAll(): void {
     this.generation++;
-    for (const id of this.events.keys()) this.unsubscribeSnapshot(id);
+    this.pending.clear();
+    for (const id of Array.from(this.events.keys())) this.unsubscribeSnapshot(id);
     super.disposeAll();
   }
 }

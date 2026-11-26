@@ -265,6 +265,7 @@ interface EventsSubscription {
 export class RemoteDockerStreams extends DockerStreams {
   private generation = 0;
   private readonly remoteEvents = new Map<string, EventsSubscription>();
+  private readonly pendingEvents = new Map<string, symbol>();
   private readonly remoteLogs = new Map<string, ChildProcess>();
   private readonly remoteStats = new Map<string, ChildProcess>();
 
@@ -284,13 +285,31 @@ export class RemoteDockerStreams extends DockerStreams {
     emit: (snapshot: DockerSnapshot) => void,
   ): Promise<void> {
     this.unsubscribeSnapshot(subscriptionId);
+    // An unsubscribe that lands while the first list is in flight must stop `docker events` from
+    // starting; otherwise nothing ever kills it.
+    const token = Symbol(subscriptionId);
+    this.pendingEvents.set(subscriptionId, token);
     const generation = this.generation;
-    const snapshot = await this.remote.list();
-    if (generation !== this.generation) return;
+    let snapshot: DockerSnapshot;
+    try {
+      snapshot = await this.remote.list();
+    } catch (error) {
+      if (this.pendingEvents.get(subscriptionId) === token)
+        this.pendingEvents.delete(subscriptionId);
+      throw error;
+    }
+    const stillWanted = this.pendingEvents.get(subscriptionId) === token;
+    if (stillWanted) this.pendingEvents.delete(subscriptionId);
+    if (!stillWanted || generation !== this.generation) return;
     emit(snapshot);
     const child = this.spawnDocker(["events", "--format", "{{json .}}"]);
     const subscription: EventsSubscription = { child, debounce: null };
     this.remoteEvents.set(subscriptionId, subscription);
+    child.on("exit", () => {
+      if (this.remoteEvents.get(subscriptionId) !== subscription) return;
+      if (subscription.debounce) clearTimeout(subscription.debounce);
+      this.remoteEvents.delete(subscriptionId);
+    });
     child.stdout?.on("data", () => {
       if (subscription.debounce) return;
       subscription.debounce = setTimeout(() => {
@@ -305,6 +324,7 @@ export class RemoteDockerStreams extends DockerStreams {
   }
 
   override unsubscribeSnapshot(subscriptionId: string): void {
+    this.pendingEvents.delete(subscriptionId);
     const subscription = this.remoteEvents.get(subscriptionId);
     if (!subscription) return;
     if (subscription.debounce) clearTimeout(subscription.debounce);
@@ -364,6 +384,7 @@ export class RemoteDockerStreams extends DockerStreams {
 
   override disposeAll(): void {
     this.generation++;
+    this.pendingEvents.clear();
     for (const id of Array.from(this.remoteEvents.keys())) this.unsubscribeSnapshot(id);
     for (const id of Array.from(this.remoteLogs.keys())) this.unsubscribeLogs(id);
     for (const id of Array.from(this.remoteStats.keys())) this.unsubscribeStats(id);
