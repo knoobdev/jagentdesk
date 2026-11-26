@@ -33,6 +33,19 @@ export const styles = StyleSheet.create((theme) => ({
     borderRadius: theme.borderRadius.md,
     backgroundColor: theme.colors.surface1,
   },
+  /** Classic keeps the body's 16px between item buttons. */
+  itemList: { gap: theme.spacing[4] },
+  /** Gumloop rows sit flush on their dividers. */
+  itemListFlush: { gap: 0 },
+  itemRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[3],
+    paddingHorizontal: theme.spacing[2],
+  },
+  itemRowActive: { backgroundColor: theme.colors.surface2 },
+  itemStatus: { width: 96, fontSize: 14, color: theme.colors.foregroundMuted },
+  itemTitle: { flex: 1, minWidth: 0, fontSize: 14, color: theme.colors.foreground },
   selected: { borderColor: theme.colors.accent, backgroundColor: theme.colors.surface2 },
   sidebar: { flex: 1, backgroundColor: theme.colors.surfaceSidebar },
   sidebarBody: { padding: theme.spacing[3], gap: theme.spacing[3] },

@@ -13,6 +13,8 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { getProviderIcon } from "@/components/provider-icons";
 import { isNative } from "@/constants/platform";
 import { useIsCompactFormFactor } from "@/constants/layout";
+import { gumloopListStyles } from "@/components/gumloop-shell/list-styles";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { settingsStyles } from "@/styles/settings";
 import type { Theme } from "@/styles/theme";
 import type { ScheduleDerivedState } from "@/schedules/schedule-derivation";
@@ -156,6 +158,7 @@ export function ScheduleRow({
   onDelete,
 }: ScheduleRowProps): ReactElement {
   const isCompact = useIsCompactFormFactor();
+  const isGumloop = useIsGumloopTheme();
   const [isHovered, setIsHovered] = useState(false);
   const handlePointerEnter = useCallback(() => setIsHovered(true), []);
   const handlePointerLeave = useCallback(() => setIsHovered(false), []);
@@ -169,11 +172,13 @@ export function ScheduleRow({
     ({ pressed }: PressableStateCallbackType) => [
       settingsStyles.row,
       styles.row,
+      // Spec 38 §4.6: a two-line Gumloop row (title + one meta line) is 56px.
+      isGumloop && styles.rowTwoLine,
       !isFirst && settingsStyles.rowBorder,
       isHovered && !isCompact && styles.rowHovered,
       pressed && styles.rowPressed,
     ],
-    [isFirst, isHovered, isCompact],
+    [isFirst, isHovered, isCompact, isGumloop],
   );
 
   return (
@@ -190,21 +195,24 @@ export function ScheduleRow({
         testID={`schedule-row-${schedule.id}`}
       >
         <View style={styles.main}>
-          <View style={styles.leading}>
+          <View style={isGumloop ? gumloopListStyles.rowIconCircle : styles.leading}>
             <ProviderGlyph provider={provider} />
           </View>
           <View style={styles.textGroup}>
             <Text style={settingsStyles.rowTitle} numberOfLines={1}>
               {title}
             </Text>
-            <Text style={styles.target} numberOfLines={1}>
-              {targetLabel}
-            </Text>
+            {isGumloop ? null : (
+              <Text style={styles.target} numberOfLines={1}>
+                {targetLabel}
+              </Text>
+            )}
             <ScheduleMeta
               schedule={schedule}
               state={state}
               serverName={serverName}
               singleHost={singleHost ?? false}
+              targetLabel={isGumloop ? targetLabel : undefined}
             />
           </View>
         </View>
@@ -379,6 +387,11 @@ const styles = StyleSheet.create((theme) => ({
   row: {
     gap: theme.spacing[3],
   },
+  rowTwoLine: {
+    minHeight: 56,
+    paddingVertical: theme.spacing[2],
+  },
+  metaTwoLine: { marginTop: 2 },
   rowHovered: {
     backgroundColor: theme.colors.surface2,
   },
@@ -426,18 +439,24 @@ function ScheduleMeta({
   state,
   serverName,
   singleHost,
+  targetLabel,
 }: {
   schedule: ScheduleSummary;
   state: ScheduleDerivedState;
   serverName: string | undefined;
   singleHost: boolean;
+  /** Gumloop folds the target into this line so the row stays two lines. */
+  targetLabel?: string;
 }) {
   const createdAgo = useTimeAgo(new Date(schedule.createdAt));
   const lastRunAgo = useTimeAgo(schedule.lastRunAt ? new Date(schedule.lastRunAt) : null);
   const meta = buildMeta({ schedule, state, createdAgo, lastRunAgo, serverName, singleHost });
   return (
-    <Text style={settingsStyles.rowHint} numberOfLines={1}>
-      {meta}
+    <Text
+      style={[settingsStyles.rowHint, targetLabel !== undefined && styles.metaTwoLine]}
+      numberOfLines={1}
+    >
+      {targetLabel ? `${targetLabel} · ${meta}` : meta}
     </Text>
   );
 }

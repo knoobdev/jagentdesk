@@ -674,6 +674,14 @@ export interface ShellChrome {
   searchHeight: number;
   searchRadius: number;
   tableRowHeight: number;
+  /**
+   * Row floors and vertical padding for plugin tables. They are tokens rather than a
+   * `chrome.kind` check because Unistyles on web compiles theme values to CSS variables, so a
+   * comparison inside a StyleSheet never matches there. Classic keeps its content-sized rows.
+   */
+  tableRowMinHeight: number;
+  tableRowTwoLineMinHeight: number;
+  tableRowPaddingVertical: number;
   switchWidth: number;
   switchHeight: number;
   switchThumbSize: number;
@@ -744,6 +752,9 @@ function classicChrome(c: ClassicChromeSource): ShellChrome {
     searchHeight: 34,
     searchRadius: BORDER_RADIUS.md,
     tableRowHeight: 44,
+    tableRowMinHeight: 0,
+    tableRowTwoLineMinHeight: 0,
+    tableRowPaddingVertical: SPACING[2],
     switchWidth: 34,
     switchHeight: 20,
     switchThumbSize: 16,
@@ -1149,7 +1160,11 @@ function gumloopChrome(c: typeof gumloopLightColors, dark: boolean): ShellChrome
     modalRadius: 16,
     searchHeight: 46,
     searchRadius: 10,
-    tableRowHeight: 72,
+    // Spec 38 §4.6 "Bảng": every Gumloop list/table row is 44px (72px read as too sparse).
+    tableRowHeight: 44,
+    tableRowMinHeight: 44,
+    tableRowTwoLineMinHeight: 56,
+    tableRowPaddingVertical: 0,
     switchWidth: 44,
     switchHeight: 24,
     switchThumbSize: 20,
