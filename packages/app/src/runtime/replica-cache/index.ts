@@ -180,6 +180,7 @@ const WorkspaceGitRuntimeSchema = z
   .optional();
 
 const StoredWorkspaceSchema = z.strictObject({
+  parentWorkspaceId: z.string().optional(),
   id: z.string(),
   projectId: z.string(),
   projectDisplayName: z.string(),
@@ -516,6 +517,7 @@ function deserializeAgent(serverId: string, stored: StoredAgent): Agent {
 
 function serializeWorkspace(workspace: WorkspaceDescriptor): StoredWorkspace {
   return {
+    parentWorkspaceId: workspace.parentWorkspaceId,
     id: workspace.id,
     projectId: workspace.projectId,
     projectDisplayName: workspace.projectDisplayName,

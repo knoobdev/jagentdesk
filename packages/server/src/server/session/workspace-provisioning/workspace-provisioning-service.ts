@@ -245,15 +245,21 @@ export function createWorkspaceProvisioningService(deps: {
     return project;
   }
 
-  async function resolveBackground(input?: {
+  async function resolveCreationMetadata(input?: {
+    workspaceId?: string;
     background?: boolean;
     callerWorkspaceId?: string;
-  }): Promise<boolean> {
-    if (input?.background !== undefined) return input.background;
-    if (!input?.callerWorkspaceId) return false;
+  }): Promise<{ background: boolean; parentWorkspaceId?: string }> {
+    if (!input?.callerWorkspaceId) return { background: input?.background ?? false };
+    if (input.workspaceId === input.callerWorkspaceId) {
+      throw new Error("A workspace cannot be its own parent");
+    }
     const callerWorkspace = await workspaceRegistry.get(input.callerWorkspaceId);
     if (!callerWorkspace) throw new Error(`Caller workspace ${input.callerWorkspaceId} not found`);
-    return callerWorkspace.background;
+    return {
+      background: input.background ?? callerWorkspace.background,
+      parentWorkspaceId: callerWorkspace.workspaceId,
+    };
   }
 
   async function createWorkspaceForDirectory(
@@ -288,7 +294,7 @@ export function createWorkspaceProvisioningService(deps: {
     const workspace = createPersistedWorkspaceRecord({
       workspaceId: context?.workspaceId ?? generateWorkspaceId(),
       metadata: context?.metadata,
-      background: await resolveBackground(context),
+      ...(await resolveCreationMetadata(context)),
       projectId: project.projectId,
       ...initialWorkspacePlacement({ source: "checkout", cwd: normalizedCwd, checkout }),
       worktreeManagerPluginId: checkoutMetadata?.worktreeManagerPluginId ?? null,
@@ -332,7 +338,7 @@ export function createWorkspaceProvisioningService(deps: {
       ...(input.untrustedSource ? { untrustedSource: input.untrustedSource } : {}),
       createdAt: timestamp,
       updatedAt: timestamp,
-      background: await resolveBackground(input),
+      ...(await resolveCreationMetadata(input)),
     });
     await workspaceRegistry.upsert(workspace, {
       expectsInitialAgent: input.expectsInitialAgent,
