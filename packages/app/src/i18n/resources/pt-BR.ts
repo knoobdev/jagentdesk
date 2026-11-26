@@ -2294,6 +2294,18 @@ export const ptBR: TranslationResources = {
           desktop: "Desktop",
         },
       },
+      connectionLog: {
+        title: "Log de conexão",
+        rowTitle: "Log de conexão",
+        rowHint:
+          "Eventos recentes de conexão e handshake neste dispositivo. Sem conteúdo de mensagens nem chaves.",
+        open: "Ver",
+        copy: "Copiar logs",
+        clear: "Limpar",
+        empty: "Ainda não há eventos de conexão.",
+        copyLabel: "log de conexão",
+        copyFailed: "Não foi possível copiar o log de conexão",
+      },
     },
     appearance: {
       theme: {

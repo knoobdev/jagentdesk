@@ -2300,6 +2300,18 @@ export const ja: TranslationResources = {
           desktop: "Desktop",
         },
       },
+      connectionLog: {
+        title: "接続ログ",
+        rowTitle: "接続ログ",
+        rowHint:
+          "このデバイスでの最近の接続とハンドシェイクのイベント。メッセージの内容や鍵は含みません。",
+        open: "表示",
+        copy: "ログをコピー",
+        clear: "消去",
+        empty: "接続イベントはまだありません。",
+        copyLabel: "接続ログ",
+        copyFailed: "接続ログをコピーできませんでした",
+      },
     },
     appearance: {
       theme: {

@@ -3,6 +3,7 @@ import {
   openClientSecureChannel,
   openDaemonSecureChannel,
   SecureChannelRejectedError,
+  type ClientHandshakeEvent,
   type SecureChannel,
 } from "./secure-channel.js";
 import {
@@ -623,5 +624,126 @@ describe("secure channel: legacy compatibility", () => {
     await client.send("legacy still works");
     await settle();
     expect(daemonReceived).toEqual(["legacy still works"]);
+  });
+});
+
+describe("secure channel: client handshake never drops a frame silently", () => {
+  const isReady = (frame: Frame) =>
+    typeof frame.data === "string" && frame.data.includes('"e2ee_ready"');
+
+  async function openClient(
+    link: ReturnType<typeof createLink>,
+    daemonKeyPair = generateKeyPair(),
+  ) {
+    const events: ClientHandshakeEvent[] = [];
+    const received: Array<string | ArrayBuffer> = [];
+    const errors: string[] = [];
+    const daemonPromise = openDaemonSecureChannel(link.daemon, { daemonKeyPair });
+    const client = await openClientSecureChannel(link.client, {
+      daemonPublicKeyB64: exportPublicKey(daemonKeyPair.publicKey),
+      events: {
+        onmessage: (data) => received.push(data),
+        onerror: (error) => errors.push(error.message),
+      },
+      onHandshakeEvent: (event) => events.push(event),
+    });
+    return { client, daemonPromise, events, received, errors };
+  }
+
+  it("fails when an encrypted record arrives before the ready that opens the channel", async () => {
+    // The ready is lost; the daemon's first record (the sign-in challenge) then
+    // reaches a client that is still handshaking, followed by the retry's ready.
+    // Before this fix the record was ignored and the channel opened without it.
+    const link = createLink();
+    let dropped = false;
+    link.setToClient((frame) => {
+      if (!dropped && isReady(frame)) {
+        dropped = true;
+        return null;
+      }
+      return frame;
+    });
+    const { client, daemonPromise, events, received, errors } = await openClient(link);
+    const daemon = await daemonPromise;
+    await daemon.send(JSON.stringify({ type: "challenge" }));
+    await settle(1_200); // the client's hello retry gets the second ready
+    expect(link.client.close).toHaveBeenCalledWith(
+      4002,
+      expect.stringContaining("non-JSON data before e2ee_ready"),
+    );
+    expect(client.isOpen()).toBe(false);
+    expect(received).toEqual([]);
+    expect(errors).toEqual([expect.stringContaining("before e2ee_ready")]);
+    expect(events.at(-1)).toEqual({
+      type: "failed",
+      reason: expect.stringContaining("non-JSON data before e2ee_ready"),
+    });
+  });
+
+  it("fails when the ready arrives as a binary frame", async () => {
+    const link = createLink();
+    link.setToClient((frame) =>
+      isReady(frame)
+        ? {
+            data: new TextEncoder().encode(frame.data as string).buffer as ArrayBuffer,
+            isBinary: true,
+          }
+        : frame,
+    );
+    const { client, events } = await openClient(link);
+    await settle();
+    expect(link.client.close).toHaveBeenCalledWith(4002, expect.stringContaining("binary frame"));
+    expect(client.isOpen()).toBe(false);
+    expect(events.map((event) => event.type)).toEqual(["hello_sent", "failed"]);
+  });
+
+  it("reports unrelated JSON before the ready and still opens on the ready", async () => {
+    const link = createLink();
+    link.setToClient((frame) => {
+      if (isReady(frame)) {
+        deliverLater(link.client, frame);
+        return { data: JSON.stringify({ type: "pong" }), isBinary: false };
+      }
+      return frame;
+    });
+    const { client, events } = await openClient(link);
+    await settle();
+    expect(client.isOpen()).toBe(true);
+    expect(events).toEqual([
+      { type: "hello_sent", attempt: 1 },
+      { type: "frame_ignored", reason: 'unexpected "pong" message before e2ee_ready', bytes: 15 },
+      { type: "opened", mode: "protected", helloAttempts: 1 },
+    ]);
+  });
+
+  it("opens on the first of two readies answering back-to-back hellos and delivers the first record", async () => {
+    // The user's relay log: the relay held the phone's hello and its 1 s retry
+    // until the daemon's data socket passed ownership, then delivered both
+    // together. The daemon answered ready, ready, then sent its challenge.
+    const link = createLink();
+    const held: Frame[] = [];
+    let holding = true;
+    link.setToDaemon((frame) => {
+      if (!holding) return frame;
+      held.push(frame);
+      return null;
+    });
+    const { client, daemonPromise, events, received } = await openClient(link);
+    await settle(1_100);
+    holding = false;
+    expect(held).toHaveLength(2);
+    expect(held[0]!.data).toBe(held[1]!.data);
+    for (const frame of held) link.daemon.onmessage?.(frame);
+    const daemon = await daemonPromise;
+    await daemon.send(JSON.stringify({ type: "challenge" }));
+    await settle();
+    expect(client.isOpen()).toBe(true);
+    expect(received).toEqual([JSON.stringify({ type: "challenge" })]);
+    expect(events).toEqual([
+      { type: "hello_sent", attempt: 1 },
+      { type: "hello_sent", attempt: 2 },
+      { type: "opened", mode: "protected", helloAttempts: 2 },
+      { type: "duplicate_ready" },
+    ]);
   });
 });

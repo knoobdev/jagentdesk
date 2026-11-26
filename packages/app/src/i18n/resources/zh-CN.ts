@@ -2242,6 +2242,17 @@ export const zhCN: TranslationResources = {
           desktop: "Desktop",
         },
       },
+      connectionLog: {
+        title: "连接日志",
+        rowTitle: "连接日志",
+        rowHint: "此设备上最近的连接和握手事件，不含消息内容或密钥。",
+        open: "查看",
+        copy: "复制日志",
+        clear: "清除",
+        empty: "暂无连接事件。",
+        copyLabel: "连接日志",
+        copyFailed: "无法复制连接日志",
+      },
     },
     appearance: {
       theme: {

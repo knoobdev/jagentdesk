@@ -2314,6 +2314,17 @@ export const ar: TranslationResources = {
           desktop: "Desktop",
         },
       },
+      connectionLog: {
+        title: "سجل الاتصال",
+        rowTitle: "سجل الاتصال",
+        rowHint: "أحداث الاتصال والمصافحة الأخيرة على هذا الجهاز، دون محتوى الرسائل أو المفاتيح.",
+        open: "عرض",
+        copy: "نسخ السجلات",
+        clear: "مسح",
+        empty: "لا توجد أحداث اتصال بعد.",
+        copyLabel: "سجل الاتصال",
+        copyFailed: "تعذّر نسخ سجل الاتصال",
+      },
     },
     appearance: {
       theme: {

@@ -102,6 +102,7 @@ import { IntegrationsSection } from "@/desktop/components/integrations-section";
 import { isElectronRuntime } from "@/desktop/host";
 import { getSnapshot as getTailscaleSnapshot, setTailnetModeIfUnset } from "@/tailscale";
 import { useAppDiagnosticStore } from "@/diagnostics/store";
+import { useConnectionLogSheetStore } from "@/diagnostics/connection-log-store";
 import { settingsStyles } from "@/styles/settings";
 import { THINKING_TONE_NATIVE_PCM_BASE64 } from "@/utils/thinking-tone.native-pcm";
 import { useVoiceAudioEngineOptional } from "@/contexts/voice-context";
@@ -573,6 +574,7 @@ function DiagnosticsSection({
 }: DiagnosticsSectionProps) {
   const { t } = useTranslation();
   const openAppDiagnostic = useAppDiagnosticStore((state) => state.open);
+  const openConnectionLog = useConnectionLogSheetStore((state) => state.open);
   const handlePlayPress = useCallback(() => {
     void handlePlaybackTest();
   }, [handlePlaybackTest]);
@@ -586,6 +588,19 @@ function DiagnosticsSection({
           </View>
           <Button variant="secondary" size="sm" onPress={openAppDiagnostic}>
             {t("settings.diagnostics.app.run")}
+          </Button>
+        </View>
+        <View style={settingsStyles.row} testID="connection-log-row">
+          <View style={settingsStyles.rowContent}>
+            <Text style={settingsStyles.rowTitle}>
+              {t("settings.diagnostics.connectionLog.rowTitle")}
+            </Text>
+            <Text style={settingsStyles.rowHint}>
+              {t("settings.diagnostics.connectionLog.rowHint")}
+            </Text>
+          </View>
+          <Button variant="secondary" size="sm" onPress={openConnectionLog}>
+            {t("settings.diagnostics.connectionLog.open")}
           </Button>
         </View>
         <View style={settingsStyles.row}>

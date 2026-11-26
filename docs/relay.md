@@ -57,6 +57,29 @@ local socket or pipe, direct TCP, Tailscale, then relay. A dropped route gets on
 until it fails or you choose **Use this connection** in host Connections settings.
 Authenticated daemon metadata adds relay to hosts paired before relay existed.
 
+## When a relay connection fails
+
+Read both ends. The daemon logs one `relay_data_summary` per relay socket when it
+closes: hellos and readies, records in and out. The app keeps **Settings →
+Diagnostics → Connection log**, an in-memory list of every client's socket,
+handshake and sign-in events with sizes, codes and reasons only. Ask the person
+to tap **Copy logs** right after the failure; the list is gone once the app is
+killed.
+
+The daemon sends nothing before its `e2ee_ready`, so the client fails the
+handshake on any frame it cannot read as a ready (binary, undecodable, or
+encrypted data that arrived first) and names the frame. Up to v0.11.0 those
+frames were ignored, and the visible error was a sign-in challenge timeout ten
+seconds later. A challenge timeout also says what arrived after the channel
+opened and why it was dropped.
+
+To run the client under a Hermes CLI, apply `@react-native/babel-preset` to each
+module and keep each module in its own function as Metro does; esbuild's scope
+hoisting makes Hermes 0.81 resolve some `base64-js` functions to the wrong
+bindings. Run `hermes -Xmicrotask-queue`: without the flag the CLI drains promise
+jobs only after every timer has run, which fakes this same "opened, never
+challenged" failure.
+
 ## Local verification
 
 Build relay and client declarations before building the server. Build the server

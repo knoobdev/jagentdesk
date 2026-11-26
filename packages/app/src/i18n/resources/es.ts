@@ -2312,6 +2312,18 @@ export const es: TranslationResources = {
           desktop: "Desktop",
         },
       },
+      connectionLog: {
+        title: "Registro de conexión",
+        rowTitle: "Registro de conexión",
+        rowHint:
+          "Eventos recientes de conexión y handshake en este dispositivo. Sin contenido de mensajes ni claves.",
+        open: "Ver",
+        copy: "Copiar registros",
+        clear: "Borrar",
+        empty: "Todavía no hay eventos de conexión.",
+        copyLabel: "registro de conexión",
+        copyFailed: "No se pudo copiar el registro de conexión",
+      },
     },
     appearance: {
       theme: {

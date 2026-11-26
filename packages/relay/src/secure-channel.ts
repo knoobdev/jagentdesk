@@ -66,11 +66,23 @@ export interface SecureChannel {
   onClose(cb: () => void): void;
 }
 
+/**
+ * Client handshake progress, for diagnostics. Carries no payloads, keys or
+ * handshake bytes: only what happened, sizes and reasons.
+ */
+export type ClientHandshakeEvent =
+  | { type: "hello_sent"; attempt: number }
+  | { type: "opened"; mode: SecurityMode; helloAttempts: number }
+  | { type: "duplicate_ready" }
+  | { type: "frame_ignored"; reason: string; bytes: number }
+  | { type: "failed"; reason: string };
+
 export interface ClientSecureChannelOptions {
   daemonPublicKeyB64: string;
   /** Lowest mode this client accepts. "protected" refuses a daemon that only offers legacy. */
   minimumMode?: SecurityMode;
   events?: SecureChannelEvents;
+  onHandshakeEvent?: (event: ClientHandshakeEvent) => void;
 }
 
 export interface DaemonSecureChannelOptions {
@@ -173,18 +185,23 @@ export async function openClientSecureChannel(
   };
   const helloText = JSON.stringify(hello);
 
-  const channel = new ClientSecureChannel(transport, events, {
-    minimumMode,
-    noise,
-    offered,
-    legacySharedKey,
-  });
+  const report = safeReporter(options.onHandshakeEvent);
+  let helloAttempts = 0;
+  const channel = new ClientSecureChannel(
+    transport,
+    events,
+    { minimumMode, noise, offered, legacySharedKey },
+    report,
+    () => helloAttempts,
+  );
 
   let retry: ReturnType<typeof setInterval> | null = null;
   const emitSendError = (error: unknown) => {
     events.onerror?.(error instanceof Error ? error : new Error(String(error)));
   };
   const sendHello = () => {
+    helloAttempts += 1;
+    report({ type: "hello_sent", attempt: helloAttempts });
     try {
       const result = transport.send(helloText);
       if (result) void result.catch(emitSendError);
@@ -222,6 +239,31 @@ interface ClientHandshakeState {
   legacySharedKey: Uint8Array;
 }
 
+type HandshakeReporter = (event: ClientHandshakeEvent) => void;
+
+/** Diagnostics must never break the handshake. */
+function safeReporter(report: ((event: ClientHandshakeEvent) => void) | undefined) {
+  return (event: ClientHandshakeEvent) => {
+    try {
+      report?.(event);
+    } catch {
+      // ignore
+    }
+  };
+}
+
+/**
+ * Thrown for frames that cannot be part of the handshake. The daemon sends
+ * nothing before its `e2ee_ready`, so each of these means the ready was lost
+ * or mangled on the way, and waiting longer would only hide that.
+ */
+class HandshakeFrameError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "HandshakeFrameError";
+  }
+}
+
 /**
  * Client channel: waits for the daemon's ready, selects the mode, then
  * delegates records to the mode's implementation.
@@ -239,6 +281,8 @@ class ClientSecureChannel implements SecureChannel {
     private readonly transport: Transport,
     private readonly events: SecureChannelEvents,
     handshake: ClientHandshakeState,
+    private readonly report: HandshakeReporter,
+    private readonly helloAttempts: () => number,
   ) {
     this.handshake = handshake;
     Object.assign(transport, {
@@ -252,12 +296,21 @@ class ClientSecureChannel implements SecureChannel {
     if (this.state !== "handshaking" || !this.handshake) return;
     let parsed: unknown;
     try {
-      if (message.isBinary) return;
-      parsed = JSON.parse(decodeTransportText(message.data));
-    } catch {
-      return; // not handshake traffic; ignore while handshaking
+      parsed = readHandshakeFrame(message);
+    } catch (error) {
+      this.failHandshake(error);
+      return;
     }
-    if (!isRecord(parsed) || parsed.type !== "e2ee_ready") return;
+    if (!isRecord(parsed) || parsed.type !== "e2ee_ready") {
+      // JSON the relay path might carry that is not ours to answer. Recorded,
+      // never silent; a ready can still follow.
+      this.report({
+        type: "frame_ignored",
+        reason: `unexpected ${describeJsonType(parsed)} before e2ee_ready`,
+        bytes: frameByteLength(message.data),
+      });
+      return;
+    }
 
     try {
       // A ready the daemon recognizably sent but that fails validation is a
@@ -270,10 +323,15 @@ class ClientSecureChannel implements SecureChannel {
         this.openLegacy(ready);
       }
     } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      this.events.onerror?.(err);
-      this.fail(PROTECTED_HANDSHAKE_FAILED_CLOSE_CODE, err.message);
+      this.failHandshake(error);
     }
+  }
+
+  private failHandshake(error: unknown): void {
+    const err = error instanceof Error ? error : new Error(String(error));
+    this.report({ type: "failed", reason: err.message });
+    this.events.onerror?.(err);
+    this.fail(PROTECTED_HANDSHAKE_FAILED_CLOSE_CODE, err.message);
   }
 
   private openProtected(envelope: ProtectedEnvelope): void {
@@ -291,6 +349,7 @@ class ClientSecureChannel implements SecureChannel {
       new ProtectedChannel(this.transport, this.events, keys.send, keys.receive, selected, {
         retry: null,
         failureCloseCode: PROTECTED_RECORD_FAILED_CLOSE_CODE,
+        onDuplicateReady: () => this.report({ type: "duplicate_ready" }),
       }),
     );
   }
@@ -311,6 +370,7 @@ class ClientSecureChannel implements SecureChannel {
     this.handshake = null;
     this.inner = inner;
     this.state = "open";
+    this.report({ type: "opened", mode: inner.mode, helloAttempts: this.helloAttempts() });
     // The mode implementation now owns the transport callbacks; mirror its close.
     inner.onClose(() => this.notifyClosed());
     this.events.onopen?.();
@@ -500,6 +560,7 @@ async function acceptProtectedHello(
   return new ProtectedChannel(transport, events, keys.send, keys.receive, selected, {
     retry: { helloText, readyText },
     failureCloseCode: DAEMON_RECORD_FAILURE_CLOSE_CODE,
+    onDuplicateReady: null,
   });
 }
 
@@ -593,6 +654,8 @@ class ProtectedChannel implements InnerChannel {
       /** Daemon side only: exact transcript used to answer identical retries. */
       retry: DaemonRetryTranscript | null;
       failureCloseCode: number;
+      /** Client side only: the daemon answered a hello retry after the channel opened. */
+      onDuplicateReady: (() => void) | null;
     },
   ) {
     Object.assign(transport, {
@@ -631,7 +694,11 @@ class ProtectedChannel implements InnerChannel {
   private async handleHandshakeTraffic(
     handshake: { kind: "hello"; text: string } | { kind: "ready" },
   ): Promise<void> {
-    if (handshake.kind === "ready") return; // client ignores duplicate ready after open
+    if (handshake.kind === "ready") {
+      // The client ignores a duplicate ready after open (the answer to a hello retry).
+      this.role.onDuplicateReady?.();
+      return;
+    }
     if (!this.role.retry) return; // a client never answers hellos
     if (handshake.text === this.role.retry.helloText) {
       await this.transport.send(this.role.retry.readyText);
@@ -807,6 +874,48 @@ function decodeParams(payload: Uint8Array): NegotiatedParams {
 function preview(text: string): string {
   const compact = text.replace(/\s+/g, " ").trim();
   return JSON.stringify(compact.length > 160 ? `${compact.slice(0, 157)}...` : compact);
+}
+
+/**
+ * Parses a frame received while the client waits for `e2ee_ready`. Throws a
+ * {@link HandshakeFrameError} naming the problem for anything that cannot be
+ * handshake traffic, so a lost or mangled ready fails the handshake instead of
+ * stalling it until a timeout far away reports something else.
+ */
+function readHandshakeFrame(message: TransportMessage): unknown {
+  const bytes = frameByteLength(message.data);
+  if (message.isBinary) {
+    throw new HandshakeFrameError(
+      `received a binary frame (${bytes} bytes) before e2ee_ready; the host's handshake reply was not delivered as text`,
+    );
+  }
+  let text: string;
+  try {
+    text = decodeTransportText(message.data);
+  } catch (error) {
+    throw new HandshakeFrameError(
+      `could not decode a ${bytes}-byte frame before e2ee_ready: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new HandshakeFrameError(
+      `received ${bytes} bytes of non-JSON data before e2ee_ready; the host's handshake reply was lost or arrived after its encrypted data`,
+    );
+  }
+}
+
+function describeJsonType(value: unknown): string {
+  if (isRecord(value) && typeof value.type === "string") {
+    return `"${value.type.slice(0, 40)}" message`;
+  }
+  return Array.isArray(value) ? "JSON array" : `JSON ${value === null ? "null" : typeof value}`;
+}
+
+function frameByteLength(data: string | ArrayBuffer): number {
+  if (typeof data === "string") return utf8ByteLength(data);
+  return data instanceof ArrayBuffer ? data.byteLength : 0;
 }
 
 function decodeTransportText(data: string | ArrayBuffer): string {

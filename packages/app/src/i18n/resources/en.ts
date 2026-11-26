@@ -2320,6 +2320,18 @@ export const en = {
           desktop: "Desktop",
         },
       },
+      connectionLog: {
+        title: "Connection log",
+        rowTitle: "Connection log",
+        rowHint:
+          "Recent connection and handshake events on this device. No message contents or keys.",
+        open: "View",
+        copy: "Copy logs",
+        clear: "Clear",
+        empty: "No connection events yet.",
+        copyLabel: "connection log",
+        copyFailed: "Failed to copy connection log",
+      },
     },
     appearance: {
       theme: {
