@@ -83,6 +83,19 @@ describe("turn_on_host_tools (spec 04 §27b.2)", () => {
     expect(result.text).toContain("reach this same conversation with the user's next message");
   });
 
+  test('the card names the group once, without a doubled "tools"', async () => {
+    const browser = setup({ groups: [group({ id: "browser-tools" })] });
+    await browser.run("browser-tools");
+    expect(browser.permissions[0]?.request.description).toBe(
+      "Agents on this host get the Browser tools. This conversation keeps its history.",
+    );
+    const docker = setup({ groups: [group({ id: "docker", name: "Docker" })] });
+    await docker.run("docker");
+    expect(docker.permissions[0]?.request.description).toBe(
+      "Agents on this host get the Docker tools. This conversation keeps its history.",
+    );
+  });
+
   test("Not now keeps the group off", async () => {
     const { run, turnedOn } = setup({
       groups: [group({ id: "docker" })],

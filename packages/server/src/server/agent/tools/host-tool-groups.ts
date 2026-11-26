@@ -48,6 +48,11 @@ export function hostToolGroupName(id: string, manifestName: string): string {
   return id === BROWSER_TOOLS_GROUP_ID ? "Browser tools" : manifestName;
 }
 
+/** "Docker" → "Docker tools"; "Browser tools" stays as it is. */
+function groupTools(name: string): string {
+  return /\btools$/i.test(name) ? name : `${name} tools`;
+}
+
 function listGroups(groups: HostToolGroupState[]): string {
   return groups.map((group) => `${group.name} (\`${group.id}\`)`).join(", ");
 }
@@ -164,7 +169,7 @@ export function registerHostToolGroupTools(input: {
         name: TURN_ON_HOST_TOOLS_TOOL,
         kind: "tool",
         title: `Turn on ${group.name} for this host?`,
-        description: `Agents on this host get the ${group.name} tools. This conversation keeps its history.`,
+        description: `Agents on this host get the ${groupTools(group.name)}. This conversation keeps its history.`,
         input: { toolGroup: group.id },
         actions: [NOT_NOW_ACTION, TURN_ON_ACTION],
         alwaysAsk: true,
