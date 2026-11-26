@@ -24,6 +24,7 @@ export type {
   BuiltinToolCallRenderer,
   BuiltinAgentProps,
   BuiltinComposerDockProps,
+  BuiltinComposerTextWatcherProps,
   BuiltinUserMessageBodyProps,
   BuiltinTurnPreparation,
 } from "./host";
