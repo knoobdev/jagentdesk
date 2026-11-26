@@ -3,7 +3,7 @@ import { createFakeCodexAppServer } from "./providers/codex/test-utils/fake-app-
 import { expect, test, vi, onTestFinished } from "vitest";
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 
@@ -3103,6 +3103,38 @@ test("createAgent passes daemon launch env through the provider launch context",
       JAGENTDESK_AGENT_CWD: workdir,
     },
   });
+});
+
+test("every agent launch puts the browser shims first on PATH and BROWSER on the .js shim", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-shim-env-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+
+  class CaptureClient extends TestAgentClient {
+    lastLaunchContext: AgentLaunchContext | undefined;
+
+    override async createSession(
+      config: AgentSessionConfig,
+      launchContext?: AgentLaunchContext,
+    ): Promise<AgentSession> {
+      this.lastLaunchContext = launchContext;
+      return new TestAgentSession(config);
+    }
+  }
+
+  const client = new CaptureClient();
+  const manager = new AgentManager({ clients: { codex: client }, registry: storage, logger });
+  const shimDir = join(workdir, "agent-bin");
+  manager.setAgentShimDir(shimDir);
+  await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+    workspaceId: undefined,
+  });
+
+  const env = client.lastLaunchContext?.env ?? {};
+  expect(env.PATH?.split(delimiter)[0]).toBe(shimDir);
+  expect(env.PATH?.split(delimiter).slice(1)).toEqual(
+    (process.env.PATH ?? "").split(delimiter).filter((entry) => entry && entry !== shimDir),
+  );
+  expect(env.BROWSER).toBe(join(shimDir, "jagentdesk-browser.js"));
 });
 
 test("createAgent and resume give the agent its workspace id", async () => {

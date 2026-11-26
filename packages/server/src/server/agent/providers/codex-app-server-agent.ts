@@ -58,6 +58,7 @@ import { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { BROWSER_SHIM_FILE } from "../../agent-browser-shim/install.js";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { renderPromptAttachmentAsText } from "../prompt-attachments.js";
@@ -8134,6 +8135,24 @@ export function codexProviderBrowserOverrides(): string[] {
   return ["-c", `skills.config=[${entries.join(",")}]`];
 }
 
+/**
+ * Spec 04 §27b item 3b: Codex runs commands in a shell rebuilt from a snapshot of the user's login
+ * shell, which replaces PATH, so the agent shim directory JAgentDesk put first was gone and `open`
+ * reached the system browser. `shell_environment_policy.set` is applied on top of that snapshot.
+ */
+export function codexAgentShimOverrides(environment: NodeJS.ProcessEnv): string[] {
+  const browser = environment.BROWSER;
+  const searchPath = environment.PATH;
+  if (!browser || !searchPath || path.basename(browser) !== BROWSER_SHIM_FILE) return [];
+  if (searchPath.split(path.delimiter)[0] !== path.dirname(browser)) return [];
+  return [
+    "-c",
+    `shell_environment_policy.set.PATH=${JSON.stringify(searchPath)}`,
+    "-c",
+    `shell_environment_policy.set.BROWSER=${JSON.stringify(browser)}`,
+  ];
+}
+
 /** One `mcpServerStatus/list` answer as tools health; null while the server is still starting. */
 function codexJAgentDeskToolsHealth(data: unknown): JAgentDeskToolsHealth | null {
   const entry = (Array.isArray(data) ? data : [])
@@ -8326,6 +8345,7 @@ export class CodexAppServerAgentClient implements AgentClient {
     const args = [
       ...launchPrefix.args,
       ...(options.inAppBrowser ? codexProviderBrowserOverrides() : []),
+      ...codexAgentShimOverrides(options.environment),
       ...(await codexHiddenConnectorOverrides(options.environment, options.hideProviderConnectors)),
       "app-server",
     ];

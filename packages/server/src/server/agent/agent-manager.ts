@@ -82,6 +82,7 @@ import {
 import { handoffBudgetTokens } from "./session-ledger/ledger-render.js";
 import { DurableContext } from "./durable-context/durable-context.js";
 import { agentIdentityInstruction, LESSON_INSTRUCTION } from "./durable-context/instructions.js";
+import { agentShimEnv } from "../agent-browser-shim/install.js";
 import type { DurableContextSettings, MemoryPort } from "./memory-port.js";
 import type { LedgerTimelineRow } from "./session-ledger/ledger-builder.js";
 import type { LedgerMergeResult } from "./session-ledger/ledger-merge.js";
@@ -1264,6 +1265,7 @@ export class AgentManager {
   private operatorContext = "";
 
   private launchEnvProvider: AgentLaunchEnvProvider | null = null;
+  private agentShimDir: string | null = null;
 
   private onAgentAttention?: AgentAttentionCallback;
 
@@ -1677,6 +1679,15 @@ export class AgentManager {
    */
   setLaunchEnvProvider(provider: AgentLaunchEnvProvider | null): void {
     this.launchEnvProvider = provider;
+  }
+
+  /**
+   * Spec 04 §27b item 3b: the directory with the `open` / `xdg-open` / BROWSER shims. Every
+   * agent launch puts it first on PATH and points BROWSER at it, so pages an agent or its dev
+   * server opens land in the in-app browser.
+   */
+  setAgentShimDir(dir: string | null): void {
+    this.agentShimDir = dir;
   }
 
   public getMetricsSnapshot(): AgentMetricsSnapshot {
@@ -7809,6 +7820,14 @@ export class AgentManager {
     return { storedConfig, launchConfig };
   }
 
+  private withAgentShimEnv(env: Record<string, string>): Record<string, string> {
+    if (!this.agentShimDir) return env;
+    return {
+      ...env,
+      ...agentShimEnv({ dir: this.agentShimDir, basePath: env.PATH ?? process.env.PATH }),
+    };
+  }
+
   /** Spec 42 §4: agents are told to save lessons only while Memory and the switch are on. */
   private lessonLearningEnabled(): boolean {
     if (!this.durablePorts?.memory()) return false;
@@ -7911,11 +7930,11 @@ export class AgentManager {
       ...pluginPromptContext(appendSystemPrompt),
       mcpServers,
       mcpServerOwners,
-      env: {
+      env: this.withAgentShimEnv({
         ...env,
         ...this.launchEnvProvider?.(agentId),
         ...agentIdentityEnv({ agentId, cwd, opening }),
-      },
+      }),
     };
     const useNativeTools = this.canUseNativeJAgentDeskTools(client, jagentdeskToolPolicy);
     if (
