@@ -167,6 +167,7 @@ import {
   type DaemonBackgroundWorkInput,
   type DaemonBackgroundWorkKey,
 } from "./background-work/index.js";
+import { BackgroundWorkTimeline } from "./background-work/timeline.js";
 import { extractAttention, buildSessionConfig } from "../persistence-hooks.js";
 import { ProviderOptionsValidationError } from "./provider-options.js";
 import { applyRecordPatch } from "../record-patch.js";
@@ -1167,6 +1168,7 @@ export class AgentManager {
   private readonly providerSubagents = new ProviderSubagentStore();
 
   private readonly backgroundWork = new AgentBackgroundWorkStore();
+  private readonly backgroundWorkTimeline = new BackgroundWorkTimeline();
 
   private readonly agentsAwaitingInitialSnapshotPersist = new Set<string>();
 
@@ -2075,6 +2077,7 @@ export class AgentManager {
   }
 
   private clearProviderBackgroundWork(agentId: string): void {
+    this.backgroundWorkTimeline.forget(agentId);
     this.publishBackgroundWork(agentId, this.backgroundWork.clear(agentId));
   }
 
@@ -6227,6 +6230,17 @@ export class AgentManager {
           ? this.backgroundWork.clear(agent.id)
           : this.backgroundWork.apply(agent.id, event.items);
       this.publishBackgroundWork(agent.id, items);
+      // Spec 38 §4.4b: "Started in background" / "Background task finished" rows for providers
+      // whose timeline does not carry them. A reset (`items: null`) is not an end.
+      if (event.items !== null && items) {
+        const rows = this.backgroundWorkTimeline.update({
+          agentId: agent.id,
+          provider: event.provider,
+          items,
+          nowMs: Date.now(),
+        });
+        for (const row of rows) await this.appendTimelineItem(agent.id, row);
+      }
       return;
     }
     const turnId = getAgentStreamEventTurnId(event);

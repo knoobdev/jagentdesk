@@ -2,6 +2,7 @@ import { useGumloopPageGutterStyle } from "../../../packages/app/src/plugins/bui
 import {
   PageHeader,
   useHosts,
+  usePageScroll,
   useIsGumloopTheme,
   gumloopListStyles,
 } from "../../../packages/app/src/plugins/builtin/host-api";
@@ -18,6 +19,7 @@ export function SharedSessionsScreen({ focused }: { focused?: boolean }): ReactE
   const gutter = useGumloopPageGutterStyle();
   const hosts = useHosts();
   const isGumloop = useIsGumloopTheme();
+  const pageScroll = usePageScroll();
 
   if (focused === false) {
     return <View style={styles.container} />;
@@ -29,8 +31,9 @@ export function SharedSessionsScreen({ focused }: { focused?: boolean }): ReactE
         icon={Share2}
         title="Shared sessions"
         description="Sessions you have shared with other people, per host. Revoke access at any time."
+        scrolled={pageScroll.scrolled}
       />
-      <ScrollView contentContainerStyle={[styles.body, gutter]}>
+      <ScrollView contentContainerStyle={[styles.body, gutter]} {...pageScroll.scrollProps}>
         {hosts.length === 0 ? (
           <Text style={styles.empty}>Connect to a host to manage its shared sessions.</Text>
         ) : (

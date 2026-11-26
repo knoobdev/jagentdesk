@@ -236,6 +236,13 @@ export class OpenCodeRuntimeClient implements AgentClient {
     if (client instanceof OpenCodeAgentClient) await client.unarchiveNativeSession(handle);
   }
 
+  // The legacy client shares one process-wide server manager, so only a v2 pick has its own
+  // server to release.
+  async retire() {
+    const selected = await this.selected?.catch(() => null);
+    if (selected && !(selected instanceof OpenCodeAgentClient)) await selected.retire();
+  }
+
   async shutdown() {
     const selected = await this.selected?.catch(() => null);
     if (this.legacySelected) await this.legacy.shutdown();

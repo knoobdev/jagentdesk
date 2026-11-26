@@ -34,3 +34,12 @@ export function usePluginDisplayName(
   const plugin = plugins.data?.find((candidate) => candidate.id === target.pluginId);
   return plugin ? pluginDisplayName(plugin) : target.pluginId;
 }
+
+/** The manifest description of one configured plugin, once the list has loaded. */
+export function usePluginDescription(
+  target: { serverId: string; pluginId: string } | null,
+): string | null {
+  const plugins = usePluginList(target?.serverId ?? "", { enabled: target !== null });
+  if (!target) return null;
+  return plugins.data?.find((candidate) => candidate.id === target.pluginId)?.description ?? null;
+}

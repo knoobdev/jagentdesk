@@ -20,6 +20,8 @@ import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store"
 import { Button } from "@/components/ui/button";
 import type { Theme } from "@/styles/theme";
 import { GumloopRow } from "./sidebar";
+import { BackgroundWorkLine, countRunningBackgroundWork } from "@/background-work/sidebar-line";
+import { BackgroundWorkStatusTooltip } from "@/background-work/status-tooltip";
 
 const ThemedSearch = withUnistyles(Search, (theme: Theme) => ({
   color: theme.colors.foregroundMuted,
@@ -30,13 +32,37 @@ function AgentRow({ agent }: { agent: AggregatedAgent }) {
     () => navigateToAgent({ serverId: agent.serverId, agentId: agent.id }),
     [agent.id, agent.serverId],
   );
-  const dot = useMemo(() => <AgentDot status={agent.status} />, [agent.status]);
+  const backgroundCount = countRunningBackgroundWork(agent.backgroundWork);
+  // Idle with background work still running keeps the running dot (spec 38 §4.4b).
+  const dotStatus = backgroundCount > 0 ? "running" : agent.status;
+  const onlyBackground = backgroundCount > 0 && agent.status !== "running";
+  const dot = useMemo(
+    () => (
+      <BackgroundWorkStatusTooltip active={onlyBackground}>
+        <AgentDot status={dotStatus} />
+      </BackgroundWorkStatusTooltip>
+    ),
+    [dotStatus, onlyBackground],
+  );
+  const secondLine = useMemo(
+    () =>
+      backgroundCount > 0 ? (
+        <BackgroundWorkLine
+          serverId={agent.serverId}
+          agentId={agent.id}
+          totalCount={backgroundCount}
+          testID={`gumloop-recent-background-${agent.id}`}
+        />
+      ) : null,
+    [agent.id, agent.serverId, backgroundCount],
+  );
   return (
     <GumloopRow
       label={agent.title ?? agent.provider}
       onPress={open}
       testID={`gumloop-recent-${agent.id}`}
       leading={dot}
+      secondLine={secondLine}
     />
   );
 }
@@ -70,7 +96,9 @@ export function WorkspaceSidebar({
         (agent) =>
           agent.serverId === serverId &&
           agent.workspaceId === workspaceId &&
-          (!runningOnly || agent.status === "running") &&
+          (!runningOnly ||
+            agent.status === "running" ||
+            countRunningBackgroundWork(agent.backgroundWork) > 0) &&
           (agent.title ?? agent.provider).toLowerCase().includes(query.toLowerCase()),
       ),
     [agents, query, runningOnly, serverId, workspaceId],

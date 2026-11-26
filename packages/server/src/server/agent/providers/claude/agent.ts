@@ -1692,8 +1692,19 @@ export function readEventIdentifiers(message: SDKMessage): EventIdentifiers {
   };
 }
 
+type ClaudeDiscoveredModels = Awaited<ReturnType<typeof discoverClaudeModels>>;
+
+interface SharedClaudeDiscovery {
+  promise: Promise<ClaudeDiscoveredModels>;
+  controller: AbortController;
+  waiters: number;
+}
+
 export class ClaudeAgentClient implements AgentClient {
   private readonly discoverModels: typeof discoverClaudeModels;
+
+  /** The discovery in flight; every snapshot cwd refreshing at once waits on this one. */
+  private sharedDiscovery: SharedClaudeDiscovery | null = null;
 
   readonly provider = "claude" as const;
 
@@ -1849,6 +1860,70 @@ export class ClaudeAgentClient implements AgentClient {
     return session;
   }
 
+  /**
+   * The catalog is global, so refreshes of several snapshot cwds share one `claude` discovery
+   * process instead of spawning one each (spec 04 §5). The process is aborted only when every
+   * caller waiting on it has aborted.
+   */
+  private discoverModelsOnce(
+    env: Record<string, string | undefined>,
+    signal: AbortSignal | undefined,
+  ): Promise<ClaudeDiscoveredModels> {
+    let shared = this.sharedDiscovery;
+    if (!shared) {
+      const controller = new AbortController();
+      const created: SharedClaudeDiscovery = {
+        controller,
+        waiters: 0,
+        promise: this.discoverModels({
+          resolveBinary: this.resolveBinary,
+          runtimeSettings: this.runtimeSettings,
+          env,
+          signal: controller.signal,
+        }).finally(() => {
+          if (this.sharedDiscovery === created) this.sharedDiscovery = null;
+        }),
+      };
+      this.sharedDiscovery = created;
+      shared = created;
+    }
+    const discovery = shared;
+    discovery.waiters += 1;
+    return new Promise<ClaudeDiscoveredModels>((resolve, reject) => {
+      let waiting = true;
+      const stopWaiting = (): boolean => {
+        if (!waiting) return false;
+        waiting = false;
+        discovery.waiters -= 1;
+        signal?.removeEventListener("abort", onAbort);
+        return true;
+      };
+      const onAbort = (): void => {
+        if (!stopWaiting()) return;
+        if (discovery.waiters === 0) {
+          // Nobody waits for it any more; the next refresh starts a fresh discovery.
+          if (this.sharedDiscovery === discovery) this.sharedDiscovery = null;
+          discovery.controller.abort(signal?.reason);
+        }
+        reject(signal?.reason);
+      };
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
+      signal?.addEventListener("abort", onAbort, { once: true });
+      discovery.promise.then(
+        (models) => {
+          if (stopWaiting()) resolve(models);
+          return undefined;
+        },
+        (error: unknown) => {
+          if (stopWaiting()) reject(error);
+        },
+      );
+    });
+  }
+
   async fetchCatalog(
     _options: FetchCatalogOptions,
     context?: ProviderRefreshContext,
@@ -1867,12 +1942,7 @@ export class ClaudeAgentClient implements AgentClient {
     let incomplete = false;
     try {
       const advertisedModels = await runProviderRefreshActivity(context, "models", () =>
-        this.discoverModels({
-          resolveBinary: this.resolveBinary,
-          runtimeSettings: this.runtimeSettings,
-          env,
-          signal: context?.signal,
-        }),
+        this.discoverModelsOnce(env, context?.signal),
       );
       discoveredModelIds = new Set(
         advertisedModels

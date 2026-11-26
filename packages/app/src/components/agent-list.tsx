@@ -21,6 +21,7 @@ import { useTranslation } from "react-i18next";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useTimeAgo } from "@/hooks/use-time-ago";
 import { type AggregatedAgent } from "@/hooks/use-aggregated-agents";
+import { BackgroundWorkLine, countRunningBackgroundWork } from "@/background-work/sidebar-line";
 import {
   ORCHESTRATION_ROLE_LABEL,
   ORCHESTRATION_ROUTE_LABEL,
@@ -30,6 +31,7 @@ import { Archive, ChevronRight } from "lucide-react-native";
 import { getProviderIcon } from "@/components/provider-icons";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
 import { useArchiveAgent } from "@/hooks/use-archive-agent";
+import type { PageScroll } from "@/components/headers/use-page-scroll";
 
 interface AgentListProps {
   agents: AggregatedAgent[];
@@ -44,6 +46,8 @@ interface AgentListProps {
   showHostColumn?: boolean;
   /** "embedded" is Home's recent activity, whose first day label sits 12px under its own label. */
   placement?: AgentListPlacement;
+  /** The page's scroll tracking, for its header divider (`usePageScroll`). */
+  scrollProps?: PageScroll["scrollProps"];
 }
 
 type AgentListPlacement = "page" | "embedded";
@@ -229,6 +233,25 @@ function SessionRowTrailingAttention({
   );
 }
 
+// Stacked phone rows are two lines and keep their padding; so does a row carrying the background
+// work line (spec 38 §4.4b).
+function gumloopRowHeightStyle(twoLine: boolean) {
+  return twoLine ? gumloopListStyles.rowTwoLine : gumloopListStyles.rowFlush;
+}
+
+function SessionRowBackgroundLine({ agent }: { agent: AggregatedAgent }) {
+  const count = countRunningBackgroundWork(agent.backgroundWork);
+  if (count === 0) return null;
+  return (
+    <BackgroundWorkLine
+      serverId={agent.serverId}
+      agentId={agent.id}
+      totalCount={count}
+      testID={`agent-row-background-${agent.serverId}-${agent.id}`}
+    />
+  );
+}
+
 function SessionRow({
   agent,
   isMobile,
@@ -260,18 +283,18 @@ function SessionRow({
   const pendingPermissionCount = agent.pendingPermissionCount ?? 0;
   const orchestrationRoleBadge = orchestrationRoleBadgeLabel(agent.labels);
   const isGumloop = useIsGumloopTheme();
+  const hasBackgroundWork = countRunningBackgroundWork(agent.backgroundWork) > 0;
 
   const pressableStyle = useCallback(
     ({ pressed, hovered = false }: PressableStateCallbackType & { hovered?: boolean }) => [
       styles.row,
       isGumloop && gumloopListStyles.row,
-      // Stacked phone rows are two lines and keep their padding.
-      isGumloop && (isMobile ? gumloopListStyles.rowTwoLine : gumloopListStyles.rowFlush),
+      isGumloop && gumloopRowHeightStyle(isMobile || hasBackgroundWork),
       isSelected && styles.rowSelected,
       Boolean(hovered) && styles.rowHovered,
       pressed && styles.rowPressed,
     ],
-    [isGumloop, isMobile, isSelected],
+    [hasBackgroundWork, isGumloop, isMobile, isSelected],
   );
 
   const handlePress = useCallback(() => onPress(agent), [onPress, agent]);
@@ -322,6 +345,7 @@ function SessionRow({
             showDesktopAttention={showDesktopAttention}
           />
         </View>
+        <SessionRowBackgroundLine agent={agent} />
         {isMobile ? (
           <View style={styles.rowMetaRow}>
             {mobileMetaParts.map((part) => (
@@ -401,6 +425,7 @@ export function AgentList({
   showAttentionIndicator = true,
   showHostColumn = false,
   placement = "page",
+  scrollProps,
 }: AgentListProps) {
   const { theme } = useUnistyles();
   const { t } = useTranslation();
@@ -592,6 +617,7 @@ export function AgentList({
         keyboardShouldPersistTaps="handled"
         ListFooterComponent={listFooterComponent}
         refreshControl={refreshControl}
+        {...scrollProps}
       />
 
       <Modal

@@ -15,6 +15,22 @@ interface BackgroundWorkState {
   status: "loading" | "stale" | "ready" | "error";
   items: AgentBackgroundWorkItem[] | null;
   stops?: Record<string, { status: "pending" | "error"; item: AgentBackgroundWorkItem }>;
+  /** Work that left the inventory while this model was watching, kept until dismissed. */
+  finished?: Record<string, { item: AgentBackgroundWorkItem; finishedAt: number }>;
+}
+
+function withFinished(
+  state: BackgroundWorkState,
+  nextItems: AgentBackgroundWorkItem[],
+  now: number,
+): BackgroundWorkState["finished"] {
+  if (state.items === null) return state.finished;
+  const live = new Set(nextItems.map((item) => item.id));
+  const gone = state.items.filter((item) => !live.has(item.id));
+  if (gone.length === 0) return state.finished;
+  const finished = { ...state.finished };
+  for (const item of gone) finished[item.id] = { item, finishedAt: now };
+  return finished;
 }
 
 export function createBackgroundWorkModel(port: Port) {
@@ -25,11 +41,18 @@ export function createBackgroundWorkModel(port: Port) {
   let observationFailed = false;
   const listeners = new Set<() => void>();
   const publish = (next: BackgroundWorkState) => {
-    state =
-      next.stops === undefined && state.stops === undefined
-        ? next
-        : { ...next, stops: next.stops ?? state.stops };
+    const stops = next.stops ?? state.stops;
+    const finished = next.finished ?? state.finished;
+    state = {
+      ...next,
+      ...(stops === undefined ? null : { stops }),
+      ...(finished === undefined ? null : { finished }),
+    };
     for (const listener of listeners) listener();
+  };
+  // Only a live update says a task ended; a resync after a reconnect can be a different view.
+  const publishReady = (items: AgentBackgroundWorkItem[]) => {
+    publish({ status: "ready", items, finished: withFinished(state, items, Date.now()) });
   };
   const refresh = async () => {
     const request = ++sequence;
@@ -67,12 +90,17 @@ export function createBackgroundWorkModel(port: Port) {
       },
       update: (items) => {
         sequence++;
-        publish({ status: "ready", items });
+        publishReady(items);
       },
     });
   };
   return {
     getSnapshot: () => state,
+    dismissFinished: (id: string) => {
+      const finished = { ...state.finished };
+      delete finished[id];
+      publish({ ...state, finished });
+    },
     dismissStop: (token: string) => {
       const stops = { ...state.stops };
       delete stops[token];

@@ -391,9 +391,9 @@ describe("ProviderSnapshotManager background refresh", () => {
       await settle();
       await harness.timers.advanceMinutes(45);
 
+      // Re-enabling Claude probes Claude only; codex keeps its warm entry (spec 04 §5).
       expect(harness.probes).toEqual([
         { minute: 60, provider: "claude" },
-        { minute: 60, provider: "codex" },
         { minute: 90, provider: "codex" },
         { minute: 105, provider: "claude" },
       ]);

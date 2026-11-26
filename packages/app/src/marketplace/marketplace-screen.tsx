@@ -20,6 +20,7 @@ import { useTranslation } from "react-i18next";
 import { useMutation } from "@tanstack/react-query";
 import type { PluginListItem } from "@jagentdesk/protocol/messages";
 import { PageHeader } from "@/components/headers/page-header";
+import { usePageScroll } from "@/components/headers/use-page-scroll";
 import { Store } from "lucide-react-native";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -158,6 +159,7 @@ function buildInstalledLookup(installed: PluginListItem[] | undefined): {
 export function MarketplaceScreen() {
   const isGumloop = useIsGumloopTheme();
   const { t } = useTranslation();
+  const pageScroll = usePageScroll();
   const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
   const serverId = useHostRouteServerId() ?? "";
@@ -509,8 +511,10 @@ export function MarketplaceScreen() {
         icon={Store}
         title={t("marketplace.title")}
         description={t("marketplace.subtitle")}
+        scrolled={pageScroll.scrolled}
       />
       <FlatList
+        {...pageScroll.scrollProps}
         key={`marketplace-${isThemesTab ? "themes" : "plugins"}-${numColumns}`}
         data={listData}
         renderItem={renderItem}

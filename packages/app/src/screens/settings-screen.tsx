@@ -8,7 +8,7 @@ import { GUMLOOP_PANEL_HOST } from "@/components/gumloop-shell/sidebar-state";
 import { GUMLOOP_PAGE_GUTTER } from "@/components/gumloop-shell/list-styles";
 import { settingsPageDescription } from "@/screens/settings/page-description";
 import { useGumloopDesktopShell } from "@/components/gumloop-shell/use-gumloop-chrome";
-import { usePluginDisplayName } from "@/plugins/plugin-list";
+import { usePluginDescription, usePluginDisplayName } from "@/plugins/plugin-list";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { SPACING } from "@/styles/theme";
 import {
@@ -28,6 +28,8 @@ import {
   ScrollView,
   TextInput,
   View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   type PressableStateCallbackType,
 } from "react-native";
 import { useRouter } from "expo-router";
@@ -156,15 +158,17 @@ import { navigateToLastWorkspace } from "@/stores/navigation-active-workspace-st
 function SettingsDesktopHeader({
   title,
   description,
+  scrolled,
   children,
 }: {
   title: string;
   description: string;
+  scrolled: boolean;
   children: ReactNode;
 }) {
   const gumloop = useGumloopDesktopShell(true);
   return gumloop ? (
-    <PageHeader icon={Settings} title={title} description={description} />
+    <PageHeader icon={Settings} title={title} description={description} scrolled={scrolled} />
   ) : (
     children
   );
@@ -1249,6 +1253,15 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
 
   const installedPlugins = useInstalledPlugins();
   const pluginDisplayName = usePluginDisplayName(view.kind === "plugin" ? view : null);
+  const pluginDescription = usePluginDescription(view.kind === "plugin" ? view : null);
+  const pageDescription = settingsPageDescription(view, pluginDescription);
+  // The header draws its divider once the page body leaves its top (spec 38 §4.4c).
+  const [detailScrolled, setDetailScrolled] = useState(false);
+  const viewKey = JSON.stringify(view);
+  useEffect(() => setDetailScrolled(false), [viewKey]);
+  const handleDetailScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    setDetailScrolled(event.nativeEvent.contentOffset.y > 0);
+  }, []);
   const detailHeader = ((): {
     title: string;
     Icon: ComponentType<{ size: number; color: string }>;
@@ -1425,7 +1438,12 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
           contentContainerStyle={insetBottomStyle}
           testID="settings-detail-scroll-body"
         >
-          <View style={styles.content}>{content}</View>
+          <View style={styles.content}>
+            <Text style={styles.compactDescription} testID="settings-page-description">
+              {pageDescription}
+            </Text>
+            {content}
+          </View>
         </SettingsScrollView>
         {addHostModals}
       </View>
@@ -1471,7 +1489,8 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
           <View style={desktopStyles.contentPane} testID="settings-detail-pane">
             <SettingsDesktopHeader
               title={detailHeader?.title ?? "Settings"}
-              description={settingsPageDescription(view)}
+              description={pageDescription}
+              scrolled={detailScrolled}
             >
               <ScreenHeader
                 borderless={!detailHeader}
@@ -1483,6 +1502,8 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
               {...settingsScrollProps}
               style={styles.scrollView}
               contentContainerStyle={insetBottomStyle}
+              onScroll={handleDetailScroll}
+              scrollEventThrottle={16}
               testID="settings-detail-scroll-body"
             >
               <View style={[styles.content, gumloopDesktop && styles.gumloopContent]}>
@@ -1520,12 +1541,19 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     backgroundColor: theme.chrome.pageCanvas,
   },
-  // Full width on the shared page gutter, like every Gumloop page (spec 38 §4.1, A38.4i).
+  // Full width on the shared page gutter, like every Gumloop page (spec 38 §4.1, A38.4i). The
+  // 8 px top padding keeps the first row off the header's divider (spec 38 §4.4c).
   gumloopContent: {
     maxWidth: "100%",
     paddingHorizontal: GUMLOOP_PAGE_GUTTER,
-    paddingTop: 0,
+    paddingTop: 8,
     alignSelf: "stretch",
+  },
+  compactDescription: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: theme.colors.foregroundMuted,
+    marginBottom: theme.spacing[4],
   },
   content: {
     padding: theme.spacing[4],

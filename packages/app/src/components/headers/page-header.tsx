@@ -1,6 +1,9 @@
-import { useGumloopDesktopShell } from "@/components/gumloop-shell/use-gumloop-chrome";
+import {
+  useGumloopDesktopShell,
+  useIsGumloopTheme,
+} from "@/components/gumloop-shell/use-gumloop-chrome";
 import { GUMLOOP_PAGE_GUTTER } from "@/components/gumloop-shell/list-styles";
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useRef, type ReactNode } from "react";
 import { Text, View } from "react-native";
 import type { LucideIcon } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -10,6 +13,7 @@ import type { Theme } from "@/styles/theme";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { CompactBackButton } from "./compact-back-button";
 import { PageHeaderActionContext } from "./page-header-context";
+import { usePageScrolled } from "./use-page-scrolled";
 
 const iconColorMapping = (theme: Theme) => ({ color: theme.colors.foreground });
 
@@ -29,6 +33,12 @@ interface PageHeaderProps {
   /** The page's tab row. Sits right under the title row, on the title's left edge. */
   tabs?: ReactNode;
   testID?: string;
+  /**
+   * The page body has scrolled: draw the 1 px divider under the header. Web detects it on its
+   * own; native cannot see the page's scroll view, so pages pass it from `usePageScroll`
+   * (spec 38 §4.4c).
+   */
+  scrolled?: boolean;
 }
 
 /**
@@ -48,18 +58,29 @@ export function PageHeader({
   accessory,
   tabs,
   testID,
+  scrolled,
 }: PageHeaderProps) {
   const gumloop = useGumloopDesktopShell(true);
   const isCompact = useIsCompactFormFactor();
+  // Phones in the Gumloop theme get the same solid header and divider (spec 38 §4.4c); classic
+  // themes keep their header as it was.
+  const gumloopPhone = useIsGumloopTheme() && isCompact;
+  const headerRef = useRef<View>(null);
+  const detectedScrolled = usePageScrolled(
+    headerRef,
+    (gumloop || gumloopPhone) && scrolled === undefined,
+  );
+  const showDivider = scrolled ?? detectedScrolled;
   const insets = useSafeAreaInsets();
   const ThemedIcon = useMemo(() => withUnistyles(icon), [icon]);
   const containerStyle = useMemo(
     () => [
       styles.container,
       gumloop && styles.gumloopContainer,
+      gumloopPhone && styles.gumloopPhoneContainer,
       isCompact ? { paddingTop: insets.top + 12 } : null,
     ],
-    [gumloop, insets.top, isCompact],
+    [gumloop, gumloopPhone, insets.top, isCompact],
   );
   const rightSide =
     accessory || actions ? (
@@ -72,7 +93,7 @@ export function PageHeader({
     ) : null;
   if (gumloop) {
     return (
-      <View style={containerStyle} testID={testID}>
+      <View ref={headerRef} style={containerStyle} testID={testID}>
         <View style={description ? styles.gumloopRowWithDescription : styles.gumloopRow}>
           {/* No window title bar in this shell: the title row drags the window and a double
               click zooms it, like the sidebar's brand row (spec 38 §4.1, A38.4h). */}
@@ -94,11 +115,14 @@ export function PageHeader({
           {rightSide}
         </View>
         {tabs ? <View style={styles.gumloopTabs}>{tabs}</View> : null}
+        {showDivider ? (
+          <View style={styles.scrollDivider} pointerEvents="none" testID="page-header-divider" />
+        ) : null}
       </View>
     );
   }
   return (
-    <View style={containerStyle} testID={testID}>
+    <View ref={headerRef} style={containerStyle} testID={testID}>
       <View style={styles.row}>
         <View style={styles.titleGroup}>
           <CompactBackButton />
@@ -111,6 +135,9 @@ export function PageHeader({
       </View>
       {description ? <Text style={styles.description}>{description}</Text> : null}
       {tabs ? <View style={styles.tabs}>{tabs}</View> : null}
+      {gumloopPhone && showDivider ? (
+        <View style={styles.scrollDivider} pointerEvents="none" testID="page-header-divider" />
+      ) : null}
     </View>
   );
 }
@@ -125,6 +152,18 @@ const styles = StyleSheet.create((theme: Theme) => ({
     paddingTop: 0,
     paddingBottom: 16,
     gap: 0,
+    // Solid behind the title row (spec 38 §4.4c). No z-index: Home pulls its first label up into
+    // the header's bottom padding and has to paint over it.
+    backgroundColor: theme.colors.surface0,
+  },
+  gumloopPhoneContainer: { backgroundColor: theme.colors.surface0 },
+  scrollDivider: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 1,
+    backgroundColor: theme.colors.border,
   },
   gumloopRow: {
     height: GUMLOOP_TITLE_ROW,

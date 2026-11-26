@@ -1,4 +1,5 @@
 export { PageHeader } from "@/components/headers/page-header";
+export { usePageScroll } from "@/components/headers/use-page-scroll";
 export {
   GUMLOOP_PAGE_GUTTER,
   gumloopChipStyles,

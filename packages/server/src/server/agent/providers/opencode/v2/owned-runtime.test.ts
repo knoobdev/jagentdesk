@@ -287,3 +287,51 @@ test("reports a bridge port change that has not been applied", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+// Spec 04 §5: a client the registry replaced must not leave its `opencode serve` running.
+test("retire stops an idle owned server and keeps a leased one until it is released", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "jagentdesk-opencode-retire-"));
+  const script = path.join(root, "server.cjs");
+  await writeFile(
+    script,
+    `
+    const http = require('node:http');
+    const server = http.createServer((_request, response) => {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ version: '2.0.10', pid: process.pid, urls: [], paths: { tmp: '/tmp' } }));
+    });
+    server.listen(0, '127.0.0.1', () => console.log('server listening on http://127.0.0.1:' + server.address().port));
+  `,
+  );
+  const settings = { command: { mode: "replace" as const, argv: [process.execPath, script] } };
+  const idleRuntime = new V2Runtime({
+    logger: createTestLogger(),
+    selection: { kind: "owned" },
+    settings,
+  });
+  const leasedRuntime = new V2Runtime({
+    logger: createTestLogger(),
+    selection: { kind: "owned" },
+    settings,
+  });
+  try {
+    const idle = await idleRuntime.acquire();
+    const idleExited = idle.exited;
+    await idle.release();
+    await idleRuntime.retire();
+    await expect(idleExited).resolves.toBeInstanceOf(Error);
+    await expect(idleRuntime.acquire()).rejects.toThrow("OpenCode runtime is closed");
+
+    const leased = await leasedRuntime.acquire();
+    const { pid } = await leased.client.server.info();
+    await leasedRuntime.retire();
+    expect(() => process.kill(pid, 0)).not.toThrow();
+    const leasedExited = leased.exited;
+    await leased.release();
+    await expect(leasedExited).resolves.toBeInstanceOf(Error);
+  } finally {
+    await idleRuntime.shutdown();
+    await leasedRuntime.shutdown();
+    await rm(root, { recursive: true, force: true });
+  }
+}, 15_000);

@@ -97,6 +97,23 @@ function resolveDetailName(toolKind: ClaudeToolKind, name: string): string {
   }
 }
 
+/**
+ * A Bash call with `run_in_background` starts background work; the app draws it as a
+ * "Started in background" row instead of a tool card (spec 38 §4.4b).
+ */
+function withBackgroundFlag(
+  toolKind: ClaudeToolKind,
+  input: unknown,
+  metadata: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  const background =
+    toolKind === "shell" &&
+    typeof input === "object" &&
+    input !== null &&
+    (input as { run_in_background?: unknown }).run_in_background === true;
+  return background ? { ...metadata, background: true } : metadata;
+}
+
 function mapClaudeToolCall(
   params: MapperParams,
   status: ClaudeToolCallStatus,
@@ -118,6 +135,7 @@ function mapClaudeToolCall(
   const input = raw.input ?? null;
   const output = raw.output ?? null;
   const detail = deriveClaudeToolDetail(resolveDetailName(toolKind, name), input, output);
+  const metadata = withBackgroundFlag(toolKind, input, raw.metadata);
 
   if (raw.status === "failed") {
     return {
@@ -127,7 +145,7 @@ function mapClaudeToolCall(
       detail,
       status: "failed",
       error: raw.error ?? { message: "Tool call failed" },
-      ...(raw.metadata ? { metadata: raw.metadata } : {}),
+      ...(metadata ? { metadata } : {}),
     };
   }
   return {
@@ -137,7 +155,7 @@ function mapClaudeToolCall(
     detail,
     status: raw.status,
     error: null,
-    ...(raw.metadata ? { metadata: raw.metadata } : {}),
+    ...(metadata ? { metadata } : {}),
   };
 }
 

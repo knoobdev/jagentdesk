@@ -66,6 +66,8 @@ export interface DaemonSessionOptions {
   }) => Promise<{ ok: boolean; error?: string }> | { ok: boolean; error?: string };
   /** Spec 05.5: closes every live socket of a revoked device on all transports. */
   closeConnectionsForDevice?: (deviceId: string) => number;
+  /** Paired devices with an open socket, for the device list's "Connected" chip. */
+  listConnectedDeviceIds?: () => ReadonlySet<string>;
 }
 
 /**
@@ -106,6 +108,7 @@ export class DaemonSession {
       }) => Promise<{ ok: boolean; error?: string }> | { ok: boolean; error?: string })
     | null;
   private readonly closeConnectionsForDevice: ((deviceId: string) => number) | null;
+  private readonly listConnectedDeviceIds: (() => ReadonlySet<string>) | null;
 
   constructor(options: DaemonSessionOptions) {
     this.host = options.host;
@@ -127,6 +130,7 @@ export class DaemonSession {
     this.pairingCodeManager = options.pairingCodeManager ?? null;
     this.cancelPendingPairingRequest = options.cancelPendingPairingRequest ?? null;
     this.closeConnectionsForDevice = options.closeConnectionsForDevice ?? null;
+    this.listConnectedDeviceIds = options.listConnectedDeviceIds ?? null;
     this.selfUpdate = new DaemonSelfUpdateSessionController({
       clientId: this.clientId,
       daemonVersion: this.daemonVersion ?? null,
@@ -502,11 +506,18 @@ export class DaemonSession {
       });
       return;
     }
+    const connected = this.listConnectedDeviceIds?.() ?? null;
     this.host.emit({
       type: "pairing.device.list.response",
       payload: {
         requestId: msg.requestId,
-        devices: this.pairedDevices.list(),
+        devices: this.pairedDevices
+          .list()
+          .map((device) =>
+            connected
+              ? Object.assign({}, device, { connected: connected.has(device.deviceId) })
+              : device,
+          ),
       },
     });
   }

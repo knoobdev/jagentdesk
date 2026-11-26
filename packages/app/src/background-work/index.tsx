@@ -1,229 +1,297 @@
-import { useCallback, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
-import { Text, View, Pressable, ScrollView } from "react-native";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type ReactElement,
+  type ReactNode,
+} from "react";
+import { Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
-import { StyleSheet } from "react-native-unistyles";
+import { Activity, CircleDashed, SquareTerminal } from "lucide-react-native";
+import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import { ComposerTrackPill, ComposerTrackRow } from "@/composer/tracks";
+import { ComposerStackTrack } from "@/composer/stack-track";
 import { LiveElapsed } from "@/components/message";
+import { StatusRing } from "@/components/status-ring";
 import { Button } from "@/components/ui/button";
+import { useIsCompactFormFactor } from "@/constants/layout";
+import type { Theme } from "@/styles/theme";
 import type { JAgentDeskAgentBackgroundWorkItem } from "@jagentdesk/client";
-import { createHostBackgroundWorkModel } from "./host";
 import { backgroundWorkText } from "./presentation";
+import {
+  consumeBackgroundWorkTrackOpen,
+  getBackgroundWorkModel,
+  useBackgroundWorkTrackOpenRequest,
+  type BackgroundWorkModel,
+} from "./shared";
 export { createHostBackgroundWorkModel } from "./host";
 
-function kindKey(kind: string): "shell" | "monitor" | "heartbeat" | "other" {
+const ThemedSquareTerminal = withUnistyles(SquareTerminal);
+const ThemedActivity = withUnistyles(Activity);
+const ThemedCircleDashed = withUnistyles(CircleDashed);
+const foregroundMutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
+
+type BackgroundWorkKind = "shell" | "monitor" | "heartbeat" | "other";
+
+function kindKey(kind: string): BackgroundWorkKind {
   if (kind === "shell" || kind === "monitor" || kind === "heartbeat") return kind;
   return "other";
 }
 
-export function BackgroundWorkTrack({
-  model,
-  count,
-}: {
-  model: ReturnType<typeof createHostBackgroundWorkModel>;
+function KindIcon({ kind }: { kind: BackgroundWorkKind }): ReactElement {
+  if (kind === "shell")
+    return <ThemedSquareTerminal size={14} uniProps={foregroundMutedColorMapping} />;
+  if (kind === "monitor" || kind === "heartbeat")
+    return <ThemedActivity size={14} uniProps={foregroundMutedColorMapping} />;
+  return <ThemedCircleDashed size={14} uniProps={foregroundMutedColorMapping} />;
+}
+
+type TrackRow =
+  | { state: "live"; item: JAgentDeskAgentBackgroundWorkItem }
+  | { state: "stopping"; item: JAgentDeskAgentBackgroundWorkItem; failed: boolean }
+  | { state: "finished"; item: JAgentDeskAgentBackgroundWorkItem };
+
+function useTrackRows(model: BackgroundWorkModel) {
+  const snapshot = useSyncedSnapshot(model);
+  const { items, stops, finished } = snapshot;
+  return useMemo(() => {
+    const rows: TrackRow[] = (items ?? []).map((item) => ({ state: "live", item }));
+    const liveTokens = new Set((items ?? []).map((item) => item.stopToken));
+    const stopping = Object.values(stops ?? {}).filter(
+      (entry) => !liveTokens.has(entry.item.stopToken),
+    );
+    for (const entry of stopping)
+      rows.push({ state: "stopping", item: entry.item, failed: entry.status === "error" });
+    const stoppingIds = new Set(stopping.map((entry) => entry.item.id));
+    for (const entry of Object.values(finished ?? {}))
+      if (!stoppingIds.has(entry.item.id)) rows.push({ state: "finished", item: entry.item });
+    return { snapshot, rows, runningCount: items?.length ?? null };
+  }, [finished, items, snapshot, stops]);
+}
+
+function useSyncedSnapshot(model: BackgroundWorkModel) {
+  return useSyncExternalStore(model.subscribe, model.getSnapshot, model.getSnapshot);
+}
+
+export interface BackgroundWorkTrackProps {
+  serverId: string;
+  agentId: string;
+  /** Running tasks from the directory summary; shown until the live list arrives. */
   count: number;
-}) {
+}
+
+/**
+ * The agent's background work as one track in the stack above the composer (spec 38 §4.4b):
+ * a stacked track on wide screens, a pill next to the subagents pill on compact ones.
+ */
+export function BackgroundWorkTrack({
+  serverId,
+  agentId,
+  count,
+}: BackgroundWorkTrackProps): ReactElement | null {
   const { t } = useTranslation();
-  const { items, status, stops } = useSyncExternalStore(
-    model.subscribe,
-    model.getSnapshot,
-    model.getSnapshot,
+  const compact = useIsCompactFormFactor();
+  const model = getBackgroundWorkModel(serverId, agentId);
+  const { snapshot, rows, runningCount } = useTrackRows(model);
+  const [expanded, setExpanded] = useState(false);
+  const toggle = useCallback(() => setExpanded((value) => !value), []);
+  const openRequest = useBackgroundWorkTrackOpenRequest(serverId, agentId);
+  useEffect(() => {
+    if (openRequest === 0) return;
+    setExpanded(true);
+    consumeBackgroundWorkTrackOpen(serverId, agentId);
+  }, [agentId, openRequest, serverId]);
+
+  const running = runningCount ?? count;
+  const leading = useMemo(() => (running > 0 ? <StatusRing /> : null), [running]);
+  if (running === 0 && rows.length === 0) return null;
+
+  let headerLabel = t("message.backgroundWork.finishedHeader", { count: rows.length });
+  if (running === 1) headerLabel = t("message.backgroundWork.pillOne");
+  else if (running > 1) headerLabel = t("message.backgroundWork.pillMany", { count: running });
+
+  const body = (
+    <BackgroundWorkRows model={model} rows={rows} status={snapshot.status} compact={compact} />
   );
-  const missing = Object.values(stops ?? {}).filter(
-    (entry) => !items?.some((item) => item.stopToken === entry.item.stopToken),
-  );
-  const rows = [...(items ?? []), ...missing.map((entry) => entry.item)];
-  if (count === 0 && rows.length === 0) return null;
-  const visibleCount = items?.length || count;
+  if (compact)
+    return (
+      <ComposerTrackPill
+        testID="background-work"
+        panelTitle={t("message.backgroundWork.title")}
+        segments={[{ bucket: running > 0 ? "running" : "done", text: headerLabel }]}
+        open={expanded}
+        onOpenChange={setExpanded}
+      >
+        {body}
+      </ComposerTrackPill>
+    );
   return (
-    <BackgroundWorkSurface
+    <ComposerStackTrack
       testID="background-work"
-      panelTitle={t("message.backgroundWork.title")}
-      segments={[
-        {
-          bucket: "running",
-          text:
-            visibleCount === 1
-              ? t("message.backgroundWork.pillOne")
-              : t("message.backgroundWork.pillMany", { count: visibleCount }),
-        },
-      ]}
+      headerTestID="background-work-header"
+      headerLabel={headerLabel}
+      leading={leading}
+      expanded={expanded}
+      onToggle={toggle}
     >
+      {body}
+    </ComposerStackTrack>
+  );
+}
+
+function BackgroundWorkRows({
+  model,
+  rows,
+  status,
+  compact,
+}: {
+  model: BackgroundWorkModel;
+  rows: TrackRow[];
+  status: ReturnType<BackgroundWorkModel["getSnapshot"]>["status"];
+  compact: boolean;
+}): ReactElement {
+  const { t } = useTranslation();
+  const Row = compact ? CompactRowFrame : StackRowFrame;
+  return (
+    <>
       {status === "loading" || status === "stale" ? (
-        <BackgroundWorkDetailRow>
+        <Row>
           <Text style={styles.facts}>{t("message.backgroundWork.waiting")}</Text>
-        </BackgroundWorkDetailRow>
+        </Row>
       ) : null}
       {status === "error" ? (
-        <>
-          <BackgroundWorkDetailRow>
-            <Text style={styles.facts}>{t("message.backgroundWork.error")}</Text>
-          </BackgroundWorkDetailRow>
-          <BackgroundWorkDetailRow
-            onPress={model.retry}
-            closeOnSelect={false}
-            accessibilityLabel={t("message.backgroundWork.retry")}
-          >
-            <Text style={styles.title}>{t("message.backgroundWork.retry")}</Text>
-          </BackgroundWorkDetailRow>
-        </>
+        <Row>
+          <Text style={styles.facts} numberOfLines={1}>
+            {t("message.backgroundWork.error")}
+          </Text>
+          <Button variant="ghost" size="sm" onPress={model.retry}>
+            {t("message.backgroundWork.retry")}
+          </Button>
+        </Row>
       ) : null}
-      {rows.map((item) => (
-        <BackgroundWorkRow
-          key={item.stopToken ?? item.id}
-          item={item}
-          model={model}
-          live={Boolean(items?.some((entry) => entry.stopToken === item.stopToken))}
-          ready={status === "ready"}
-          stopStatus={stops?.[item.stopToken ?? ""]?.status}
-        />
+      {rows.map((row) => (
+        <Row key={`${row.state}:${row.item.stopToken ?? row.item.id}`}>
+          <BackgroundWorkRowContent row={row} model={model} ready={status === "ready"} />
+        </Row>
       ))}
-    </BackgroundWorkSurface>
+    </>
   );
 }
 
-function BackgroundWorkRow({
-  item,
-  model,
-  live,
-  ready,
-  stopStatus,
-}: {
-  item: JAgentDeskAgentBackgroundWorkItem;
-  model: ReturnType<typeof createHostBackgroundWorkModel>;
-  live: boolean;
-  ready: boolean;
-  stopStatus?: "pending" | "error";
-}) {
-  const { t } = useTranslation();
-  const kind = t(`message.backgroundWork.${kindKey(item.kind)}`);
-  const stop = useCallback(() => {
-    void model.stopItem(item);
-  }, [model, item]);
-  const dismiss = useCallback(
-    () => model.dismissStop(item.stopToken ?? ""),
-    [model, item.stopToken],
-  );
-  let detail = t("message.backgroundWork.notRunning");
-  if (stopStatus === "pending") detail = t("message.backgroundWork.stopping");
-  const { title, command } = backgroundWorkText(item, kind);
-  const action = item.canStop && ready && live;
-  const label =
-    stopStatus === "pending"
-      ? t("message.backgroundWork.stopping")
-      : t("message.backgroundWork.stop");
+function StackRowFrame({ children }: { children: ReactNode }): ReactElement {
   return (
-    <BackgroundWorkDetailRow>
-      <View style={styles.row}>
-        <Text style={styles.title}>{title}</Text>
-        {command ? <Text style={styles.facts}>{command}</Text> : null}
-        <Text style={styles.facts}>
-          {kind} ·{" "}
-          {live ? (
-            <LiveElapsed startedAt={new Date(item.startedAt)} active style={styles.facts} />
-          ) : (
-            detail
-          )}
-        </Text>
-        {stopStatus === "error" ? (
-          <Text style={styles.facts}>{t("message.backgroundWork.stopError")}</Text>
-        ) : null}
-      </View>
-      {action ? (
-        <Button
-          variant="ghost"
-          size="sm"
-          accessibilityLabel={`${t("message.backgroundWork.stop")} ${title}`}
-          disabled={stopStatus === "pending"}
-          onPress={stop}
-        >
-          {label}
-        </Button>
-      ) : null}
-      {!live && stopStatus === "error" ? (
-        <Button variant="ghost" size="sm" onPress={dismiss}>
-          {t("message.backgroundWork.dismiss")}
-        </Button>
-      ) : null}
-    </BackgroundWorkDetailRow>
-  );
-}
-
-const styles = StyleSheet.create((theme) => ({
-  surface: {
-    marginHorizontal: theme.spacing[3],
-    borderRadius: theme.borderRadius.md,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface1,
-  },
-  header: { padding: theme.spacing[2] },
-  details: { maxHeight: 240 },
-  detailRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[2],
-    padding: theme.spacing[2],
-  },
-  row: { flexGrow: 1, flexShrink: 1, flexBasis: "auto", minWidth: 0 },
-  title: { fontSize: theme.fontSize.base, color: theme.colors.foreground },
-  facts: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
-}));
-
-// This checkout uses composer cards; keep the existing SubagentsTrack header/detail layout.
-function BackgroundWorkSurface({
-  testID,
-  panelTitle,
-  segments,
-  children,
-}: {
-  testID: string;
-  panelTitle: string;
-  segments: Array<{ bucket: string; text: string }>;
-  children: ReactNode;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const accessibilityState = useMemo(() => ({ expanded }), [expanded]);
-  const toggleExpanded = useCallback(() => setExpanded((value) => !value), []);
-  const label = segments.map((segment) => segment.text).join(" · ");
-  return (
-    <View style={styles.surface} testID={testID}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={panelTitle}
-        accessibilityState={accessibilityState}
-        onPress={toggleExpanded}
-        style={styles.header}
-      >
-        <Text style={styles.title}>{label}</Text>
-      </Pressable>
-      {expanded ? (
-        <ScrollView style={styles.details} keyboardShouldPersistTaps="handled">
-          {children}
-        </ScrollView>
-      ) : null}
+    <View style={styles.row} testID="background-work-row">
+      {children}
     </View>
   );
 }
 
-function BackgroundWorkDetailRow({
-  children,
-  onPress,
-  accessibilityLabel,
-}: {
-  children: ReactNode;
-  onPress?: () => void;
-  closeOnSelect?: boolean;
-  accessibilityLabel?: string;
-}) {
-  if (onPress)
-    return (
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={accessibilityLabel}
-        onPress={onPress}
-        style={styles.detailRow}
-      >
-        {children}
-      </Pressable>
-    );
-  return <View style={styles.detailRow}>{children}</View>;
+function CompactRowFrame({ children }: { children: ReactNode }): ReactElement {
+  return (
+    <ComposerTrackRow testID="background-work-row">
+      <View style={styles.compactRow}>{children}</View>
+    </ComposerTrackRow>
+  );
 }
+
+function BackgroundWorkRowContent({
+  row,
+  model,
+  ready,
+}: {
+  row: TrackRow;
+  model: BackgroundWorkModel;
+  ready: boolean;
+}): ReactElement {
+  const { t } = useTranslation();
+  const { item } = row;
+  const kind = kindKey(item.kind);
+  const kindLabel = t(`message.backgroundWork.${kind}`);
+  const { title, command } = backgroundWorkText(item, kindLabel);
+  const stop = useCallback(() => {
+    void model.stopItem(item);
+  }, [model, item]);
+  const dismiss = useCallback(() => {
+    if (row.state === "stopping") model.dismissStop(item.stopToken ?? "");
+    else model.dismissFinished(item.id);
+  }, [model, item.id, item.stopToken, row.state]);
+  // The command is the label when there is one: it is what the agent ran and what the user
+  // recognises; the description becomes the accessible name.
+  const label = command ?? title;
+  const labelIsCommand = Boolean(command ?? item.command);
+  return (
+    <>
+      <KindIcon kind={kind} />
+      <Text
+        style={labelIsCommand ? styles.commandLabel : styles.label}
+        numberOfLines={1}
+        accessibilityLabel={title}
+      >
+        {label}
+      </Text>
+      {row.state === "live" ? (
+        <LiveElapsed startedAt={new Date(item.startedAt)} active style={styles.facts} />
+      ) : null}
+      {row.state === "stopping" && !row.failed ? (
+        <Text style={styles.facts}>{t("message.backgroundWork.stopping")}</Text>
+      ) : null}
+      {row.state === "stopping" && row.failed ? (
+        <Text style={styles.facts} numberOfLines={1}>
+          {t("message.backgroundWork.stopError")}
+        </Text>
+      ) : null}
+      {row.state === "finished" ? (
+        <Text style={styles.facts}>{t("message.backgroundWork.notRunning")}</Text>
+      ) : null}
+      {row.state === "live" && item.canStop && ready ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          accessibilityLabel={`${t("message.backgroundWork.stop")} ${title}`}
+          onPress={stop}
+          testID="background-work-stop"
+        >
+          {t("message.backgroundWork.stop")}
+        </Button>
+      ) : null}
+      {row.state === "finished" || (row.state === "stopping" && row.failed) ? (
+        <Button variant="ghost" size="sm" onPress={dismiss} testID="background-work-dismiss">
+          {t("message.backgroundWork.dismiss")}
+        </Button>
+      ) : null}
+    </>
+  );
+}
+
+const styles = StyleSheet.create((theme) => ({
+  row: {
+    minHeight: 32,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+  },
+  compactRow: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+  },
+  label: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 13,
+    color: theme.colors.foreground,
+  },
+  commandLabel: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 13,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foreground,
+  },
+  facts: { fontSize: 13, color: theme.colors.foregroundMuted },
+}));

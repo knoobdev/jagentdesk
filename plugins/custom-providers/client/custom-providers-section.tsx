@@ -216,7 +216,12 @@ export function CustomProvidersSection({ serverId }: { serverId: string }) {
         {loaded ? (
           <View style={settingsStyles.card}>
             {loaded.providers.length === 0 ? (
-              <Text style={styles.emptyText}>{t("settings.providers.customProviders.empty")}</Text>
+              // Inside the group card, padded off its edges, above the add row (spec 38 §4.4c).
+              <View style={styles.emptyRow} testID="custom-providers-empty">
+                <Text style={styles.emptyText}>
+                  {t("settings.providers.customProviders.empty")}
+                </Text>
+              </View>
             ) : (
               loaded.providers.map((record, index) => (
                 <CustomProviderRow
@@ -284,9 +289,12 @@ const styles = StyleSheet.create((theme) => ({
     padding: theme.spacing[4],
     alignItems: "center",
   },
+  emptyRow: {
+    padding: theme.spacing[4],
+  },
   emptyText: {
     color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.sm,
+    fontSize: 14,
   },
   errorText: {
     color: theme.colors.palette.red[300],
