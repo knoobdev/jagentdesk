@@ -108,6 +108,8 @@ function ProviderFields({ serverId, model }: { serverId: string; model: BotFormM
         emptyText={t("bots.noOptions")}
         loading={providers.isLoading}
         size={size}
+        searchable
+        searchPlaceholder={t("bots.searchProviders")}
         triggerTestID="bot-provider"
       />
       <SelectField
@@ -119,6 +121,8 @@ function ProviderFields({ serverId, model }: { serverId: string; model: BotFormM
         placeholder={t("bots.choose")}
         emptyText={t("bots.noOptions")}
         size={size}
+        searchable
+        searchPlaceholder={t("bots.searchModels")}
         triggerTestID="bot-model"
       />
       <SelectField

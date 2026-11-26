@@ -53,6 +53,8 @@ export const botsStrings = {
   repo: "Default repository",
   choose: "Choose…",
   noOptions: "No options available",
+  searchModels: "Search models",
+  searchProviders: "Search providers",
   save: "Save",
   saved: "Saved",
   cancel: "Cancel",
