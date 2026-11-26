@@ -99,6 +99,15 @@ function serializeAttachment(ws: WebSocket, value: unknown): void {
   ws.serializeAttachment(value);
 }
 
+/** 1005, 1006 and 1015 describe a close but may not be sent in one. */
+function sendableCloseCode(code: number): number {
+  return code === 1000 ||
+    (code >= 1001 && code <= 1014 && code !== 1005 && code !== 1006) ||
+    (code >= 3000 && code <= 4999)
+    ? code
+    : 1000;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -226,6 +235,11 @@ interface CFResponseInit extends ResponseInit {
 export class RelayDurableObject {
   private state: DurableObjectState;
   private pendingFrames = new Map<string, Array<string | ArrayBuffer>>();
+  /**
+   * Connections whose forward failure was already logged. A broken target fails
+   * on every frame; one line per connection is enough to diagnose it.
+   */
+  private forwardFailuresLogged = new Set<string>();
   private pendingFrameBytes = new Map<string, number>();
 
   private readonly hooks: RelayHooks;
@@ -332,9 +346,8 @@ export class RelayDurableObject {
       const parsed: unknown = JSON.parse(message);
       const parsedRecord = isRecord(parsed) ? parsed : null;
       if (parsedRecord?.type !== "ping") return;
-      // Logged so the daemon-side e2e idle test can assert no JSON ping reached the DO
-      // (which would indicate a regression to app-level pings that wake the DO).
-      console.log("[Relay DO] legacy_json_ping_received");
+      // Not logged: an old daemon sends one every 30 s, and each line is a billed
+      // Workers Logs event.
       try {
         ws.send(JSON.stringify({ type: "pong", ts: Date.now() }));
       } catch {
@@ -376,6 +389,13 @@ export class RelayDurableObject {
         }
       }, secondDelayMs);
     }, initialDelayMs);
+  }
+
+  private logForwardFailure(route: string, error: unknown): void {
+    if (this.forwardFailuresLogged.has(route)) return;
+    if (this.forwardFailuresLogged.size >= 256) this.forwardFailuresLogged.clear();
+    this.forwardFailuresLogged.add(route);
+    console.error(`[Relay DO] Failed to forward ${route}:`, error);
   }
 
   private frameByteLength(frame: string | ArrayBuffer): number {
@@ -806,7 +826,7 @@ export class RelayDurableObject {
         try {
           target.send(message);
         } catch (error) {
-          console.error(`[Relay DO] Failed to forward client->server(${connectionId}):`, error);
+          this.logForwardFailure(`client->server(${connectionId})`, error);
         }
       }
       return;
@@ -818,7 +838,7 @@ export class RelayDurableObject {
       try {
         target.send(message);
       } catch (error) {
-        console.error(`[Relay DO] Failed to forward server->client(${connectionId}):`, error);
+        this.logForwardFailure(`server->client(${connectionId})`, error);
       }
     }
   }
@@ -827,6 +847,10 @@ export class RelayDurableObject {
    * Called when a WebSocket closes (wakes from hibernation).
    */
   webSocketClose(ws: WebSocket, code: number, reason: string, _wasClean: boolean): void {
+    // Answer the peer's close frame. Under this compatibility date the runtime
+    // does not, and a phone that closed its pairing socket sat in CLOSING for
+    // 10-20 s before its own close timed out.
+    this.closeSocket(ws, sendableCloseCode(code), reason);
     const attachmentRaw = deserializeAttachment(ws);
     if (!isRecord(attachmentRaw)) return;
     const attachment = attachmentRaw;

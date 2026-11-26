@@ -640,6 +640,34 @@ describe("RelayDurableObject control nudge/reset behavior", () => {
   });
 });
 
+describe("relay close handshake", () => {
+  it.each([
+    [4000, "network lost", 4000],
+    [1001, "going away", 1001],
+    [1006, "", 1000],
+    [1005, "", 1000],
+  ])("answers a client close %i (%s) and closes the server data socket", (code, reason, sent) => {
+    const clientId = "clt_close";
+    const client = createMockSocket({
+      version: "2",
+      role: "client",
+      connectionId: clientId,
+      serverId: "srv_test",
+      createdAt: Date.now(),
+    });
+    const serverData = createMockSocket();
+    const { state, setTagSockets } = createMockState();
+    setTagSockets("server-control", [createMockSocket({ authState: "ok" })]);
+    setTagSockets(`server:${clientId}`, [serverData]);
+    setTagSockets(`client:${clientId}`, [client]);
+    const relay = new RelayDurableObject(state as unknown as DurableObjectStateArg);
+    setTagSockets(`client:${clientId}`, []);
+    relay.webSocketClose(client as unknown as WebSocket, code, reason, false);
+    expect(client.close).toHaveBeenCalledWith(sent, reason);
+    expect(serverData.close).toHaveBeenCalledWith(1001, "Client disconnected");
+  });
+});
+
 function base64Url(bytes: Uint8Array): string {
   return bytesToBase64Url(bytes);
 }

@@ -161,9 +161,13 @@ export function startRelayTransport({
       controlWs = null;
       controlHandler?.closed();
     }
+    // Terminate, not close: the relay does not answer a close frame, so `ws`
+    // would report the close only after its 30 s timeout. Until then the daemon
+    // treats every session on that socket as alive; a pairing attempt stayed
+    // open and the host could confirm a device that was already gone.
     for (const ws of rawDataSockets.values()) {
       try {
-        ws.close();
+        ws.terminate();
       } catch {
         // ignore
       }
