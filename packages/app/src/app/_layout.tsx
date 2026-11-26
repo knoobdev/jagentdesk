@@ -124,7 +124,6 @@ import {
 } from "@/tailscale";
 import { keyboardActionDispatcher } from "@/keyboard/keyboard-action-dispatcher";
 import { polyfillCrypto } from "@/polyfills/crypto";
-import { polyfillNavigator } from "@/polyfills/navigator";
 import { createSourceHostReconnectHandler } from "@/runtime/migration/reverse-migration-handler";
 import {
   getHostRuntimeStore,
@@ -163,7 +162,6 @@ import {
   parseServerIdFromPathname,
 } from "@/utils/host-routes";
 
-polyfillNavigator();
 polyfillCrypto();
 
 export interface HostRuntimeBootstrapState {
