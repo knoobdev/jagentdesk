@@ -14,7 +14,36 @@ export interface MemoryTurnInjection {
 export interface MemoryPort {
   /** Null when Memory or auto-inject is off, or nothing passes the relevance threshold. */
   prepareUserTurn(input: { agentId: string; text: string }): Promise<MemoryTurnInjection | null>;
+  /** The spec 42 switches, kept with the Memory settings (Settings → Memory). */
+  durableSettings(): DurableContextSettings;
 }
+
+/** Spec 42 §8 switches. All on by default; the daemon uses the defaults without Memory. */
+export interface DurableContextSettings {
+  regroundAfterCompaction: boolean;
+  recitation: boolean;
+  ledgerNudge: boolean;
+  learnFromCorrections: boolean;
+  lessonExpiry: boolean;
+}
+
+export const DEFAULT_DURABLE_CONTEXT_SETTINGS: DurableContextSettings = {
+  regroundAfterCompaction: true,
+  recitation: true,
+  ledgerNudge: true,
+  learnFromCorrections: true,
+  lessonExpiry: true,
+};
+
+/** A memory block the prompt already carries (session.ts put it there for a person's message). */
+export function hasMemoryBlock(prompt: AgentPromptInput): boolean {
+  if (typeof prompt === "string") return false;
+  return prompt.some(
+    (block) => block.type === "text" && "title" in block && block.title === MEMORY_BLOCK_TITLE,
+  );
+}
+
+export const MEMORY_BLOCK_TITLE = "Relevant memories";
 
 /**
  * Puts the memory block first, as a text attachment so the user's bubble shows only what they

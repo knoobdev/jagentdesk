@@ -1,21 +1,32 @@
 import { randomBytes } from "node:crypto";
 import type Database from "better-sqlite3";
 import type {
+  MemoryCitation,
+  MemoryKind,
   MemoryRecord,
   MemoryScope,
   MemorySource,
+  MemoryStatus,
   MemoryUse,
   MemoryUseKind,
   ScoredMemory,
 } from "../shared/types.js";
-import { MEMORY_TEXT_MAX_CHARS } from "../shared/types.js";
+import { isGraduationReady, MEMORY_TEXT_MAX_CHARS } from "../shared/types.js";
 import { extractQueryTerms, type QueryTerm } from "./query-terms.js";
 import { findSecret } from "./secrets.js";
 
 export class MemoryInputError extends Error {
   constructor(
     message: string,
-    readonly code: "empty" | "too_long" | "secret" | "not_found" | "no_project" | "disabled",
+    readonly code:
+      | "empty"
+      | "too_long"
+      | "secret"
+      | "not_found"
+      | "no_project"
+      | "disabled"
+      | "citation"
+      | "conflict",
   ) {
     super(message);
     this.name = "MemoryInputError";
@@ -40,7 +51,35 @@ interface MemoryRow {
   updated_at: number;
   last_used_at: number | null;
   use_count: number;
+  kind: MemoryKind;
+  status: MemoryStatus;
+  citations: string;
+  helpful: number;
+  harmful: number;
+  status_reason: string | null;
+  last_validated_at: number | null;
+  kept_at: number | null;
+  graduated_path: string | null;
+  agent_count?: number;
 }
+
+/** Spec 42 columns, added to databases created before them. */
+const LESSON_COLUMNS: ReadonlyArray<[string, string]> = [
+  ["kind", "TEXT NOT NULL DEFAULT 'memory'"],
+  ["status", "TEXT NOT NULL DEFAULT 'active'"],
+  ["citations", "TEXT NOT NULL DEFAULT '[]'"],
+  ["helpful", "INTEGER NOT NULL DEFAULT 0"],
+  ["harmful", "INTEGER NOT NULL DEFAULT 0"],
+  ["status_reason", "TEXT"],
+  ["last_validated_at", "INTEGER"],
+  // When the lesson was last approved, created or rated helpful: the 28-day expiry counts from it.
+  ["kept_at", "INTEGER"],
+  ["graduated_path", "TEXT"],
+];
+
+const ROW_SELECT = `SELECT m.rowid, m.*,
+  (SELECT count(DISTINCT u.agent_id) FROM memory_uses u WHERE u.memory_id = m.id) AS agent_count
+  FROM memories m`;
 
 export interface AddMemoryInput {
   scope: MemoryScope;
@@ -49,15 +88,24 @@ export interface AddMemoryInput {
   tags?: readonly string[];
   pinned?: boolean;
   source: MemorySource;
+  kind?: MemoryKind;
+  /** Already normalized; required (non-empty) for a lesson. */
+  citations?: readonly MemoryCitation[];
+  /** "pending" for lessons from Capture lessons; "active" otherwise. */
+  status?: "active" | "pending";
 }
 
 export interface UpdateMemoryInput {
   text?: string;
   tags?: readonly string[];
   pinned?: boolean;
+  kind?: MemoryKind;
+  citations?: readonly MemoryCitation[];
 }
 
 export interface ListMemoriesFilter {
+  kind?: MemoryKind;
+  status?: MemoryStatus;
   scope?: MemoryScope;
   /** Project memories of this project; with no scope, also every global memory. */
   projectId?: string | null;
@@ -188,6 +236,15 @@ export class MemoryStore {
       CREATE INDEX IF NOT EXISTS memory_uses_memory ON memory_uses (memory_id);
       CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     `);
+    const existing = new Set(
+      db
+        .prepare<[], { name: string }>("PRAGMA table_info(memories)")
+        .all()
+        .map((column) => column.name),
+    );
+    for (const [name, definition] of LESSON_COLUMNS) {
+      if (!existing.has(name)) db.exec(`ALTER TABLE memories ADD COLUMN ${name} ${definition}`);
+    }
   }
 
   add(input: AddMemoryInput): { memory: MemoryRecord; deduplicated: boolean } {
@@ -200,23 +257,28 @@ export class MemoryStore {
     const projectId = input.scope === "project" ? input.projectId : null;
     const norm = normalizeText(text);
     const now = this.now();
+    const kind = input.kind ?? "memory";
+    const citations = input.citations ?? [];
+    if (kind === "lesson" && citations.length === 0)
+      throw new MemoryInputError(
+        "A lesson needs at least one citation: the file (and if you can, an exact excerpt) that shows it is true.",
+        "citation",
+      );
     const existing = this.db
       .prepare<[string, string, string], MemoryRow>(
         "SELECT rowid, * FROM memories WHERE scope = ? AND ifnull(project_id, '') = ? AND norm = ?",
       )
       .get(input.scope, projectId ?? "", norm);
     if (existing) {
-      const tags = cleanTags([...JSON.parse(existing.tags), ...(input.tags ?? [])]);
-      this.db
-        .prepare("UPDATE memories SET text = ?, tags = ?, updated_at = ? WHERE id = ?")
-        .run(text, JSON.stringify(tags), now, existing.id);
+      this.mergeInto(existing, { ...input, text, kind, citations });
       return { memory: this.require(existing.id), deduplicated: true };
     }
     const id = this.newId();
     this.db
       .prepare(
-        `INSERT INTO memories (id, scope, project_id, text, norm, tags, pinned, source, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO memories (id, scope, project_id, text, norm, tags, pinned, source, created_at, updated_at,
+           kind, status, citations, kept_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -229,8 +291,57 @@ export class MemoryStore {
         JSON.stringify(input.source),
         now,
         now,
+        kind,
+        input.status ?? "active",
+        JSON.stringify(citations),
+        now,
       );
     return { memory: this.require(id), deduplicated: false };
+  }
+
+  /**
+   * Delta update (spec 42 §4): the matching entry is updated in place, nothing else is touched.
+   * A captured (pending) copy never demotes an entry the user already approved; saving a stale
+   * entry again brings it back (its citations are checked again before injection).
+   */
+  private mergeInto(
+    existing: MemoryRow,
+    input: {
+      text: string;
+      tags?: readonly string[];
+      kind: MemoryKind;
+      citations: readonly MemoryCitation[];
+      status?: "active" | "pending";
+    },
+  ): void {
+    const now = this.now();
+    const tags = cleanTags([...JSON.parse(existing.tags), ...(input.tags ?? [])]);
+    const mergedCitations = mergeCitations(JSON.parse(existing.citations), input.citations);
+    const nextKind: MemoryKind =
+      existing.kind === "lesson" || input.kind === "lesson" ? "lesson" : "memory";
+    let nextStatus: MemoryStatus = existing.status;
+    if (existing.status === "pending") nextStatus = input.status ?? "active";
+    else if (existing.status === "stale" && input.status !== "pending") nextStatus = "active";
+    const revived = nextStatus === "active" && existing.status !== "active";
+    this.db
+      .prepare(
+        `UPDATE memories SET text = ?, tags = ?, kind = ?, citations = ?, status = ?, updated_at = ?,
+           status_reason = CASE WHEN ? THEN NULL ELSE status_reason END,
+           kept_at = CASE WHEN ? THEN ? ELSE kept_at END
+         WHERE id = ?`,
+      )
+      .run(
+        input.text,
+        JSON.stringify(tags),
+        nextKind,
+        JSON.stringify(mergedCitations),
+        nextStatus,
+        now,
+        revived ? 1 : 0,
+        revived ? 1 : 0,
+        now,
+        existing.id,
+      );
   }
 
   update(id: string, patch: UpdateMemoryInput): MemoryRecord {
@@ -238,6 +349,10 @@ export class MemoryStore {
     if (!row) throw new MemoryInputError("Memory not found.", "not_found");
     const text = patch.text === undefined ? row.text : validateMemoryText(patch.text);
     const tags = patch.tags === undefined ? JSON.parse(row.tags) : cleanTags(patch.tags);
+    const kind = patch.kind ?? row.kind;
+    const citations = patch.citations ?? (JSON.parse(row.citations) as MemoryCitation[]);
+    if (kind === "lesson" && citations.length === 0)
+      throw new MemoryInputError("A lesson needs at least one citation.", "citation");
     let pinned = row.pinned;
     if (patch.pinned !== undefined) pinned = patch.pinned ? 1 : 0;
     const norm = normalizeText(text);
@@ -251,9 +366,18 @@ export class MemoryStore {
       if (duplicate) this.db.prepare("DELETE FROM memories WHERE id = ?").run(duplicate.id);
       this.db
         .prepare(
-          "UPDATE memories SET text = ?, norm = ?, tags = ?, pinned = ?, updated_at = ? WHERE id = ?",
+          "UPDATE memories SET text = ?, norm = ?, tags = ?, pinned = ?, kind = ?, citations = ?, updated_at = ? WHERE id = ?",
         )
-        .run(text, norm, JSON.stringify(tags), pinned, this.now(), id);
+        .run(
+          text,
+          norm,
+          JSON.stringify(tags),
+          pinned,
+          kind,
+          JSON.stringify(citations),
+          this.now(),
+          id,
+        );
     });
     run();
     return this.require(id);
@@ -271,7 +395,7 @@ export class MemoryStore {
   list(filter: ListMemoriesFilter = {}): MemoryRecord[] {
     const where: string[] = [];
     const params: (string | number)[] = [];
-    if (filter.scope === "global") where.push("scope = 'global'");
+    if (filter.scope === "global") where.push("m.scope = 'global'");
     else if (filter.scope === "project") {
       where.push("scope = 'project' AND project_id = ?");
       params.push(filter.projectId ?? "");
@@ -280,7 +404,7 @@ export class MemoryStore {
       params.push(filter.projectId ?? "");
     }
     if (filter.tag) {
-      where.push("EXISTS (SELECT 1 FROM json_each(memories.tags) WHERE value = ?)");
+      where.push("EXISTS (SELECT 1 FROM json_each(m.tags) WHERE value = ?)");
       params.push(filter.tag.trim().toLowerCase());
     }
     if (filter.contains?.trim()) {
@@ -292,7 +416,15 @@ export class MemoryStore {
       where.push("json_extract(source, '$.agentId') = ?");
       params.push(filter.createdByAgentId);
     }
-    const sql = `SELECT rowid, * FROM memories ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+    if (filter.kind) {
+      where.push("kind = ?");
+      params.push(filter.kind);
+    }
+    if (filter.status) {
+      where.push("status = ?");
+      params.push(filter.status);
+    }
+    const sql = `${ROW_SELECT} ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
       ORDER BY pinned DESC, updated_at DESC`;
     return this.db
       .prepare<(string | number)[], MemoryRow>(sql)
@@ -311,7 +443,8 @@ export class MemoryStore {
   /**
    * What the daemon puts in front of a user turn (spec 41 §3.1): at most `maxRelevant` memories
    * that pass the relevance threshold, plus every pinned memory up to `maxPinned`, together within
-   * `tokenCap`. Pinned memories go first; a memory that does not fit is skipped, not cut.
+   * `tokenCap`. Pinned memories go first; a memory that does not fit is skipped, not cut. Only
+   * active entries qualify; `accept` (the lesson citation check, spec 42 §4) can veto one.
    */
   selectForPrompt(input: {
     text: string;
@@ -319,16 +452,20 @@ export class MemoryStore {
     maxRelevant?: number;
     maxPinned?: number;
     tokenCap: number;
+    accept?: (memory: MemoryRecord) => boolean;
   }): ScoredMemory[] {
     const maxRelevant = input.maxRelevant ?? 5;
     const maxPinned = input.maxPinned ?? 10;
-    const pinned = this.list({ projectId: input.projectId })
+    const accept = input.accept ?? (() => true);
+    const pinned = this.list({ projectId: input.projectId, status: "active" })
       .filter((memory) => memory.pinned)
+      .filter(accept)
       .slice(0, maxPinned);
     const terms = extractQueryTerms(input.text);
     const relevant = this.candidates(input.text, input.projectId)
       .filter((candidate) => qualifies(candidate, terms))
       .filter((candidate) => !pinned.some((memory) => memory.id === candidate.row.id))
+      .filter((candidate) => accept(toRecord(candidate.row)))
       .slice(0, maxRelevant);
     const selected: ScoredMemory[] = [];
     let tokens = 0;
@@ -380,9 +517,15 @@ export class MemoryStore {
     const rows = this.db
       .prepare<
         [string],
-        MemoryRow & { turn_key: string; kind: MemoryUseKind; score: number | null; at: number }
+        MemoryRow & {
+          turn_key: string;
+          use_kind: MemoryUseKind;
+          use_score: number | null;
+          at: number;
+        }
       >(
-        `SELECT m.rowid, m.*, u.turn_key, u.kind, u.score AS score, u.at
+        `SELECT m.rowid, m.*, u.turn_key, u.kind AS use_kind, u.score AS use_score, u.at,
+           (SELECT count(DISTINCT x.agent_id) FROM memory_uses x WHERE x.memory_id = m.id) AS agent_count
          FROM memory_uses u JOIN memories m ON m.id = u.memory_id
          WHERE u.agent_id = ? ORDER BY u.at DESC`,
       )
@@ -390,10 +533,92 @@ export class MemoryStore {
     return rows.map((row) => ({
       memory: toRecord(row),
       turnKey: row.turn_key,
-      kind: row.kind,
-      score: row.score,
+      kind: row.use_kind,
+      score: row.use_score,
       usedAtMs: row.at,
     }));
+  }
+
+  /** User approval / restore, or the daemon marking an entry stale, deprecated or graduated. */
+  setStatus(
+    id: string,
+    status: MemoryStatus,
+    options: { reason?: string | null; graduatedPath?: string } = {},
+  ): MemoryRecord {
+    const row = this.row(id);
+    if (!row) throw new MemoryInputError("Memory not found.", "not_found");
+    const now = this.now();
+    // Approving or restoring restarts the expiry clock and forgets the old reason.
+    const kept = status === "active" && row.status !== "active";
+    this.db
+      .prepare(
+        `UPDATE memories SET status = ?, status_reason = ?, updated_at = ?,
+           kept_at = CASE WHEN ? THEN ? ELSE kept_at END,
+           graduated_path = coalesce(?, graduated_path)
+         WHERE id = ?`,
+      )
+      .run(
+        status,
+        status === "active" ? null : (options.reason ?? row.status_reason),
+        now,
+        kept ? 1 : 0,
+        now,
+        options.graduatedPath ?? null,
+        id,
+      );
+    return this.require(id);
+  }
+
+  /**
+   * 👍/👎 and the `rate_memory` tool (spec 42 §4). Helpful keeps a lesson alive (restarts its
+   * 28-day clock); harmful ≥ 2 and more harmful than helpful deprecates the entry.
+   */
+  rate(id: string, helpful: boolean): MemoryRecord {
+    const row = this.row(id);
+    if (!row) throw new MemoryInputError("Memory not found.", "not_found");
+    const now = this.now();
+    if (helpful) {
+      this.db
+        .prepare("UPDATE memories SET helpful = helpful + 1, kept_at = ? WHERE id = ?")
+        .run(now, id);
+    } else {
+      this.db.prepare("UPDATE memories SET harmful = harmful + 1 WHERE id = ?").run(id);
+    }
+    const next = this.require(id);
+    if (
+      next.harmful >= 2 &&
+      next.harmful > next.helpful &&
+      next.status !== "deprecated" &&
+      next.status !== "graduated"
+    ) {
+      return this.setStatus(id, "deprecated", {
+        reason: `Rated unhelpful ${next.harmful} times (helpful ${next.helpful}).`,
+      });
+    }
+    return next;
+  }
+
+  markValidated(id: string): void {
+    this.db.prepare("UPDATE memories SET last_validated_at = ? WHERE id = ?").run(this.now(), id);
+  }
+
+  /**
+   * Active lessons not kept (created, approved or rated helpful) within `maxAgeMs` go stale
+   * (spec 42 §4). Returns the ids that changed.
+   */
+  expireLessons(maxAgeMs: number): string[] {
+    const cutoff = this.now() - maxAgeMs;
+    const rows = this.db
+      .prepare<[number], { id: string }>(
+        `SELECT id FROM memories WHERE kind = 'lesson' AND status = 'active'
+           AND coalesce(kept_at, created_at) < ?`,
+      )
+      .all(cutoff);
+    const days = Math.round(maxAgeMs / 86_400_000);
+    for (const { id } of rows) {
+      this.setStatus(id, "stale", { reason: `Not rated helpful for ${days} days.` });
+    }
+    return rows.map((row) => row.id);
   }
 
   getSetting(key: string): string | null {
@@ -419,7 +644,7 @@ export class MemoryStore {
   private candidates(query: string, projectId: string | null, scope?: MemoryScope): Candidate[] {
     const terms = extractQueryTerms(query);
     if (terms.length === 0) return [];
-    const scopeSql = scopeCondition(scope);
+    const scopeSql = `${scopeCondition(scope)} AND m.status = 'active'`;
     const scopeParams = scope === "global" ? [] : [projectId ?? ""];
     const total =
       this.db
@@ -428,7 +653,9 @@ export class MemoryStore {
     if (total === 0) return [];
     const byRow = new Map<number, Candidate>();
     const matchTerm = this.db.prepare<string[], MemoryRow>(
-      `SELECT m.rowid, m.* FROM memories_fts f JOIN memories m ON m.rowid = f.rowid
+      `SELECT m.rowid, m.*,
+         (SELECT count(DISTINCT u.agent_id) FROM memory_uses u WHERE u.memory_id = m.id) AS agent_count
+       FROM memories_fts f JOIN memories m ON m.rowid = f.rowid
        WHERE memories_fts MATCH ? AND ${scopeSql}`,
     );
     for (const term of terms) {
@@ -459,18 +686,18 @@ export class MemoryStore {
       const candidate = byRow.get(rowid);
       if (candidate) candidate.ftsRank = rank;
     }
+    // Spec 42 §4: at equal score a lesson goes before a plain memory.
     return [...byRow.values()].sort(
       (left, right) =>
         right.score - left.score ||
+        kindRank(left.row.kind) - kindRank(right.row.kind) ||
         left.ftsRank - right.ftsRank ||
         right.row.updated_at - left.row.updated_at,
     );
   }
 
   private row(id: string): MemoryRow | undefined {
-    return this.db
-      .prepare<[string], MemoryRow>("SELECT rowid, * FROM memories WHERE id = ?")
-      .get(id);
+    return this.db.prepare<[string], MemoryRow>(`${ROW_SELECT} WHERE m.id = ?`).get(id);
   }
 
   private require(id: string): MemoryRecord {
@@ -490,6 +717,27 @@ function qualifies(candidate: Candidate, terms: readonly QueryTerm[]): boolean {
   return candidate.matched >= Math.min(2, terms.length);
 }
 
+function kindRank(kind: MemoryKind): number {
+  return kind === "lesson" ? 0 : 1;
+}
+
+function mergeCitations(
+  existing: readonly MemoryCitation[],
+  incoming: readonly MemoryCitation[],
+): MemoryCitation[] {
+  const merged = [...existing];
+  for (const citation of incoming) {
+    const same = merged.some(
+      (other) =>
+        other.path === citation.path &&
+        other.symbol === citation.symbol &&
+        other.excerpt === citation.excerpt,
+    );
+    if (!same) merged.push(citation);
+  }
+  return merged.slice(-5);
+}
+
 function scopeCondition(scope: MemoryScope | undefined): string {
   if (scope === "global") return "m.scope = 'global'";
   if (scope === "project") return "m.scope = 'project' AND m.project_id = ?";
@@ -505,7 +753,7 @@ function round(value: number): number {
 }
 
 function toRecord(row: MemoryRow): MemoryRecord {
-  return {
+  const base = {
     id: row.id,
     scope: row.scope,
     projectId: row.project_id,
@@ -518,4 +766,19 @@ function toRecord(row: MemoryRow): MemoryRecord {
     lastUsedAtMs: row.last_used_at,
     useCount: row.use_count,
   };
+  const record: MemoryRecord = {
+    ...base,
+    kind: row.kind ?? "memory",
+    status: row.status ?? "active",
+    citations: JSON.parse(row.citations ?? "[]") as MemoryCitation[],
+    helpful: row.helpful ?? 0,
+    harmful: row.harmful ?? 0,
+    statusReason: row.status_reason ?? null,
+    lastValidatedAtMs: row.last_validated_at ?? null,
+    agentCount: row.agent_count ?? 0,
+    graduatedPath: row.graduated_path ?? null,
+    graduationReady: false,
+  };
+  record.graduationReady = isGraduationReady(record);
+  return record;
 }

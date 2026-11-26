@@ -42,6 +42,10 @@ export function register(host: BuiltinServerHost) {
       "memory.agent.request",
       "memory.settings.get.request",
       "memory.settings.set.request",
+      "memory.rate.request",
+      "memory.validate.request",
+      "memory.graduation.preview.request",
+      "memory.graduation.apply.request",
     ],
     (services) => new MemorySession(ref.get(services.daemon), services.push),
   );

@@ -48,6 +48,7 @@ export class MemorySession implements BuiltinSessionContribution {
   ): Promise<SessionOutboundMessage> {
     switch (message.type) {
       case "memory.list.request": {
+        service.sweepExpiredLessons();
         const projectId =
           message.projectId ?? (await service.projectIdForAgent(message.agentId)) ?? null;
         const memories =
@@ -58,6 +59,8 @@ export class MemorySession implements BuiltinSessionContribution {
                 projectId,
                 tag: message.tag,
                 contains: message.query,
+                kind: message.kind,
+                status: message.status,
               });
         return {
           type: "memory.list.response",
@@ -104,6 +107,38 @@ export class MemorySession implements BuiltinSessionContribution {
         return {
           type: "memory.settings.set.response",
           payload: { requestId: message.requestId, settings: service.updateSettings(message) },
+        };
+      case "memory.rate.request":
+        return {
+          type: "memory.rate.response",
+          payload: {
+            requestId: message.requestId,
+            memory: service.rate({ id: message.id, helpful: message.helpful }),
+          },
+        };
+      case "memory.validate.request":
+        return {
+          type: "memory.validate.response",
+          payload: {
+            requestId: message.requestId,
+            memories: await service.validate({ id: message.id, projectId: message.projectId }),
+          },
+        };
+      case "memory.graduation.preview.request":
+        return {
+          type: "memory.graduation.preview.response",
+          payload: {
+            requestId: message.requestId,
+            ...(await service.graduationPreview(message.id)),
+          },
+        };
+      case "memory.graduation.apply.request":
+        return {
+          type: "memory.graduation.apply.response",
+          payload: {
+            requestId: message.requestId,
+            ...(await service.graduationApply({ id: message.id, baseHash: message.baseHash })),
+          },
         };
     }
   }

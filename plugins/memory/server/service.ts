@@ -1,15 +1,22 @@
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import type { JsonValue } from "@jagentdesk/protocol/agent-types";
 import type { Logger } from "pino";
 import type {
   AgentManager,
   BuiltinProject,
   BuiltinProjectAccess,
+  DurableContextSettings,
   MemoryTurnInjection,
   SessionOutboundMessage,
 } from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 import {
   DEFAULT_MEMORY_SETTINGS,
+  LESSON_EXPIRY_MS,
+  type MemoryCitation,
+  type MemoryKind,
+  type MemoryStatus,
   MEMORY_PLUGIN_ID,
   MEMORY_REMEMBERED_ITEM_KIND,
   MEMORY_USED_ITEM_KIND,
@@ -21,7 +28,34 @@ import {
   type MemoryUseKind,
   type ScoredMemory,
 } from "../shared/types.js";
+import {
+  addLearnedRule,
+  checkCitations,
+  hashText,
+  insertionDiff,
+  normalizeCitations,
+  pickRulesFile,
+} from "./lessons.js";
 import { MemoryInputError, MemoryStore } from "./store.js";
+
+const BOOLEAN_SETTINGS = [
+  "enabled",
+  "autoInject",
+  "regroundAfterCompaction",
+  "recitation",
+  "ledgerNudge",
+  "learnFromCorrections",
+  "lessonExpiry",
+] as const;
+
+export interface GraduationPreview {
+  id: string;
+  path: string;
+  relativePath: string;
+  created: boolean;
+  diff: string;
+  baseHash: string;
+}
 
 const MIN_TOKEN_CAP = 100;
 const MAX_TOKEN_CAP = 8_000;
@@ -57,10 +91,24 @@ export class MemoryService {
     return { ...DEFAULT_MEMORY_SETTINGS, ...(JSON.parse(raw) as Partial<MemorySettings>) };
   }
 
+  /** The spec 42 switches for the daemon core (re-grounding, recitation, ledger nudge). */
+  durableSettings(): DurableContextSettings {
+    const settings = this.settings();
+    return {
+      regroundAfterCompaction: settings.regroundAfterCompaction,
+      recitation: settings.recitation,
+      ledgerNudge: settings.ledgerNudge,
+      learnFromCorrections: settings.enabled && settings.learnFromCorrections,
+      lessonExpiry: settings.lessonExpiry,
+    };
+  }
+
   updateSettings(patch: Partial<MemorySettings>): MemorySettings {
     const next = { ...this.settings() };
-    if (patch.enabled !== undefined) next.enabled = patch.enabled;
-    if (patch.autoInject !== undefined) next.autoInject = patch.autoInject;
+    for (const key of BOOLEAN_SETTINGS) {
+      const value = patch[key];
+      if (typeof value === "boolean") next[key] = value;
+    }
     if (patch.tokenCap !== undefined)
       next.tokenCap = Math.max(MIN_TOKEN_CAP, Math.min(MAX_TOKEN_CAP, Math.round(patch.tokenCap)));
     this.deps.store.setSetting("settings", JSON.stringify(next));
@@ -77,12 +125,54 @@ export class MemoryService {
     return (await this.deps.projects.forAgent(agentId))?.projectId ?? null;
   }
 
+  /** Where an agent's citations resolve: its cwd, else its project's root. */
+  private async rootForAgent(agentId: string | null | undefined): Promise<string | null> {
+    if (!agentId) return null;
+    const cwd = this.deps.agentManager.getAgent(agentId)?.cwd;
+    if (cwd) return cwd;
+    return (await this.deps.projects?.forAgent(agentId))?.rootPath ?? null;
+  }
+
+  private async projectRoot(projectId: string | null): Promise<string | null> {
+    if (!projectId) return null;
+    return (
+      (await this.listProjects()).find((project) => project.projectId === projectId)?.rootPath ??
+      null
+    );
+  }
+
+  /**
+   * Cleans a lesson's citations and checks them now, so an agent learns at once that a path or
+   * excerpt is wrong (spec 42 §4: a lesson must hold before it is ever injected).
+   */
+  private prepareCitations(
+    kind: MemoryKind,
+    citations: readonly MemoryCitation[] | undefined,
+    root: string | null,
+  ): MemoryCitation[] {
+    const cleaned = normalizeCitations(citations, root);
+    if (kind !== "lesson") return cleaned;
+    if (cleaned.length === 0)
+      throw new MemoryInputError(
+        "A lesson needs at least one citation: the file (and if you can, an exact excerpt) that shows it is true.",
+        "citation",
+      );
+    if (root) {
+      const problem = checkCitations(cleaned, root);
+      if (problem) throw new MemoryInputError(`Not saved: ${problem}`, "citation");
+    }
+    return cleaned;
+  }
+
   /** The `remember` tool. */
   async remember(input: {
     agentId: string | null;
     text: string;
     scope: MemoryScope;
     tags?: readonly string[];
+    kind?: MemoryKind;
+    citations?: readonly MemoryCitation[];
+    status?: "active" | "pending";
   }): Promise<{ memory: MemoryRecord; deduplicated: boolean }> {
     this.requireEnabled();
     const projectId =
@@ -90,11 +180,20 @@ export class MemoryService {
     const provider = input.agentId
       ? this.deps.agentManager.getAgent(input.agentId)?.provider
       : null;
+    const kind = input.kind ?? "memory";
+    const citations = this.prepareCitations(
+      kind,
+      input.citations,
+      await this.rootForAgent(input.agentId),
+    );
     const result = this.deps.store.add({
       scope: input.scope,
       projectId,
       text: input.text,
       tags: input.tags,
+      kind,
+      citations,
+      status: input.status,
       source: {
         by: "agent",
         ...(input.agentId ? { agentId: input.agentId } : {}),
@@ -171,6 +270,118 @@ export class MemoryService {
     return this.deps.store.list({ scope: input.scope, projectId, tag: input.tag });
   }
 
+  /** `rate_memory` and the chip's 👍/👎. */
+  rate(input: { id: string; helpful: boolean }): MemoryRecord {
+    const memory = this.deps.store.rate(input.id, input.helpful);
+    this.changed(memory);
+    return memory;
+  }
+
+  /** Expires lessons when the 28-day switch is on; run before anything reads lesson status. */
+  sweepExpiredLessons(): void {
+    if (!this.settings().lessonExpiry) return;
+    const expired = this.deps.store.expireLessons(LESSON_EXPIRY_MS);
+    if (expired.length > 0) this.changed(null);
+  }
+
+  /**
+   * The check before a lesson is injected (spec 42 §4). A lesson whose cited file is gone or whose
+   * excerpt no longer appears goes stale and stays out. Plain memories always pass.
+   */
+  private lessonHolds(memory: MemoryRecord, root: string | null): boolean {
+    if (memory.kind !== "lesson") return true;
+    if (!root) return false;
+    const problem = checkCitations(memory.citations, root);
+    if (problem) {
+      this.changed(this.deps.store.setStatus(memory.id, "stale", { reason: problem }));
+      return false;
+    }
+    this.deps.store.markValidated(memory.id);
+    return true;
+  }
+
+  /** "Validate now" on the Memory page: one lesson, or every active/stale lesson of a project. */
+  async validate(input: { id?: string; projectId?: string }): Promise<MemoryRecord[]> {
+    const targets = input.id
+      ? [this.deps.store.get(input.id)].filter((memory): memory is MemoryRecord => memory !== null)
+      : this.deps.store
+          .list({ scope: "project", projectId: input.projectId ?? null, kind: "lesson" })
+          .filter((memory) => memory.status === "active" || memory.status === "stale");
+    const results: MemoryRecord[] = [];
+    for (const memory of targets) {
+      if (memory.kind !== "lesson") {
+        results.push(memory);
+        continue;
+      }
+      const root =
+        (await this.projectRoot(memory.projectId)) ??
+        (await this.rootForAgent(memory.source.agentId));
+      const problem = root
+        ? checkCitations(memory.citations, root)
+        : "The lesson has no project root to check against.";
+      this.deps.store.markValidated(memory.id);
+      let next = this.deps.store.get(memory.id) ?? memory;
+      if (problem && next.status === "active")
+        next = this.deps.store.setStatus(memory.id, "stale", { reason: problem });
+      else if (!problem && next.status === "stale" && next.statusReason?.startsWith("Cited"))
+        next = this.deps.store.setStatus(memory.id, "active");
+      results.push(next);
+    }
+    this.changed(null);
+    return results;
+  }
+
+  /** The "Make this a project rule" diff (spec 42 §5). Nothing is written. */
+  async graduationPreview(id: string): Promise<GraduationPreview> {
+    const { memory, root } = await this.graduationTarget(id);
+    const target = pickRulesFile(root);
+    const after = addLearnedRule(target.before, memory.text, memory.citations);
+    return {
+      id,
+      path: target.path,
+      relativePath: target.relativePath,
+      created: !target.exists,
+      diff: insertionDiff(target.relativePath, target.before, after),
+      baseHash: hashText(target.before),
+    };
+  }
+
+  /** Writes the rule after the user approved the diff; refuses when the file changed since. */
+  async graduationApply(input: {
+    id: string;
+    baseHash: string;
+  }): Promise<{ memory: MemoryRecord; path: string }> {
+    const { memory, root } = await this.graduationTarget(input.id);
+    const target = pickRulesFile(root);
+    if (hashText(target.before) !== input.baseHash)
+      throw new MemoryInputError(
+        `${target.relativePath} changed since the diff was shown. Review it again.`,
+        "conflict",
+      );
+    fs.mkdirSync(path.dirname(target.path), { recursive: true });
+    fs.writeFileSync(target.path, addLearnedRule(target.before, memory.text, memory.citations));
+    const graduated = this.deps.store.setStatus(memory.id, "graduated", {
+      reason: `Added to ${target.relativePath}`,
+      graduatedPath: target.relativePath,
+    });
+    this.changed(graduated);
+    return { memory: graduated, path: target.path };
+  }
+
+  private async graduationTarget(id: string): Promise<{ memory: MemoryRecord; root: string }> {
+    const memory = this.deps.store.get(id);
+    if (!memory) throw new MemoryInputError("Memory not found.", "not_found");
+    if (memory.kind !== "lesson" || memory.status !== "active")
+      throw new MemoryInputError("Only an active lesson can become a project rule.", "conflict");
+    const root = await this.projectRoot(memory.projectId);
+    if (!root)
+      throw new MemoryInputError(
+        "This lesson is not in a project with a root folder.",
+        "no_project",
+      );
+    return { memory, root };
+  }
+
   /** The Memory port: auto-inject (spec 41 §3.1). Never calls a model. */
   async prepareUserTurn(input: {
     agentId: string;
@@ -179,11 +390,14 @@ export class MemoryService {
     if (!this.deps.isEnabled()) return null;
     const settings = this.settings();
     if (!settings.enabled || !settings.autoInject) return null;
+    this.sweepExpiredLessons();
     const projectId = await this.projectIdForAgent(input.agentId);
+    const root = await this.rootForAgent(input.agentId);
     const memories = this.deps.store.selectForPrompt({
       text: input.text,
       projectId,
       tokenCap: settings.tokenCap,
+      accept: (memory) => this.lessonHolds(memory, root),
     });
     if (memories.length === 0) return null;
     return {
@@ -201,6 +415,46 @@ export class MemoryService {
     };
   }
 
+  /** Edit, approve (pending → active), restore or re-cite an existing entry as the user. */
+  private async updateAsUser(
+    id: string,
+    input: {
+      text?: string;
+      tags?: readonly string[];
+      pinned?: boolean;
+      kind?: MemoryKind;
+      citations?: readonly MemoryCitation[];
+      status?: MemoryStatus;
+    },
+  ): Promise<MemoryRecord> {
+    const current = this.deps.store.get(id);
+    if (!current) throw new MemoryInputError("Memory not found.", "not_found");
+    const kind = input.kind ?? current.kind;
+    const root =
+      (await this.projectRoot(current.projectId)) ??
+      (await this.rootForAgent(current.source.agentId));
+    const recite = input.citations !== undefined || input.kind !== undefined;
+    let memory = this.deps.store.update(id, {
+      text: input.text,
+      tags: input.tags,
+      pinned: input.pinned,
+      kind: input.kind,
+      citations: recite
+        ? this.prepareCitations(kind, input.citations ?? current.citations, root)
+        : undefined,
+    });
+    if (input.status && input.status !== memory.status) {
+      if (input.status === "active" && memory.kind === "lesson" && root) {
+        // Approving or restoring a lesson re-checks its citations first.
+        const problem = checkCitations(memory.citations, root);
+        if (problem) throw new MemoryInputError(`Not approved: ${problem}`, "citation");
+      }
+      memory = this.deps.store.setStatus(id, input.status);
+    }
+    this.changed(memory);
+    return memory;
+  }
+
   /** Memory page and "Remember this": create or edit a memory as the user. */
   async saveAsUser(input: {
     id?: string;
@@ -211,16 +465,11 @@ export class MemoryService {
     text?: string;
     tags?: readonly string[];
     pinned?: boolean;
+    kind?: MemoryKind;
+    citations?: readonly MemoryCitation[];
+    status?: MemoryStatus;
   }): Promise<{ memory: MemoryRecord; deduplicated: boolean }> {
-    if (input.id) {
-      const memory = this.deps.store.update(input.id, {
-        text: input.text,
-        tags: input.tags,
-        pinned: input.pinned,
-      });
-      this.changed(memory);
-      return { memory, deduplicated: false };
-    }
+    if (input.id) return { memory: await this.updateAsUser(input.id, input), deduplicated: false };
     if (input.text === undefined) throw new MemoryInputError("Memory text is empty.", "empty");
     const scope = input.scope ?? "project";
     const projectId =
@@ -230,12 +479,18 @@ export class MemoryService {
     const provider = input.agentId
       ? this.deps.agentManager.getAgent(input.agentId)?.provider
       : null;
+    const kind = input.kind ?? "memory";
+    const root = (await this.projectRoot(projectId)) ?? (await this.rootForAgent(input.agentId));
+    const citations = this.prepareCitations(kind, input.citations, root);
     const result = this.deps.store.add({
       scope,
       projectId,
       text: input.text,
       tags: input.tags,
       pinned: input.pinned,
+      kind,
+      citations,
+      status: input.status === "pending" ? "pending" : "active",
       source: {
         by: "user",
         ...(input.agentId ? { agentId: input.agentId } : {}),
@@ -278,6 +533,7 @@ export class MemoryService {
       card.entries.push({
         id: memory.id,
         scope: memory.scope,
+        memoryKind: memory.kind,
         text: memory.text,
         score: memory.score,
         kind,
@@ -327,6 +583,7 @@ function usedEntryJson(entry: MemoryUsedEntry): JsonValue {
   return {
     id: entry.id,
     scope: entry.scope,
+    memoryKind: entry.memoryKind ?? "memory",
     text: entry.text,
     score: entry.score,
     kind: entry.kind,
@@ -337,12 +594,22 @@ function usedEntryJson(entry: MemoryUsedEntry): JsonValue {
 /** The block the provider receives in front of the user's message. */
 export function renderMemoryBlock(memories: readonly ScoredMemory[]): string {
   const lines = memories.map((memory) => {
-    const labels = [memory.scope, ...(memory.pinned ? ["pinned"] : [])].join(", ");
-    return `- [${labels}] ${memory.text.replace(/\s*\n\s*/g, " ")}`;
+    const labels = [
+      memory.kind === "lesson" ? "lesson" : null,
+      memory.scope,
+      memory.pinned ? "pinned" : null,
+    ]
+      .filter(Boolean)
+      .join(", ");
+    const cited =
+      memory.kind === "lesson" && memory.citations.length > 0
+        ? ` (source: ${memory.citations.map((citation) => citation.path).join(", ")})`
+        : "";
+    return `- [${labels}] ${memory.text.replace(/\s*\n\s*/g, " ")}${cited} {id: ${memory.id}}`;
   });
   return [
     "<relevant-memories>",
-    "Notes saved in JAgentDesk Memory by earlier agents or by the user. Apply the ones that fit this message; they can be out of date. Use search_memory to look for more.",
+    "Notes saved in JAgentDesk Memory by earlier agents or by the user. Apply the ones that fit this message; they can be out of date. Use search_memory to look for more. Lessons were learned from earlier corrections and checked against the files just now. When one of them clearly helped or misled you, call rate_memory with its id.",
     ...lines,
     "</relevant-memories>",
   ].join("\n");
