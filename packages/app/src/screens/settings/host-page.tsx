@@ -1,3 +1,4 @@
+import { ContinuitySettingsCards } from "@/continuity/continuity-settings-cards";
 import { hostTransportLabelKey } from "@/types/host-connection";
 import {
   ArrowDown,
@@ -56,6 +57,7 @@ import { ProvidersSection } from "@/screens/settings/providers-section";
 import { HostUsageSection } from "@/usage/host-usage-section";
 import { HostAppearanceSection } from "@/screens/settings/host-appearance-section";
 import { SettingsSection } from "@/screens/settings/settings-section";
+import { PairedDevicesSection } from "@/screens/settings/paired-devices-section";
 import { migrateHostData } from "@/runtime/migration/host-migration-service";
 import { useToast } from "@/contexts/toast-context";
 import { useSessionStore } from "@/stores/session-store";
@@ -248,9 +250,12 @@ export function HostPairDevicePage({ serverId }: { serverId: string }) {
   }
 
   return (
-    <SettingsSection title={t("settings.host.pairDevices.title")}>
-      <PairDeviceRow serverId={serverId} />
-    </SettingsSection>
+    <View>
+      <SettingsSection title={t("settings.host.pairDevices.title")}>
+        <PairDeviceRow serverId={serverId} />
+      </SettingsSection>
+      <PairedDevicesSection serverId={serverId} hostName={host.label} />
+    </View>
   );
 }
 
@@ -272,6 +277,7 @@ export function HostAgentsPage({ serverId }: { serverId: string }) {
           <AppendSystemPromptCard serverId={serverId} />
           <OperatorContextCard serverId={serverId} />
           <RestartRecoveryCard serverId={serverId} />
+          <ContinuitySettingsCards serverId={serverId} />
           <IdleRuntimeCleanupCard serverId={serverId} />
         </SettingsSection>
       ) : (

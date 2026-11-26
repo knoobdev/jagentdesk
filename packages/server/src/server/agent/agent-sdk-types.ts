@@ -4,6 +4,13 @@ import type {
   AgentOptionToggleControl,
 } from "@jagentdesk/protocol/agent-types";
 export type { AgentOptionControl, AgentOptionSelectControl, AgentOptionToggleControl };
+import type {
+  ContextCompactionNotice,
+  ProviderSwitchNotice,
+  RegroundingNotice,
+  UsageLimitNotice,
+} from "@jagentdesk/protocol/agent-types";
+export type { ContextCompactionNotice, ProviderSwitchNotice, RegroundingNotice, UsageLimitNotice };
 import type { AgentMessage } from "@jagentdesk/protocol/agent-message";
 import type { Options as ClaudeAgentOptions } from "@anthropic-ai/claude-agent-sdk";
 import type {
@@ -409,7 +416,19 @@ export type AgentTimelineItem =
   | ToolCallTimelineItem
   | { type: "todo"; items: AgentTaskItem[] }
   | { type: "error"; message: string }
-  | { type: "notification"; level: "info" | "warning" | "error"; message: string }
+  | {
+      type: "notification";
+      level: "info" | "warning" | "error";
+      message: string;
+      /** Set on the row a provider switch appends (spec 40 §3). */
+      providerSwitch?: ProviderSwitchNotice;
+      /** Set on the row a usage-limit failure appends when no failover ran (spec 40 §4). */
+      usageLimit?: UsageLimitNotice;
+      /** Set on the "Context compacted" row (spec 42 §1). */
+      contextCompaction?: ContextCompactionNotice;
+      /** Set on the "Re-grounded after compaction" row (spec 42 §2). */
+      regrounding?: RegroundingNotice;
+    }
   | CompactionTimelineItem
   | PluginTimelineItem;
 
@@ -681,7 +700,20 @@ export interface AgentSessionConfig {
   internal?: boolean;
 }
 
+/**
+ * Spec 42 §3: provider compaction hooks (Claude PreCompact / PostCompact). Runtime-only, never
+ * persisted; providers without compaction hooks ignore it.
+ */
+export interface AgentCompactionHooks {
+  /** Extra instructions for the compaction itself, or null to add none. */
+  preCompactInstruction(): string | null;
+  /** The provider's own summary after a compaction, kept to compare with the ledger. */
+  onCompactSummary(input: { summary: string; trigger: "auto" | "manual" | null }): void;
+}
+
 export interface AgentLaunchContext {
+  /** Spec 42 §3 compaction hooks; runtime-only. */
+  compactionHooks?: AgentCompactionHooks;
   /** Launch-only instructions contributed by plugins. */
   appendSystemPrompt?: string[];
   /** Launch-only plugin MCP servers and their owners; never persisted. */
@@ -689,6 +721,18 @@ export interface AgentLaunchContext {
   mcpServerOwners?: Record<string, string>;
   agentId?: string;
   env?: Record<string, string>;
+  /**
+   * JAgentDesk browser tools are part of this launch. Providers turn off their own browser
+   * tooling (Codex's Browser/Chrome plugin skills, Claude in Chrome) and refuse shell commands
+   * that open a URL in the system browser, so pages open in the app (spec 04 §27b.3).
+   */
+  inAppBrowser?: boolean;
+  /**
+   * Provider-owned connector families JAgentDesk tools replace in this launch, for example
+   * `atlassian` while JAgentDesk has a Jira connection (spec 29.4). Providers hide those
+   * connectors from the agent where their CLI can; launch-only, never persisted.
+   */
+  hideProviderConnectors?: string[];
   /**
    * Runtime-only internal JAgentDesk tools. This must never be persisted into
    * AgentSessionConfig; providers may adapt it to their native tool surface.
@@ -763,6 +807,11 @@ export interface AgentUsageSession {
   sessionKey: string;
 }
 
+export type JAgentDeskToolsHealth =
+  | { status: "ok" }
+  | { status: "missing"; reason: string }
+  | { status: "unknown" };
+
 export interface AgentSession {
   /** Persist the session's current handle immediately after an interactive resume. */
   readonly persistenceUpdatedOnResume?: boolean;
@@ -798,6 +847,19 @@ export interface AgentSession {
 
   streamHistory(): AsyncGenerator<AgentStreamEvent>;
 
+  /**
+   * A cheap token that changes whenever the provider's stored history for this session changes
+   * (a file's size and mtime, a session's update time). Null when it cannot be read. Providers
+   * without one always replay their history when an agent is reopened.
+   */
+  readHistoryVersion?(): Promise<string | null>;
+
+  /**
+   * The host already holds this session's projected timeline and will not call streamHistory for
+   * it. History the session reads later, to index turns or rewind targets, must not be retained.
+   */
+  discardHistoryReplay?(): void;
+
   getRuntimeInfo(): Promise<AgentRuntimeInfo>;
 
   getAvailableModes(): Promise<AgentMode[]>;
@@ -831,6 +893,13 @@ export interface AgentSession {
 
   listCommands?(): Promise<AgentSlashCommand[]>;
 
+  /**
+   * Spec 04 §27b.0: whether the JAgentDesk tools reached this runtime, asked before each
+   * foreground turn. Cheap: reads the provider's own MCP or bridge status and may repair the
+   * connection in place. Providers that cannot tell return `unknown`.
+   */
+  checkJAgentDeskTools?(options: { signal: AbortSignal }): Promise<JAgentDeskToolsHealth>;
+
   /** A returned model is the effective selection committed by this mutation.
    * Returning void means the requested selection was accepted. No status read is required. */
   setModel?(modelId: string | null): Promise<void | { model: string | null }>;
@@ -853,6 +922,13 @@ export interface AgentSession {
   applyOptions?(options: ProviderOptions): Promise<Record<string, unknown> | void>;
 
   revertConversation?(input: { messageId: string }): Promise<void>;
+
+  /**
+   * Fast fork (spec 41 §6): copies the provider conversation into a new provider session that ends
+   * before the turn `beforeUserMessageId` opened (the whole conversation when null) and returns
+   * its handle. This session is unchanged; nothing is replayed into a prompt.
+   */
+  forkConversation?(input: { beforeUserMessageId: string | null }): Promise<AgentPersistenceHandle>;
 
   revertFiles?(input: { messageId: string }): Promise<void>;
 
@@ -1048,4 +1124,10 @@ export interface AgentClient {
    * shuts down. Must be idempotent.
    */
   shutdown?(): Promise<void>;
+  /**
+   * The provider registry replaced or removed this client (its config changed). Release what it
+   * holds while idle, such as an owned helper server; sessions still running on it keep their
+   * resources until they end. The client is not used for new work afterwards.
+   */
+  retire?(): Promise<void>;
 }

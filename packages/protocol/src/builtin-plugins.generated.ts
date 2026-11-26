@@ -15,6 +15,7 @@ export const STATIC_BUILTIN_PLUGIN_IDS = [
   "skills",
   "spec-mode",
   "autorun",
+  "memory",
   "insights",
   "session-share",
   "browser-tools",
@@ -149,6 +150,13 @@ export const GENERATED_BUILTIN_MANIFESTS = [
     name: "Autonomous run",
     description: "Let agents continue working until stopped.",
     defaultEnabled: false,
+    requires: [],
+  },
+  {
+    id: "memory",
+    name: "Memory",
+    description: "What your agents remember about your projects and about you.",
+    defaultEnabled: true,
     requires: [],
   },
   {

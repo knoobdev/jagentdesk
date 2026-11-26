@@ -61,8 +61,11 @@ What re-probes a provider:
 - **The background schedule.** Enabled providers refresh about every 30 minutes (`PROVIDER_BACKGROUND_REFRESH_INTERVAL_MS`), one provider per slot, across the global scope and every cached cwd. A failed, unavailable or incomplete background probe keeps a ready catalog. Background refresh is soft, so OpenCode keeps its shared server. A manual refresh pushes that provider's next slot back. Shutdown cancels the schedule and aborts running probes.
 - **An explicit workspace refresh**, which affects one cwd.
 - **Settings refresh**, which clears every scope and in-flight load, then force-refreshes only the global scope. Workspace scopes re-probe lazily on their next read.
+- **A config change to that provider** (a custom provider save, a daemon config patch, a changed base it extends). `stageMutableProviderConfig` diffs each provider's override, runtime settings and enabled state; only the changed providers get a new client and go back to loading. Every other provider keeps its client, entries and in-flight loads. Rebuilding every client on each save leaked one owned `opencode serve` per edit and re-ran Claude model discovery in every cached cwd. A replaced client gets `retire()`: OpenCode v2 stops its idle owned server, and one still serving sessions stops when the last session releases it.
 
-Do not add focus, selector-open or config-reload refreshes. Registry and config replacement may update label, description, default mode, enabled state and membership, but must not spawn provider processes.
+A custom API provider's refresh asks its models endpoint first (`checkApiProviderEndpoint`), before any provider process starts. A refusal (401, 403, 429, unreachable) puts it in `error`, and the background schedule skips it until its config changes or someone refreshes it. Concurrent refreshes of one provider share one endpoint check, and Claude shares one model-discovery process across cwds.
+
+Do not add focus, selector-open or config-reload refreshes. Registry and config replacement may update label, description, default mode, enabled state and membership, but must not spawn provider processes for providers whose config did not change.
 
 ### Draft metadata
 

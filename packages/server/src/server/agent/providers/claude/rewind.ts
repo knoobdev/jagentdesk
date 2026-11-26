@@ -12,7 +12,7 @@ import {
 export interface ClaudeRewindSdk {
   forkSession(
     sessionId: string,
-    options: { upToMessageId: string; transcriptPath: string },
+    options: { upToMessageId?: string; transcriptPath: string },
   ): Promise<{ sessionId: string }>;
 }
 
@@ -22,7 +22,7 @@ export interface ClaudeRewindSdk {
 export const realClaudeRewindSdk: ClaudeRewindSdk = {
   forkSession: (sessionId, options) =>
     claudeForkSession(sessionId, {
-      upToMessageId: options.upToMessageId,
+      ...(options.upToMessageId ? { upToMessageId: options.upToMessageId } : {}),
       sessionStore: projectFolderSessionStore(path.dirname(options.transcriptPath)),
     }),
 };

@@ -11,6 +11,22 @@ it on in Settings → host → Plugins.
 - The desktop main process executes the commands
   (`packages/desktop/src/features/browser-automation/`).
 
+## Pages open in the app, never the system browser
+
+Spec 04 §27b.3. A `browser_new_tab` tab opens selected in the inspector pane beside the chat. When a
+launch carries browser tools (`AgentLaunchContext.inAppBrowser`):
+
+- The system instructions require the `browser_*` tools for every page and forbid `open`,
+  `xdg-open`, `start` and `Start-Process` with a URL and the provider's own browser tools.
+- Codex starts with `-c skills.config=[…]` turning off its bundled `browser:control-in-app-browser`
+  and `chrome:control-chrome` skills. Without this, "use the browser" made Codex drive the user's
+  Chrome through its Browser plugin before it used the app. `-c skills.config` merges with the
+  user's own skill switches.
+- Claude disallows `mcp__claude-in-chrome`, and a `PreToolUse` Bash hook denies commands that open a
+  URL in the system browser (`packages/server/src/server/agent/system-browser.ts`), in every
+  permission mode.
+- OpenCode ships no browser of its own; the instructions cover it.
+
 ## Desktop selection
 
 `browser_list_hosts` lists connected windows, including windows with no tabs. With multiple

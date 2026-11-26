@@ -15,7 +15,12 @@ export interface PairedDevice {
   pairedAtMs: number;
   tailnetNodeId?: string;
   kind?: "desktop" | "mobile" | "daemon";
+  /** Last time a socket of this device opened or closed (spec 15.11.1 "Last active"). */
+  lastSeenMs?: number;
 }
+
+/** A connection churning every few seconds must not rewrite the devices file every time. */
+const LAST_SEEN_WRITE_INTERVAL_MS = 60_000;
 
 const PairedDeviceSchema = z.object({
   deviceId: z.string().min(1),
@@ -24,6 +29,7 @@ const PairedDeviceSchema = z.object({
   pairedAtMs: z.number(),
   tailnetNodeId: z.string().optional(),
   kind: DeviceKindSchema.optional(),
+  lastSeenMs: z.number().optional(),
 });
 
 const PairedDevicesFileSchema = z.object({
@@ -44,8 +50,21 @@ export interface PairedDeviceStore {
     tailnetNodeId?: string;
     kind?: "desktop" | "mobile" | "daemon";
   }): PairedDevice;
+  /**
+   * Registers a device approved by a fresh pairing, or refreshes the record when
+   * its key is already registered. The device id and pairing time stay; name and
+   * kind follow the new pairing, and a tailnet pin is replaced only when the new
+   * pairing carries one.
+   */
+  repair(input: {
+    devicePublicKeyB64: string;
+    deviceName?: string;
+    tailnetNodeId?: string;
+    kind?: "desktop" | "mobile" | "daemon";
+  }): { device: PairedDevice; created: boolean };
   revokeById(deviceId: string): boolean;
   revokeByPublicKey(publicKeyB64: string): boolean;
+  markSeen(deviceId: string, atMs: number): void;
 }
 
 export function createPairedDeviceStore(args: {
@@ -109,6 +128,21 @@ export function createPairedDeviceStore(args: {
       return device;
     },
 
+    repair(input) {
+      const index = findIndexByPublicKey(input.devicePublicKeyB64);
+      if (index === -1) return { device: this.register(input), created: true };
+      const existing = devices[index]!;
+      const device: PairedDevice = {
+        ...existing,
+        ...(input.deviceName ? { deviceName: input.deviceName } : {}),
+        ...(input.kind ? { kind: input.kind } : {}),
+        ...(input.tailnetNodeId ? { tailnetNodeId: input.tailnetNodeId } : {}),
+      };
+      devices[index] = device;
+      persist();
+      return { device, created: false };
+    },
+
     revokeById(deviceId: string): boolean {
       const index = devices.findIndex((device) => device.deviceId === deviceId);
       if (index === -1) {
@@ -117,6 +151,19 @@ export function createPairedDeviceStore(args: {
       devices.splice(index, 1);
       persist();
       return true;
+    },
+
+    markSeen(deviceId: string, atMs: number): void {
+      const device = devices.find((candidate) => candidate.deviceId === deviceId);
+      if (!device) return;
+      if (device.lastSeenMs !== undefined && atMs - device.lastSeenMs < LAST_SEEN_WRITE_INTERVAL_MS)
+        return;
+      device.lastSeenMs = atMs;
+      try {
+        persist();
+      } catch (error) {
+        log?.warn({ err: error, deviceId }, "Failed to record paired device activity");
+      }
     },
 
     revokeByPublicKey(publicKeyB64: string): boolean {

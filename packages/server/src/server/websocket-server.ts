@@ -940,11 +940,15 @@ export class VoiceAssistantWebSocketServer {
     this.hubRelationships = hubRelationships ?? null;
     this.pairing = pairing ?? null;
     this.sasPairing = pairing
-      ? new SasPairing(pairing.devices, (message) => {
-          for (const session of this.listTrustedSessions()) {
-            if (session.getPermissions().includes("access.manage")) session.publish(message);
-          }
-        })
+      ? new SasPairing(
+          pairing.devices,
+          (message) => {
+            for (const session of this.listTrustedSessions()) {
+              if (session.getPermissions().includes("access.manage")) session.publish(message);
+            }
+          },
+          this.logger.child({ module: "pairing-sas" }),
+        )
       : null;
     this.pluginRuntime = pluginRuntime ?? null;
     this.agentManager = agentManager;
@@ -1465,6 +1469,14 @@ export class VoiceAssistantWebSocketServer {
     return closed;
   }
 
+  /** Paired devices with at least one open socket right now (spec 15.11.1 "Connected"). */
+  public listConnectedDeviceIds(): Set<string> {
+    const ids = new Set<string>();
+    for (const identity of this.socketIdentities.values())
+      if (identity.deviceId) ids.add(identity.deviceId);
+    return ids;
+  }
+
   public listTrustedSessions(): Session[] {
     return Array.from(
       new Set(
@@ -1634,7 +1646,7 @@ export class VoiceAssistantWebSocketServer {
 
   public async close(): Promise<void> {
     this.prepareForShutdown();
-    this.sasPairing?.cancel();
+    this.sasPairing?.cancel("daemon_stopped");
     await this.connectedHosts.close();
     this.unsubscribeSpeechReadiness?.();
     this.unsubscribeSpeechReadiness = null;
@@ -2280,6 +2292,7 @@ export class VoiceAssistantWebSocketServer {
       cancelPendingPairingRequest: ({ requestId, reason }) =>
         this.cancelPendingPairingRequest({ requestId, reason }),
       closeConnectionsForDevice: (deviceId) => this.closeConnectionsForDevice(deviceId),
+      listConnectedDeviceIds: () => this.listConnectedDeviceIds(),
       serviceProxy: this.serviceProxy ?? undefined,
       scriptRuntimeStore: this.scriptRuntimeStore ?? undefined,
       workspaceSetupSnapshots: this.workspaceSetupSnapshots,
@@ -2423,6 +2436,7 @@ export class VoiceAssistantWebSocketServer {
       const device = this.pairing?.devices.getByPublicKey(message.devicePublicKeyB64);
       if (device) {
         pending.identity.deviceId = device.deviceId;
+        this.pairing?.devices.markSeen(device.deviceId, Date.now());
       }
     }
     pending.connectionLogger.info(
@@ -2753,10 +2767,16 @@ export class VoiceAssistantWebSocketServer {
         resumeOnStartupSetting: true,
         // COMPAT(idleRuntimeCleanupSetting): added in v0.9.59, remove gate after 2027-05-24.
         idleRuntimeCleanupSetting: true,
+        // COMPAT(crossProviderContinuity): added in v0.10.2, remove gate after 2027-05-26.
+        crossProviderContinuity: true,
+        // COMPAT(durableContext): added in v0.10.2, remove gate after 2027-05-26.
+        durableContext: true,
         // COMPAT(agentForkContext): added in v0.1.102, remove gate after 2026-12-28.
         agentForkContext: true,
         // COMPAT(agentForkContextCursor): added in v0.1.108, remove gate after 2027-01-14.
         agentForkContextCursor: true,
+        // Fast fork (spec 41 §6).
+        agentNativeFork: true,
         // COMPAT(providerSubagents): added in v0.1.107, remove gate after 2027-01-12.
         providerSubagents: true,
         // COMPAT(agentBackgroundWork): added after v0.11.0-beta.5, remove gate after 2027-04-06.
@@ -2969,12 +2989,13 @@ export class VoiceAssistantWebSocketServer {
       error?: Error;
     },
   ): Promise<void> {
-    this.sasPairing?.disconnected(ws);
+    this.sasPairing?.disconnected(ws, { code: details.code });
     this.hostLinks.get(ws)?.close();
     this.hostLinks.delete(ws);
     this.applicationSocketLease.release(ws);
     const identity = this.socketIdentities.get(ws);
     const identityFields = identity ? toConnectionLogFields(identity) : {};
+    if (identity?.deviceId) this.pairing?.devices.markSeen(identity.deviceId, Date.now());
     const pending = this.clearPendingConnection(ws);
     if (pending) {
       this.incrementRuntimeCounter("pendingDisconnected");
@@ -3573,6 +3594,7 @@ export class VoiceAssistantWebSocketServer {
           parsed,
           pendingConnection.identity.tailnetNodeId,
           pendingConnection.identity.transport,
+          pendingConnection.connectionLogger,
         )
       )
         return;

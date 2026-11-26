@@ -1,4 +1,10 @@
+import { ProviderSwitchRow } from "@/continuity/provider-switch-row";
+import { RegroundingRow } from "@/continuity/regrounding-row";
+import { buildProviderSegments } from "@/continuity/provider-segments";
+import { UsageLimitRow } from "@/continuity/usage-limit-row";
 import { useChatOutlineRail } from "@/chat-rail";
+import { MessageActionsAgentContext } from "./message-actions-context";
+import { isGuestShareMode } from "@/screens/share/guest-share-mode";
 import { SubagentLaunchMarker } from "@/subagents/launch-marker";
 import { useRevealedText } from "@/hooks/use-revealed-text";
 import { createStreamPresentation } from "./presentation";
@@ -9,6 +15,8 @@ import { GumloopAgentHeader } from "@/components/gumloop-shell/chat-headers";
 import { GUMLOOP_MESSAGE_INDENT } from "@/components/gumloop-shell/chat-layout";
 import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { indexBackgroundStarts, readBackgroundTimelineEvent } from "@/background-work/timeline";
+import { BackgroundTaskTimelineRow } from "@/background-work/timeline-row";
 import React, {
   forwardRef,
   memo,
@@ -387,6 +395,10 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     );
     const streamHead = providedStreamHead ?? sessionStreamHead;
     const forkAgent = useForkAgent({ serverId: resolvedServerId, toast, readOnly });
+    const messageActionsAgent = useMemo(
+      () => (readOnly || isGuestShareMode() ? null : { serverId: resolvedServerId, agentId }),
+      [readOnly, resolvedServerId, agentId],
+    );
     const supportsAgentForkContextCursor = useSessionStore(
       (state) =>
         state.sessions[resolvedServerId]?.serverInfo?.features?.agentForkContextCursor === true,
@@ -820,6 +832,11 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       [resolvedServerId],
     );
 
+    const backgroundStarts = useMemo(
+      () => indexBackgroundStarts(effectiveStreamItems, effectiveStreamHead),
+      [effectiveStreamItems, effectiveStreamHead],
+    );
+    const lookupBackgroundStart = useStableEvent((callId: string) => backgroundStarts.get(callId));
     const renderSingleToolCallItem = useCallback(
       (
         item: Extract<StreamItem, { kind: "tool_call" }>,
@@ -830,6 +847,9 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
 
         if (payload.source === "agent") {
           const data = payload.data;
+
+          const backgroundEvent = readBackgroundTimelineEvent(item, lookupBackgroundStart);
+          if (backgroundEvent) return <BackgroundTaskTimelineRow event={backgroundEvent} />;
 
           if (
             data.name === "speak" &&
@@ -904,6 +924,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         setInlineDetailsExpanded,
         handleToolCallOpenFile,
         handleOpenMessageSender,
+        lookupBackgroundStart,
       ],
     );
 
@@ -1002,6 +1023,38 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             );
 
           case "activity_log":
+            if (item.usageLimit) {
+              return (
+                <UsageLimitRow
+                  serverId={resolvedServerId}
+                  agentId={agentId}
+                  message={item.message}
+                  notice={item.usageLimit}
+                />
+              );
+            }
+            if (item.regrounding) {
+              return (
+                <RegroundingRow
+                  serverId={resolvedServerId}
+                  agentId={agentId}
+                  message={item.message}
+                  timestamp={item.timestamp.getTime()}
+                  notice={item.regrounding}
+                />
+              );
+            }
+            if (item.providerSwitch) {
+              return (
+                <ProviderSwitchRow
+                  serverId={resolvedServerId}
+                  agentId={agentId}
+                  message={item.message}
+                  timestamp={item.timestamp.getTime()}
+                  notice={item.providerSwitch}
+                />
+              );
+            }
             return (
               <ActivityLog
                 type={item.activityType}
@@ -1040,17 +1093,23 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
 
     const bottomTurnFooterHost = streamLayout.auxiliaryTurnFooter;
 
+    // Rows written before a provider switch keep the provider that wrote them.
+    const providerSegments = useMemo(
+      () => buildProviderSegments(effectiveStreamItems),
+      [effectiveStreamItems],
+    );
     const renderStreamItem = useCallback<RenderStreamItem>(
       (item, originalLayoutItem) => {
         const layoutItem =
           originalLayoutItem.item === item ? originalLayoutItem : { ...originalLayoutItem, item };
         const rawContent = renderStreamItemContent(layoutItem);
+        const segment = providerSegments.get(item.id);
         const content = isGumloop
           ? wrapGumloopAgentItem({
               layoutItem,
               content: rawContent,
-              provider: context.provider,
-              model: agentModelLabel(context),
+              provider: segment?.provider ?? context.provider,
+              model: segment ? segment.model : agentModelLabel(context),
             })
           : rawContent;
         return renderStreamItemWithTurnFooter({
@@ -1067,6 +1126,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         getTurnIndent,
         handleForkAssistantTurn,
         isGumloop,
+        providerSegments,
         readOnly,
         renderStreamItemContent,
         streamRenderStrategy,
@@ -1237,71 +1297,73 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     );
 
     return (
-      <ToolCallSheetProvider>
-        <AssistantSelectionCopySurface style={stylesheet.container}>
-          <MessageOuterSpacingProvider disableOuterSpacing>
-            <ChatFind
-              agentId={agentId}
-              serverId={resolvedServerId}
-              epoch={timelineEpoch}
-              items={chatFindItems}
-              viewportRef={viewportRef}
-              revealLoadedMessage={revealLoadedMessage}
-              visibleMessageIds={chatFindVisibleMessageIds}
-            >
-              <ToolCallExpansionContext.Provider value={toolCallExpansion}>
-                {streamRenderStrategy.render({
-                  readingRowReplacements: projectedToolCalls.readingRowReplacements,
-                  agentId,
-                  segments: renderModel.segments,
-                  historyRowRevision,
-                  liveHeadRowRevision: expandedToolCallGroups,
-                  boundary,
-                  renderers,
-                  listEmptyComponent,
-                  viewportRef,
-                  routeBottomAnchorRequest,
-                  isAuthoritativeHistoryReady,
-                  onNearBottomChange: setIsNearBottom,
-                  onReadingPositionChange: chatOutline.reportReadingPosition,
-                  onNearHistoryStart: loadOlder,
-                  isLoadingOlderHistory: isLoadingOlder,
-                  hasOlderHistory: hasOlder,
-                  olderHistoryProgressKey: progressKey,
-                  scrollEnabled: streamScrollEnabled,
-                  contentMaxWidth,
-                  outlineInset: outlineInset,
-                  listStyle: stylesheet.list,
-                  baseListContentContainerStyle: stylesheet.listContentContainer,
-                  forwardListContentContainerStyle: stylesheet.forwardListContentContainer,
-                })}
-              </ToolCallExpansionContext.Provider>
-            </ChatFind>
-          </MessageOuterSpacingProvider>
-          {outlineInset > 0 ? (
-            <ChatOutlineRail
-              prompts={chatOutline.prompts}
-              activePrompt={chatOutline.activePrompt}
-              onJumpToPrompt={chatOutline.jumpToPrompt}
-            />
-          ) : null}
-          {(!isNearBottom || isTimelineDetached) && (
-            <View style={stylesheet.scrollToBottomContainer} pointerEvents="box-none">
-              <Animated.View entering={scrollIndicatorFadeIn} exiting={scrollIndicatorFadeOut}>
-                <Pressable
-                  style={stylesheet.scrollToBottomButton}
-                  onPress={scrollToBottom}
-                  accessibilityRole="button"
-                  accessibilityLabel={t("agentStream.scrollToBottom")}
-                  testID="scroll-to-bottom-button"
-                >
-                  <ChevronDown size={24} color={stylesheet.scrollToBottomIcon.color} />
-                </Pressable>
-              </Animated.View>
-            </View>
-          )}
-        </AssistantSelectionCopySurface>
-      </ToolCallSheetProvider>
+      <MessageActionsAgentContext.Provider value={messageActionsAgent}>
+        <ToolCallSheetProvider>
+          <AssistantSelectionCopySurface style={stylesheet.container}>
+            <MessageOuterSpacingProvider disableOuterSpacing>
+              <ChatFind
+                agentId={agentId}
+                serverId={resolvedServerId}
+                epoch={timelineEpoch}
+                items={chatFindItems}
+                viewportRef={viewportRef}
+                revealLoadedMessage={revealLoadedMessage}
+                visibleMessageIds={chatFindVisibleMessageIds}
+              >
+                <ToolCallExpansionContext.Provider value={toolCallExpansion}>
+                  {streamRenderStrategy.render({
+                    readingRowReplacements: projectedToolCalls.readingRowReplacements,
+                    agentId,
+                    segments: renderModel.segments,
+                    historyRowRevision,
+                    liveHeadRowRevision: expandedToolCallGroups,
+                    boundary,
+                    renderers,
+                    listEmptyComponent,
+                    viewportRef,
+                    routeBottomAnchorRequest,
+                    isAuthoritativeHistoryReady,
+                    onNearBottomChange: setIsNearBottom,
+                    onReadingPositionChange: chatOutline.reportReadingPosition,
+                    onNearHistoryStart: loadOlder,
+                    isLoadingOlderHistory: isLoadingOlder,
+                    hasOlderHistory: hasOlder,
+                    olderHistoryProgressKey: progressKey,
+                    scrollEnabled: streamScrollEnabled,
+                    contentMaxWidth,
+                    outlineInset: outlineInset,
+                    listStyle: stylesheet.list,
+                    baseListContentContainerStyle: stylesheet.listContentContainer,
+                    forwardListContentContainerStyle: stylesheet.forwardListContentContainer,
+                  })}
+                </ToolCallExpansionContext.Provider>
+              </ChatFind>
+            </MessageOuterSpacingProvider>
+            {outlineInset > 0 ? (
+              <ChatOutlineRail
+                prompts={chatOutline.prompts}
+                activePrompt={chatOutline.activePrompt}
+                onJumpToPrompt={chatOutline.jumpToPrompt}
+              />
+            ) : null}
+            {(!isNearBottom || isTimelineDetached) && (
+              <View style={stylesheet.scrollToBottomContainer} pointerEvents="box-none">
+                <Animated.View entering={scrollIndicatorFadeIn} exiting={scrollIndicatorFadeOut}>
+                  <Pressable
+                    style={stylesheet.scrollToBottomButton}
+                    onPress={scrollToBottom}
+                    accessibilityRole="button"
+                    accessibilityLabel={t("agentStream.scrollToBottom")}
+                    testID="scroll-to-bottom-button"
+                  >
+                    <ChevronDown size={24} color={stylesheet.scrollToBottomIcon.color} />
+                  </Pressable>
+                </Animated.View>
+              </View>
+            )}
+          </AssistantSelectionCopySurface>
+        </ToolCallSheetProvider>
+      </MessageActionsAgentContext.Provider>
     );
   },
 );

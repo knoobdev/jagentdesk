@@ -15,6 +15,7 @@ import {
   type AgentSession,
   type AgentSessionConfig,
   type AgentStreamEvent,
+  type JAgentDeskToolsHealth,
   type SteerActiveTurnOptions,
   type SteerResult,
 } from "../../../agent-sdk-types.js";
@@ -31,6 +32,10 @@ import { messages } from "./history.js";
 import { SessionPermissions } from "./permissions.js";
 import { SessionUsage } from "./usage.js";
 import { attachMcpServers } from "./mcp-attach.js";
+import {
+  isInternalJAgentDeskMcpServer,
+  JAGENTDESK_MCP_SERVER_NAME,
+} from "../../../runtime-mcp-config.js";
 import { createSessionMetricsReporter } from "../../metrics.js";
 import { replayedTurnMetrics, sessionMetrics } from "./metrics.js";
 import { type ProviderOptions } from "@jagentdesk/protocol/agent-types";
@@ -304,6 +309,23 @@ export class OpenCodeV2Session implements AgentSession {
     this.emit({ ...event, ...(this.turns.id ? { turnId: this.turns.id } : {}) });
   }
 
+  /** The session's update time and revert point, and its newest message's progress. */
+  async readHistoryVersion(): Promise<string | null> {
+    await this.reconnectIfExited();
+    const [info, newest] = await Promise.all([
+      this.client.session.get({ sessionID: this.id }),
+      this.client.message.list({ sessionID: this.id, order: "desc", limit: 1 }),
+    ]);
+    const last = newest.data[0];
+    return [
+      this.id,
+      info.time.updated,
+      JSON.stringify(info.revert ?? null),
+      last?.id ?? "",
+      JSON.stringify(last && "time" in last ? last.time : null),
+    ].join(":");
+  }
+
   async *streamHistory() {
     await this.reconnectIfExited();
     const history = new V2Timeline(false);
@@ -451,6 +473,50 @@ export class OpenCodeV2Session implements AgentSession {
       // A rejected apply stores nothing, so the running session keeps asking as it did.
       this.config.providerOptions = previous;
       throw error;
+    }
+  }
+
+  /** Number of JAgentDesk tools this session's launch bound through the bridge plugin. */
+  expectedBridgeTools = 0;
+
+  /**
+   * Spec 04 §27b.0. A shared OpenCode server that restarted or reloaded its plugin forgets the
+   * session's bridge binding, and with it every `jagentdesk_*` tool. One re-bind is tried here;
+   * the caller restarts the runtime if that is not enough.
+   */
+  async checkJAgentDeskTools({ signal }: { signal: AbortSignal }): Promise<JAgentDeskToolsHealth> {
+    // A dead OpenCode server is replaced, and the session re-bound, when the turn starts.
+    if (this.closed || this.historyOnly || this.exited) return { status: "unknown" };
+    const mcp = this.config.mcpServers?.[JAGENTDESK_MCP_SERVER_NAME];
+    if (mcp && isInternalJAgentDeskMcpServer(mcp)) {
+      const catalog = await this.client.mcp.list(
+        { location: { directory: this.config.cwd } },
+        { signal },
+      );
+      const entry = catalog.data.find((item) => item.name === JAGENTDESK_MCP_SERVER_NAME);
+      if (!entry) {
+        return { status: "missing", reason: "the jagentdesk MCP server is not loaded in OpenCode" };
+      }
+      if (entry.status.status !== "connected") {
+        const detail = entry.status.status === "failed" ? `: ${entry.status.error}` : "";
+        return {
+          status: "missing",
+          reason: `the jagentdesk MCP server is ${entry.status.status}${detail}`,
+        };
+      }
+    }
+    if (!this.requiresJAgentDeskPlugin || this.expectedBridgeTools === 0) return { status: "ok" };
+    for (let attempt = 0; ; attempt++) {
+      signal.throwIfAborted();
+      const status = await this.connection.sessionToolsStatus(this.id, this.config.cwd);
+      if (!status) return { status: "unknown" };
+      if (status.bound && status.tools.length > 0) return { status: "ok" };
+      const reason = status.bound
+        ? "the JAgentDesk plugin in OpenCode has no tools for this session"
+        : "the JAgentDesk plugin in OpenCode lost this session's binding";
+      if (attempt > 0) return { status: "missing", reason };
+      this.logger.warn({ reason }, "Re-binding the OpenCode session's JAgentDesk tools");
+      await this.connection.bindSession(this.id, this.config.cwd);
     }
   }
 

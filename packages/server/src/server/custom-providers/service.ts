@@ -38,8 +38,15 @@ export interface CustomProviderServiceDeps {
   acquireSshClient?: AcquireSshClient;
   /** Whether an SSH server id exists; absent deps skip the existence check. */
   sshServerExists?: (serverId: string) => boolean;
-  /** Hot reload (spec 34.6): rebuild the provider registry + snapshot after a write. */
-  reloadRegistry: (removeProviders: readonly string[]) => Promise<void> | void;
+  /**
+   * Hot reload (spec 34.6): rebuild the provider registry + snapshot after a write.
+   * `changedProviders` are refreshed even when their config entry looks the same (a new API key
+   * lives in the secret store, not in config.json); every other provider keeps its state.
+   */
+  reloadRegistry: (
+    removeProviders: readonly string[],
+    changedProviders: readonly string[],
+  ) => Promise<void> | void;
 }
 
 export interface CustomProviderServiceExtras {
@@ -47,6 +54,11 @@ export interface CustomProviderServiceExtras {
   materializeOpenCodeProvider(providerId: string): Promise<OpenCodeProviderInjection | null>;
   /** The Claude spawn env for one api entry, or null when not an anthropic one. */
   materializeClaudeEnv(providerId: string): Promise<Record<string, string> | null>;
+  /**
+   * Asks one api entry's models endpoint with its stored key. Throws when the endpoint refuses
+   * (401/403/429…) or cannot be reached; resolves without a request for other providers.
+   */
+  checkEndpoint(providerId: string): Promise<void>;
   /** Closes every open forward; called on daemon shutdown. */
   closeAll(): void;
 }
@@ -187,8 +199,11 @@ export function createCustomProviderService(
     };
   }
 
-  async function notifyChanged(removeProviders: readonly string[] = []): Promise<void> {
-    await deps.reloadRegistry(removeProviders);
+  async function notifyChanged(change: {
+    removeProviders: readonly string[];
+    changedProviders: readonly string[];
+  }): Promise<void> {
+    await deps.reloadRegistry(change.removeProviders, change.changedProviders);
     for (const listener of changeListeners) listener();
   }
 
@@ -368,7 +383,7 @@ export function createCustomProviderService(
       if (!record) {
         throw new CustomProviderError("provider_not_found", `Provider "${validated.id}" vanished`);
       }
-      await notifyChanged();
+      await notifyChanged({ removeProviders: [], changedProviders: [validated.id] });
       return record;
     },
 
@@ -387,11 +402,29 @@ export function createCustomProviderService(
       writeAgentProviderEntry(deps.jagentdeskHome, id, null);
       await deps.secretStore.delete(providerApiKeySecretId(id));
       forwarder.close(id);
-      await notifyChanged([id]);
+      await notifyChanged({ removeProviders: [id], changedProviders: [] });
     },
 
     async test(input: TestApiProviderInput): Promise<ProviderTestResult> {
       return testProvider(input);
+    },
+
+    async checkEndpoint(providerId) {
+      const api = apiBlockOf(readEntries()[providerId]);
+      if (!api) return;
+      const result = await testProvider({
+        id: providerId,
+        protocol: api.protocol,
+        baseUrl: api.baseUrl,
+        ...(api.via === "tailnet" || api.via === "ssh" ? { via: api.via } : {}),
+        ...(api.sshServerId ? { sshServerId: api.sshServerId } : {}),
+      });
+      if (!result.ok) {
+        throw new CustomProviderError(
+          "endpoint_unreachable",
+          result.error?.message ?? "The models endpoint could not be reached",
+        );
+      }
     },
 
     onChanged(listener: () => void) {

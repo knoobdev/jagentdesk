@@ -503,6 +503,8 @@ export function wrapSessionProvider(provider: AgentProvider, inner: AgentSession
         yield mapStreamEvent(provider, event);
       }
     },
+    readHistoryVersion: inner.readHistoryVersion?.bind(inner),
+    discardHistoryReplay: inner.discardHistoryReplay?.bind(inner),
     getRuntimeInfo: async () => mapRuntimeInfo(provider, await inner.getRuntimeInfo()),
     getAvailableModes: () => inner.getAvailableModes(),
     getCurrentMode: () => inner.getCurrentMode(),
@@ -515,10 +517,12 @@ export function wrapSessionProvider(provider: AgentProvider, inner: AgentSession
     close: () => inner.close(),
     canStopRuntime: inner.canStopRuntime?.bind(inner),
     listCommands: inner.listCommands?.bind(inner),
+    checkJAgentDeskTools: inner.checkJAgentDeskTools?.bind(inner),
     setModel: inner.setModel?.bind(inner),
     setThinkingOption: inner.setThinkingOption?.bind(inner),
     applyOptions: inner.applyOptions?.bind(inner),
     revertConversation: inner.revertConversation?.bind(inner),
+    forkConversation: inner.forkConversation?.bind(inner),
     revertFiles: inner.revertFiles?.bind(inner),
     revertBoth: inner.revertBoth?.bind(inner),
     tryHandleOutOfBand: inner.tryHandleOutOfBand?.bind(inner),
@@ -552,6 +556,7 @@ function wrapClientProvider(
       return inner.capabilities;
     },
     shutdown: inner.shutdown?.bind(inner),
+    retire: inner.retire?.bind(inner),
     resolveUsageLaunch: inner.resolveUsageLaunch?.bind(inner),
     createSession: async (config, launchContext, options) =>
       wrapSessionProvider(

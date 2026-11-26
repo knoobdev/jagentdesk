@@ -17,10 +17,13 @@ import type {
   BuiltinAttachmentPillProps,
   BuiltinClientProps,
   BuiltinComposerDockProps,
+  BuiltinComposerTextWatcherProps,
   BuiltinDestination,
   BuiltinUserMessageBodyProps,
   BuiltinScreen as ScreenProps,
   BuiltinTurnPreparation,
+  BuiltinInspectorTab,
+  BuiltinMessageActionProps,
 } from "./host";
 import { BuiltinPluginScreenBoundary } from "./route-boundary";
 
@@ -149,6 +152,18 @@ export function BuiltinComposerDocks(props: BuiltinComposerDockProps) {
     </>
   );
 }
+export function BuiltinComposerTextWatchers(props: BuiltinComposerTextWatcherProps) {
+  const entries = useBuiltinClientContributions(props.serverId);
+  return (
+    <>
+      {[...entries].flatMap(([id, entry]) =>
+        [...entry.composerTextWatchers].map(([key, Watcher]) => (
+          <Watcher key={`${id}/${key}`} {...props} />
+        )),
+      )}
+    </>
+  );
+}
 export function BuiltinAgentSettingsCards({ serverId }: BuiltinClientProps) {
   const entries = useBuiltinClientContributions(serverId);
   const cards = [...entries]
@@ -213,6 +228,28 @@ export function BuiltinClientItems({
         )),
       )}
     </>
+  );
+}
+
+/** Feature actions under one chat message, after Copy. */
+export function BuiltinMessageActions(props: BuiltinMessageActionProps) {
+  const entries = useBuiltinClientContributions(props.serverId);
+  return (
+    <>
+      {[...entries].flatMap(([id, entry]) =>
+        [...entry.messageActions].map(([key, Component]) => (
+          <Component key={`${id}/${key}`} {...props} />
+        )),
+      )}
+    </>
+  );
+}
+/** Feature tabs of the agent inspector, in plugin order. */
+export function useBuiltinInspectorTabs(serverId: string): BuiltinInspectorTab[] {
+  const entries = useBuiltinClientContributions(serverId);
+  return useMemo(
+    () => Array.from(entries.values()).flatMap((entry) => Array.from(entry.inspectorTabs.values())),
+    [entries],
   );
 }
 

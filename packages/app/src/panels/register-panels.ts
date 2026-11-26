@@ -1,5 +1,6 @@
 import {
   filesPanelRegistration,
+  ledgerPanelRegistration,
   changesTreePanelRegistration,
   pullRequestPanelRegistration,
 } from "./explorer-panels";
@@ -13,6 +14,7 @@ import { setupPanelRegistration } from "@/panels/setup-panel";
 import { terminalPanelRegistration } from "@/panels/terminal-panel";
 import { providerSubagentPanelRegistration } from "@/panels/provider-subagent-panel";
 import { pluginPanelRegistration } from "@/plugins/workspace-panels/panel";
+import { builtinInspectorPanelRegistration } from "@/panels/builtin-inspector-panel";
 
 let panelsRegistered = false;
 
@@ -23,6 +25,7 @@ export function ensurePanelsRegistered(): void {
   registerPanel(filesPanelRegistration);
   registerPanel(changesTreePanelRegistration);
   registerPanel(pullRequestPanelRegistration);
+  registerPanel(ledgerPanelRegistration);
   registerPanel(draftPanelRegistration);
   registerPanel(agentPanelRegistration);
   registerPanel(providerSubagentPanelRegistration);
@@ -33,5 +36,6 @@ export function ensurePanelsRegistered(): void {
   registerPanel(commitDiffPanelRegistration);
   registerPanel(workingDiffPanelRegistration);
   registerPanel(pluginPanelRegistration);
+  registerPanel(builtinInspectorPanelRegistration);
   panelsRegistered = true;
 }

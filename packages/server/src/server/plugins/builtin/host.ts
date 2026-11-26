@@ -22,6 +22,7 @@ import type { BrowserToolsBroker } from "../../browser-tools/broker.js";
 import type { BrowserFingerprintProfile } from "@jagentdesk/protocol/browser-automation/fingerprint-profile";
 import type { AgentStorage } from "../../agent/agent-storage.js";
 import type { SkillInvocationResolver } from "../../agent/agent-prompt.js";
+import type { MemoryPort } from "../../agent/memory-port.js";
 import type { HostCapabilityService } from "../../host-capabilities/service.js";
 import type { TunnelManager } from "../../tunnels/tunnel-manager.js";
 import type { WebSocket as WsSocket } from "ws";
@@ -68,6 +69,8 @@ export interface BuiltinPorts extends BuiltinProvidedServices {
   autorun: AutorunPort;
   /** Insights records every billed turn (AgentManager `onUsageBilled`). */
   usageHistory: UsageHistoryPort;
+  /** Memory: relevant memories in front of each user turn (spec 41 §3.1). */
+  memory: MemoryPort;
 }
 /**
  * Services one built-in offers the built-ins that require it. Core declares each contract so a
@@ -116,6 +119,18 @@ export interface BuiltinDaemonDeps {
   sendPush(notice: BuiltinPushNotice): void;
   /** Core resources Session sharing uses; guest confinement stays in the daemon's sessions. */
   sessionShare: SessionShareDeps;
+  /** Projects (spec 02) and the project an agent works in; absent in daemons built for tests. */
+  projects?: BuiltinProjectAccess;
+}
+export interface BuiltinProject {
+  projectId: string;
+  name: string;
+  rootPath: string;
+}
+export interface BuiltinProjectAccess {
+  list(): Promise<BuiltinProject[]>;
+  /** The project of the agent's workspace, else the project whose root holds the agent's cwd. */
+  forAgent(agentId: string): Promise<BuiltinProject | null>;
 }
 export interface GuestSocketParams {
   agentId: string;
@@ -221,6 +236,16 @@ export interface BuiltinBotTriggerContext {
   setState(key: string, value: number): void;
   service: BuiltinServiceLookup;
 }
+/**
+ * What a built-in in an agent's tool set adds to that agent's launch (spec 29.4): system
+ * instructions, and the provider-owned connectors its tools replace (for example `atlassian`
+ * for Jira), which the daemon hides from providers when the host setting asks for it.
+ */
+export interface BuiltinAgentLaunchHints {
+  instructions?: string[];
+  replacesProviderConnectors?: ProviderConnectorFamily[];
+}
+export type ProviderConnectorFamily = "atlassian";
 export interface BuiltinBotTriggerSource {
   /** Source name in logs and on each trigger. */
   name: string;
@@ -358,6 +383,10 @@ export interface BuiltinServerHost {
   shared<T>(create: (services: BuiltinCoreServices) => T): (services: BuiltinCoreServices) => T;
   /** Bots poll every registered source while this plugin is enabled. */
   botTriggerSource(source: BuiltinBotTriggerSource): void;
+  /** Read at every launch of an agent whose tool set includes this built-in. Synchronous. */
+  agentLaunchHints(
+    get: (context: { service: BuiltinServiceLookup }) => BuiltinAgentLaunchHints | null,
+  ): void;
 }
 interface RpcRegistration {
   id: BuiltinPluginId;
@@ -443,6 +472,10 @@ export class BuiltinServerRegistry {
   private readonly ports = new Map<BuiltinPortKey, PortRegistration>();
   private readonly tools: ToolRegistration[] = [];
   private readonly triggers = new Map<BuiltinPluginId, BuiltinBotTriggerSource>();
+  private readonly launchHintSources = new Map<
+    BuiltinPluginId,
+    (context: { service: BuiltinServiceLookup }) => BuiltinAgentLaunchHints | null
+  >();
   /** Daemon scopes keyed by daemon home: several daemons can share one test process. */
   private readonly scopes = new Map<string, BuiltinDaemonScope>();
   forPlugin(id: BuiltinPluginId): BuiltinServerHost {
@@ -502,6 +535,11 @@ export class BuiltinServerRegistry {
       botTriggerSource: (source) => {
         if (this.triggers.has(id)) throw new Error(`Duplicate built-in bot trigger source: ${id}`);
         this.triggers.set(id, source);
+      },
+      agentLaunchHints: (get) => {
+        if (this.launchHintSources.has(id))
+          throw new Error(`Duplicate built-in launch hints: ${id}`);
+        this.launchHintSources.set(id, get);
       },
     };
   }
@@ -626,6 +664,23 @@ export class BuiltinServerRegistry {
         if (!snapshot || snapshot.has(tools.id)) register(name, config, handler);
       }, toolContext);
     }
+  }
+  /** Launch hints of the given built-ins for the daemon rooted at `home`, in plugin order. */
+  launchHints(home: string, ids: ReadonlySet<string>): BuiltinAgentLaunchHints {
+    const service = this.lookup(home);
+    const instructions: string[] = [];
+    const connectors = new Set<ProviderConnectorFamily>();
+    for (const [id, get] of this.launchHintSources) {
+      if (!ids.has(id)) continue;
+      const hints = get({ service });
+      instructions.push(...(hints?.instructions ?? []));
+      for (const family of hints?.replacesProviderConnectors ?? []) connectors.add(family);
+    }
+    return { instructions, replacesProviderConnectors: [...connectors] };
+  }
+  /** Built-ins that install agent tools, in any slot. */
+  agentToolPluginIds(): ReadonlySet<BuiltinPluginId> {
+    return new Set(this.tools.map((tools) => tools.id));
   }
   session(
     state: BuiltinPluginState | undefined,

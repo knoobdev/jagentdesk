@@ -441,6 +441,16 @@ export class DaemonConfigStore {
   }
 }
 
+/** Failover and cross-provider child settings (spec 40 §4–§5); omitted when unset. */
+function persistedContinuityConfig(mutable: MutableDaemonConfig) {
+  return {
+    ...(mutable.agentFailover ? { failover: mutable.agentFailover } : {}),
+    ...(mutable.crossProviderChildren
+      ? { crossProviderChildren: mutable.crossProviderChildren }
+      : {}),
+  };
+}
+
 function mergeMutableConfigIntoPersistedConfig(params: {
   persisted: PersistedConfig;
   mutable: MutableDaemonConfig;
@@ -491,6 +501,7 @@ function mergeMutableConfigIntoPersistedConfig(params: {
     resumeOnStartup: mutable.resumeOnStartup,
     resumePrompt: mutable.resumePrompt,
     idleRuntimeCleanup: mutable.idleRuntimeCleanup !== false,
+    ...persistedContinuityConfig(mutable),
   };
   return {
     ...persisted,
@@ -529,6 +540,7 @@ function mergeMutableConfigIntoPersistedConfig(params: {
       enableTerminalAgentHooks: mutable.enableTerminalAgentHooks,
       appendSystemPrompt: mutable.appendSystemPrompt,
       operatorContext: mutable.operatorContext,
+      ...(mutable.jira !== undefined ? { jira: mutable.jira } : {}),
       orchestration: mutable.orchestration,
       ...(mutable.agentProfiles !== undefined ? { agentProfiles: mutable.agentProfiles } : {}),
       ...(mutable.terminalProfiles !== undefined

@@ -73,6 +73,7 @@ function normalizeSimpleWorkspaceTabTarget(value: WorkspaceTabTarget): Workspace
     case "changes_tree":
     case "files":
     case "pull_request":
+    case "ledger":
       return { kind: value.kind };
     case "setup": {
       const workspaceId = trimNonEmpty(value.workspaceId);
@@ -81,6 +82,10 @@ function normalizeSimpleWorkspaceTabTarget(value: WorkspaceTabTarget): Workspace
     case "commit_diff": {
       const sha = trimNonEmpty(value.sha);
       return sha ? { kind: "commit_diff", sha } : null;
+    }
+    case "builtin_inspector": {
+      const tabId = trimNonEmpty(value.tabId);
+      return tabId ? { kind: "builtin_inspector", tabId } : null;
     }
     default:
       return null;
@@ -147,6 +152,7 @@ function secondaryWorkspaceTabTargetsEqual(
     return left.focusPath === right.focusPath && left.focusRequestId === right.focusRequestId;
   }
   if (left.kind === "changes_tree" && right.kind === "changes_tree") return true;
+  if (left.kind === "ledger" && right.kind === "ledger") return true;
   if (left.kind === "files" && right.kind === "files") {
     return true;
   }
@@ -173,6 +179,9 @@ function pluginWorkspaceTabTargetsEqual(
       left.context === right.context &&
       (left.context !== "agent" || right.context !== "agent" || left.agentId === right.agentId)
     );
+  }
+  if (left.kind === "builtin_inspector" && right.kind === "builtin_inspector") {
+    return left.tabId === right.tabId;
   }
   return false;
 }
@@ -241,7 +250,15 @@ export function buildDeterministicWorkspaceTabId(target: WorkspaceTabTarget): st
     }
     return `plugin_workspace_${target.pluginId.length}_${target.pluginId}_${target.panelId.length}_${target.panelId}`;
   }
-  if (target.kind === "files" || target.kind === "changes_tree" || target.kind === "pull_request")
+  if (target.kind === "builtin_inspector") {
+    return `builtin_inspector_${target.tabId}`;
+  }
+  if (
+    target.kind === "files" ||
+    target.kind === "changes_tree" ||
+    target.kind === "pull_request" ||
+    target.kind === "ledger"
+  )
     return target.kind;
   return `file_${target.path}`;
 }

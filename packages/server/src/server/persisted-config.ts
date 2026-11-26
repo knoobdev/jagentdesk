@@ -1,3 +1,7 @@
+import {
+  CrossProviderChildrenConfigSchema,
+  FailoverConfigSchema,
+} from "./agent/failover/failover-policy.js";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
@@ -322,6 +326,7 @@ export const PersistedConfigSchema = z
         enableTerminalAgentHooks: z.boolean().optional(),
         appendSystemPrompt: z.string().optional(),
         operatorContext: z.string().optional(),
+        jira: z.object({ hideProviderConnectors: z.boolean().optional() }).strict().optional(),
         terminalProfiles: z.array(TerminalProfileSchema).optional(),
         agentProfiles: z.array(AgentProfileSchema).optional(),
         orchestration: OrchestrationConfigSchema.optional(),
@@ -394,6 +399,8 @@ export const PersistedConfigSchema = z
         providers: z.preprocess(normalizeAgentProviders, ProviderOverridesSchema).optional(),
         idleRuntimeCleanup: z.boolean().optional(),
         metadataGeneration: AgentMetadataGenerationSchema.optional(),
+        failover: FailoverConfigSchema.optional(),
+        crossProviderChildren: CrossProviderChildrenConfigSchema.optional(),
       })
       .strict()
       .optional(),

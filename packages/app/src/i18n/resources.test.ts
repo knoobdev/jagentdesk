@@ -51,6 +51,7 @@ const OPTIONAL_ENGLISH_FALLBACK_PREFIXES = [
   "ssh.",
   "builtinPlugins.",
   "bots.",
+  "memory.",
 ];
 function isOptionalEnglishFallbackKey(key: string): boolean {
   return OPTIONAL_ENGLISH_FALLBACK_PREFIXES.some((prefix) => key.startsWith(prefix));

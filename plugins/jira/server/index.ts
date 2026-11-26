@@ -3,7 +3,7 @@ import type {
   BuiltinServerHost,
   BuiltinSessionContribution,
 } from "../../../packages/server/src/server/plugins/builtin/host-api.js";
-import { createJiraAgentTools } from "./agent-tools.js";
+import { createJiraAgentTools, jiraAgentInstruction } from "./agent-tools.js";
 import { pollJiraBotTriggers } from "./bot-triggers.js";
 import { atlassianEndpointsFromEnv } from "./credentials.js";
 import { JiraService } from "./service.js";
@@ -86,6 +86,20 @@ export function register(host: BuiltinServerHost) {
     },
     { slot: "integrations" },
   );
+  // Spec 29.4: agents prefer jira_* over the provider's own Jira/Atlassian connector.
+  host.agentLaunchHints(({ service }) => {
+    const jira = service(daemon);
+    if (!jira) return null;
+    const sites = jira.service
+      .listConnections()
+      .filter((connection) => connection.authState === "connected")
+      .map((connection) => connection.siteUrl.replace(/\/+$/, ""));
+    if (sites.length === 0) return null;
+    return {
+      instructions: [jiraAgentInstruction(sites)],
+      replacesProviderConnectors: ["atlassian"],
+    };
+  });
   host.botTriggerSource({
     name: "jira",
     async poll(bot, context) {

@@ -194,7 +194,7 @@ import { type PaneHost } from "@/panels/panel-manifest";
 import { type ComposerFocusOptions } from "@/composer/model";
 import { useRetainedPanelActive } from "@/components/retained-panel";
 import { builtinClientRegistry } from "@/plugins/builtin/loaded";
-import { BuiltinAttachmentPill } from "@/plugins/builtin/surfaces";
+import { BuiltinAttachmentPill, BuiltinComposerTextWatchers } from "@/plugins/builtin/surfaces";
 
 const composerImageAttachmentPersister: Pick<
   AttachmentPersister,
@@ -2707,6 +2707,12 @@ function ComposerContentImpl({
                 configuration={forgeConfiguration}
                 ref={forgeAutoAttachRef}
                 onResolvingChange={setIsForgeResolving}
+              />
+              <BuiltinComposerTextWatchers
+                serverId={serverId}
+                text={textSource}
+                attachments={attachments}
+                setAttachments={setSelectedAttachments}
               />
 
               {/* MessageInput handles everything: text, dictation, attachments, all buttons */}

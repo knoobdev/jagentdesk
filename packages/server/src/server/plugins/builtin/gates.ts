@@ -42,6 +42,11 @@ const TOOL_PREFIXES: readonly [BuiltinPluginId, readonly string[]][] = [
   ["forge-hub", ["forge_"]],
   ["browser-tools", ["browser_"]],
 ];
+/** Built-ins whose agent tools are gated by name prefix. */
+export function builtinPluginsWithToolPrefixes(): BuiltinPluginId[] {
+  return TOOL_PREFIXES.map(([id]) => id);
+}
+
 export function builtinPluginForTool(name: string): BuiltinPluginId | null {
   if (/^provider_(add|list|remove|test|update)$/.test(name)) return "custom-providers";
   if (name === "create_skill" || name === "update_skill") return "skills";

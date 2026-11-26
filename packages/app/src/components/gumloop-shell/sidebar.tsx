@@ -87,6 +87,7 @@ const PRIMARY_ORDER: readonly string[] = [
   "sessions",
   "schedules",
   "skills",
+  "memory",
   "bots",
   "marketplace",
   "usage",

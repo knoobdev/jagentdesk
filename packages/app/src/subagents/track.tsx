@@ -2,20 +2,20 @@ import { usePaneContext } from "@/panels/pane-context";
 import { useSubagentSheetTab } from "./sheet-tab";
 import { useSheetPanePage } from "@/screens/workspace/sheet-pane";
 import { ComposerTrackPill, ComposerTrackRow } from "@/composer/tracks";
+import { ComposerStackTrack } from "@/composer/stack-track";
 import { iconButtonChromeStyle } from "@/components/ui/icon-button-chrome";
 import { useAgentFactsLine } from "@/panels/agent-facts-line";
 import type { AgentAddress } from "@jagentdesk/protocol/addresses";
 import { useHosts } from "@/runtime/host-runtime";
 
-import { CHAT_COLUMN_RAIL_DATASET } from "@/chat-rail";
 import { useCallback, useMemo, useState, type ReactElement } from "react";
-import { Pressable, ScrollView, Text, View, type PressableStateCallbackType } from "react-native";
+import { Pressable, Text, View, type PressableStateCallbackType } from "react-native";
 import { useTranslation } from "react-i18next";
-import { Archive, ChevronDown, ChevronRight, Unlink } from "lucide-react-native";
+import { Archive, Unlink } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { getProviderIcon } from "@/components/provider-icons";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useIsCompactFormFactor, MAX_CONTENT_WIDTH } from "@/constants/layout";
+import { useIsCompactFormFactor } from "@/constants/layout";
 import { isNative } from "@/constants/platform";
 import {
   WorkspaceTabIcon,
@@ -30,8 +30,6 @@ import {
 } from "./track-presentation";
 
 const ThemedArchive = withUnistyles(Archive);
-const ThemedChevronDown = withUnistyles(ChevronDown);
-const ThemedChevronRight = withUnistyles(ChevronRight);
 const ThemedUnlink = withUnistyles(Unlink);
 
 const foregroundColorMapping = (theme: Theme) => ({ color: theme.colors.foreground });
@@ -48,8 +46,6 @@ export interface SubagentsTrackProps {
   onArchiveFinished?: () => void;
   onDetachSubagent?: (address: AgentAddress) => void;
 }
-
-const SUBAGENTS_LIST_MAX_HEIGHT = 200;
 
 function buildRowPresentation(row: SubagentRow): WorkspaceTabPresentation {
   const data = buildSubagentRowPresentationData(row);
@@ -78,21 +74,20 @@ export function SubagentsTrack({
     setExpanded((current) => !current);
   }, []);
 
-  const surfaceStyle = useMemo(
-    () => [styles.surface, expanded && styles.surfaceExpanded],
-    [expanded],
-  );
-
-  const headerStyle = useCallback(
-    ({ hovered, pressed }: PressableStateCallbackType) => [
-      styles.headerToggle,
-      (hovered || pressed) && styles.headerActive,
-    ],
-    [],
-  );
-  const headerContainerStyle = useMemo(
-    () => [styles.header, expanded ? styles.headerDivider : styles.headerCollapsed],
-    [expanded],
+  const finishedCount = countFinishedSubagents(rows);
+  const headerAction = useMemo(
+    () =>
+      finishedCount > 0 && onArchiveFinished ? (
+        <SubagentActionButton
+          accessibilityLabel={t("subagents.archiveFinishedAction")}
+          testID="subagents-track-archive-finished"
+          tooltipLabel={t("subagents.archiveFinishedTooltip")}
+          icon="archive"
+          visible
+          onPress={onArchiveFinished}
+        />
+      ) : null,
+    [finishedCount, onArchiveFinished, t],
   );
 
   if (rows.length === 0) {
@@ -100,7 +95,6 @@ export function SubagentsTrack({
   }
 
   const headerLabel = formatHeaderLabel(rows);
-  const finishedCount = countFinishedSubagents(rows);
 
   if (compact)
     return (
@@ -115,62 +109,26 @@ export function SubagentsTrack({
       />
     );
   return (
-    <View style={styles.outer} testID="subagents-track" dataSet={CHAT_COLUMN_RAIL_DATASET}>
-      <View style={styles.track}>
-        <View style={surfaceStyle}>
-          <View style={headerContainerStyle}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={headerLabel}
-              testID="subagents-track-header"
-              onPress={toggleExpanded}
-              style={headerStyle}
-            >
-              {expanded ? (
-                <ThemedChevronDown size={12} uniProps={foregroundMutedColorMapping} />
-              ) : (
-                <ThemedChevronRight size={12} uniProps={foregroundMutedColorMapping} />
-              )}
-              <Text style={styles.headerLabel} numberOfLines={1}>
-                {headerLabel}
-              </Text>
-            </Pressable>
-            {finishedCount > 0 && onArchiveFinished ? (
-              <View style={styles.headerAction}>
-                <SubagentActionButton
-                  accessibilityLabel={t("subagents.archiveFinishedAction")}
-                  testID="subagents-track-archive-finished"
-                  tooltipLabel={t("subagents.archiveFinishedTooltip")}
-                  icon="archive"
-                  visible
-                  onPress={onArchiveFinished}
-                />
-              </View>
-            ) : null}
-          </View>
-          {expanded ? (
-            <ScrollView
-              style={styles.scroll}
-              contentContainerStyle={styles.scrollContent}
-              showsVerticalScrollIndicator={false}
-              nestedScrollEnabled
-            >
-              {rows.map((row) => (
-                <SubagentsTrackRow
-                  serverId={serverId}
-                  key={row.kind === "jagentdesk" ? `${row.address.serverId}:${row.id}` : row.id}
-                  row={row}
-                  onOpenSubagent={onOpenSubagent}
-                  onOpenProviderSubagent={onOpenProviderSubagent}
-                  onArchiveSubagent={onArchiveSubagent}
-                  onDetachSubagent={onDetachSubagent}
-                />
-              ))}
-            </ScrollView>
-          ) : null}
-        </View>
-      </View>
-    </View>
+    <ComposerStackTrack
+      testID="subagents-track"
+      headerTestID="subagents-track-header"
+      headerLabel={headerLabel}
+      expanded={expanded}
+      onToggle={toggleExpanded}
+      headerAction={headerAction}
+    >
+      {rows.map((row) => (
+        <SubagentsTrackRow
+          serverId={serverId}
+          key={row.kind === "jagentdesk" ? `${row.address.serverId}:${row.id}` : row.id}
+          row={row}
+          onOpenSubagent={onOpenSubagent}
+          onOpenProviderSubagent={onOpenProviderSubagent}
+          onArchiveSubagent={onArchiveSubagent}
+          onDetachSubagent={onDetachSubagent}
+        />
+      ))}
+    </ComposerStackTrack>
   );
 }
 
@@ -453,68 +411,6 @@ const styles = StyleSheet.create((theme) => ({
   rowText: { flexGrow: 1, flexShrink: 1, flexBasis: "auto", minWidth: 0 },
   rowTitle: { fontSize: theme.fontSize.base, color: theme.colors.foreground },
   rowFacts: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
-  outer: {
-    width: "100%",
-    alignItems: "center",
-    paddingHorizontal: theme.spacing[4],
-  },
-  track: {
-    width: "100%",
-    maxWidth: MAX_CONTENT_WIDTH,
-    marginBottom: -theme.spacing[4],
-  },
-  surface: {
-    alignSelf: "stretch",
-    backgroundColor: theme.colors.surface1,
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.borderAccent,
-    borderBottomWidth: 0,
-    borderTopLeftRadius: theme.borderRadius["2xl"],
-    borderTopRightRadius: theme.borderRadius["2xl"],
-    overflow: "hidden",
-  },
-  surfaceExpanded: {
-    paddingBottom: theme.spacing[4],
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  headerToggle: {
-    flex: 1,
-    minWidth: 0,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[2],
-    paddingLeft: theme.spacing[3],
-    paddingRight: theme.spacing[1],
-    paddingVertical: theme.spacing[2],
-  },
-  headerAction: {
-    paddingRight: theme.spacing[2],
-  },
-  headerCollapsed: {
-    paddingBottom: theme.spacing[4],
-  },
-  headerActive: {
-    backgroundColor: theme.colors.surface2,
-  },
-  headerDivider: {
-    borderBottomWidth: theme.borderWidth[1],
-    borderBottomColor: theme.colors.border,
-  },
-  headerLabel: {
-    flexShrink: 1,
-    minWidth: 0,
-    fontSize: theme.fontSize.xs,
-    color: theme.colors.foregroundMuted,
-  },
-  scroll: {
-    maxHeight: SUBAGENTS_LIST_MAX_HEIGHT,
-  },
-  scrollContent: {
-    paddingVertical: theme.spacing[1],
-  },
   row: {
     minHeight: { xs: 44, md: 32 },
     flexDirection: "row",

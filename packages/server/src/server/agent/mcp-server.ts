@@ -7,7 +7,10 @@ import type {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import { addModelVisibleStructuredContent } from "./tools/jagentdesk-tool-serialization.js";
-import { createJAgentDeskToolCatalog, type JAgentDeskToolHostDependencies } from "./tools/jagentdesk-tools.js";
+import {
+  createJAgentDeskToolCatalog,
+  type JAgentDeskToolHostDependencies,
+} from "./tools/jagentdesk-tools.js";
 import type { JAgentDeskToolResult } from "./tools/types.js";
 
 export type AgentMcpServerOptions = JAgentDeskToolHostDependencies;
@@ -42,6 +45,7 @@ export async function createAgentMcpServer(options: AgentMcpServerOptions): Prom
         title: tool.title,
         description: tool.description,
         inputSchema: tool.inputSchema,
+        ...(tool._meta ? { _meta: tool._meta } : {}),
       },
       async (args: unknown, context?: McpToolContext) =>
         toMcpToolResult(await catalog.executeTool(tool.name, args, { signal: context?.signal })),

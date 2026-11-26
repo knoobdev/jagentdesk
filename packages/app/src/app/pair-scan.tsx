@@ -153,7 +153,9 @@ export default function PairScanScreen() {
 
       try {
         setIsPairing(true);
-        router.push(
+        // Replace: a camera left mounted under pair-verify keeps scanning and
+        // would open a second exchange when the host shows a new code.
+        router.replace(
           `/pair-verify?source=${encodeURIComponent(source)}&offer=${encodeURIComponent(offerUrl)}` as Href,
         );
       } catch (error) {

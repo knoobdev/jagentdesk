@@ -31,6 +31,14 @@ interface LogRecord {
   err?: { message?: string };
 }
 
+/** Opening an agent reads its history; resuming alone no longer parses the transcript. */
+async function openHistoryAndClose(session: AgentSession): Promise<void> {
+  for await (const _event of session.streamHistory()) {
+    // Drain the replay the way the daemon hydrates a reopened agent.
+  }
+  await session.close();
+}
+
 describe("ClaudeAgentSession persisted history load", () => {
   let tempRoot: string;
   let cwd: string;
@@ -656,7 +664,7 @@ describe("ClaudeAgentSession persisted history load", () => {
   );
 
   test("logs the resolved transcript path when the transcript does not exist", async () => {
-    await (await resume()).close();
+    await openHistoryAndClose(await resume());
 
     expect(records).toContainEqual(
       expect.objectContaining({
@@ -672,7 +680,7 @@ describe("ClaudeAgentSession persisted history load", () => {
     // A directory at the transcript path exists but cannot be read as a file.
     mkdirSync(transcriptPath(), { recursive: true });
 
-    await (await resume()).close();
+    await openHistoryAndClose(await resume());
 
     expect(records).toContainEqual(
       expect.objectContaining({
@@ -849,7 +857,7 @@ describe("ClaudeAgentSession persisted history load", () => {
       chmodSync(path.join(configDir, "projects"), 0o000);
 
       try {
-        await (await resume()).close();
+        await openHistoryAndClose(await resume());
       } finally {
         chmodSync(path.join(configDir, "projects"), 0o755);
       }

@@ -1,3 +1,4 @@
+import { stat } from "node:fs/promises";
 import { z } from "zod";
 
 import { CodexAppServerResponseTooLargeError } from "./app-server-transport.js";
@@ -39,6 +40,8 @@ const CodexThreadMetadataSchema = z
       .object({
         historyMode: z.enum(["legacy", "paginated"]).optional(),
         status: z.unknown().optional(),
+        path: z.unknown().optional(),
+        updatedAt: z.unknown().optional(),
       })
       .passthrough(),
   })
@@ -93,6 +96,30 @@ export async function readCodexThreadHistoryMode(
 ): Promise<CodexThreadHistoryMode> {
   // COMPAT(codexHistoryMode): added in v0.10.0, remove after 2027-05-23 once Codex floor >= 0.143.
   return (await readThreadMetadata(client, threadId)).historyMode ?? "legacy";
+}
+
+/**
+ * The rollout file's size and modification time, which change with every item Codex records.
+ * Falls back to the thread's update time when Codex does not report the rollout path.
+ */
+export async function readCodexThreadHistoryVersion(
+  client: CodexThreadHistoryClient,
+  threadId: string,
+): Promise<string | null> {
+  const thread = await readThreadMetadata(client, threadId);
+  const rolloutPath = typeof thread.path === "string" ? thread.path : null;
+  if (rolloutPath) {
+    try {
+      const stats = await stat(rolloutPath);
+      return `${threadId}:${stats.size}:${stats.mtimeMs}`;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  const updatedAt = thread.updatedAt;
+  return typeof updatedAt === "number" || typeof updatedAt === "string"
+    ? `${threadId}:updated:${updatedAt}`
+    : null;
 }
 
 async function readThreadMetadata(client: CodexThreadHistoryClient, threadId: string) {

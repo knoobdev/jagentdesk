@@ -22,6 +22,7 @@ do not rename them.
 | `workbench`        | Workbench                                     | on      | `devices`     |
 | `forge-hub`        | Forge Hub ([forges](forge-providers.md))      | on      |               |
 | `skills`           | Skills                                        | on      |               |
+| `memory`           | Memory ([guide](memory.md))                   | on      |               |
 | `spec-mode`        | Spec mode                                     | on      | `skills`      |
 | `autorun`          | Autonomous run                                | off     |               |
 | `insights`         | Insights                                      | on      |               |
@@ -30,7 +31,7 @@ do not rename them.
 
 The same Built-in list also holds `bots` ([Bots](bots.md)), `worktree-include`, the bundled
 provider plugins and the `*-usage-source` plugins. Those keep the SDK runtime described in
-[Plugins](plugins.md#bundled-plugins); this doc covers the 17 features above. The manifest in
+[Plugins](plugins.md#bundled-plugins); this doc covers the 18 features above. The manifest in
 `plugins/<id>/jagentdesk-plugin.json` is the source of truth for names, defaults and dependencies.
 
 ## Turning a built-in off
@@ -54,8 +55,23 @@ While a built-in is off:
   controls without a reload. A deep link to its screen shows "Plugin turned off" with a
   permission-gated "Turn on".
 - Its RPCs answer `plugin_disabled`.
-- New agents do not get its tools. Each agent captures its enabled set once
-  (`BuiltinPluginState.forAgent`), so running agents keep the tools they opened with.
+- Agents lose its tools from their next message. A provider reads its tool list once, when its
+  runtime starts, so each launch adopts the host's current set (`BuiltinPluginState.forAgent`
+  holds it for that runtime's stateless MCP requests). At the start of every turn the agent manager
+  compares that set with the host's; when a built-in with agent tools changed, it closes the runtime
+  and resumes the same native session, keeping the agent id and timeline (spec 04 §27b.1). The
+  same happens when a built-in's `agentLaunchHints` change: Jira adds an instruction and hides
+  the provider's own Atlassian connectors once a connection exists, without changing any tool
+  group. A session without a resumable id keeps its old tools and gets one "New tools apply from
+  a new session" row, unless it has no conversation yet, in which case it starts again.
+- Every foreground turn also asks the provider whether the JAgentDesk tools reached its runtime
+  (`AgentSession.checkJAgentDeskTools`: Claude `mcpServerStatus()`, Codex `mcpServerStatus/list`,
+  OpenCode the bridge plugin's `status`; others answer `unknown`). Missing tools get one
+  release and resume with a fresh MCP config, then a "JAgentDesk tools are unavailable for
+  <provider>: <reason>" row (spec 04 §27b.0). Wrapped providers (profiles, custom providers)
+  must forward the method; `provider-registry.ts` enforces that through its type.
+- An agent asked for an off built-in calls `turn_on_host_tools`, which shows "Turn on <name> for
+  this host?" even in unattended modes, because it changes host settings.
 - Its background services and session contributions stop within five seconds.
 - Its data and secrets stay on disk.
 
@@ -131,7 +147,7 @@ would load it, and its CommonJS entry pulls raw React Native into the app's unit
 - `host.shared(create)` returns an accessor for one value per daemon, keyed by its config store
   (Argo CD's SSE service).
 - `host.provide(key, get)` serves a port declared in `BuiltinPorts`. Core flows read ports
-  (prompt delivery reads `skillInvocation`, spawn reads `specMode`), and features that `require`
+  (prompt delivery reads `skillInvocation` and `memory`, spawn reads `specMode`), and features that `require`
   this one read `BuiltinProvidedServices` entries with `provided(key)`. Devices provides the
   simulator installer that Workbench's `sim_install_batch` uses.
 - `host.botTriggerSource(source)` adds a source to the Bots poller while the plugin is on.
@@ -167,7 +183,8 @@ libraries.
 add a sidebar destination and mobile drawer entry, a left panel, a route screen, settings sections,
 a card on Settings → Providers, composer items, agent controls, header controls, composer docks,
 agent panel accessories, Settings → Agents cards, a user message body, turn preparers, timeline
-renderers, tool call cards, attachment sources and pills, and per-host mounts. Read the interface
+renderers, tool call cards, attachment sources and pills, per-host mounts, message actions (under every user message and
+assistant turn) and agent inspector tabs. Read the interface
 for each signature.
 
 - Use one destination for desktop and mobile. `group: "Tools"` puts it in the sidebar's Tools

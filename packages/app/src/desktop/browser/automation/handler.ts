@@ -384,9 +384,10 @@ async function openBrowserTabForRequest(params: {
       message: "Cannot create a browser tab without a workspace context.",
     });
   }
-  useWorkspaceLayoutStore.getState().openTabInBackground(workspaceKey, {
-    kind: "browser",
-    browserId,
+  // Spec 04 §27b.3: the agent's tab is selected in the inspector pane right away, next to the
+  // chat, so the user sees the page open in the app rather than looking for it.
+  useWorkspaceLayoutStore.getState().openTabInExplorerPaneFocused(workspaceKey, {
+    target: { kind: "browser", browserId },
   });
 
   if (browserHost?.executeAutomationCommand) {

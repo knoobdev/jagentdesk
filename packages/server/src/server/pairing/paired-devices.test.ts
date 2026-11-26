@@ -49,6 +49,22 @@ describe("paired devices store", () => {
     }
   });
 
+  test("markSeen records activity, persists it, and skips writes inside a minute", () => {
+    const home = createTempHome();
+    try {
+      const store = createStore(home);
+      const device = store.register({ devicePublicKeyB64: makePublicKeyB64() });
+      store.markSeen(device.deviceId, 1_000_000);
+      store.markSeen(device.deviceId, 1_030_000);
+      expect(store.getById(device.deviceId)?.lastSeenMs).toBe(1_000_000);
+      store.markSeen(device.deviceId, 1_060_000);
+      store.markSeen("missing-id", 1_060_000);
+      expect(createStore(home).getById(device.deviceId)?.lastSeenMs).toBe(1_060_000);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   test("register without deviceName omits the field", () => {
     const home = createTempHome();
     try {

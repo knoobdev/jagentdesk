@@ -245,6 +245,26 @@ describe("relay-transport control lifecycle", () => {
     expect(hasLogMessage(logger, "info", "relay_control_connected")).toBe(true);
   });
 
+  test("stop() terminates data sockets so attached sessions see the close at once", async () => {
+    const closes: unknown[] = [];
+    const { controller } = start({
+      attachSocket: async (socket) => {
+        socket.on("close", (code) => closes.push(code));
+      },
+    });
+    const control = relay.sockets[0];
+    control.open();
+    authenticate(control, ownership, "srv_test");
+    control.message(JSON.stringify({ type: "connected", connectionId: "conn_pairing" }));
+    const data = relay.sockets.find((socket) => socket.url.includes("conn_pairing"))!;
+    data.open();
+    authenticate(data, ownership, "srv_test");
+    await Promise.resolve();
+    await controller.stop();
+    expect(data.terminateCalls).toBe(1);
+    expect(closes).toEqual([1006]);
+  });
+
   test("terminates and reconnects when control socket opens but never becomes ready", () => {
     vi.useFakeTimers();
     const { logger } = start();

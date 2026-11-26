@@ -131,6 +131,10 @@ import {
   type RefreshProvidersSnapshotResponseMessage,
   type ProviderDiagnosticResponseMessage,
   type ProviderUsageListResponseMessage,
+  type AgentLedgerGetPayload,
+  type AgentContinuityGetPayload,
+  type AgentFailoverConfig,
+  type CrossProviderChildrenConfig,
   type DaemonGetStatusResponse,
   type DaemonGetPairingOfferResponse,
   type PairingDeviceListResponse,
@@ -353,6 +357,16 @@ import {
   type SkillSourceStatus,
   type SkillWrittenPaths,
 } from "@jagentdesk/protocol/native-skills";
+import type {
+  MemoryGraduationPreview,
+  MemoryListRequest,
+  MemoryProject,
+  MemoryRecordWire,
+  MemorySaveRequest,
+  MemorySettingsSetRequest,
+  MemorySettingsWire,
+  MemoryUseWire,
+} from "@jagentdesk/protocol/memory";
 import { type LifetimeUsage, type UsageDayRollup } from "@jagentdesk/protocol/usage-history";
 import { terminalSubscriptionKey } from "@jagentdesk/protocol/terminal-subscription-key";
 import {
@@ -434,6 +448,14 @@ const consoleLogger: Logger = {
   warn: (obj, msg) => console.warn(msg, obj),
   error: (obj, msg) => console.error(msg, obj),
 };
+
+/**
+ * How far a connection attempt got before it connected or failed: the socket is
+ * still opening (for relay: the encrypted channel is being set up), it opened,
+ * the host's challenge arrived, the device key is signing it, or the hello was
+ * sent and the host has not answered yet.
+ */
+export type DaemonConnectStage = "connecting" | "opened" | "challenged" | "signing" | "hello_sent";
 
 const perfNow: () => number =
   typeof performance !== "undefined" && typeof performance.now === "function"
@@ -1589,6 +1611,10 @@ type ScheduleUpdatePayload = Extract<
 
 export type FetchAgentTimelinePayload = FetchAgentTimelineResponseMessage["payload"];
 
+export type AgentForkPayload = Extract<
+  SessionOutboundMessage,
+  { type: "agent.fork.response" }
+>["payload"];
 export type AgentForkContextPayload = AgentForkContextResponseMessage["payload"];
 
 export type FetchAgentTimelineDirection = FetchAgentTimelinePayload["direction"];
@@ -2473,6 +2499,7 @@ export class DaemonClient {
   private challengeWaitTimeout: ReturnType<typeof setTimeout> | null = null;
 
   private registeredThisConnection = false;
+  private connectStageValue: DaemonConnectStage = "connecting";
 
   private reconnectAttempt = 0;
 
@@ -2726,6 +2753,7 @@ export class DaemonClient {
       this.lastServerInfoMessage = null;
       this.owned.disconnected();
       this.registeredThisConnection = false;
+      this.connectStageValue = "connecting";
 
       this.updateConnectionState(
         {
@@ -2756,6 +2784,7 @@ export class DaemonClient {
             this.pendingGenericTransportErrorTimeout = null;
           }
           this.lastErrorValue = null;
+          this.connectStageValue = "opened";
           if (this.config.expectChallenge) {
             this.startChallengeWaitFallback();
           } else {
@@ -2833,7 +2862,14 @@ export class DaemonClient {
               this.chunkedTransport!.receive(typeof data === "string" ? data : bytes!);
             else this.handleTransportMessage(data);
           } catch (error) {
-            if (!(error instanceof ChunkedTransportProtocolError)) throw error;
+            if (!(error instanceof ChunkedTransportProtocolError)) {
+              // Transports swallow listener errors; keep the reason for the caller.
+              this.lastErrorValue = `Failed to handle a message from the host: ${
+                error instanceof Error ? error.message : String(error)
+              }`;
+              this.logger.warn({ err: error }, "transport_message_handler_failed");
+              throw error;
+            }
             transport.close(4003, "Invalid chunked transport");
           }
         }),
@@ -3190,6 +3226,11 @@ export class DaemonClient {
 
   get isConnecting(): boolean {
     return this.connectionState.status === "connecting";
+  }
+
+  /** How far the current connection attempt got; see {@link DaemonConnectStage}. */
+  get connectStage(): DaemonConnectStage {
+    return this.connectStageValue;
   }
 
   get lastError(): string | null {
@@ -5034,6 +5075,37 @@ export class DaemonClient {
     return payload;
   }
 
+  /**
+   * Fast fork (spec 41 §6): the daemon forks the provider conversation natively and answers with
+   * the new agent. `code: "native_fork_unavailable"` means seed a new agent instead.
+   */
+  async forkAgent(
+    agentId: string,
+    options: AgentForkContextOptions & { forkAgentId?: string; title?: string } = {},
+  ): Promise<AgentForkPayload> {
+    const resolvedRequestId = this.createRequestId(options.requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "agent.fork.request",
+      agentId,
+      requestId: resolvedRequestId,
+      ...(options.boundaryCursor ? { boundaryCursor: options.boundaryCursor } : {}),
+      ...(options.boundaryMessageId ? { boundaryMessageId: options.boundaryMessageId } : {}),
+      ...(options.forkAgentId ? { forkAgentId: options.forkAgentId } : {}),
+      ...(options.title ? { title: options.title } : {}),
+    });
+    return this.sendRequest({
+      requestId: resolvedRequestId,
+      message,
+      timeout: 120_000,
+      options: { skipQueue: true },
+      select: (msg) => {
+        if (msg.type !== "agent.fork.response") return null;
+        if (msg.payload.requestId !== resolvedRequestId) return null;
+        return msg.payload;
+      },
+    });
+  }
+
   // ============================================================================
   // Agent Interaction
   // ============================================================================
@@ -5241,6 +5313,7 @@ export class DaemonClient {
     agentId: string,
     provider: AgentProvider,
     modelId: string | null,
+    options?: { whenBusy?: "wait" | "interrupt" },
   ): Promise<void> {
     const requestId = this.createRequestId();
     const message = SessionInboundMessageSchema.parse({
@@ -5248,6 +5321,7 @@ export class DaemonClient {
       agentId,
       provider,
       modelId,
+      ...(options?.whenBusy ? { whenBusy: options.whenBusy } : {}),
       requestId,
     });
     const payload = await this.sendRequest({
@@ -8065,6 +8139,11 @@ export class DaemonClient {
     });
   }
 
+  /** The public key this client signs its hello with, to find itself in the paired devices. */
+  getDevicePublicKeyB64(): string | null {
+    return this.config.deviceSigning?.devicePublicKeyB64 ?? null;
+  }
+
   async pairingDeviceList(requestId?: string): Promise<PairingDeviceListResponse["payload"]> {
     return this.sendNamespacedCorrelatedSessionRequest<"pairing.device.list.response">({
       requestId,
@@ -8122,6 +8201,117 @@ export class DaemonClient {
     return this.sendNamespacedCorrelatedSessionRequest({
       requestId,
       message: { type: "skills.mutate.request", mutation },
+    });
+  }
+
+  // ── Memory built-in (spec 41). Errors reject with DaemonRpcError; codes: "secret",
+  // "too_long", "empty", "not_found", "no_project", "disabled", "plugin_disabled".
+  async listMemories(
+    options: Omit<MemoryListRequest, "type" | "requestId">,
+    requestId?: string,
+  ): Promise<{
+    requestId: string;
+    memories: MemoryRecordWire[];
+    projects: MemoryProject[];
+    projectId: string | null;
+  }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "memory.list.request", ...options },
+    });
+  }
+
+  async saveMemory(
+    input: Omit<MemorySaveRequest, "type" | "requestId">,
+    requestId?: string,
+  ): Promise<{ requestId: string; memory: MemoryRecordWire; deduplicated: boolean }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "memory.save.request", ...input },
+    });
+  }
+
+  async deleteMemory(
+    id: string,
+    requestId?: string,
+  ): Promise<{ requestId: string; id: string; deleted: boolean }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "memory.delete.request", id },
+    });
+  }
+
+  async getAgentMemories(
+    agentId: string,
+    requestId?: string,
+  ): Promise<{
+    requestId: string;
+    agentId: string;
+    created: MemoryRecordWire[];
+    used: MemoryUseWire[];
+  }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "memory.agent.request", agentId },
+    });
+  }
+
+  async getMemorySettings(
+    requestId?: string,
+  ): Promise<{ requestId: string; settings: MemorySettingsWire }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "memory.settings.get.request" },
+    });
+  }
+
+  async setMemorySettings(
+    patch: Omit<MemorySettingsSetRequest, "type" | "requestId">,
+    requestId?: string,
+  ): Promise<{ requestId: string; settings: MemorySettingsWire }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "memory.settings.set.request", ...patch },
+    });
+  }
+
+  /** 👍/👎 on a memory or lesson (spec 42 §4). */
+  async rateMemory(
+    input: { id: string; helpful: boolean; agentId?: string },
+    requestId?: string,
+  ): Promise<{ requestId: string; memory: MemoryRecordWire }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "memory.rate.request", ...input },
+    });
+  }
+
+  /** "Validate now": one lesson by id, or every lesson of a project. */
+  async validateMemories(
+    input: { id?: string; projectId?: string },
+    requestId?: string,
+  ): Promise<{ requestId: string; memories: MemoryRecordWire[] }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "memory.validate.request", ...input },
+    });
+  }
+
+  /** The AGENTS.md / CLAUDE.md diff "Make this a project rule" would write (spec 42 §5). */
+  async previewMemoryGraduation(id: string, requestId?: string): Promise<MemoryGraduationPreview> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "memory.graduation.preview.request", id },
+    });
+  }
+
+  async applyMemoryGraduation(
+    input: { id: string; baseHash: string },
+    requestId?: string,
+  ): Promise<{ requestId: string; memory: MemoryRecordWire; path: string }> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "memory.graduation.apply.request", ...input },
     });
   }
 
@@ -8626,6 +8816,78 @@ export class DaemonClient {
       active = false;
       unsubscribe();
     }
+  }
+
+  /** Host failover/child-provider settings and this agent's overrides (spec 40 §4–§5). */
+  async getAgentContinuity(
+    agentId: string,
+    options?: { requestId?: string },
+  ): Promise<AgentContinuityGetPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"agent.continuity.get.response">({
+      requestId: options?.requestId,
+      message: { type: "agent.continuity.get.request", agentId },
+    });
+  }
+
+  /** `null` clears an override back to the host setting; an omitted key is left alone. */
+  async setAgentContinuity(
+    agentId: string,
+    patch: {
+      failover?: AgentFailoverConfig | null;
+      crossProviderChildren?: CrossProviderChildrenConfig | null;
+    },
+  ): Promise<void> {
+    const payload =
+      await this.sendNamespacedCorrelatedSessionRequest<"agent.continuity.set.response">({
+        message: { type: "agent.continuity.set.request", agentId, ...patch },
+      });
+    if (payload.error) throw new Error(payload.error);
+  }
+
+  /** "Continue with …" after a usage limit: switch and resend the failed turn's message. */
+  async continueAgentWithProvider(
+    agentId: string,
+    target: { provider: string; model: string | null },
+  ): Promise<void> {
+    const payload =
+      await this.sendNamespacedCorrelatedSessionRequest<"agent.failover.continue.response">({
+        message: { type: "agent.failover.continue.request", agentId, ...target },
+      });
+    if (!payload.accepted) throw new Error(payload.error ?? "Continue with provider failed");
+  }
+
+  /** Spec 42 §6: fresh native session on the same provider and model, with the ledger handoff. */
+  async rolloverAgent(
+    agentId: string,
+  ): Promise<{ sessionId: string | null; handoffId: string | null }> {
+    const payload = await this.sendNamespacedCorrelatedSessionRequest<"agent.rollover.response">({
+      message: { type: "agent.rollover.request", agentId },
+    });
+    if (payload.error) throw new Error(payload.error);
+    return { sessionId: payload.sessionId, handoffId: payload.handoffId };
+  }
+
+  /** Spec 42 §7: one visible turn asking the agent to save pending lessons. */
+  async captureAgentLessons(agentId: string): Promise<void> {
+    const payload =
+      await this.sendNamespacedCorrelatedSessionRequest<"agent.lessons.capture.response">({
+        message: { type: "agent.lessons.capture.request", agentId },
+      });
+    if (!payload.accepted) throw new Error(payload.error ?? "Capture lessons failed");
+  }
+
+  /** The session ledger of an agent (spec 40 §2), with its handoffs and provider sessions. */
+  async getAgentLedger(
+    agentId: string,
+    options?: { requestId?: string },
+  ): Promise<AgentLedgerGetPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"agent.ledger.get.response">({
+      requestId: options?.requestId,
+      message: {
+        type: "agent.ledger.get.request",
+        agentId,
+      },
+    });
   }
 
   async listProviderUsage(options?: { requestId?: string }): Promise<ProviderUsageListPayload> {
@@ -12252,6 +12514,7 @@ export class DaemonClient {
           ...(extra?.devicePublicKeyB64 ? { devicePublicKeyB64: extra.devicePublicKeyB64 } : {}),
         }),
       );
+      this.connectStageValue = "hello_sent";
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to send hello message";
       this.lastErrorValue = message;
@@ -12295,6 +12558,7 @@ export class DaemonClient {
   }
 
   private handleChallenge(nonce: string): void {
+    this.connectStageValue = "challenged";
     if (this.challengeWaitTimeout) {
       clearTimeout(this.challengeWaitTimeout);
       this.challengeWaitTimeout = null;
@@ -12442,9 +12706,11 @@ export class DaemonClient {
 
   private sendSignedHello(nonce: string): void {
     const { devicePublicKeyB64, signNonce } = this.config.deviceSigning!;
+    this.connectStageValue = "signing";
     try {
       const signed = signNonce(nonce);
       if (typeof signed === "string") {
+        if (!signed) throw new Error("This device's key returned an empty signature");
         // Preserve the synchronous path used by native key stores and the
         // existing client handshake tests. Electron's IPC-backed signer
         // takes the Promise branch below.
@@ -12453,6 +12719,7 @@ export class DaemonClient {
       }
       void signed
         .then((signature) => {
+          if (!signature) throw new Error("This device's key returned an empty signature");
           return this.sendHelloMessage({ nonce, signature, devicePublicKeyB64 });
         })
         .catch((error) => {

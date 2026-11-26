@@ -379,6 +379,12 @@ function resolveOperatorContext(persisted: ReturnType<typeof loadPersistedConfig
   return persisted.daemon?.operatorContext ?? "";
 }
 
+function resolveHideProviderJiraConnectors(
+  persisted: ReturnType<typeof loadPersistedConfig>,
+): boolean {
+  return persisted.daemon?.jira?.hideProviderConnectors !== false;
+}
+
 function resolveBrowserToolsEnabled(persisted: ReturnType<typeof loadPersistedConfig>): boolean {
   // Spec 36 keeps the browser-tools built-in opt-in. An explicit legacy value
   // seeds the one-time migration; an absent flag must not turn it on.
@@ -460,6 +466,7 @@ function resolveStaticLoadConfigSettings(
     autoArchiveAfterMerge: persisted.daemon?.autoArchiveAfterMerge ?? false,
     appendSystemPrompt: resolveAppendSystemPrompt(persisted),
     operatorContext: resolveOperatorContext(persisted),
+    hideProviderJiraConnectors: resolveHideProviderJiraConnectors(persisted),
     terminalProfiles: persisted.daemon?.terminalProfiles,
     orchestration: persisted.daemon?.orchestration,
     hostnames: mergeHostnames([
@@ -498,6 +505,7 @@ export function loadConfig(
     autoArchiveAfterMerge,
     appendSystemPrompt,
     operatorContext,
+    hideProviderJiraConnectors,
     terminalProfiles,
     orchestration,
     hostnames,
@@ -543,6 +551,7 @@ export function loadConfig(
     enableTerminalAgentHooks: persisted.daemon?.enableTerminalAgentHooks ?? false,
     appendSystemPrompt,
     operatorContext,
+    hideProviderJiraConnectors,
     builtinPlugins: persisted.builtinPlugins,
     pluginsEnabled: persisted.pluginsEnabled,
     plugins: persisted.plugins,
@@ -568,6 +577,8 @@ export function loadConfig(
     ...resolveRestartRecoveryConfig(persisted.agents),
     agentProviderSettings: extractAgentProviderSettings(providerOverrides),
     idleRuntimeCleanup: persisted.agents?.idleRuntimeCleanup ?? true,
+    agentFailover: persisted.agents?.failover,
+    crossProviderChildren: persisted.agents?.crossProviderChildren,
     metadataGeneration: persisted.agents?.metadataGeneration,
     providerOverrides,
     log: resolveLogConfigFromEnv(env, persisted),

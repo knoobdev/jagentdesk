@@ -1,5 +1,14 @@
+import {
+  CROSS_PROVIDER_CHILDREN_DISABLED,
+  FAILOVER_DISABLED,
+  type CrossProviderChildrenConfig,
+  type FailoverConfig,
+} from "./agent/failover/failover-policy.js";
+import { ProviderQuotaTracker } from "./agent/failover/provider-quota.js";
+import { ProviderUsageService } from "../services/quota-fetcher/service.js";
 import { builtinServerRegistry } from "./plugins/builtin/loaded.js";
 import { createBuiltinCoreServices } from "./plugins/builtin/services.js";
+import { createBuiltinHostToolSet } from "./plugins/builtin/host-tool-set.js";
 import {
   createFinishSubscriptions as createRemoteFinishSubscriptions,
   createJsonFinishSubscriptionStore as createRemoteFinishStore,
@@ -174,6 +183,7 @@ import type { RequestedSpeechProviders } from "./speech/speech-types.js";
 import { createSpeechService } from "./speech/speech-runtime.js";
 import { createSpeechSettingsOwner } from "./speech/speech-settings.js";
 import { AgentManager } from "./agent/agent-manager.js";
+import { AgentTimelineSnapshots } from "./agent/agent-timeline-snapshots.js";
 import { AgentStorage } from "./agent/agent-storage.js";
 import { attachAgentStoragePersistence } from "./persistence-hooks.js";
 import { createAgentMcpServer } from "./agent/mcp-server.js";
@@ -198,6 +208,7 @@ import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseRegistry } from "./database/database-registry.js";
 import { ScheduleService } from "./schedule/service.js";
 import { sendPromptToAgent } from "./agent/agent-prompt.js";
+import { createBuiltinProjectAccess } from "./plugins/builtin/project-access.js";
 import { TunnelManager } from "./tunnels/tunnel-manager.js";
 import { DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
 import { PluginService } from "./plugins/index.js";
@@ -498,6 +509,7 @@ export interface JAgentDeskDaemonConfig {
   appendSystemPrompt?: string;
   // Operator / engagement authorization context injected first into every agent's system prompt.
   operatorContext?: string;
+  hideProviderJiraConnectors?: boolean;
   terminalProfiles?: TerminalProfile[];
   orchestration?: OrchestrationConfig;
   staticDir: string;
@@ -527,6 +539,8 @@ export interface JAgentDeskDaemonConfig {
   downloadTokenTtlMs?: number;
   agentProviderSettings?: AgentProviderRuntimeSettingsMap;
   idleRuntimeCleanup?: boolean;
+  agentFailover?: FailoverConfig;
+  crossProviderChildren?: CrossProviderChildrenConfig;
   metadataGeneration?: {
     providers?: Array<{
       provider: string;
@@ -661,7 +675,9 @@ function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): Mutab
     resumeOnStartup: config.resumeOnStartup === true,
     resumePrompt: config.resumePrompt ?? "Resume working.",
     operatorContext: config.operatorContext ?? "",
+    jira: { hideProviderConnectors: config.hideProviderJiraConnectors !== false },
     orchestration: config.orchestration ?? createDefaultOrchestrationConfig(),
+    ...continuityConfigFromStartup(config),
   };
 
   if (config.terminalProfiles !== undefined) {
@@ -1079,6 +1095,7 @@ export async function createJAgentDeskDaemon(
   );
   let reloadProviderRegistry: (
     removeProviders: readonly string[],
+    changedProviders: readonly string[],
   ) => Promise<void> = async () => {};
   const customProviderService = createCustomProviderService({
     jagentdeskHome: config.jagentdeskHome,
@@ -1087,7 +1104,8 @@ export async function createJAgentDeskDaemon(
     getTailnetSocks: () => tsnetListener?.getTailnetSocks() ?? null,
     acquireSshClient: (acquireServerId) => sshService.acquireClient(acquireServerId),
     sshServerExists: (existsServerId) => sshService.storage.getServer(existsServerId) !== undefined,
-    reloadRegistry: (removeProviders) => reloadProviderRegistry(removeProviders),
+    reloadRegistry: (removeProviders, changedProviders) =>
+      reloadProviderRegistry(removeProviders, changedProviders),
   });
   const providerSnapshotLogger = logger.child({ module: "provider-snapshot-manager" });
   const providerSnapshotManager = new ProviderSnapshotManager({
@@ -1102,10 +1120,33 @@ export async function createJAgentDeskDaemon(
     openCodeProviderInjection: (providerId) =>
       customProviderService.materializeOpenCodeProvider(providerId),
     claudeSpawnEnv: (providerId) => customProviderService.materializeClaudeEnv(providerId),
+    checkApiProviderEndpoint: (providerId) => customProviderService.checkEndpoint(providerId),
   });
   const initialAgentManagerState = providerSnapshotManager.getAgentManagerProviderState();
+  const timelineSnapshots = new AgentTimelineSnapshots({
+    directory: path.join(config.jagentdeskHome, "agent-timelines"),
+    logger,
+  });
+  // Remaining quota per provider for failover and list_child_providers (spec 40 §4–§5).
+  const providerQuota = new ProviderQuotaTracker(new ProviderUsageService({ logger }));
   const agentManager: AgentManager = new AgentManager({
     pluginLifecycle: pluginRuntime,
+    timelineSnapshots,
+    resolveContinuityConfig: () => {
+      const current = daemonConfigStore.get();
+      return {
+        failover: current.agentFailover ?? FAILOVER_DISABLED,
+        crossProviderChildren: current.crossProviderChildren ?? CROSS_PROVIDER_CHILDREN_DISABLED,
+      };
+    },
+    isProviderUsageExhausted: (provider) => providerQuota.isExhausted(provider),
+    resolveProviderQuota: async (provider) => {
+      await providerQuota.refresh().catch(() => undefined);
+      return providerQuota.quota(provider);
+    },
+    resolveProviderLabel: (provider) => providerSnapshotManager.getProviderLabel(provider),
+    resolveModelContextWindow: async ({ provider, model }) =>
+      resolveSnapshotContextWindow(providerSnapshotManager.getSnapshot(), provider, model),
     resolveJAgentDeskToolPolicy: (provider) =>
       resolveJAgentDeskToolPolicy(provider, daemonConfigStore.get().providers),
     pluginAgentTools: pluginRuntime,
@@ -1122,6 +1163,18 @@ export async function createJAgentDeskDaemon(
     mcpAuthToken: agentMcpAuthToken,
     logger,
   });
+
+  // Spec 04 §27b.1: built-in tool groups are compared at the start of every turn.
+  const builtinHostToolSet = createBuiltinHostToolSet({
+    state: pluginRuntime.builtin,
+    registry: builtinServerRegistry,
+    launchHints: (ids) => builtinServerRegistry.launchHints(config.jagentdeskHome, ids),
+  });
+  agentManager.setHostToolSet(builtinHostToolSet.source);
+  agentManager.setHideProviderConnectors(
+    () => daemonConfigStore.get().jira?.hideProviderConnectors !== false,
+  );
+  agentManager.setProviderLabel((provider) => providerSnapshotManager.getProviderLabel(provider));
 
   const unsubscribeBuiltinAgentSnapshots = agentManager.subscribe(
     (event) => {
@@ -1162,12 +1215,23 @@ export async function createJAgentDeskDaemon(
     report: (agentId, err) => logger.error({ agentId, err }, "Agent restart recovery failed"),
   });
   await restartRecovery.prepareStartup();
+  // Failover resends the failed turn's message the way a user send does (spec 40 §4).
+  agentManager.setFailoverResend(async (agentId, prompt) => {
+    await sendPromptToAgent({
+      agentId,
+      prompt,
+      agentManager,
+      agentStorage,
+      logger,
+      messageId: randomUUID(),
+    });
+  });
 
   // Spec 34.6 hot reload: after a custom provider save/delete, re-read the
   // persisted config, rebuild the provider registry (base overrides replaced,
   // removed providers dropped) and swap it into the live agent manager. The
   // providers_snapshot_update broadcast happens via the snapshot "change" event.
-  reloadProviderRegistry = async (removeProviders) => {
+  reloadProviderRegistry = async (removeProviders, changedProviders) => {
     const persisted = loadPersistedConfig(config.jagentdeskHome, logger);
     const baseOverrides = extractProviderOverrides(
       persisted.agents?.providers as Record<string, unknown> | undefined,
@@ -1175,6 +1239,7 @@ export async function createJAgentDeskDaemon(
     const nextAgentManagerState = providerSnapshotManager.applyMutableProviderConfig(undefined, {
       baseOverrides: baseOverrides ?? {},
       removeProviders,
+      changedProviders,
     });
     agentManager.updateProviderRegistry(nextAgentManagerState);
   };
@@ -1690,8 +1755,22 @@ export async function createJAgentDeskDaemon(
       // A live capability toggle re-scopes already-connected guest sessions (ADR-0019).
       updateGuestScopes: (agentId, scopes) => wsServer?.updateGuestScopesForAgent(agentId, scopes),
     },
+    projects: createBuiltinProjectAccess({
+      projectRegistry,
+      workspaceRegistry,
+      workspaceIdOf: async (agentId) =>
+        agentManager.getAgent(agentId)?.workspaceId ??
+        (await agentStorage.get(agentId))?.workspaceId,
+      cwdOf: async (agentId) =>
+        agentManager.getAgent(agentId)?.cwd ?? (await agentStorage.get(agentId))?.cwd,
+    }),
   });
   pluginRuntime.builtinDaemon = builtinDaemon;
+  // Spec 42: durable agent context reads its switches and lessons through the Memory port.
+  agentManager.setDurableContextPorts({
+    settings: () => builtinDaemon.port("memory")?.durableSettings(),
+    memory: () => builtinDaemon.enabledPort("memory"),
+  });
   // Spec mode's launch environment (spec 28): the provider process sees the shared checkout env.
   agentManager.setLaunchEnvProvider(
     (agentId) => builtinDaemon.enabledPort("specMode")?.launchEnv(agentId) ?? null,
@@ -1897,6 +1976,7 @@ export async function createJAgentDeskDaemon(
     },
     requestHostToolPermission: (agentId, req) =>
       agentManager.requestHostToolPermission(agentId, req),
+    hostToolGroups: builtinHostToolSet.groups,
     logger,
   });
   const createAgentToolCatalog = (runtime: JAgentDeskToolRuntimeContext) =>
@@ -2355,6 +2435,7 @@ export async function createJAgentDeskDaemon(
     agentManager.prepareForShutdown();
     await restartRecovery.captureRunningAgents();
     await closeAllAgents(logger, agentManager);
+    timelineSnapshots.dispose();
     await withTimeout({
       promise: pluginRuntime.drainEvents(),
       timeoutMs: 5_000,
@@ -2496,4 +2577,26 @@ export function connectIdleRuntimeCleanupConfig(
 ): () => void {
   cleanup.setEnabled(store.get().idleRuntimeCleanup !== false);
   return store.onFieldChange("idleRuntimeCleanup", (value) => cleanup.setEnabled(value !== false));
+}
+
+function resolveSnapshotContextWindow(
+  entries: ReturnType<ProviderSnapshotManager["getSnapshot"]>,
+  provider: string,
+  model: string | null,
+): number | null {
+  const models = entries.find((entry) => entry.provider === provider)?.models ?? [];
+  const match =
+    (model ? models.find((entry) => entry.id === model || entry.aliases?.includes(model)) : null) ??
+    models.find((entry) => entry.isDefault);
+  return match?.contextWindowMaxTokens ?? null;
+}
+
+function continuityConfigFromStartup(config: {
+  agentFailover?: FailoverConfig;
+  crossProviderChildren?: CrossProviderChildrenConfig;
+}): Pick<MutableDaemonConfig, "agentFailover" | "crossProviderChildren"> {
+  const result: Pick<MutableDaemonConfig, "agentFailover" | "crossProviderChildren"> = {};
+  if (config.agentFailover) result.agentFailover = config.agentFailover;
+  if (config.crossProviderChildren) result.crossProviderChildren = config.crossProviderChildren;
+  return result;
 }

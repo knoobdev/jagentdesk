@@ -1,4 +1,5 @@
 import { botsStrings } from "./bots";
+import { memoryStrings } from "./memory";
 import { builtinPluginStrings } from "./builtin-plugins";
 // Vietnamese (Tiếng Việt). Partial translation of the app shell; any missing key
 // falls back to English (i18next fallbackLng: "en"). Extend incrementally.
@@ -22,6 +23,7 @@ export const vi = {
     showLess: "Thu gọn",
   },
   bots: botsStrings,
+  memory: memoryStrings,
   subagents: {
     title: "Các tác tử con",
     parent: {

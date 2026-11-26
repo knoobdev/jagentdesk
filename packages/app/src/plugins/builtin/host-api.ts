@@ -1,4 +1,5 @@
 export { PageHeader } from "@/components/headers/page-header";
+export { usePageScroll } from "@/components/headers/use-page-scroll";
 export {
   GUMLOOP_PAGE_GUTTER,
   gumloopChipStyles,
@@ -24,8 +25,11 @@ export type {
   BuiltinToolCallRenderer,
   BuiltinAgentProps,
   BuiltinComposerDockProps,
+  BuiltinComposerTextWatcherProps,
   BuiltinUserMessageBodyProps,
   BuiltinTurnPreparation,
+  BuiltinMessageActionProps,
+  BuiltinInspectorTab,
 } from "./host";
 
 // Packages installed only in packages/app resolve for features through the host API.

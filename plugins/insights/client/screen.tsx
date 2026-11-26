@@ -1,4 +1,7 @@
-import { useGumloopPageGutterStyle } from "../../../packages/app/src/plugins/builtin/host-api";
+import {
+  useGumloopPageGutterStyle,
+  usePageScroll,
+} from "../../../packages/app/src/plugins/builtin/host-api";
 import {
   PageHeader,
   useHostRuntimeClient,
@@ -242,6 +245,7 @@ function lifetimeModelRows(lifetime: LifetimeUsage): ModelUsageRow[] {
 // returns every host in registry order, so hosts[0] can be a different daemon than the viewed
 // one and sessions[hosts[0].serverId] is empty → the whole dashboard reads zeros.
 export function InsightsScreen({ serverId }: { serverId: string }) {
+  const pageScroll = usePageScroll();
   const isCompact = useIsCompactFormFactor();
   const isGumloop = useIsGumloopTheme();
   const insights = useUsageInsights(serverId);
@@ -372,8 +376,13 @@ export function InsightsScreen({ serverId }: { serverId: string }) {
         title="Usage & Cost"
         description="Where your tokens go and which models drive cost, live from every agent session on this host."
         actions={headerActions}
+        scrolled={pageScroll.scrolled}
       />
-      <ScrollView style={styles.container} contentContainerStyle={contentContainerStyle}>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={contentContainerStyle}
+        {...pageScroll.scrollProps}
+      >
         {!hasData ? (
           <Text style={styles.banner}>
             No agent has reported usage on this host yet — the figures below stay at zero until one

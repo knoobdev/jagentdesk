@@ -107,6 +107,7 @@ export async function registerSharedBridge(context) {
         bind: { input: object, output: object },
         unbind: { input: object, output: object },
         refresh: { input: object, output: object },
+        status: { input: object, output: object },
       },
       events: {},
     },
@@ -164,6 +165,15 @@ export async function registerSharedBridge(context) {
         updating = next;
         await next;
         return {};
+      },
+      // Spec 04 §27b.0: the daemon asks before each turn whether this session still has its tools.
+      status: async (input) => {
+        await updating.catch(() => undefined);
+        const binding = typeof input.sessionID === "string" && bindings.get(input.sessionID);
+        return {
+          bound: Boolean(binding),
+          tools: binding ? [...registrations.keys()] : [],
+        };
       },
       refresh: async () => {
         await context.provider.reload();

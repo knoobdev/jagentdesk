@@ -1,0 +1,13 @@
+{
+  "kind": "builtin",
+  "id": "memory",
+  "name": "Memory",
+  "description": "What your agents remember about your projects and about you.",
+  "defaultEnabled": true,
+  "requires": [],
+  "builtinOrder": 16,
+  "builtinEntrypoints": {
+    "server": "server/index.ts",
+    "client": "client/index.tsx"
+  }
+}

@@ -1,7 +1,11 @@
 import { createExternalProcessEnv } from "../../../jagentdesk-env.js";
 import { ClaudeResultMeter } from "./metrics.js";
 import { ClaudeRuntimeSafety } from "./runtime-safety.js";
-import { setImmediate } from "node:timers/promises";
+import { setImmediate, setTimeout as delay } from "node:timers/promises";
+import {
+  claudeDeniedConnectorServers,
+  claudeDisallowedConnectorTools,
+} from "../../provider-connectors.js";
 import { validateProviderOptions, assertChangesAreLive } from "../../provider-options.js";
 import { type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -12,10 +16,16 @@ import stripAnsi from "strip-ansi";
 import { createImportDescriptorScheduler } from "./import-descriptor-scheduler.js";
 import { bypassApprovesAsk } from "./bypass-approval.js";
 import {
+  CLAUDE_PROVIDER_BROWSER_TOOL_RULE,
+  SYSTEM_BROWSER_REFUSAL,
+  isSystemBrowserOpenCommand,
+} from "../../system-browser.js";
+import {
   type AgentDefinition,
   type CanUseTool,
   type HookCallback,
   type McpServerConfig as ClaudeSdkMcpServerConfig,
+  type McpServerStatus,
   type PermissionMode,
   type PermissionResult,
   type PermissionUpdate,
@@ -59,7 +69,11 @@ import {
 } from "./model-manifest.js";
 import { expandTilde } from "../../../../utils/path.js";
 import { parsePartialJsonObject } from "./partial-json.js";
-import { withClaudeReplayHistory, type ClaudeReplayHistory } from "./transcript-history.js";
+import {
+  readClaudeTranscriptTimelineMarker,
+  withClaudeReplayHistory,
+  type ClaudeReplayHistory,
+} from "./transcript-history.js";
 import { ClaudeSidechainTracker } from "./sidechain-tracker.js";
 import { readClaudeSubagentHandback } from "./subagent-handback.js";
 import { ClaudeTaskState } from "./task-state.js";
@@ -121,6 +135,7 @@ import {
   type AgentCapabilityFlags,
   type AgentClient,
   type AgentCreateSessionOptions,
+  type AgentCompactionHooks,
   type AgentLaunchContext,
   type AgentMetadata,
   type AgentMetric,
@@ -157,6 +172,7 @@ import {
   type ToolCallDetail,
   type AgentDraftControls,
   type AgentOptionControl,
+  type JAgentDeskToolsHealth,
 } from "../../agent-sdk-types.js";
 import { importSessionFromPersistence } from "../../provider-session-import.js";
 import { runProviderRefreshActivity } from "../../provider-refresh-deadline.js";
@@ -516,18 +532,41 @@ type ClaudeImportDescriptorResult =
   | { type: "parsed"; descriptor: ImportableProviderSession | null }
   | { type: "unreadable"; error: Error };
 
+/**
+ * With JAgentDesk browser tools on, a Bash command that opens a URL in the system browser is
+ * refused, in every permission mode, and Claude is pointed at the browser_* tools (spec 04 §27b.3).
+ */
+export const refuseSystemBrowserBashHook: HookCallback = async (input) => {
+  if (input.hook_event_name !== "PreToolUse") return {};
+  const command = (input.tool_input as { command?: unknown } | undefined)?.command;
+  if (typeof command !== "string" || !isSystemBrowserOpenCommand(command)) return {};
+  return {
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: SYSTEM_BROWSER_REFUSAL,
+    },
+  };
+};
+
 interface ClaudeAgentSessionOptions {
   defaults?: { agents?: Record<string, AgentDefinition> };
   runtimeSettings?: ProviderRuntimeSettings;
   handle?: AgentPersistenceHandle;
   agentId?: string;
   launchEnv?: Record<string, string>;
+  /** JAgentDesk browser tools are on for this launch (spec 04 §27b.3). */
+  inAppBrowser?: boolean;
+  /** Provider connectors JAgentDesk tools replace in this launch (spec 29.4). */
+  hideProviderConnectors?: string[];
   persistSession?: boolean;
   logger: Logger;
   queryFactory?: ClaudeQueryFactory;
   resolveBinary: () => Promise<string>;
   rewindSdk?: ClaudeRewindSdk;
   spawnEnvOverlay?: () => Promise<Record<string, string> | null>;
+  /** Spec 42 §3: PreCompact instruction and PostCompact summary. */
+  compactionHooks?: AgentCompactionHooks;
 }
 
 type ClaudeThinkingEffort = "low" | "medium" | "high" | "xhigh" | "max";
@@ -687,6 +726,13 @@ function summarizeClaudeOptionsForLog(options: ClaudeOptions): ClaudeOptionsLogS
     persistSession: typeof options.persistSession === "boolean" ? options.persistSession : null,
     fastMode: readClaudeFastModeSetting(options.settings),
   };
+}
+
+function claudeMissingToolsReason(entry: McpServerStatus | undefined): string {
+  if (!entry) return "the jagentdesk MCP server is not loaded in Claude Code";
+  if (entry.status === "connected") return "the jagentdesk MCP server listed no tools";
+  const detail = entry.error ? `: ${entry.error}` : "";
+  return `the jagentdesk MCP server is ${entry.status}${detail}`;
 }
 
 function readClaudeFastModeSetting(settings: ClaudeOptions["settings"]): boolean | null {
@@ -1646,8 +1692,19 @@ export function readEventIdentifiers(message: SDKMessage): EventIdentifiers {
   };
 }
 
+type ClaudeDiscoveredModels = Awaited<ReturnType<typeof discoverClaudeModels>>;
+
+interface SharedClaudeDiscovery {
+  promise: Promise<ClaudeDiscoveredModels>;
+  controller: AbortController;
+  waiters: number;
+}
+
 export class ClaudeAgentClient implements AgentClient {
   private readonly discoverModels: typeof discoverClaudeModels;
+
+  /** The discovery in flight; every snapshot cwd refreshing at once waits on this one. */
+  private sharedDiscovery: SharedClaudeDiscovery | null = null;
 
   readonly provider = "claude" as const;
 
@@ -1756,6 +1813,9 @@ export class ClaudeAgentClient implements AgentClient {
       runtimeSettings: this.runtimeSettings,
       agentId: launchContext?.agentId,
       launchEnv: launchContext?.env,
+      compactionHooks: launchContext?.compactionHooks,
+      inAppBrowser: launchContext?.inAppBrowser,
+      hideProviderConnectors: launchContext?.hideProviderConnectors,
       persistSession: options?.persistSession,
       logger: this.logger,
       queryFactory: this.queryFactory,
@@ -1787,13 +1847,81 @@ export class ClaudeAgentClient implements AgentClient {
       handle,
       agentId: launchContext?.agentId,
       launchEnv: launchContext?.env,
+      compactionHooks: launchContext?.compactionHooks,
+      inAppBrowser: launchContext?.inAppBrowser,
+      hideProviderConnectors: launchContext?.hideProviderConnectors,
       logger: this.logger,
       queryFactory: this.queryFactory,
       resolveBinary: this.resolveBinary,
       rewindSdk: this.rewindSdk,
     });
-    await session.ensureHistoryReady();
+    // History is read when it is first needed: replaying it, a turn, a rewind. An agent whose
+    // projected timeline the daemon already holds opens without parsing its transcript.
     return session;
+  }
+
+  /**
+   * The catalog is global, so refreshes of several snapshot cwds share one `claude` discovery
+   * process instead of spawning one each (spec 04 §5). The process is aborted only when every
+   * caller waiting on it has aborted.
+   */
+  private discoverModelsOnce(
+    env: Record<string, string | undefined>,
+    signal: AbortSignal | undefined,
+  ): Promise<ClaudeDiscoveredModels> {
+    let shared = this.sharedDiscovery;
+    if (!shared) {
+      const controller = new AbortController();
+      const created: SharedClaudeDiscovery = {
+        controller,
+        waiters: 0,
+        promise: this.discoverModels({
+          resolveBinary: this.resolveBinary,
+          runtimeSettings: this.runtimeSettings,
+          env,
+          signal: controller.signal,
+        }).finally(() => {
+          if (this.sharedDiscovery === created) this.sharedDiscovery = null;
+        }),
+      };
+      this.sharedDiscovery = created;
+      shared = created;
+    }
+    const discovery = shared;
+    discovery.waiters += 1;
+    return new Promise<ClaudeDiscoveredModels>((resolve, reject) => {
+      let waiting = true;
+      const stopWaiting = (): boolean => {
+        if (!waiting) return false;
+        waiting = false;
+        discovery.waiters -= 1;
+        signal?.removeEventListener("abort", onAbort);
+        return true;
+      };
+      const onAbort = (): void => {
+        if (!stopWaiting()) return;
+        if (discovery.waiters === 0) {
+          // Nobody waits for it any more; the next refresh starts a fresh discovery.
+          if (this.sharedDiscovery === discovery) this.sharedDiscovery = null;
+          discovery.controller.abort(signal?.reason);
+        }
+        reject(signal?.reason);
+      };
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
+      signal?.addEventListener("abort", onAbort, { once: true });
+      discovery.promise.then(
+        (models) => {
+          if (stopWaiting()) resolve(models);
+          return undefined;
+        },
+        (error: unknown) => {
+          if (stopWaiting()) reject(error);
+        },
+      );
+    });
   }
 
   async fetchCatalog(
@@ -1814,12 +1942,7 @@ export class ClaudeAgentClient implements AgentClient {
     let incomplete = false;
     try {
       const advertisedModels = await runProviderRefreshActivity(context, "models", () =>
-        this.discoverModels({
-          resolveBinary: this.resolveBinary,
-          runtimeSettings: this.runtimeSettings,
-          env,
-          signal: context?.signal,
-        }),
+        this.discoverModelsOnce(env, context?.signal),
       );
       discoveredModelIds = new Set(
         advertisedModels
@@ -2479,6 +2602,10 @@ class ClaudeAgentSession implements AgentSession {
   private readonly launchEnv?: Record<string, string>;
 
   private readonly agentId?: string;
+  private readonly compactionHooks?: AgentCompactionHooks;
+
+  private readonly inAppBrowser: boolean;
+  private readonly hideProviderConnectors: readonly string[];
 
   private readonly defaults?: { agents?: Record<string, AgentDefinition> };
 
@@ -2608,6 +2735,9 @@ class ClaudeAgentSession implements AgentSession {
   // Readiness never rejects; history/rebind failures are logged at their owning boundary.
   private historyReady: Promise<void> | null = null;
 
+  // The host holds the projected timeline; the first history read only indexes it.
+  private discardInitialHistory = false;
+
   private historySessionId: string | null = null;
 
   private replayingHistory = false;
@@ -2684,6 +2814,8 @@ class ClaudeAgentSession implements AgentSession {
     assertClaudeThinkingOptionSupported(config.model, config.thinkingOptionId);
     this.launchEnv = options.launchEnv;
     this.agentId = options.agentId;
+    this.inAppBrowser = options.inAppBrowser === true;
+    this.hideProviderConnectors = options.hideProviderConnectors ?? [];
     this.defaults = options.defaults;
     this.runtimeSettings = options.runtimeSettings;
     this.persistSession = options.persistSession;
@@ -2692,6 +2824,7 @@ class ClaudeAgentSession implements AgentSession {
     this.resolveBinary = options.resolveBinary;
     this.rewindSdk = options.rewindSdk ?? realClaudeRewindSdk;
     this.spawnEnvOverlay = options.spawnEnvOverlay;
+    this.compactionHooks = options.compactionHooks;
     this.contextUsage = new ClaudeContextUsageState(
       getClaudeContextWindowMaxTokens(this.config.model),
     );
@@ -3378,7 +3511,8 @@ class ClaudeAgentSession implements AgentSession {
       "provider.claude.session_close.start",
     );
     this.closed = true;
-    await this.ensureHistoryReady();
+    // Wait for a history read in progress; closing never starts one.
+    await this.historyReady;
     this.rejectAllPendingPermissions(new Error("Claude session closed"));
     // AgentManager settles the run after runtime release. Preserve cleanup records
     // without reporting this closure as an explicit turn cancellation.
@@ -3443,6 +3577,36 @@ class ClaudeAgentSession implements AgentSession {
     );
   }
 
+  /**
+   * Spec 04 §27b.0. Claude connects MCP servers on its own after launch and only reports a
+   * lost server through the model's context, so the daemon asks before each turn. One
+   * in-place reconnect is tried; the caller restarts the runtime if that is not enough.
+   */
+  async checkJAgentDeskTools({ signal }: { signal: AbortSignal }): Promise<JAgentDeskToolsHealth> {
+    const serverConfig = this.config.mcpServers?.[JAGENTDESK_MCP_SERVER_NAME];
+    if (!serverConfig || !isInternalJAgentDeskMcpServer(serverConfig)) return { status: "unknown" };
+    const query = await this.ensureQuery();
+    let reconnected = false;
+    while (true) {
+      signal.throwIfAborted();
+      const entry = (await query.mcpServerStatus()).find(
+        (status) => status.name === JAGENTDESK_MCP_SERVER_NAME,
+      );
+      if (entry?.status === "pending") {
+        await delay(200, undefined, { signal });
+        continue;
+      }
+      if (entry?.status === "connected" && (entry.tools?.length ?? 0) > 0) return { status: "ok" };
+      const reason = claudeMissingToolsReason(entry);
+      if (reconnected || !entry) return { status: "missing", reason };
+      reconnected = true;
+      this.logger.warn({ reason }, "Reconnecting Claude's JAgentDesk MCP server before the turn");
+      await query.reconnectMcpServer(JAGENTDESK_MCP_SERVER_NAME).catch((error: unknown) => {
+        this.logger.warn({ err: error }, "Claude JAgentDesk MCP reconnect failed");
+      });
+    }
+  }
+
   async listCommands(): Promise<AgentSlashCommand[]> {
     const q = await this.ensureQuery();
     const commands = await q.supportedCommands();
@@ -3480,6 +3644,41 @@ class ClaudeAgentSession implements AgentSession {
       resolveMessageId: (messageId) => this.resolveClaudeMessageId(messageId),
       setSessionId: (sessionId) => this.rebindConversationSession(sessionId),
     });
+  }
+
+  async forkConversation(input: {
+    beforeUserMessageId: string | null;
+  }): Promise<AgentPersistenceHandle> {
+    await this.ensureHistoryReady();
+    const sessionId = this.claudeSessionId;
+    const transcriptPath = sessionId ? await this.resolveHistoryPath(sessionId) : null;
+    if (!sessionId || !transcriptPath) {
+      throw new Error("This Claude agent has no conversation to fork yet");
+    }
+    let upToMessageId: string | undefined;
+    if (input.beforeUserMessageId) {
+      const target = await this.resolveConversationRewindTarget(input.beforeUserMessageId);
+      if (target.kind === "fresh-session") {
+        throw new Error("Fork from a reply: the selected turn has no answered turn before it");
+      }
+      upToMessageId = target.messageId;
+    }
+    // The SDK copies the transcript file on disk (fresh UUIDs); it never reaches a prompt.
+    const fork = await this.rewindSdk.forkSession(sessionId, {
+      ...(upToMessageId ? { upToMessageId } : {}),
+      transcriptPath,
+    });
+    const {
+      providerOptions: _providerOptions,
+      pluginAppendSystemPrompt: _pluginAppendSystemPrompt,
+      ...persistedConfig
+    } = this.config;
+    return {
+      provider: "claude",
+      sessionId: fork.sessionId,
+      nativeHandle: fork.sessionId,
+      metadata: { ...persistedConfig },
+    };
   }
 
   async revertFiles(input: { messageId: string }): Promise<void> {
@@ -4111,7 +4310,7 @@ class ClaudeAgentSession implements AgentSession {
       // subagents keep running. Without this declaration an interrupt kills every one of them.
       // Claude stops a helper itself with its TaskStop tool.
       perTaskStopAffordance: true,
-      hooks: { ...this.buildSubagentEffortHooks(), Stop: [{ hooks: [this.observeStopHook] }] },
+      hooks: { ...this.buildSessionHooks(), ...this.buildCompactionHooks() },
       ...(this.persistSession === undefined ? {} : { persistSession: this.persistSession }),
       env: sdkEnv,
     };
@@ -4127,13 +4326,20 @@ class ClaudeAgentSession implements AgentSession {
     if (this.claudeSessionId && !this.pendingFreshSessionId) {
       base.resume = this.claudeSessionId;
     }
-    if (this.runtimeSettings?.disallowedTools?.length) {
-      base.disallowedTools = [
-        ...(base.disallowedTools ?? []),
-        ...this.runtimeSettings.disallowedTools,
-      ];
+    const launchDisallowed = this.launchDisallowedTools();
+    if (launchDisallowed.length) {
+      base.disallowedTools = [...(base.disallowedTools ?? []), ...launchDisallowed];
     }
     return base;
+  }
+
+  private launchDisallowedTools(): string[] {
+    return [
+      ...(this.runtimeSettings?.disallowedTools ?? []),
+      // Claude in Chrome would open pages in the user's real Chrome instead of the app.
+      ...(this.inAppBrowser ? [CLAUDE_PROVIDER_BROWSER_TOOL_RULE] : []),
+      ...claudeDisallowedConnectorTools(this.hideProviderConnectors),
+    ];
   }
 
   private async buildSettingsOptions(
@@ -4144,13 +4350,24 @@ class ClaudeAgentSession implements AgentSession {
     // Internal agents do daemon work such as naming a branch, so the user's and
     // project's hooks must not run for them.
     const disableAllHooks = this.config.internal === true;
-    if (fastMode === null && !input.ultracode && !disableAllHooks) {
+    const deniedConnectors = claudeDeniedConnectorServers(this.hideProviderConnectors);
+    if (fastMode === null && !input.ultracode && !disableAllHooks && !deniedConnectors.length) {
       return {};
     }
+    const userDenied = (providerOptions.settings as Record<string, unknown> | undefined)
+      ?.deniedMcpServers;
     const updates = {
       ...(fastMode === null ? {} : { fastMode }),
       ...(input.ultracode ? { ultracode: true } : {}),
       ...(disableAllHooks ? { disableAllHooks: true } : {}),
+      ...(deniedConnectors.length
+        ? {
+            deniedMcpServers: [
+              ...(Array.isArray(userDenied) ? userDenied : []),
+              ...deniedConnectors,
+            ],
+          }
+        : {}),
     };
     // The SDK replaces extraArgs.settings with Options.settings, so a user's
     // `--settings` would be dropped whenever JAgentDesk sets flag settings. Fold it in.
@@ -5795,6 +6012,21 @@ class ClaudeAgentSession implements AgentSession {
    * These are observation-only: they record what they see and always return an empty result, so
    * they can never alter tool execution or turn control.
    */
+  private buildSessionHooks(): NonNullable<ClaudeOptions["hooks"]> {
+    const hooks = {
+      ...this.buildSubagentEffortHooks(),
+      Stop: [{ hooks: [this.observeStopHook] }],
+    };
+    if (!this.inAppBrowser) return hooks;
+    return {
+      ...hooks,
+      PreToolUse: [
+        ...(hooks.PreToolUse ?? []),
+        { matcher: "Bash", hooks: [refuseSystemBrowserBashHook] },
+      ],
+    };
+  }
+
   private buildSubagentEffortHooks(): NonNullable<ClaudeOptions["hooks"]> {
     const observe = async (input: unknown): Promise<Record<string, never>> => {
       try {
@@ -5819,6 +6051,33 @@ class ClaudeAgentSession implements AgentSession {
   }
 
   // Observation-only, like the effort hooks: it never alters turn control.
+  /**
+   * Spec 42 §3: PreCompact asks the compaction to keep what the ledger tracks; PostCompact hands
+   * Claude's summary to the daemon, which keeps it next to the ledger. Neither alters the turn.
+   */
+  private buildCompactionHooks(): NonNullable<ClaudeOptions["hooks"]> {
+    const hooks = this.compactionHooks;
+    if (!hooks) return {};
+    const preCompact: HookCallback = async (input) => {
+      if (input.hook_event_name !== "PreCompact") return {};
+      const instruction = hooks.preCompactInstruction();
+      return instruction ? { systemMessage: instruction } : {};
+    };
+    const postCompact: HookCallback = async (input) => {
+      if (input.hook_event_name !== "PostCompact") return {};
+      try {
+        hooks.onCompactSummary({ summary: input.compact_summary, trigger: input.trigger ?? null });
+      } catch (error) {
+        this.logger.warn({ err: error }, "PostCompact summary was not recorded");
+      }
+      return {};
+    };
+    return {
+      PreCompact: [{ hooks: [preCompact] }],
+      PostCompact: [{ hooks: [postCompact] }],
+    };
+  }
+
   private readonly observeStopHook: HookCallback = async (input) => {
     if (input.hook_event_name === "Stop") this.runtimeSafety.observeStop(input.session_crons);
     return {};
@@ -5873,11 +6132,72 @@ class ClaudeAgentSession implements AgentSession {
 
   ensureHistoryReady(): Promise<void> {
     if (!this.historyReady) {
-      this.historyReady = this.historySessionId
+      const load = this.historySessionId
         ? this.loadPersistedHistory(this.historySessionId)
         : Promise.resolve();
+      this.historyReady = this.discardInitialHistory ? this.indexHistoryOnly(load) : load;
     }
     return this.historyReady;
+  }
+
+  private async indexHistoryOnly(load: Promise<void>): Promise<void> {
+    await load;
+    this.discardInitialHistory = false;
+    this.dropPendingHistory();
+  }
+
+  discardHistoryReplay(): void {
+    if (!this.historyReady) {
+      this.discardInitialHistory = true;
+      return;
+    }
+    void this.historyReady.then(() => {
+      this.dropPendingHistory();
+      return undefined;
+    });
+  }
+
+  private dropPendingHistory(): void {
+    this.persistedHistory = [];
+    this.persistedProviderSubagentEvents = [];
+    this.historyPending = false;
+  }
+
+  /**
+   * Where the transcript's last timeline record ends, and the subagent transcripts by size and
+   * modification time. Claude Code appends bookkeeping to the transcript whenever a resumed
+   * session starts or exits; that must not count as a change of history.
+   */
+  async readHistoryVersion(): Promise<string | null> {
+    const sessionId = this.claudeSessionId;
+    if (!sessionId) return null;
+    const historyPath = await this.resolveHistoryPath(sessionId);
+    if (!historyPath) return null;
+    let transcript: fs.Stats;
+    try {
+      transcript = await promises.stat(historyPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return `${sessionId}:none`;
+      throw error;
+    }
+    const marker =
+      (await readClaudeTranscriptTimelineMarker(historyPath)) ??
+      `${transcript.size}:${transcript.mtimeMs}`;
+    const subagentsDir = path.join(path.dirname(historyPath), sessionId, "subagents");
+    let subagentFiles = 0;
+    let subagentBytes = 0;
+    let subagentMtimeMs = 0;
+    const names = await promises.readdir(subagentsDir).catch(() => [] as string[]);
+    await Promise.all(
+      names.map(async (name) => {
+        const stats = await promises.stat(path.join(subagentsDir, name)).catch(() => null);
+        if (!stats?.isFile()) return;
+        subagentFiles += 1;
+        subagentBytes += stats.size;
+        subagentMtimeMs = Math.max(subagentMtimeMs, stats.mtimeMs);
+      }),
+    );
+    return [sessionId, marker, subagentFiles, subagentBytes, subagentMtimeMs].join(":");
   }
 
   private async loadPersistedHistory(sessionId: string): Promise<void> {

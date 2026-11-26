@@ -36,6 +36,29 @@ describe("claude tool-call mapper", () => {
     }
   });
 
+  it("marks a Bash call that runs in the background", () => {
+    const background = expectMapped(
+      mapClaudeCompletedToolCall({
+        callId: "claude-call-bg",
+        name: "Bash",
+        input: { command: "sleep 120", run_in_background: true },
+        output: "Command running in background with ID: b1",
+        metadata: { source: "test" },
+      }),
+    );
+    expect(background.metadata).toEqual({ source: "test", background: true });
+
+    const foreground = expectMapped(
+      mapClaudeCompletedToolCall({
+        callId: "claude-call-fg",
+        name: "Bash",
+        input: { command: "pwd", run_in_background: false },
+        output: "/tmp",
+      }),
+    );
+    expect(foreground.metadata).toBeUndefined();
+  });
+
   it("maps partial running input through the same canonical detail path", () => {
     const item = expectMapped(
       mapClaudeRunningToolCall({

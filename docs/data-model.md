@@ -56,6 +56,8 @@ $JAGENTDESK_HOME/
 ├── agents/
 │   └── {sanitized-cwd}/
 │       └── {agentId}.json               # One file per agent
+├── agent-timelines/
+│   └── {agentId}.json                   # Projected-timeline snapshot (cache, safe to delete)
 ├── schedules/
 │   └── {scheduleId}.json                # One file per schedule
 ├── chat/
@@ -90,8 +92,9 @@ The `agents/{sanitized-cwd}/` directory name is derived from the agent's `cwd` b
 
 Each agent is stored as a separate JSON file, grouped by project directory. The record holds
 identity, configuration, the provider persistence handle, and status. It does not hold the
-timeline: the daemon keeps projected items in memory and rebuilds them from provider history
-when the agent resumes ([timeline-sync.md](timeline-sync.md)).
+timeline: the daemon keeps projected items in memory, snapshots them to `agent-timelines/`, and
+rebuilds them from provider history when the snapshot no longer matches
+([timeline-sync.md](timeline-sync.md#reopening-an-agent)).
 
 Fields whose meaning the schema does not show:
 

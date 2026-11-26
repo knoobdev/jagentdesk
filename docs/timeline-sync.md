@@ -7,8 +7,32 @@ Agent chat delivery has two paths:
 
 The daemon retains projected items in memory. Each source event advances the stream sequence,
 then replaces the previous tool state or merges into the current text item. Intermediate payloads
-are never retained for history or catch-up. Provider history is the durable transcript authority
-and rebuilds the projection when an agent resumes.
+are never retained for history or catch-up. Provider history is the durable transcript authority.
+
+## Reopening an agent
+
+A months-long agent has tens of megabytes of provider history, and replaying all of it on open
+took 12–50 s on a busy daemon. So the daemon keeps a snapshot of each agent's projected rows,
+epoch and provider-subagent cards in `$JAGENTDESK_HOME/agent-timelines/{agentId}.json`
+(`packages/server/src/server/agent/agent-timeline-snapshots.ts`), with a history version the
+provider reports (`AgentSession.readHistoryVersion`): where the Claude transcript's last
+timeline record ends plus the subagent transcripts' size and mtime, the Codex rollout's size and
+mtime, OpenCode's session update time and newest message. The Claude version skips trailing
+bookkeeping because Claude Code appends `cost-state`, `mode` and `tools-used` records every time
+a resumed session starts or exits, including the slash-command lookup the app runs on open.
+
+- Opening an agent restores the snapshot when the provider still reports the same version. The
+  epoch is restored too, so cursors and cached ranges a client holds stay valid. Otherwise the
+  provider history replays as before and the snapshot is rewritten.
+- A snapshot is written only while the agent is settled (no run, no running child), a few seconds
+  after its timeline last changed, and when the agent closes. Rows and version taken mid-turn
+  could disagree; a version that moved on just costs a replay.
+- The snapshot is a cache. A missing, unreadable or outdated file means a replay, never lost
+  history. Rewind and refresh delete it before they rebuild from the provider.
+- Claude no longer parses its transcript at resume. It reads it on the first replay, turn or
+  rewind; when the daemon already holds the timeline, that read only indexes turns and drops
+  the timeline (`discardHistoryReplay`).
+- Providers without `readHistoryVersion` (ACP agents, Pi) always replay.
 
 The invariants are:
 
@@ -65,9 +89,20 @@ Provider message IDs are not guaranteed for every displayed item. JAgentDesk-gen
 Actions that address a point in chat history, such as Fork, use the daemon timeline `epoch` plus the projected item's `seqEnd`. The app carries that position on the rendered assistant item for both live and fetched history. When adjacent projected chunks merge, the merged item retains the newer chunk's position.
 
 The daemon validates the epoch and locates the projected item at the selected position. A fork
-includes projected items through that checkpoint. If an item spans the checkpoint and changed
-afterward, the daemon refuses that fork with an actionable error: discarded historical payloads
-cannot be reconstructed from sequence metadata. Forking the current context remains available.
+into a tab of the same workspace is native (`agent.fork.request`, gated on
+`features.agentNativeFork`): the provider copies its own conversation up to that point
+(`AgentSession.forkConversation`; Claude forks the transcript before the next turn's user message)
+and a new agent resumes the copy with `historyPrimed`, so nothing is replayed into a prompt or into
+the new timeline. The fork's only row is a `jagentdesk`/`fork-origin` plugin item that names the
+parent and the position; the app pages the parent's history from the parent agent when the user
+opens it. That durable row also keeps a later load from hydrating the forked transcript.
+
+Providers without `forkConversation` answer `native_fork_unavailable`, and a fork into a new
+workspace runs in another checkout a provider session cannot move to. Both keep the seeded draft:
+`agent.fork_context.request` curates projected items through the checkpoint into a chat-history
+attachment (at most 100 000 characters, newest kept). It copies only user, assistant and tool-call
+rows, so a plugin card updated later never blocks a checkpoint, and a tool call that changed after
+the checkpoint is copied as still running.
 
 ## Resume behavior
 
