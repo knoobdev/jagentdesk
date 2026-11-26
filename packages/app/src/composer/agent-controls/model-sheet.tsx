@@ -17,7 +17,11 @@ import { ModelBrowser, useModelBrowser } from "@/components/model-browser";
 import { ComposerToolbarGlyph } from "@/composer/agent-controls/glyph";
 import { type ProviderSelectorProvider } from "@/provider-selection/provider-selection";
 import { useIsCompactFormFactor } from "@/constants/layout";
-import { type AgentProfilePicker, type AgentProfileSeed } from "@/agent-profiles";
+import {
+  type AgentProfile,
+  type AgentProfilePicker,
+  type AgentProfileSeed,
+} from "@/agent-profiles";
 import { type ContextBridge } from "@/components/ui/isolated-bottom-sheet-modal";
 import { TailEllipsisText } from "@/components/ui/tail-ellipsis-text";
 import { resolveModelBrowserScrolling } from "@/components/model-browser-view";
@@ -50,7 +54,7 @@ interface CompactModelSheetProps {
   profiles?: AgentProfilePicker | null;
   onApplyProfile?: (profileId: string) => void;
   onEditProfiles?: () => void;
-  onCreateProfile?: (seed: AgentProfileSeed) => void;
+  onCreateProfile?: (seed: AgentProfileSeed) => Promise<AgentProfile | null> | void;
   onEditProfile?: (profileId: string) => void;
   onOpen?: () => void;
   onClose?: () => void;
@@ -73,8 +77,9 @@ function shortModelLabel(label: string): string {
 }
 
 function resolveModelSheetProfileActions(
-  onCreateProfile: ((seed: AgentProfileSeed) => void) | undefined,
+  onCreateProfile: ((seed: AgentProfileSeed) => Promise<AgentProfile | null> | void) | undefined,
   onEditProfile: ((profileId: string) => void) | undefined,
+  onSelect: (provider: string, modelId: string) => void,
   close: () => void,
 ): {
   create?: (seed: AgentProfileSeed) => void;
@@ -83,8 +88,11 @@ function resolveModelSheetProfileActions(
   return {
     create: onCreateProfile
       ? (seed: AgentProfileSeed) => {
+          if (seed.modelId) {
+            onSelect(seed.provider, seed.modelId);
+          }
           close();
-          onCreateProfile(seed);
+          void onCreateProfile(seed);
         }
       : undefined,
     edit: onEditProfile
@@ -279,7 +287,12 @@ export function CompactModelSheet({
     onEditProfiles?.();
   }, [close, onEditProfiles]);
 
-  const profileActions = resolveModelSheetProfileActions(onCreateProfile, onEditProfile, close);
+  const profileActions = resolveModelSheetProfileActions(
+    onCreateProfile,
+    onEditProfile,
+    onSelect,
+    close,
+  );
 
   const toggle = useCallback(() => {
     if (isOpen) {

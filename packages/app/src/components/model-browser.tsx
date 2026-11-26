@@ -57,6 +57,7 @@ import {
 } from "@/components/ui/scroll-view";
 import {
   AgentProfileGlyph,
+  type AgentProfile,
   type AgentProfilePicker,
   type AgentProfilePickerRow as AgentProfilePickerRowModel,
   type AgentProfileSeed,
@@ -242,7 +243,7 @@ interface ModelBrowserProps {
   /** Applying a profile resolves the pick and dismisses, exactly like a model row. */
   onApplyProfile?: (profileId: string) => void;
   onEditProfiles?: () => void;
-  onCreateProfile?: (seed: AgentProfileSeed) => void;
+  onCreateProfile?: (seed: AgentProfileSeed) => Promise<AgentProfile | null> | void;
   onEditProfile?: (profileId: string) => void;
   onRetryProvider?: (provider: AgentProvider) => void;
   isRetryingProvider?: boolean;
@@ -725,7 +726,7 @@ function ModelRow({
   showProviderLabel?: boolean;
   onPress: () => void;
   profiledRows: AgentProfilePickerRowModel[];
-  onCreateProfile?: (seed: AgentProfileSeed) => void;
+  onCreateProfile?: (seed: AgentProfileSeed) => Promise<AgentProfile | null> | void;
   onEditProfile?: (profileId: string) => void;
   onEditProfiles?: () => void;
 }) {
@@ -795,7 +796,13 @@ function ModelRow({
           label={t("modelSelector.editProfileLabel", { name: primary.name })}
           testID={`model-edit-profile-${row.provider}-${row.modelId}`}
         >
-          <AgentProfileGlyph icon={primary.icon} color={primary.color} size={ICON_SIZE.xs} />
+          <AgentProfileGlyph
+            icon={primary.icon}
+            color={primary.color}
+            provider={primary.provider}
+            serverId={serverId}
+            size={ICON_SIZE.xs}
+          />
         </ModelRowProfileAction>
       );
     }
@@ -809,7 +816,13 @@ function ModelRow({
         label={t("modelSelector.editProfilesCount", { count: profiledRows.length })}
         testID={`model-edit-profiles-${row.provider}-${row.modelId}`}
       >
-        <AgentProfileGlyph icon={primary.icon} color={primary.color} size={ICON_SIZE.xs} />
+        <AgentProfileGlyph
+          icon={primary.icon}
+          color={primary.color}
+          provider={primary.provider}
+          serverId={serverId}
+          size={ICON_SIZE.xs}
+        />
       </ModelRowProfileAction>
     );
   }, [
@@ -824,6 +837,7 @@ function ModelRow({
     profiledRows,
     row.modelId,
     row.provider,
+    serverId,
     t,
   ]);
 
@@ -899,7 +913,7 @@ function SelectableModelRow({
   showProviderLabel?: boolean;
   onSelect: (provider: string, modelId: string) => void;
   profiledRows: AgentProfilePickerRowModel[];
-  onCreateProfile?: (seed: AgentProfileSeed) => void;
+  onCreateProfile?: (seed: AgentProfileSeed) => Promise<AgentProfile | null> | void;
   onEditProfile?: (profileId: string) => void;
   onEditProfiles?: () => void;
 }) {
@@ -923,15 +937,25 @@ function SelectableModelRow({
 
 function AgentProfilePickerRowView({
   row,
+  serverId,
   onApply,
 }: {
   row: AgentProfilePickerRowModel;
+  serverId: string | null;
   onApply: (profileId: string) => void;
 }) {
   const handlePress = useCallback(() => onApply(row.id), [onApply, row.id]);
   const leadingSlot = useMemo(
-    () => <AgentProfileGlyph icon={row.icon} color={row.color} size={ICON_SIZE.sm} />,
-    [row.color, row.icon],
+    () => (
+      <AgentProfileGlyph
+        icon={row.icon}
+        color={row.color}
+        provider={row.provider}
+        serverId={serverId}
+        size={ICON_SIZE.sm}
+      />
+    ),
+    [row.color, row.icon, row.provider, serverId],
   );
   return (
     <ModelBrowserRow
@@ -952,10 +976,12 @@ function AgentProfilePickerRowView({
  */
 function AgentProfilesPickerSection({
   rows,
+  serverId,
   onApplyProfile,
   onEditProfiles,
 }: {
   rows: AgentProfilePickerRowModel[];
+  serverId: string | null;
   onApplyProfile?: (profileId: string) => void;
   onEditProfiles?: () => void;
 }) {
@@ -975,7 +1001,12 @@ function AgentProfilesPickerSection({
         ) : null}
       </View>
       {rows.map((row) => (
-        <AgentProfilePickerRowView key={row.id} row={row} onApply={handleApply} />
+        <AgentProfilePickerRowView
+          key={row.id}
+          row={row}
+          serverId={serverId}
+          onApply={handleApply}
+        />
       ))}
     </View>
   );
@@ -1004,10 +1035,12 @@ function CreateAgentProfileRow({ onPress }: { onPress: () => void }) {
 
 function AgentProfilesPickerContent({
   rows,
+  serverId,
   onApplyProfile,
   onEditProfiles,
 }: {
   rows: AgentProfilePickerRowModel[];
+  serverId: string | null;
   onApplyProfile?: (profileId: string) => void;
   onEditProfiles?: () => void;
 }) {
@@ -1017,6 +1050,7 @@ function AgentProfilesPickerContent({
   return (
     <AgentProfilesPickerSection
       rows={rows}
+      serverId={serverId}
       onApplyProfile={onApplyProfile}
       onEditProfiles={onEditProfiles}
     />
@@ -1029,11 +1063,13 @@ function AgentProfilesPickerContent({
  */
 function ProfileSearchResultsHeader({
   rows,
+  serverId,
   hasModelRows,
   onApplyProfile,
   onEditProfiles,
 }: {
   rows: AgentProfilePickerRowModel[];
+  serverId: string | null;
   hasModelRows: boolean;
   onApplyProfile?: (profileId: string) => void;
   onEditProfiles?: () => void;
@@ -1043,6 +1079,7 @@ function ProfileSearchResultsHeader({
     <View>
       <AgentProfilesPickerSection
         rows={rows}
+        serverId={serverId}
         onApplyProfile={onApplyProfile}
         onEditProfiles={onEditProfiles}
       />
@@ -1247,7 +1284,7 @@ function ModelRowList({
   header?: React.ReactElement;
   scrolling: "sheet" | "independent";
   profiledLookup: Map<string, AgentProfilePickerRowModel[]>;
-  onCreateProfile?: (seed: AgentProfileSeed) => void;
+  onCreateProfile?: (seed: AgentProfileSeed) => Promise<AgentProfile | null> | void;
   onEditProfile?: (profileId: string) => void;
   onEditProfiles?: () => void;
 }) {
@@ -1376,7 +1413,7 @@ function ProviderModelBrowserContent({
   onSelect: (provider: string, modelId: string) => void;
   onApplyProfile?: (profileId: string) => void;
   onEditProfiles?: () => void;
-  onCreateProfile?: (seed: AgentProfileSeed) => void;
+  onCreateProfile?: (seed: AgentProfileSeed) => Promise<AgentProfile | null> | void;
   onEditProfile?: (profileId: string) => void;
   profiledLookup: Map<string, AgentProfilePickerRowModel[]>;
   showProfilesSection?: boolean;
@@ -1403,6 +1440,7 @@ function ProviderModelBrowserContent({
       return (
         <AgentProfilesPickerContent
           rows={providerProfileRows}
+          serverId={serverId}
           onApplyProfile={onApplyProfile}
           onEditProfiles={onEditProfiles}
         />
@@ -1411,6 +1449,7 @@ function ProviderModelBrowserContent({
     return matchedProfileRows.length > 0 ? (
       <ProfileSearchResultsHeader
         rows={matchedProfileRows}
+        serverId={serverId}
         hasModelRows={visibleRows.length > 0}
         onApplyProfile={onApplyProfile}
         onEditProfiles={onEditProfiles}
@@ -1423,6 +1462,7 @@ function ProviderModelBrowserContent({
     onEditProfiles,
     profiles,
     providerProfileRows,
+    serverId,
     showProfilesSection,
     visibleRows.length,
   ]);
@@ -1525,12 +1565,13 @@ function ModelBrowserContent({
       allView.kind === "searchResults" && allView.profiles.length > 0 ? (
         <ProfileSearchResultsHeader
           rows={allView.profiles}
+          serverId={serverId}
           hasModelRows={allView.rows.length > 0}
           onApplyProfile={onApplyProfile}
           onEditProfiles={onEditProfiles}
         />
       ) : undefined,
-    [allView, onApplyProfile, onEditProfiles],
+    [allView, onApplyProfile, onEditProfiles, serverId],
   );
 
   if (view.kind === "provider") {
@@ -1592,6 +1633,7 @@ function ModelBrowserContent({
       {showProfilesSection && profiles ? (
         <AgentProfilesPickerContent
           rows={profiles.rows}
+          serverId={serverId}
           onApplyProfile={onApplyProfile}
           onEditProfiles={onEditProfiles}
         />
