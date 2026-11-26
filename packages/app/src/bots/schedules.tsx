@@ -13,6 +13,7 @@ import { useBotSchedules, useBotsMutation } from "./queries";
 import { styles } from "./styles";
 import { ScheduleFormModel } from "./schedule-model";
 import { Input, QueryNotice, ErrorNotice } from "./ui";
+import { Hint } from "./help";
 function ScheduleSheet({
   serverId,
   botId,
@@ -208,7 +209,7 @@ export function BotSchedules({ serverId, botId }: { serverId: string; botId: str
       </Button>
       <QueryNotice query={schedules} />
       {schedules.isSuccess && !schedules.data.length ? (
-        <Text style={styles.muted}>{t("bots.noSchedules")}</Text>
+        <Hint testID="bot-schedules-empty">{t("bots.help.schedules")}</Hint>
       ) : null}
       {schedules.data?.map((schedule) => (
         <ScheduleRow

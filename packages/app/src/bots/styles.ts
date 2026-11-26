@@ -70,5 +70,19 @@ export const styles = StyleSheet.create((theme) => ({
   message: { padding: theme.spacing[3], gap: theme.spacing[1] },
   userMessage: { backgroundColor: theme.colors.surface2, borderRadius: theme.borderRadius.md },
   editor: { minHeight: 300, textAlignVertical: "top", fontFamily: theme.fontFamily.mono },
+  // Spec 37 §37.5.2: in-place help is 13 px foregroundMuted.
+  hint: { color: theme.colors.foregroundMuted, fontSize: 13, lineHeight: 18 },
+  hintCode: {
+    color: theme.colors.foreground,
+    fontFamily: theme.fontFamily.mono,
+    fontSize: theme.fontSize.code,
+    backgroundColor: theme.colors.surface2,
+  },
+  helpTitle: { color: theme.colors.foreground, fontSize: 13, fontWeight: "600", lineHeight: 18 },
+  helpSteps: { gap: theme.spacing[1] },
+  helpSection: { gap: theme.spacing[1] },
+  howToAsk: { paddingHorizontal: theme.spacing[3], gap: theme.spacing[1] },
+  /** Takes the empty history's space so How to ask sits on the composer. */
+  grow: { flex: 1 },
   warning: { color: theme.colors.foreground, fontSize: theme.fontSize.base },
 }));

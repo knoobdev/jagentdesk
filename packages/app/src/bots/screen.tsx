@@ -32,6 +32,7 @@ import { HomeFiles } from "./home-files";
 import { BotSlackSettings } from "./slack";
 import { BotSchedules } from "./schedules";
 import { RoomSheet, RoomChat } from "./rooms";
+import { HowBotsWorkButton, TeammateCard } from "./help";
 type BotTab = "chat" | "items" | "soulMemory" | "schedules" | "settings";
 const tabs: BotTab[] = ["chat", "items", "soulMemory", "schedules", "settings"];
 function BotSettings({
@@ -150,16 +151,19 @@ function BotView({ serverId, bot, onBack }: { serverId: string; bot: Bot; onBack
   const needsYou = items.data?.filter((item) => item.status === "needs_you").length ?? 0;
   const actions = useMemo(
     () => (
-      <Button size="sm" variant="ghost" onPress={onBack}>
-        {t("bots.back")}
-      </Button>
+      <>
+        <HowBotsWorkButton serverId={serverId} bot={bot} />
+        <Button size="sm" variant="ghost" onPress={onBack}>
+          {t("bots.back")}
+        </Button>
+      </>
     ),
-    [onBack, t],
+    [onBack, t, serverId, bot],
   );
   let body;
   switch (tab) {
     case "items":
-      body = <BotItems serverId={serverId} botId={bot.id} />;
+      body = <BotItems serverId={serverId} bot={bot} />;
       break;
     case "soulMemory":
       body = <HomeFiles serverId={serverId} bot={bot} />;
@@ -397,10 +401,7 @@ function HostBotsScreen({ serverId }: { serverId: string }) {
           roomsReady={rooms.isSuccess}
         />
         {bots.isSuccess && bots.data.length === 0 ? (
-          <View style={styles.card}>
-            <Text style={styles.title}>{t("bots.empty")}</Text>
-            <Text style={styles.muted}>{t("bots.emptyHint")}</Text>
-          </View>
+          <TeammateCard onNewBot={newBot} testID="bots-empty" />
         ) : null}
         {bots.data?.map((entry) => (
           <BotCard key={entry.id} serverId={serverId} bot={entry} />

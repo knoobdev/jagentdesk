@@ -83,6 +83,21 @@ export function useBotSchedules(serverId: string, botId: string) {
     },
   });
 }
+/** Slack status of one bot. Settings polls it while the owner connects; Chat reads it once. */
+export function useBotSlackStatus(serverId: string, botId: string, poll = false) {
+  const { client, enabled } = useBotsConnection(serverId);
+  return useFetchQuery({
+    dataShape: "value",
+    staleTimeMs: 1000,
+    queryKey: [...botsKey(serverId), "slack", botId],
+    enabled,
+    refetchInterval: enabled && poll ? 2000 : false,
+    queryFn: async () => {
+      if (!client) throw new Error(i18n.t("bots.offline"));
+      return (await client.botsRequest("bots.slack.status.request", { botId })).status;
+    },
+  });
+}
 export function useBotsMutation<T extends BotsRequestType>(serverId: string, type: T) {
   const { client, enabled } = useBotsConnection(serverId);
   const queryClient = useQueryClient();

@@ -1,13 +1,12 @@
 import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { Linking, ScrollView, Text, View } from "react-native";
-import { useFetchQuery } from "@/data/query";
 import { useTranslation } from "react-i18next";
 import * as Clipboard from "expo-clipboard";
 import { AdaptiveModalSheet } from "@/components/adaptive-modal-sheet";
 import { Button } from "@/components/ui/button";
 import { Field, FormTextInput } from "@/components/ui/form-field";
 import { useIsCompactFormFactor } from "@/constants/layout";
-import { botsKey, useBotsConnection, useBotsMutation } from "./queries";
+import { useBotSlackStatus, useBotsConnection, useBotsMutation } from "./queries";
 import { ErrorNotice, QueryNotice, Section } from "./ui";
 import { styles } from "./styles";
 import { SlackFormModel } from "./slack-form-model";
@@ -95,23 +94,13 @@ function ManifestDialog({ manifest, onClose }: { manifest: string; onClose: () =
 }
 export function BotSlackSettings({ serverId, botId }: { serverId: string; botId: string }) {
   const { t } = useTranslation();
-  const { client, enabled } = useBotsConnection(serverId);
+  const { enabled } = useBotsConnection(serverId);
   const compact = useIsCompactFormFactor();
   const [model] = useState(() => new SlackFormModel());
   const draft = useSyncExternalStore(model.subscribe, model.getState, model.getState);
   const [manifest, setManifest] = useState<string | null>(null);
   const [code, setCode] = useState<{ code: string; expiresAt_ms: number } | null>(null);
-  const status = useFetchQuery({
-    dataShape: "value",
-    staleTimeMs: 1000,
-    queryKey: [...botsKey(serverId), "slack", botId],
-    enabled,
-    refetchInterval: enabled ? 2000 : false,
-    queryFn: async () => {
-      if (!client) throw new Error(t("bots.offline"));
-      return (await client.botsRequest("bots.slack.status.request", { botId })).status;
-    },
-  });
+  const status = useBotSlackStatus(serverId, botId, true);
   const create = useBotsMutation(serverId, "bots.slack.manifest.request");
   const connect = useBotsMutation(serverId, "bots.slack.connect.request");
   const link = useBotsMutation(serverId, "bots.slack.link_code.request");

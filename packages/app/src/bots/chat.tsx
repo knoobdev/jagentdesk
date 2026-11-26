@@ -20,6 +20,7 @@ import { buildDraftStoreKey } from "@/stores/draft-keys";
 import { styles } from "./styles";
 import { mergeMessages } from "./model";
 import { botIdFromLabels } from "./envelope";
+import { HowToAsk } from "./help";
 export function AgentTimeline({ serverId, agentId }: { serverId: string; agentId: string }) {
   const { client, enabled } = useBotsConnection(serverId);
   const agent = useBotAgent(serverId, agentId);
@@ -225,6 +226,25 @@ export function BotChat({ serverId, bot }: { serverId: string; bot: Bot }) {
     [send, bot],
   );
   const useTimeline = Boolean(bot.agentId && !showHistory);
+  // A bot that has never been asked anything: no Supervisor yet and no stored messages.
+  const fresh = !bot.agentId && history.isSuccess && messages.length === 0;
+  let conversation;
+  if (fresh)
+    conversation = (
+      <>
+        <View style={styles.grow} />
+        <HowToAsk serverId={serverId} bot={bot} />
+      </>
+    );
+  else if (useTimeline && bot.agentId)
+    conversation = <AgentTimeline serverId={serverId} agentId={bot.agentId} />;
+  else
+    conversation = (
+      <>
+        <QueryNotice query={history} />
+        <Messages messages={messages} />
+      </>
+    );
   return (
     <View style={styles.column}>
       <View style={styles.row}>
@@ -244,14 +264,7 @@ export function BotChat({ serverId, bot }: { serverId: string; bot: Bot }) {
         ) : null}
       </View>
       <ErrorNotice error={error} />
-      {useTimeline && bot.agentId ? (
-        <AgentTimeline serverId={serverId} agentId={bot.agentId} />
-      ) : (
-        <>
-          <QueryNotice query={history} />
-          <Messages messages={messages} />
-        </>
-      )}
+      {conversation}
       <MessageComposer
         serverId={serverId}
         draftId={`bot:${bot.id}`}

@@ -17,6 +17,7 @@ import { confirmDialog } from "@/utils/confirm-dialog";
 import { BotFormModel, validateBotDraft } from "./form-model";
 import { useBotsMutation } from "./queries";
 import { Input, ErrorNotice } from "./ui";
+import { Hint } from "./help";
 import { styles } from "./styles";
 function ProviderFields({ serverId, model }: { serverId: string; model: BotFormModel }) {
   const { t } = useTranslation();
@@ -131,12 +132,17 @@ function ProviderFields({ serverId, model }: { serverId: string; model: BotFormM
         size={size}
         triggerTestID="bot-mode"
       />
+      <Hint testID="bot-agent-hint">{t("bots.help.agent")}</Hint>
     </>
   );
 }
-function AdvancedSettings({ model }: { model: BotFormModel }) {
+function AdvancedSettings({ serverId, model }: { serverId: string; model: BotFormModel }) {
   const { t } = useTranslation();
   const draft = useSyncExternalStore(model.subscribe, model.getState, model.getState);
+  const providers = useProvidersSnapshot(serverId);
+  const agent =
+    providers.entries?.find((entry) => entry.provider === draft.provider)?.label ??
+    (draft.providerLabel || draft.provider);
   const validation = useMemo(() => validateBotDraft(draft), [draft]);
   const setLookAround = useCallback(
     function setLookAround(value: boolean) {
@@ -173,11 +179,13 @@ function AdvancedSettings({ model }: { model: BotFormModel }) {
           onValueChange={setLookAround}
           accessibilityLabel={t("bots.lookAround")}
         />
+        <Hint testID="bot-look-around-hint">{t("bots.help.lookAround")}</Hint>
       </Field>
       <Input
         label={t("bots.interval")}
         value={draft.interval}
         onChange={setInterval}
+        hint={t("bots.help.interval", { agent })}
         error={
           draft.lookAround && validation.errors.interval ? t(validation.errors.interval) : null
         }
@@ -190,8 +198,9 @@ function AdvancedSettings({ model }: { model: BotFormModel }) {
           accessibilityLabel={t("bots.unattended")}
           testID="bot-unattended"
         />
+        <Hint testID="bot-unattended-hint">{t("bots.help.unattended")}</Hint>
       </Field>
-      <Text style={styles.warning}>{t("bots.unattendedWarning")}</Text>
+      {draft.unattended ? <Text style={styles.warning}>{t("bots.unattendedWarning")}</Text> : null}
     </>
   );
 }
@@ -257,6 +266,7 @@ export function BotForm({ serverId, bot, save, pending, error, onSaved }: FormPr
         label={t("bots.name")}
         value={draft.name}
         onChange={setName}
+        hint={t("bots.help.name")}
         error={errors.name ? t(errors.name) : null}
         testID="bot-name"
       />
@@ -265,6 +275,7 @@ export function BotForm({ serverId, bot, save, pending, error, onSaved }: FormPr
         value={draft.slug}
         onChange={setSlug}
         editable={!bot}
+        hint={t("bots.help.slug")}
         error={errors.slug ? t(errors.slug) : null}
         testID="bot-slug"
       />
@@ -273,7 +284,7 @@ export function BotForm({ serverId, bot, save, pending, error, onSaved }: FormPr
         value={draft.identity}
         onChange={setIdentity}
         multiline
-        hint={t("bots.identityOptional")}
+        hint={t("bots.help.identity")}
         error={
           errors.identity ? t(errors.identity, { length: draft.identity.trim().length }) : null
         }
@@ -284,9 +295,10 @@ export function BotForm({ serverId, bot, save, pending, error, onSaved }: FormPr
         label={t("bots.repo")}
         value={draft.defaultRepo}
         onChange={setRepo}
+        hint={t("bots.help.repo")}
         testID="bot-repo"
       />
-      {bot ? <AdvancedSettings model={model} /> : null}
+      {bot ? <AdvancedSettings serverId={serverId} model={model} /> : null}
       <ErrorNotice error={error} />
       {saved ? <Text style={styles.muted}>{t("bots.saved")}</Text> : null}
       <Button onPress={submit} loading={pending} disabled={pending || blocked} testID="bot-save">

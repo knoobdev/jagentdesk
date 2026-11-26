@@ -8,6 +8,7 @@ import { useBots, useRooms } from "./queries";
 import { buildBotsRoute } from "./model";
 import { styles } from "./styles";
 import { QueryNotice } from "./ui";
+import { TeammateCard } from "./help";
 function BotRow({ serverId, bot, active }: { serverId: string; bot: Bot; active: boolean }) {
   const { t } = useTranslation();
   const style = [styles.navRow, active && styles.navActive];
@@ -86,6 +87,9 @@ export function BotsSidebar({ serverId }: { serverId: string }) {
         </Button>
       </View>
       <QueryNotice query={bots} />
+      {bots.isSuccess && bots.data.length === 0 ? (
+        <TeammateCard onNewBot={createBot} testID="bots-nav-empty" />
+      ) : null}
       {bots.data?.map((bot) => (
         <BotRow key={bot.id} serverId={serverId} bot={bot} active={params.botId === bot.id} />
       ))}

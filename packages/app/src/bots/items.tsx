@@ -23,6 +23,7 @@ import { useItems, useBotsConnection, useBotsMutation, botsKey } from "./queries
 import { sortItems } from "./model";
 import { styles } from "./styles";
 import { Section, QueryNotice, ErrorNotice, Input } from "./ui";
+import { TabHint } from "./help";
 export function WorkerPermissions({
   serverId,
   bot,
@@ -523,9 +524,9 @@ function ItemRow({
     </Button>
   );
 }
-export function BotItems({ serverId, botId }: { serverId: string; botId: string }) {
+export function BotItems({ serverId, bot }: { serverId: string; bot: Bot }) {
   const { t } = useTranslation();
-  const query = useItems(serverId, botId);
+  const query = useItems(serverId, bot.id);
   const isGumloop = useIsGumloopTheme();
   const [expanded, setExpanded] = useState(false);
   const params = useLocalSearchParams<{ itemId?: string }>();
@@ -544,7 +545,7 @@ export function BotItems({ serverId, botId }: { serverId: string; botId: string 
     <ScrollView contentContainerStyle={styles.body} testID="bots-items">
       <QueryNotice query={query} />
       {query.isSuccess && !items.length ? (
-        <Text style={styles.muted}>{t("bots.noItems")}</Text>
+        <TabHint i18nKey="bots.help.items" bot={bot} testID="bot-items-empty" />
       ) : null}
       {visible.length ? (
         <View style={isGumloop ? styles.itemListFlush : styles.itemList}>
