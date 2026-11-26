@@ -3,7 +3,8 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import pino, { type Logger } from "pino";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { createTestLogger } from "../../../test-utils/test-logger.js";
 import type { AgentLaunchContext, AgentSession, AgentSessionConfig } from "../agent-sdk-types.js";
@@ -45,7 +46,12 @@ interface Fixture {
   client: OpenCodeV2AgentClient;
 }
 
-async function startFixture(mode: Mode, options: { userHub?: boolean } = {}): Promise<Fixture> {
+interface FixtureOptions {
+  userHub?: boolean;
+  logger?: Logger;
+}
+
+async function startFixture(mode: Mode, options: FixtureOptions = {}): Promise<Fixture> {
   const root = await mkdtemp(path.join(os.tmpdir(), "jagentdesk-opencode-v2-shared-"));
   const project = path.join(root, "project");
   await mkdir(project, { recursive: true });
@@ -96,7 +102,11 @@ async function startFixture(mode: Mode, options: { userHub?: boolean } = {}): Pr
       env: service.ownedEnvironment,
     },
   }[mode];
-  const client = new OpenCodeV2AgentClient({ logger: createTestLogger(), bridge, settings });
+  const client = new OpenCodeV2AgentClient({
+    logger: options.logger ?? createTestLogger(),
+    bridge,
+    settings,
+  });
   return { root, project, bridge, service, client, ...(userHub ? { userHub } : {}) };
 }
 
@@ -160,7 +170,7 @@ function agentMcpTools(request: ScriptedRequest): ScriptedTool[] {
   );
 }
 
-function useFixture(mode: Mode, options: { userHub?: boolean } = {}) {
+function useFixture(mode: Mode, options: FixtureOptions = {}) {
   const state: { fixture?: Fixture; cleanups: Array<() => Promise<void>> } = { cleanups: [] };
   beforeEach(async () => {
     state.fixture = await startFixture(mode, options);
@@ -313,5 +323,62 @@ describe.each<Mode>(["explicit", "discovered"])("OpenCode v2 %s shared service",
     // The remaining session keeps its own endpoint after the other one closes.
     const afterClose = `after close ${scriptedCall("hub_marker")}`;
     expect((await second!.run(afterClose)).finalText).toBe("RESULT HUB_OK_2");
+  }, 120_000);
+});
+
+// Spec 33.7: the MCP path is decided once per OpenCode server and logged as `opencode_mcp_path`.
+describe("OpenCode v2 MCP path on an owned server", () => {
+  const lines: Array<Record<string, unknown>> = [];
+  const logger = pino(
+    { level: "info" },
+    {
+      write: (line: string) => {
+        lines.push(JSON.parse(line) as Record<string, unknown>);
+      },
+    },
+  );
+  const state = useFixture("owned", { logger });
+  const paths = () =>
+    lines.filter((line) => "opencode_mcp_path" in line).map((line) => line.opencode_mcp_path);
+  afterEach(() => {
+    lines.length = 0;
+    vi.unstubAllEnvs();
+  });
+
+  async function runAgentMcp(fixture: Fixture, cleanups: Array<() => Promise<void>>) {
+    const hub = await HttpMcpFixture.start({ token: "token-1", marker: "HUB_OK_1" });
+    cleanups.push(() => hub.close());
+    const stdio = await writeStdioMcpFixture(fixture.root);
+    const { config, launch } = hubLaunch({
+      cwd: fixture.project,
+      agentId: "agent-1",
+      hub,
+      token: "token-1",
+      secret: "secret-1",
+      stdio: stdio.script,
+    });
+    const session = await fixture.client.createSession(config, launch, { persistSession: false });
+    cleanups.push(() => session.close());
+    expect((await session.run(scriptedCall("hub_marker"))).finalText).toBe("RESULT HUB_OK_1");
+    const stdioEnv = await session.run(scriptedCall("local_env", { name: "HUB_SECRET" }));
+    expect(stdioEnv.finalText).toBe("RESULT secret-1");
+    const shell = await session.run(
+      scriptedCall("shell", { command: 'printf %s "$HUB_SECRET"', description: "Print secret" }),
+    );
+    expect(shell.finalText).toContain("secret-1");
+    return session;
+  }
+
+  test("runs the agent's MCP servers through the plugin when the server reports features.mcpTools", async () => {
+    await runAgentMcp(state.fixture!, state.cleanups);
+    expect(paths()).toEqual(["session"]);
+  }, 120_000);
+
+  test("keeps mcp.add on a server of the agent's own when the legacy path is in use", async () => {
+    vi.stubEnv("JAGENTDESK_OPENCODE_MCP_PATH", "legacy");
+    await runAgentMcp(state.fixture!, state.cleanups);
+    // The shared helper decides; the agent's dedicated server binds its session on the same path.
+    expect(paths()).toEqual(["legacy", "legacy"]);
+    expect(lines.filter((line) => line.opencode_mcp_path && line.dedicated)).toHaveLength(1);
   }, 120_000);
 });
