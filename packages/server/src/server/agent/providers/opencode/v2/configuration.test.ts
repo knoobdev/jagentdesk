@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { features, permissionRules, requiresDedicatedV2Server } from "./configuration.js";
+import { features, permissionRules } from "./configuration.js";
 
 describe("OpenCode v2 permission rules", () => {
   test("maps authored native permissions and exact injected MCP grants", () => {
@@ -16,39 +16,6 @@ describe("OpenCode v2 permission rules", () => {
       { action: "shell", resource: "pwd", effect: "allow" },
       { action: "subagent", resource: "*", effect: "ask" },
     ]);
-  });
-});
-
-describe("OpenCode v2 helper isolation", () => {
-  test("shares the helper for agent-identity environment only", () => {
-    expect(
-      requiresDedicatedV2Server(
-        { provider: "opencode", cwd: "/tmp/project" },
-        {
-          agentId: "agent",
-          env: { JAGENTDESK_AGENT_ID: "agent", JAGENTDESK_AGENT_CWD: "/tmp/project" },
-        },
-      ),
-    ).toBe(false);
-  });
-
-  test("dedicates a helper for any other process environment", () => {
-    expect(
-      requiresDedicatedV2Server(
-        { provider: "opencode", cwd: "/tmp/project" },
-        { agentId: "agent", env: { CUSTOM_FLAG: "1" } },
-      ),
-    ).toBe(true);
-  });
-
-  test("dedicates a helper when the session carries custom MCP", () => {
-    expect(
-      requiresDedicatedV2Server({
-        provider: "opencode",
-        cwd: "/tmp/project",
-        mcpServers: { custom: { type: "stdio", command: "custom", args: [] } },
-      }),
-    ).toBe(true);
   });
 });
 

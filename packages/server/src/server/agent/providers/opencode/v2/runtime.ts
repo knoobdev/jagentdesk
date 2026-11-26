@@ -21,7 +21,11 @@ import {
   type OpenCodeProviderInjection,
 } from "../../../../custom-providers/materialization.js";
 import { resolveExternalOpenCodeServer, type ExternalOpenCodeServer } from "./external-server.js";
-import { selectOpenCodeService, type OpenCodeServiceSelection } from "./service-selection.js";
+import {
+  processEnvironmentOverrides,
+  selectOpenCodeService,
+  type OpenCodeServiceSelection,
+} from "./service-selection.js";
 import {
   bridgeBindings,
   connectSharedService,
@@ -72,8 +76,6 @@ export interface V2RuntimeOptions {
 
 export interface V2RuntimeAcquireOptions {
   fresh?: boolean;
-  dedicated?: boolean;
-  env?: Record<string, string>;
   signal?: AbortSignal;
 }
 
@@ -110,16 +112,11 @@ export class V2Runtime {
     input.signal?.throwIfAborted();
     this.assertBridgePort();
     const selected = await raceProviderRefreshAbort(input.signal, this.selection);
-    const selection: OpenCodeServiceSelection = this.requiresOwnedServer(input, selected)
+    const selection: OpenCodeServiceSelection = this.requiresOwnedServer(selected)
       ? { kind: "owned" }
       : selected;
-    let pending: Promise<Generation>;
-    if (input.env || input.dedicated) {
-      pending = this.startTracked(selection, input.env);
-    } else {
-      if (!this.current) this.current = this.startTracked(selection);
-      pending = this.current;
-    }
+    this.current ??= this.startTracked(selection);
+    const pending = this.current;
     let generation: Generation;
     try {
       generation = await raceProviderRefreshAbort(input.signal, pending);
@@ -165,23 +162,11 @@ export class V2Runtime {
       );
   }
 
-  private requiresOwnedServer(
-    input: V2RuntimeAcquireOptions,
-    selection: OpenCodeServiceSelection,
-  ): boolean {
-    if (selection.kind === "owned" || input.env || input.dedicated) return true;
-    const connectionEnv = new Set([
-      "JAGENTDESK_OPENCODE_SERVER_URL",
-      "JAGENTDESK_OPENCODE_SERVER_PASSWORD",
-      "JAGENTDESK_OPENCODE_BRIDGE_URL",
-      "JAGENTDESK_OPENCODE_BRIDGE_PORT",
-    ]);
-    if (selection.kind === "discovered") {
-      connectionEnv.add("XDG_CONFIG_HOME");
-      connectionEnv.add("XDG_STATE_HOME");
-      connectionEnv.add("OPENCODE_CONFIG_DIR");
-    }
-    return Object.keys(this.options.settings?.env ?? {}).some((key) => !connectionEnv.has(key));
+  // JAgentDesk starts its own server, instead of refusing, when the provider env configures the
+  // OpenCode process: an existing server cannot honor it.
+  private requiresOwnedServer(selection: OpenCodeServiceSelection): boolean {
+    if (selection.kind === "owned") return true;
+    return processEnvironmentOverrides(this.options.settings?.env, selection.kind).length > 0;
   }
 
   private lease(generation: Generation, pending: Promise<Generation>): V2Connection {
@@ -235,11 +220,8 @@ export class V2Runtime {
     this.current = null;
   }
 
-  private startTracked(
-    selection: OpenCodeServiceSelection,
-    env?: Record<string, string>,
-  ): Promise<Generation> {
-    const pending = this.start(selection, env);
+  private startTracked(selection: OpenCodeServiceSelection): Promise<Generation> {
+    const pending = this.start(selection);
     this.starts.add(pending);
     void pending.then(
       (generation) =>
@@ -256,10 +238,7 @@ export class V2Runtime {
     return pending;
   }
 
-  private async start(
-    selection: OpenCodeServiceSelection,
-    env: Record<string, string> = {},
-  ): Promise<Generation> {
+  private async start(selection: OpenCodeServiceSelection): Promise<Generation> {
     if (selection.kind !== "owned") {
       const generation: Generation = {
         ...(await connectSharedService(selection, this.options)),
@@ -281,7 +260,6 @@ export class V2Runtime {
     let configured: Record<string, string> = {
       ...(inheritedConfig ? { OPENCODE_CONFIG_CONTENT: inheritedConfig } : {}),
       ...settings?.env,
-      ...env,
     };
     const injection = this.options.providerConfigInjection
       ? await this.options.providerConfigInjection()

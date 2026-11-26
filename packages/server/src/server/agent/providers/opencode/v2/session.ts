@@ -31,17 +31,35 @@ import { commands } from "./commands.js";
 import { messages } from "./history.js";
 import { SessionPermissions } from "./permissions.js";
 import { SessionUsage } from "./usage.js";
-import { attachMcpServers } from "./mcp-attach.js";
 import {
   isInternalJAgentDeskMcpServer,
   JAGENTDESK_MCP_SERVER_NAME,
 } from "../../../runtime-mcp-config.js";
 import { createSessionMetricsReporter } from "../../metrics.js";
 import { replayedTurnMetrics, sessionMetrics } from "./metrics.js";
+import type { SessionMcp } from "./session-mcp.js";
 import { type ProviderOptions } from "@jagentdesk/protocol/agent-types";
 import { applyProviderOptionsPatch } from "../../../option-controls.js";
 import { assertChangesAreLive, validateProviderOptions } from "../../../provider-options.js";
 import { OpenCodeProviderOptionsSchema } from "../options.js";
+
+export interface OpenCodeV2SessionOptions {
+  connection: V2Connection;
+  info: SessionInfo;
+  config: AgentSessionConfig;
+  logger: Logger;
+  persist: boolean;
+  requiresJAgentDeskPlugin: boolean;
+  /** The complete shell environment for this session and its descendants. */
+  environment?: Record<string, string>;
+  /** MCP servers JAgentDesk hosts for this session; the session closes them. */
+  mcp?: SessionMcp;
+  unbind?: () => void;
+  bindChild?: (id: string) => void;
+  acquire?: () => Promise<V2Connection>;
+  moved?: (connection: V2Connection) => void;
+  historyOnly?: boolean;
+}
 
 export class OpenCodeV2Session implements AgentSession {
   readonly provider = "opencode";
@@ -70,8 +88,6 @@ export class OpenCodeV2Session implements AgentSession {
 
   private reconnecting: Promise<void> | null = null;
 
-  private launchEnv: Record<string, string> | undefined;
-
   private sync: Promise<void> = Promise.resolve();
 
   private dirty = false;
@@ -89,19 +105,33 @@ export class OpenCodeV2Session implements AgentSession {
   private readonly reportSessionMetrics = createSessionMetricsReporter((metrics) =>
     this.emit({ type: "session_metrics_updated", provider: "opencode", metrics }),
   );
-  constructor(
-    private connection: V2Connection,
-    private info: SessionInfo,
-    private readonly config: AgentSessionConfig,
-    private readonly logger: Logger,
-    private readonly persist: boolean,
-    private readonly requiresJAgentDeskPlugin: boolean,
-    private readonly unbind?: () => void,
-    bindChild?: (id: string) => void,
-    private readonly acquire?: () => Promise<V2Connection>,
-    private readonly moved?: (connection: V2Connection) => void,
-    private readonly historyOnly = false,
-  ) {
+  private connection: V2Connection;
+  private info: SessionInfo;
+  private readonly config: AgentSessionConfig;
+  private readonly logger: Logger;
+  private readonly persist: boolean;
+  private readonly requiresJAgentDeskPlugin: boolean;
+  // OpenCode replaces the whole local shell environment, rather than overlaying it.
+  private readonly environment: Record<string, string> | undefined;
+  private readonly mcp: SessionMcp | undefined;
+  private readonly unbind: (() => void) | undefined;
+  private readonly acquire: (() => Promise<V2Connection>) | undefined;
+  private readonly moved: ((connection: V2Connection) => void) | undefined;
+  private readonly historyOnly: boolean;
+  constructor(options: OpenCodeV2SessionOptions) {
+    const { info, config, bindChild } = options;
+    this.connection = options.connection;
+    this.info = info;
+    this.config = config;
+    this.logger = options.logger;
+    this.persist = options.persist;
+    this.requiresJAgentDeskPlugin = options.requiresJAgentDeskPlugin;
+    this.environment = options.environment;
+    this.mcp = options.mcp;
+    this.unbind = options.unbind;
+    this.acquire = options.acquire;
+    this.moved = options.moved;
+    this.historyOnly = options.historyOnly ?? false;
     this.background = new OpenCodeBackgroundInventory({
       id: info.id,
       cwd: config.cwd,
@@ -123,7 +153,10 @@ export class OpenCodeV2Session implements AgentSession {
       id: info.id,
       emit: (event) => this.emit(event),
       reconcilePermissions: (id) => this.permissions.reconcile(id),
-      bindChild,
+      adoptChild: async (id) => {
+        bindChild?.(id);
+        await this.adoptDescendant(id);
+      },
     });
     this.turns = new SessionTurns({
       client: () => this.client,
@@ -174,9 +207,7 @@ export class OpenCodeV2Session implements AgentSession {
     return this.connection.client;
   }
 
-  async initialize(environment?: Record<string, string>) {
-    // OpenCode replaces the whole local shell environment, rather than overlaying it.
-    this.launchEnv = environment;
+  async initialize() {
     this.watchExit(this.connection);
     await this.configureConnection();
     const location = { directory: this.config.cwd };
@@ -203,12 +234,6 @@ export class OpenCodeV2Session implements AgentSession {
     await waitForLocationReady({ client: this.client, location, signal: this.abort.signal });
     if (this.requiresJAgentDeskPlugin)
       await awaitJAgentDeskPlugin({ client: this.client, location, signal: this.abort.signal });
-    await attachMcpServers({
-      client: this.client,
-      location,
-      mcpServers: this.config.mcpServers,
-      signal: this.abort.signal,
-    });
     if (this.historyOnly) return;
     const system = composeSystemPromptParts(
       this.config.systemPrompt,
@@ -230,6 +255,12 @@ export class OpenCodeV2Session implements AgentSession {
         });
       }
     }
+  }
+
+  /** Gives a descendant session the shell environment, which OpenCode does not inherit. */
+  async adoptDescendant(sessionID: string) {
+    if (this.closed || this.historyOnly || !this.environment) return;
+    await this.client.session.environment({ sessionID, variables: this.environment });
   }
 
   private async startStream() {
@@ -616,8 +647,9 @@ export class OpenCodeV2Session implements AgentSession {
     await this.connection.bindSession(this.id, this.config.cwd);
     // Session environments are process-local. Reapply this agent's snapshot before
     // reconciling a new connection, including event-stream reconnections.
-    if (this.launchEnv)
-      await this.client.session.environment({ sessionID: this.id, variables: this.launchEnv });
+    if (this.environment)
+      await this.client.session.environment({ sessionID: this.id, variables: this.environment });
+    await this.children.restoreAdoptions();
     await this.reconcile();
     await this.children.reconcile(this.id);
     await this.turns.reconcile();
@@ -756,6 +788,7 @@ export class OpenCodeV2Session implements AgentSession {
     try {
       if (!this.persist) await this.client.session.remove({ sessionID: this.id });
     } finally {
+      await this.mcp?.close();
       await this.connection.release();
     }
     this.listeners.clear();
