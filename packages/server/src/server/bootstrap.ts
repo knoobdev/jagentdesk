@@ -226,6 +226,7 @@ import {
   type ActiveWorkspaceRef,
 } from "./workspace-archive-service.js";
 import { setupAutoArchiveOnMerge } from "./auto-archive-on-merge/index.js";
+import { isCheckoutUntrusted } from "./workspace-automation-gate.js";
 import { wrapSessionMessage, type SessionOutboundMessage } from "./messages.js";
 import type { TerminalManager } from "../terminal/terminal-manager.js";
 import { startWorkerTerminalManager } from "../terminal/worker-terminal-manager.js";
@@ -1359,6 +1360,8 @@ export async function createJAgentDeskDaemon(
         worktreeRoot: workspace.worktreeRoot,
         isJAgentDeskOwnedWorktree: workspace.isJAgentDeskOwnedWorktree,
         mainRepoRoot: workspace.mainRepoRoot,
+        worktreeManagerPluginId: workspace.worktreeManagerPluginId,
+        untrustedSource: workspace.untrustedSource,
       }));
   };
   const markWorkspaceArchiving = (workspaceIds: Iterable<string>, archivingAt: string) =>
@@ -1404,6 +1407,8 @@ export async function createJAgentDeskDaemon(
   setupAutoArchiveOnMerge({
     jagentdeskHome: config.jagentdeskHome,
     jagentdeskWorktreesBaseRoot: config.worktreesRoot,
+    worktreeManagers: pluginRuntime,
+    workspaceArchiveOperations,
     daemonConfigStore,
     workspaceGitService,
     github,
@@ -1412,6 +1417,8 @@ export async function createJAgentDeskDaemon(
     terminalManager,
     logger,
     findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
+    getWorkspace: (workspaceId) => workspaceRegistry.get(workspaceId),
+    isCheckoutUntrusted: (checkoutPath) => isCheckoutUntrusted(workspaceRegistry, checkoutPath),
     listActiveWorkspaces: listActiveWorkspacesExternal,
     getAutoArchivedChangeRequestUrl: async (workspaceId) =>
       (await workspaceRegistry.get(workspaceId))?.autoArchivedChangeRequestUrl ?? null,
@@ -1432,6 +1439,7 @@ export async function createJAgentDeskDaemon(
         createJAgentDeskWorktree: async (workflowInput, workflowOptions) => {
           return createRegisteredJAgentDeskWorktree(workflowInput, {
             lifecycle: pluginRuntime,
+            worktreeManagers: pluginRuntime,
             github,
             ...(workflowOptions?.resolveDefaultBranch
               ? {
@@ -1488,11 +1496,15 @@ export async function createJAgentDeskDaemon(
       {
         jagentdeskHome: config.jagentdeskHome,
         jagentdeskWorktreesBaseRoot: config.worktreesRoot,
+        worktreeManagers: pluginRuntime,
+        workspaceArchiveOperations,
         github,
         workspaceGitService,
         agentManager,
         agentStorage,
         findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
+        getWorkspace: (workspaceIdToRead) => workspaceRegistry.get(workspaceIdToRead),
+        isCheckoutUntrusted: (checkoutPath) => isCheckoutUntrusted(workspaceRegistry, checkoutPath),
         listActiveWorkspaces: listActiveWorkspacesExternal,
         archiveWorkspaceRecord: (workspaceIdToArchive, archivedAt) =>
           archiveWorkspaceRecordExternal(workspaceIdToArchive, undefined, archivedAt),
@@ -1508,6 +1520,10 @@ export async function createJAgentDeskDaemon(
   const hubAgentLifecycle = new CreateAgentLifecycleDispatch({
     jagentdeskHome: config.jagentdeskHome,
     worktreesRoot: config.worktreesRoot,
+    worktreeManagers: pluginRuntime,
+    workspaceArchiveOperations,
+    getWorkspace: (workspaceId) => workspaceRegistry.get(workspaceId),
+    isCheckoutUntrusted: (checkoutPath) => isCheckoutUntrusted(workspaceRegistry, checkoutPath),
     agentManager,
     agentStorage,
     github,
@@ -1643,11 +1659,15 @@ export async function createJAgentDeskDaemon(
       {
         jagentdeskHome: config.jagentdeskHome,
         jagentdeskWorktreesBaseRoot: config.worktreesRoot,
+        worktreeManagers: pluginRuntime,
+        workspaceArchiveOperations,
         github,
         workspaceGitService,
         agentManager,
         agentStorage,
         findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
+        getWorkspace: (workspaceIdToRead) => workspaceRegistry.get(workspaceIdToRead),
+        isCheckoutUntrusted: (checkoutPath) => isCheckoutUntrusted(workspaceRegistry, checkoutPath),
         listActiveWorkspaces: listActiveWorkspacesExternal,
         archiveWorkspaceRecord: (workspaceIdToArchive, archivedAt) =>
           archiveWorkspaceRecordExternal(workspaceIdToArchive, undefined, archivedAt),
@@ -1894,6 +1914,9 @@ export async function createJAgentDeskDaemon(
     providerSnapshotManager,
     github,
     workspaceGitService,
+    worktreeManagers: pluginRuntime,
+    workspaceArchiveOperations,
+    isCheckoutUntrusted: (checkoutPath) => isCheckoutUntrusted(workspaceRegistry, checkoutPath),
     findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
     listActiveWorkspaces: listActiveWorkspacesExternal,
     archiveWorkspaceRecord: (workspaceId, archivedAt) =>

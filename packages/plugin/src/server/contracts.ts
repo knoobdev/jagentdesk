@@ -5,6 +5,7 @@ import type { PluginRpcContract, PluginSubscriptionContract, PluginWireInput } f
 import type { PluginCleanup } from "../contracts.js";
 import type { ProviderRegistration } from "./provider.js";
 import type { PluginLifecycleRegistration } from "./lifecycle.js";
+import type { WorktreeManagerRegistration } from "./worktree.js";
 
 export interface PluginHandlerContext {
   jagentdesk: JAgentDeskApi;
@@ -64,6 +65,7 @@ export interface PluginServerContext extends PluginLifecycleRegistration {
   ): void;
   registerProvider(provider: ProviderRegistration): void;
   registerUsageSource(source: UsageSourceRegistration): void;
+  registerWorktreeManager(manager: WorktreeManagerRegistration): () => void;
 }
 
 export type PluginServerContribution = (server: PluginServerContext) => PluginCleanup;

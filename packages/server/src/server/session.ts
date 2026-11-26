@@ -249,6 +249,7 @@ import {
   archiveWorkspaceContents,
   unarchiveWorkspaceAgents,
   archiveByScope,
+  resolveWorkspaceBackingPath,
   type ActiveWorkspaceRef,
 } from "./workspace-archive-service.js";
 import { type ServiceProxySubsystem } from "./service-proxy.js";
@@ -271,7 +272,12 @@ import {
   matchesAgentUpdatesFilter,
   type AgentUpdatesService,
 } from "./session/agent-updates/agent-updates-service.js";
-import { expandTilde } from "../utils/path.js";
+import {
+  createRealpathAwarePathMatcher,
+  expandTilde,
+  isRealpathInsideRoot,
+  normalizePathForIdentity,
+} from "../utils/path.js";
 import {
   searchDirectoryEntries,
   WORKSPACE_SEARCH_HIDDEN_DIRECTORIES,
@@ -333,7 +339,10 @@ import { resolveWorktreeSourceCwd } from "./workspace-source.js";
 import { type MessageReceipts } from "./message-receipts/index.js";
 import { isAbsolute, relative } from "node:path";
 import { applyRecordPatch } from "./record-patch.js";
-import { formatWorkspaceAutomationBlockedMessage } from "./workspace-automation-gate.js";
+import {
+  formatWorkspaceAutomationBlockedMessage,
+  isCheckoutUntrusted,
+} from "./workspace-automation-gate.js";
 
 function toolInstallErrorPayload(error: unknown): { code: string; message: string } {
   if (error instanceof ToolInstallError) return { code: error.code, message: error.message };
@@ -729,6 +738,10 @@ export interface SessionOptions {
     wait: import("./plugins/lifecycle/index.js").PluginLifecycle["wait"];
     before: import("./plugins/lifecycle/index.js").PluginLifecycle["before"];
     emit?: import("./plugins/lifecycle/index.js").PluginLifecycle["emit"];
+    hasWorktreeManager: import("./plugins/runtime.js").PluginWorktreeManagerRuntime["hasWorktreeManager"];
+    createWorktree: import("./plugins/runtime.js").PluginWorktreeManagerRuntime["createWorktree"];
+    removeWorktree: import("./plugins/runtime.js").PluginWorktreeManagerRuntime["removeWorktree"];
+    restoreWorktree: import("./plugins/runtime.js").PluginWorktreeManagerRuntime["restoreWorktree"];
     listPlugins(): Promise<import("@jagentdesk/protocol/messages").PluginListItem[]>;
     getLogs(pluginId: string): import("@jagentdesk/protocol/messages").PluginLogEntry[];
     installDirectory(input: {
@@ -1333,11 +1346,33 @@ export class Session {
     this.workspaceRecovery = createWorkspaceRecoveryService({
       jagentdeskHome: this.jagentdeskHome,
       worktreesRoot: this.worktreesRoot,
+      worktreeManagers: pluginRuntime ?? undefined,
       getWorkspace: (workspaceId) => this.workspaceRegistry.get(workspaceId),
       getProject: (projectId) => this.projectRegistry.get(projectId),
       isDirectory: (path) => this.filesystem.isDirectory(path),
       unarchiveWorkspace: async (workspace) => {
         await this.workspaceProvisioning.ensureWorkspaceRecordUnarchived(workspace);
+      },
+      isCheckoutUntrusted: (checkoutPath) =>
+        isCheckoutUntrusted(this.workspaceRegistry, checkoutPath),
+      syncCheckoutWorktreeManager: async ({
+        worktreeRoot,
+        worktreeManagerPluginId,
+        excludeWorkspaceId,
+      }) => {
+        const matchesCheckout = createRealpathAwarePathMatcher(worktreeRoot);
+        const workspaces = await this.workspaceRegistry.list();
+        const timestamp = new Date().toISOString();
+        for (const candidate of workspaces) {
+          if (candidate.workspaceId === excludeWorkspaceId) continue;
+          if (!matchesCheckout(candidate.worktreeRoot ?? candidate.cwd)) continue;
+          if ((candidate.worktreeManagerPluginId ?? null) === worktreeManagerPluginId) continue;
+          const { worktreeManagerPluginId: _previous, ...withoutManager } = candidate;
+          const updated: PersistedWorkspaceRecord = worktreeManagerPluginId
+            ? { ...withoutManager, worktreeManagerPluginId, updatedAt: timestamp }
+            : { ...withoutManager, updatedAt: timestamp };
+          await this.workspaceRegistry.upsert(updated);
+        }
       },
     });
     this.checkoutSession = new CheckoutSession({
@@ -1548,9 +1583,15 @@ export class Session {
         this.emitWorkspaceUpdateForWorkspaceId(workspaceId),
       logger: this.sessionLogger,
     });
+    this.workspaceArchiveOperations = resolveWorkspaceArchiveOperations(workspaceArchiveOperations);
     this.createAgentLifecycleDispatch = new CreateAgentLifecycleDispatch({
       jagentdeskHome: this.jagentdeskHome,
       worktreesRoot: this.worktreesRoot,
+      worktreeManagers: pluginRuntime ?? undefined,
+      workspaceArchiveOperations: this.workspaceArchiveOperations,
+      getWorkspace: (workspaceId) => this.workspaceRegistry.get(workspaceId),
+      isCheckoutUntrusted: (checkoutPath) =>
+        isCheckoutUntrusted(this.workspaceRegistry, checkoutPath),
       agentManager: this.agentManager,
       agentStorage: this.agentStorage,
       github: this.github,
@@ -1584,7 +1625,6 @@ export class Session {
     this.getDaemonTcpHost = optionalServiceRefs.getDaemonTcpHost;
     this.serviceProxyPublicBaseUrl = optionalServiceRefs.serviceProxyPublicBaseUrl;
     this.resolveScriptHealth = optionalServiceRefs.resolveScriptHealth;
-    this.workspaceArchiveOperations = resolveWorkspaceArchiveOperations(workspaceArchiveOperations);
     this.workspaceScripts = createWorkspaceScriptsService({
       serviceProxy: this.serviceProxy,
       scriptRuntimeStore: this.scriptRuntimeStore,
@@ -6207,11 +6247,14 @@ export class Session {
       {
         jagentdeskHome: this.jagentdeskHome,
         jagentdeskWorktreesBaseRoot: this.worktreesRoot,
+        worktreeManagers: this.pluginRuntime,
+        workspaceArchiveOperations: this.workspaceArchiveOperations,
         github: this.github,
         workspaceGitService: this.workspaceGitService,
         agentManager: this.agentManager,
         agentStorage: this.agentStorage,
         findWorkspaceIdForCwd: (cwd) => this.findWorkspaceIdForCwd(cwd),
+        getWorkspace: (workspaceId) => this.workspaceRegistry.get(workspaceId),
         listActiveWorkspaces: () => this.listActiveWorkspaceRefs(),
         archiveWorkspaceRecord: (workspaceId, archivedAt) =>
           this.archiveWorkspaceRecord(workspaceId, archivedAt),
@@ -6222,6 +6265,8 @@ export class Session {
         clearWorkspaceArchiving: (workspaceIds) => this.clearWorkspaceArchiving(workspaceIds),
         killTerminalsForWorkspace: (workspaceId) =>
           this.terminalController.killTerminalsForWorkspace(workspaceId),
+        isCheckoutUntrusted: (checkoutPath) =>
+          isCheckoutUntrusted(this.workspaceRegistry, checkoutPath),
         sessionLogger: this.sessionLogger,
       },
       msg,
@@ -6952,9 +6997,60 @@ export class Session {
     };
   }
 
+  private async withWorkspaceCheckout<T>(workspaceId: string, run: () => Promise<T>): Promise<T> {
+    const workspace = await this.workspaceRegistry.get(workspaceId);
+    if (!workspace) {
+      return run();
+    }
+    const checkoutPath = await resolveWorkspaceBackingPath(workspace, {
+      jagentdeskHome: this.jagentdeskHome,
+      jagentdeskWorktreesBaseRoot: this.worktreesRoot,
+    });
+    return this.workspaceArchiveOperations.withCheckout(checkoutPath, run);
+  }
+
+  private async withCheckoutForDirectory<T>(cwd: string, run: () => Promise<T>): Promise<T> {
+    const normalizedCwd = resolve(cwd);
+    const matchesCwd = createRealpathAwarePathMatcher(normalizedCwd);
+    const workspaces = await this.workspaceRegistry.list();
+    let matchingWorkspace = workspaces.find((workspace) => matchesCwd(workspace.cwd));
+    if (!matchingWorkspace) {
+      let bestDepth = -1;
+      for (const workspace of workspaces) {
+        if (
+          workspace.worktreeRoot !== null &&
+          isRealpathInsideRoot(workspace.worktreeRoot, normalizedCwd)
+        ) {
+          const depth = normalizePathForIdentity(workspace.worktreeRoot).length;
+          if (depth > bestDepth) {
+            bestDepth = depth;
+            matchingWorkspace = workspace;
+          }
+        }
+      }
+    }
+    let checkoutPath = normalizedCwd;
+    if (matchingWorkspace) {
+      checkoutPath = await resolveWorkspaceBackingPath(matchingWorkspace, {
+        jagentdeskHome: this.jagentdeskHome,
+        jagentdeskWorktreesBaseRoot: this.worktreesRoot,
+      });
+    } else {
+      const checkout = await this.workspaceGitService.getCheckout(normalizedCwd);
+      if (checkout.isGit && checkout.worktreeRoot) {
+        checkoutPath = resolve(checkout.worktreeRoot);
+      }
+    }
+    return this.workspaceArchiveOperations.withCheckout(checkoutPath, run);
+  }
+
   private async restoreWorkspaceAndEmit(workspaceId: string): Promise<void> {
-    await this.workspaceRecovery.restore(workspaceId);
-    await this.publishRecoveredWorkspace(workspaceId);
+    await this.workspaceArchiveOperations.restore(workspaceId, () =>
+      this.withWorkspaceCheckout(workspaceId, async () => {
+        await this.workspaceRecovery.restore(workspaceId);
+        await this.publishRecoveredWorkspace(workspaceId);
+      }),
+    );
   }
 
   private async publishRecoveredWorkspace(workspaceId: string): Promise<void> {
@@ -7001,6 +7097,7 @@ export class Session {
   ): Promise<CreateJAgentDeskWorktreeResult> {
     const result = await createJAgentDeskWorktree(input, {
       lifecycle: this.pluginRuntime,
+      worktreeManagers: this.pluginRuntime,
       github: this.github,
       ...(options?.resolveDefaultBranch
         ? { resolveDefaultBranch: options.resolveDefaultBranch }
@@ -7031,6 +7128,8 @@ export class Session {
         worktreeRoot: workspace.worktreeRoot,
         isJAgentDeskOwnedWorktree: workspace.isJAgentDeskOwnedWorktree,
         mainRepoRoot: workspace.mainRepoRoot,
+        worktreeManagerPluginId: workspace.worktreeManagerPluginId,
+        untrustedSource: workspace.untrustedSource,
       }));
   }
 
@@ -7650,24 +7749,29 @@ export class Session {
     }
 
     const cwd = expandTilde(request.source.path);
-    const directoryExists = await this.filesystem.isDirectory(cwd).catch(() => false);
-    if (!directoryExists) {
-      throw new SessionRequestError("directory_not_found", `Directory not found: ${cwd}`);
-    }
-
     const explicitTitle = request.title?.trim() || null;
     const promptTitle = resolveFirstAgentPromptTitle(request.firstAgentContext);
-    const workspace = await this.workspaceProvisioning.createWorkspaceForDirectory(
-      cwd,
-      explicitTitle ?? promptTitle,
-      request.source.projectId,
-      {
-        expectsInitialAgent: Boolean(request.firstAgentContext),
-        workspaceId,
-        metadata: request.metadata,
-        ...(await this.workspaceBackgroundIntent(request.background, request.callerAgentId)),
-      },
+    const backgroundIntent = await this.workspaceBackgroundIntent(
+      request.background,
+      request.callerAgentId,
     );
+    const workspace = await this.withCheckoutForDirectory(cwd, async () => {
+      const directoryExists = await this.filesystem.isDirectory(cwd).catch(() => false);
+      if (!directoryExists) {
+        throw new SessionRequestError("directory_not_found", `Directory not found: ${cwd}`);
+      }
+      return this.workspaceProvisioning.createWorkspaceForDirectory(
+        cwd,
+        explicitTitle ?? promptTitle,
+        request.source.projectId,
+        {
+          expectsInitialAgent: Boolean(request.firstAgentContext),
+          workspaceId,
+          metadata: request.metadata,
+          ...backgroundIntent,
+        },
+      );
+    });
     await this.syncWorkspaceGitObserverForWorkspace(workspace);
     const descriptor = await this.describeWorkspaceRecord(workspace);
     await this.emitCreatedWorkspaceUpdate(
@@ -7749,34 +7853,41 @@ export class Session {
   ): Promise<void> {
     const requestedCwd = request.cwd;
     const cwd = expandTilde(requestedCwd);
-    const directoryExists = await this.filesystem.isDirectory(cwd).catch(() => false);
-    if (!directoryExists) {
-      this.sessionLogger.info(
-        { requestedCwd, resolvedCwd: cwd, reason: "directory_not_found" },
-        "Open project rejected",
-      );
-      this.emit({
-        type: "open_project_response",
-        payload: {
-          requestId: request.requestId,
-          workspace: null,
-          error: `Directory not found: ${cwd}`,
-          errorCode: "directory_not_found",
-        },
-      });
-      return;
-    }
 
     try {
-      const projectsBefore = new Map<string, PersistedProjectRecord>();
-      for (const project of await this.projectRegistry.list()) {
-        projectsBefore.set(project.projectId, project);
+      const opened = await this.withCheckoutForDirectory(cwd, async () => {
+        const directoryExists = await this.filesystem.isDirectory(cwd).catch(() => false);
+        if (!directoryExists) {
+          return null;
+        }
+        const projectsBefore = new Map<string, PersistedProjectRecord>();
+        for (const project of await this.projectRegistry.list()) {
+          projectsBefore.set(project.projectId, project);
+        }
+        const workspacesBefore = new Map<string, PersistedWorkspaceRecord>();
+        for (const workspaceRecord of await this.workspaceRegistry.list()) {
+          workspacesBefore.set(workspaceRecord.workspaceId, workspaceRecord);
+        }
+        const workspace = await this.workspaceProvisioning.findOrCreateWorkspaceForDirectory(cwd);
+        return { workspace, projectsBefore, workspacesBefore };
+      });
+      if (!opened) {
+        this.sessionLogger.info(
+          { requestedCwd, resolvedCwd: cwd, reason: "directory_not_found" },
+          "Open project rejected",
+        );
+        this.emit({
+          type: "open_project_response",
+          payload: {
+            requestId: request.requestId,
+            workspace: null,
+            error: `Directory not found: ${cwd}`,
+            errorCode: "directory_not_found",
+          },
+        });
+        return;
       }
-      const workspacesBefore = new Map<string, PersistedWorkspaceRecord>();
-      for (const workspaceRecord of await this.workspaceRegistry.list()) {
-        workspacesBefore.set(workspaceRecord.workspaceId, workspaceRecord);
-      }
-      const workspace = await this.workspaceProvisioning.findOrCreateWorkspaceForDirectory(cwd);
+      const { workspace, projectsBefore, workspacesBefore } = opened;
       const project = await this.projectRegistry.get(workspace.projectId);
       await this.syncWorkspaceGitObserverForWorkspace(workspace);
       const descriptor = await this.describeWorkspaceRecord(workspace);
@@ -8309,11 +8420,14 @@ export class Session {
             {
               jagentdeskHome: this.jagentdeskHome,
               jagentdeskWorktreesBaseRoot: this.worktreesRoot,
+              worktreeManagers: this.pluginRuntime,
+              workspaceArchiveOperations: this.workspaceArchiveOperations,
               github: this.github,
               workspaceGitService: this.workspaceGitService,
               agentManager: this.agentManager,
               agentStorage: this.agentStorage,
               findWorkspaceIdForCwd: (cwd) => this.findWorkspaceIdForCwd(cwd),
+              getWorkspace: (workspaceId) => this.workspaceRegistry.get(workspaceId),
               listActiveWorkspaces: () => this.listActiveWorkspaceRefs(),
               archiveWorkspaceRecord: (workspaceId, archivedAt) =>
                 this.archiveWorkspaceRecord(workspaceId, archivedAt),
@@ -8321,6 +8435,8 @@ export class Session {
               markWorkspaceArchiving: (workspaceIds, archivingAt) =>
                 this.markWorkspaceArchiving(workspaceIds, archivingAt),
               clearWorkspaceArchiving: (workspaceIds) => this.clearWorkspaceArchiving(workspaceIds),
+              isCheckoutUntrusted: (checkoutPath) =>
+                isCheckoutUntrusted(this.workspaceRegistry, checkoutPath),
               killTerminalsForWorkspace: (workspaceId) =>
                 this.terminalController.killTerminalsForWorkspace(workspaceId),
               sessionLogger: this.sessionLogger,
@@ -8382,7 +8498,9 @@ export class Session {
   ): Promise<void> {
     try {
       await this.workspaceArchiveOperations.undo(request.workspaceId, (input) =>
-        this.restoreArchivedWorkspaceAndAgents(request.workspaceId, input),
+        this.withWorkspaceCheckout(request.workspaceId, () =>
+          this.restoreArchivedWorkspaceAndAgents(request.workspaceId, input),
+        ),
       );
       this.emit({
         type: "workspace.archive.undo.response",

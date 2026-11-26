@@ -1,6 +1,10 @@
 import { runGitCommand } from "../utils/run-git-command.js";
-import type { PluginWorktreeCreateRequest } from "@jagentdesk/plugin/server";
+import type {
+  PluginWorktreeCreateInput,
+  PluginWorktreeCreateRequest,
+} from "@jagentdesk/plugin/server";
 import type { PluginLifecycle } from "./plugins/lifecycle/index.js";
+import type { PluginWorktreeManagerRuntime } from "./plugins/runtime.js";
 import { createNameId } from "mnemonic-id";
 
 import type { ForgeService } from "../services/forge-service.js";
@@ -9,6 +13,9 @@ import {
   resolveDefaultWorktreePath,
   resolveExistingWorktreeForSlug,
   fetchFirstAvailableRef,
+  prepareWorktreeBranchOff,
+  type PreparedWorktreeBranchOff,
+  runPluginWorktreeManagerCheckout,
   slugify,
   validateBranchSlug,
   type CreatedWorktree,
@@ -18,6 +25,7 @@ import {
   type ResolveWorktreeCreationIntentInput,
   UnsupportedForgeCheckoutTargetError,
   type WorktreeCreationIntent,
+  worktreeUntrustedSource,
 } from "./resolve-worktree-creation-intent.js";
 import type { ChangeRequestCheckoutSource, FirstAgentContext } from "@jagentdesk/protocol/messages";
 import type { WorkspaceGitService } from "./workspace-git-service.js";
@@ -26,6 +34,7 @@ import {
   readJAgentDeskWorktreeMetadata,
 } from "../utils/worktree-metadata.js";
 import { runWithRepositoryRoot } from "../utils/git-repository-discovery.js";
+import type { UntrustedWorkspaceSource } from "./workspace-automation-gate.js";
 
 export interface CreateWorktreeCoreInput {
   cwd: string;
@@ -43,6 +52,10 @@ export interface CreateWorktreeCoreInput {
 
 export interface CreateWorktreeCoreDeps {
   lifecycle?: Pick<PluginLifecycle, "before">;
+  worktreeManagers?: Pick<
+    PluginWorktreeManagerRuntime,
+    "hasWorktreeManager" | "createWorktree" | "removeWorktree"
+  >;
   github: ForgeService;
   workspaceGitService?: Pick<
     WorkspaceGitService,
@@ -54,6 +67,7 @@ export interface CreateWorktreeCoreDeps {
 export interface CreateWorktreeCoreResult {
   worktree: CreatedWorktree;
   intent: WorktreeCreationIntent;
+  untrustedSource?: UntrustedWorkspaceSource;
   repoRoot: string;
   created: boolean;
 }
@@ -120,24 +134,7 @@ async function createWorktreeAtRepositoryRoot(
     fetchRef: ({ repoRoot: cwd, sources, destination }) =>
       fetchFirstAvailableRef({ cwd, sources, destination }),
   });
-  let normalizedSlug: string;
-
-  switch (intent.kind) {
-    case "branch-off": {
-      normalizedSlug = requestedWorktreeSlug ?? normalizeWorktreeSlug(intent.branchName);
-      break;
-    }
-    case "checkout-branch": {
-      normalizedSlug = requestedWorktreeSlug ?? normalizeWorktreeSlug(intent.branchName);
-      break;
-    }
-    case "checkout-change-request":
-    case "checkout-github-pr": {
-      normalizedSlug =
-        requestedWorktreeSlug ?? normalizeWorktreeSlug(intent.localBranchName ?? intent.headRef);
-      break;
-    }
-  }
+  let normalizedSlug = requestedWorktreeSlug ?? defaultWorktreeSlugForIntent(intent);
 
   const existingWorktree = await resolveExistingWorktreeForSlug({
     slug: normalizedSlug,
@@ -179,8 +176,28 @@ async function createWorktreeAtRepositoryRoot(
   const transformed = deps.lifecycle
     ? await deps.lifecycle.before("worktree.create.before", request)
     : request;
+  const originalUntrustedSource = worktreeUntrustedSource(intent);
   normalizedSlug = validateWorktreeSlug(transformed.slug);
   intent = creationIntentFromRequest(transformed, intent);
+  const untrustedSource = originalUntrustedSource ?? worktreeUntrustedSource(intent);
+
+  const { worktree: managedWorktree, preparedBranchOff } = await tryCreateWithWorktreeManager({
+    repoRoot,
+    transformed,
+    intent,
+    untrusted: Boolean(untrustedSource),
+    input,
+    deps,
+  });
+  if (managedWorktree) {
+    return {
+      worktree: managedWorktree,
+      intent,
+      untrustedSource,
+      repoRoot,
+      created: true,
+    };
+  }
 
   return {
     worktree: await createWorktree({
@@ -189,13 +206,60 @@ async function createWorktreeAtRepositoryRoot(
       worktreePath: transformed.path,
       source: intent,
       runSetup: input.runSetup ?? true,
+      preparedBranchOff,
       jagentdeskHome: input.jagentdeskHome,
       worktreesRoot: input.worktreesRoot,
     }),
     intent,
+    untrustedSource,
     repoRoot,
     created: true,
   };
+}
+
+function defaultWorktreeSlugForIntent(intent: WorktreeCreationIntent): string {
+  switch (intent.kind) {
+    case "branch-off":
+    case "checkout-branch":
+      return normalizeWorktreeSlug(intent.branchName);
+    case "checkout-change-request":
+    case "checkout-github-pr":
+      return normalizeWorktreeSlug(intent.localBranchName ?? intent.headRef);
+  }
+}
+
+async function tryCreateWithWorktreeManager(options: {
+  repoRoot: string;
+  transformed: PluginWorktreeCreateRequest;
+  intent: WorktreeCreationIntent;
+  untrusted: boolean;
+  input: Pick<CreateWorktreeCoreInput, "jagentdeskHome" | "worktreesRoot">;
+  deps: Pick<CreateWorktreeCoreDeps, "worktreeManagers">;
+}): Promise<{ worktree: CreatedWorktree | null; preparedBranchOff?: PreparedWorktreeBranchOff }> {
+  const { repoRoot, transformed, intent, untrusted, input, deps } = options;
+  let preparedBranchOff: PreparedWorktreeBranchOff | undefined;
+  const worktree = await runPluginWorktreeManagerCheckout({
+    cwd: repoRoot,
+    source: intent,
+    operation: "create",
+    untrusted,
+    jagentdeskHome: input.jagentdeskHome,
+    worktreesBaseRoot: input.worktreesRoot,
+    worktreeManagers: deps.worktreeManagers,
+    run: async ({ changeRequestHeadSha }) => {
+      let request: PluginWorktreeCreateInput = {
+        ...transformed,
+        untrusted,
+        ...(changeRequestHeadSha ? { headSha: changeRequestHeadSha } : {}),
+      };
+      if (request.kind === "branch-off" && intent.kind === "branch-off") {
+        preparedBranchOff = await prepareWorktreeBranchOff(repoRoot, intent);
+        request = { ...request, baseRef: preparedBranchOff.baseRef };
+      }
+      return deps.worktreeManagers!.createWorktree(request);
+    },
+  });
+  return { worktree, preparedBranchOff };
 }
 
 function describeCreationRequest(
@@ -208,6 +272,7 @@ function describeCreationRequest(
       kind: intent.kind,
       branch: intent.branchName,
       baseRef: intent.baseBranch,
+      ...(intent.startPoint ? { startPoint: intent.startPoint } : {}),
     };
   if (intent.kind === "checkout-branch")
     return { ...placement, kind: intent.kind, branch: intent.branchName };

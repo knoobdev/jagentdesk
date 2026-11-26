@@ -4032,6 +4032,9 @@ export class DaemonClient {
         cwd,
       },
       responseType: "open_project_response",
+      // Opening a path whose checkout is currently archiving waits on the daemon checkout gate;
+      // wait for the terminal response or transport disconnect instead of timing out while queued.
+      timeout: 0,
     });
   }
 
@@ -4163,6 +4166,9 @@ export class DaemonClient {
         workspaceId,
       },
       responseType: "archive_workspace_response",
+      // Archive may wait for a queued checkout operation and then run teardown/manager removal,
+      // each bounded on the daemon; wait for the terminal response or transport disconnect.
+      timeout: 0,
     });
   }
 
@@ -4661,7 +4667,9 @@ export class DaemonClient {
           type: "workspace.recovery.restore.request",
           workspaceId,
         },
-        timeout: 150_000,
+        // Restore may wait behind an active archive/removal before running a bounded restore stage;
+        // wait for the terminal response or transport disconnect instead of timing out mid-workflow.
+        timeout: 0,
       });
     if (!payload.accepted) {
       throw new Error(payload.error ?? "Workspace recovery was rejected by the host");
@@ -4677,8 +4685,9 @@ export class DaemonClient {
           type: "workspace.archive.undo.request",
           workspaceId,
         },
-        // Undoing a finished worktree archive recreates the worktree, like recovery does.
-        timeout: 150_000,
+        // Undo may wait for an in-flight archive to settle and then recreate the worktree;
+        // wait for the terminal response or transport disconnect.
+        timeout: 0,
       });
     if (!payload.accepted) {
       throw new Error(payload.error ?? "The host could not undo the workspace archive");
@@ -6395,6 +6404,9 @@ export class DaemonClient {
         ...(input.scope !== undefined ? { scope: input.scope } : {}),
       },
       responseType: "jagentdesk_worktree_archive_response",
+      // Archive may wait for a queued checkout operation and then run teardown/manager removal,
+      // each bounded on the daemon; wait for the terminal response or transport disconnect.
+      timeout: 0,
     });
   }
 
@@ -6418,6 +6430,10 @@ export class DaemonClient {
         ...(input.githubPrNumber !== undefined ? { githubPrNumber: input.githubPrNumber } : {}),
       },
       responseType: "create_jagentdesk_worktree_response",
+      // Every daemon stage (before hooks, shared 120s manager budget, Git, after hooks) enforces
+      // its own deadline, and transport heartbeats/close reject if the host drops, so wait for the
+      // terminal worktree response instead of aborting prematurely mid-workflow.
+      timeout: 0,
     });
   }
 

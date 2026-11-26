@@ -22,6 +22,7 @@ const JAgentDeskWorktreeMetadataV1Schema = z.object({
   baseRefName: z.string().min(1),
   baseRef: z.string().min(1).optional(),
   changeRequestLookupTarget: ChangeRequestLookupTargetSchema.optional(),
+  worktreeManagerPluginId: z.string().min(1).optional(),
 });
 
 const JAgentDeskWorktreeMetadataV2Schema = z.object({
@@ -29,6 +30,7 @@ const JAgentDeskWorktreeMetadataV2Schema = z.object({
   baseRefName: z.string().min(1),
   baseRef: z.string().min(1).optional(),
   changeRequestLookupTarget: ChangeRequestLookupTargetSchema.optional(),
+  worktreeManagerPluginId: z.string().min(1).optional(),
   firstAgentBranchAutoName: z
     .discriminatedUnion("status", [
       z.object({
@@ -227,6 +229,7 @@ export async function writeJAgentDeskWorktreeMetadata(
     baseRefName: string;
     baseRef?: string;
     changeRequestLookupTarget?: JAgentDeskWorktreeChangeRequestHint;
+    worktreeManagerPluginId?: string;
   },
 ): Promise<void> {
   return mutateMetadata(worktreeRoot, async (root) => {
@@ -243,6 +246,9 @@ export async function writeJAgentDeskWorktreeMetadata(
       ...(baseRef ? { baseRef } : {}),
       ...(options.changeRequestLookupTarget
         ? { changeRequestLookupTarget: options.changeRequestLookupTarget }
+        : {}),
+      ...(options.worktreeManagerPluginId
+        ? { worktreeManagerPluginId: options.worktreeManagerPluginId }
         : {}),
     };
     await writeJAgentDeskWorktreeMetadataFile(root, metadata);

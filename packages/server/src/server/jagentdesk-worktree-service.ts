@@ -1,4 +1,5 @@
 import type { PluginLifecycle } from "./plugins/lifecycle/index.js";
+import type { PluginWorktreeManagerRuntime } from "./plugins/runtime.js";
 import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
 
@@ -61,6 +62,10 @@ export interface AttemptFirstAgentBranchAutoNameResult {
 
 export interface CreateJAgentDeskWorktreeDeps extends CreateWorktreeCoreDeps {
   lifecycle?: Pick<PluginLifecycle, "wait" | "before">;
+  worktreeManagers?: Pick<
+    PluginWorktreeManagerRuntime,
+    "hasWorktreeManager" | "createWorktree" | "removeWorktree"
+  >;
   workspaceGitService: WorkspaceGitService;
   workspaceProvisioning: Pick<WorkspaceProvisioningService, "createWorkspaceForWorktree">;
 }
@@ -106,6 +111,7 @@ export async function createJAgentDeskWorktree(
       worktreeRoot: createdWorktree.worktree.worktreePath,
       branch: createdWorktree.worktree.branchName || null,
       baseBranch: createdWorktree.worktree.comparisonBaseRef,
+      worktreeManagerPluginId: createdWorktree.worktree.worktreeManagerPluginId ?? null,
       title: input.title?.trim() || resolveFirstAgentPromptTitle(input.firstAgentContext),
       expectsInitialAgent: Boolean(input.firstAgentContext),
       background: input.background,
@@ -132,6 +138,10 @@ export async function createJAgentDeskWorktree(
         ...(input.runSetup === false ? { teardownCwds: [] } : {}),
         jagentdeskHome: input.jagentdeskHome,
         worktreesBaseRoot: input.worktreesRoot,
+        worktreeManagers: deps.worktreeManagers,
+        worktreeManagerPluginId: createdWorktree.worktree.worktreeManagerPluginId ?? null,
+        removeReason: "rollback",
+        untrusted: Boolean(createdWorktree.untrustedSource),
       },
       error,
     );
@@ -263,6 +273,10 @@ async function maybeMarkFirstAgentBranchAutoNameEligible(options: {
 }): Promise<void> {
   const { createdWorktree } = options;
   if (!createdWorktree.created || createdWorktree.intent.kind !== "branch-off") {
+    return;
+  }
+  // A worktree manager plugin owns branch and directory naming, so skip silent renames.
+  if (createdWorktree.worktree.worktreeManagerPluginId) {
     return;
   }
 
