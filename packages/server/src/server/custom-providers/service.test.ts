@@ -60,9 +60,9 @@ async function withHttpServer(
 
 async function makeService(home: string, overrides: Record<string, unknown> = {}) {
   const secretStore = new MemorySecretStore();
-  const reloadRegistry = vi.fn<(removeProviders: readonly string[]) => Promise<void>>(
-    async () => {},
-  );
+  const reloadRegistry = vi.fn<
+    (removeProviders: readonly string[], changedProviders: readonly string[]) => Promise<void>
+  >(async () => {});
   const service = createCustomProviderService({
     jagentdeskHome: home,
     logger: createTestLogger(),
@@ -122,7 +122,7 @@ describe("createCustomProviderService — save/list", () => {
     });
     expect(JSON.stringify(providers)).not.toContain("sk-secret");
     expect(envProviders).toEqual([]);
-    expect(reloadRegistry).toHaveBeenCalledWith([]);
+    expect(reloadRegistry).toHaveBeenCalledWith([], ["my-models"]);
   });
 
   test("anthropic saves derive extends claude with WebSearch disallowed", async () => {
@@ -401,7 +401,7 @@ describe("createCustomProviderService — delete", () => {
     await service.delete("my-models");
     expect(readAgentProviderEntriesSafe(home)).toEqual({});
     expect(await secretStore.get("provider.apikey.my-models")).toBeNull();
-    expect(reloadRegistry).toHaveBeenLastCalledWith(["my-models"]);
+    expect(reloadRegistry).toHaveBeenLastCalledWith(["my-models"], []);
     const { providers } = await service.list();
     expect(providers).toEqual([]);
   });

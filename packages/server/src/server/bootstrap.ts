@@ -1079,6 +1079,7 @@ export async function createJAgentDeskDaemon(
   );
   let reloadProviderRegistry: (
     removeProviders: readonly string[],
+    changedProviders: readonly string[],
   ) => Promise<void> = async () => {};
   const customProviderService = createCustomProviderService({
     jagentdeskHome: config.jagentdeskHome,
@@ -1087,7 +1088,8 @@ export async function createJAgentDeskDaemon(
     getTailnetSocks: () => tsnetListener?.getTailnetSocks() ?? null,
     acquireSshClient: (acquireServerId) => sshService.acquireClient(acquireServerId),
     sshServerExists: (existsServerId) => sshService.storage.getServer(existsServerId) !== undefined,
-    reloadRegistry: (removeProviders) => reloadProviderRegistry(removeProviders),
+    reloadRegistry: (removeProviders, changedProviders) =>
+      reloadProviderRegistry(removeProviders, changedProviders),
   });
   const providerSnapshotLogger = logger.child({ module: "provider-snapshot-manager" });
   const providerSnapshotManager = new ProviderSnapshotManager({
@@ -1102,6 +1104,7 @@ export async function createJAgentDeskDaemon(
     openCodeProviderInjection: (providerId) =>
       customProviderService.materializeOpenCodeProvider(providerId),
     claudeSpawnEnv: (providerId) => customProviderService.materializeClaudeEnv(providerId),
+    checkApiProviderEndpoint: (providerId) => customProviderService.checkEndpoint(providerId),
   });
   const initialAgentManagerState = providerSnapshotManager.getAgentManagerProviderState();
   const agentManager: AgentManager = new AgentManager({
@@ -1167,7 +1170,7 @@ export async function createJAgentDeskDaemon(
   // persisted config, rebuild the provider registry (base overrides replaced,
   // removed providers dropped) and swap it into the live agent manager. The
   // providers_snapshot_update broadcast happens via the snapshot "change" event.
-  reloadProviderRegistry = async (removeProviders) => {
+  reloadProviderRegistry = async (removeProviders, changedProviders) => {
     const persisted = loadPersistedConfig(config.jagentdeskHome, logger);
     const baseOverrides = extractProviderOverrides(
       persisted.agents?.providers as Record<string, unknown> | undefined,
@@ -1175,6 +1178,7 @@ export async function createJAgentDeskDaemon(
     const nextAgentManagerState = providerSnapshotManager.applyMutableProviderConfig(undefined, {
       baseOverrides: baseOverrides ?? {},
       removeProviders,
+      changedProviders,
     });
     agentManager.updateProviderRegistry(nextAgentManagerState);
   };

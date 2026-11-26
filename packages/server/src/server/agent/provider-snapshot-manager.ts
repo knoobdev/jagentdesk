@@ -120,6 +120,12 @@ export interface ProviderSnapshotManagerOptions {
   openCodeBridge?: OpenCodeBridge;
   openCodeProviderInjection?: OpenCodeProviderInjectionResolver;
   claudeSpawnEnv?: ClaudeSpawnEnvResolver;
+  /**
+   * Asks a custom API provider's endpoint before its catalog (spec 04 §5). Throws when the
+   * endpoint refuses; the provider then shows `error` and background refresh leaves it alone
+   * until its config changes or someone refreshes it.
+   */
+  checkApiProviderEndpoint?: (provider: AgentProvider) => Promise<void>;
 }
 
 interface ProviderSnapshotRefreshOptions {
@@ -143,6 +149,11 @@ interface ApplyMutableProviderConfigOptions {
   replace?: boolean;
   /** Replaces the startup-derived base overrides (spec 34.6 hot reload from persisted config). */
   baseOverrides?: Record<string, ProviderOverride>;
+  /**
+   * Providers to refresh even if their resolved config did not change, e.g. a custom provider
+   * whose API key (kept outside the config) was just saved.
+   */
+  changedProviders?: readonly string[];
 }
 
 export interface StagedMutableProviderConfig {
@@ -262,6 +273,14 @@ export class ProviderSnapshotManager {
 
   private readonly claudeSpawnEnv?: ClaudeSpawnEnvResolver;
 
+  private readonly checkApiProviderEndpoint?: (provider: AgentProvider) => Promise<void>;
+
+  /** One endpoint check per provider at a time, shared by every snapshot cwd refreshing it. */
+  private readonly endpointChecks = new Map<AgentProvider, Promise<void>>();
+
+  /** Custom API providers whose endpoint refused the last check; background refresh skips them. */
+  private readonly endpointRejected = new Set<AgentProvider>();
+
   private readonly isDev: boolean;
 
   private readonly pluginProviders: PluginAgentClientRegistry;
@@ -294,6 +313,7 @@ export class ProviderSnapshotManager {
     this.openCodeBridge = options.openCodeBridge;
     this.openCodeProviderInjection = options.openCodeProviderInjection;
     this.claudeSpawnEnv = options.claudeSpawnEnv;
+    this.checkApiProviderEndpoint = options.checkApiProviderEndpoint;
     this.isDev = options.isDev === true;
     this.extraClients = options.extraClients ?? {};
     this.runtimeSettings = options.runtimeSettings;
@@ -757,16 +777,32 @@ export class ProviderSnapshotManager {
       this.providerRegistry = this.buildRegistry();
       this.updateRefreshProviders();
       this.warnUnknownProviderOverrides();
-      this.providerClients = { ...this.extraClients } as Record<AgentProvider, AgentClient>;
 
+      // Spec 04 §5: a save/delete refreshes the provider it touched, nothing else. Unchanged
+      // providers keep their client (and the processes it owns), snapshot entries and in-flight
+      // loads; rebuilding every client here leaked one `opencode serve` per edit and re-ran
+      // Claude model discovery in every cached snapshot.
+      const changed = this.resolveChangedProviders(previous, options.changedProviders ?? []);
+      for (const provider of changed) this.endpointRejected.delete(provider);
+      this.providerClients = { ...this.extraClients } as Record<AgentProvider, AgentClient>;
+      for (const [provider, client] of Object.entries(previous.providerClients)) {
+        if (this.providerClients[provider] || changed.has(provider)) continue;
+        if (this.providerRegistry[provider]?.enabled) this.providerClients[provider] = client;
+      }
+
+      for (const [cwd, loads] of previous.providerLoads) {
+        const kept = new Map([...loads].filter(([provider]) => !changed.has(provider)));
+        if (kept.size > 0) this.providerLoads.set(cwd, kept);
+        else this.providerLoads.delete(cwd);
+      }
       for (const cwd of this.snapshots.keys()) {
-        this.providerLoads.delete(cwd);
-        this.snapshots.set(cwd, this.reconcileSnapshotForRegistry(cwd));
+        this.snapshots.set(cwd, this.reconcileSnapshotForRegistry(cwd, changed));
       }
 
       return {
         agentManagerState: this.getAgentManagerProviderState(),
         publish: () => {
+          this.retireReplacedClients(previous.providerClients);
           for (const cwd of snapshotCwds) {
             this.emitChange(cwd);
             const target =
@@ -810,6 +846,68 @@ export class ProviderSnapshotManager {
     for (const [cwd, entries] of previous.snapshots) this.snapshots.set(cwd, entries);
     this.providerLoads.clear();
     for (const [cwd, loads] of previous.providerLoads) this.providerLoads.set(cwd, loads);
+  }
+
+  /** Providers whose definition may differ from `previous`, plus those a caller names. */
+  private resolveChangedProviders(
+    previous: MutableProviderState,
+    forced: readonly string[],
+  ): Set<AgentProvider> {
+    const changed = new Set<AgentProvider>(forced);
+    const ids = new Set([
+      ...Object.keys(previous.providerRegistry),
+      ...Object.keys(this.providerRegistry),
+    ]);
+    for (const provider of ids) {
+      const before = previous.providerRegistry[provider];
+      const after = this.providerRegistry[provider];
+      if (
+        !before ||
+        !after ||
+        before.enabled !== after.enabled ||
+        JSON.stringify(previous.providerOverrides?.[provider]) !==
+          JSON.stringify(this.providerOverrides?.[provider]) ||
+        JSON.stringify(previous.runtimeSettings?.[provider]) !==
+          JSON.stringify(this.runtimeSettings?.[provider])
+      ) {
+        changed.add(provider);
+      }
+    }
+    // A derived provider inherits its base's launch settings.
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const provider of ids) {
+        if (changed.has(provider)) continue;
+        const base =
+          this.providerRegistry[provider]?.derivedFromProviderId ??
+          previous.providerRegistry[provider]?.derivedFromProviderId;
+        if (base && changed.has(base)) {
+          changed.add(provider);
+          grew = true;
+        }
+      }
+    }
+    return changed;
+  }
+
+  /**
+   * Lets clients the registry no longer uses free what they hold while idle. Agents still running
+   * on one keep it; a retired client cleans up after them.
+   */
+  private retireReplacedClients(previousClients: Record<AgentProvider, AgentClient>): void {
+    const live = new Set<AgentClient>(Object.values(this.providerClients));
+    for (const client of Object.values(this.extraClients)) if (client) live.add(client);
+    for (const client of new Set(Object.values(previousClients))) {
+      if (live.has(client) || !client.retire) continue;
+      this.ownedClients.delete(client);
+      client.retire().catch((error: unknown) => {
+        this.logger.warn(
+          { err: error, provider: client.provider },
+          "Provider client retire failed",
+        );
+      });
+    }
   }
 
   setRefreshTimeoutMs(refreshTimeoutMs: number | undefined): void {
@@ -1022,13 +1120,24 @@ export class ProviderSnapshotManager {
     return entries;
   }
 
-  private reconcileSnapshotForRegistry(cwd: string): Map<AgentProvider, ProviderSnapshotEntry> {
+  /**
+   * Rebuilds a snapshot for the current registry. `changed` limits the reset: other providers keep
+   * their entry as is. Without it every provider goes back to loading.
+   */
+  private reconcileSnapshotForRegistry(
+    cwd: string,
+    changed?: ReadonlySet<AgentProvider>,
+  ): Map<AgentProvider, ProviderSnapshotEntry> {
     const existing = this.snapshots.get(cwd);
     const entries = new Map<AgentProvider, ProviderSnapshotEntry>();
 
     for (const provider of this.getProviderIds()) {
       const definition = this.providerRegistry[provider];
       const current = existing?.get(provider);
+      if (changed && !changed.has(provider) && current) {
+        entries.set(provider, current);
+        continue;
+      }
       const metadata = {
         provider,
         enabled: definition?.enabled ?? true,
@@ -1201,7 +1310,9 @@ export class ProviderSnapshotManager {
     background?: boolean;
   }): Promise<void> {
     const { snapshotCwd, catalogScope, provider, definition, load, force } = options;
-    const snapshot = this.getOrCreateSnapshot(snapshotCwd);
+    // Resolved on every read: a config change may swap the cwd's map while this load runs and
+    // keeps it, for a provider whose config did not change.
+    const snapshot = () => this.getOrCreateSnapshot(snapshotCwd);
     const base = {
       provider,
       source: this.getProviderSource(provider),
@@ -1215,13 +1326,13 @@ export class ProviderSnapshotManager {
       if (
         options.background &&
         entry.status !== "ready" &&
-        snapshot.get(provider)?.status === "ready"
+        snapshot().get(provider)?.status === "ready"
       )
         return false;
       if (!this.isCurrentProviderLoad(snapshotCwd, provider, load)) {
         return false;
       }
-      const current = snapshot.get(provider);
+      const current = snapshot().get(provider);
       if (
         options.background &&
         current &&
@@ -1229,7 +1340,7 @@ export class ProviderSnapshotManager {
           JSON.stringify({ ...entry, fetchedAt: undefined })
       )
         return false;
-      snapshot.set(provider, entry);
+      snapshot().set(provider, entry);
       this.emitChange(snapshotCwd);
       return true;
     };
@@ -1246,6 +1357,12 @@ export class ProviderSnapshotManager {
         timeoutMs: this.refreshTimeoutMs,
         signal: this.stopped.signal,
         operation: async (context) => {
+          // First, so a provider whose endpoint refuses starts no provider process.
+          if (definition.derivedFromProviderId) {
+            await context.runActivity("endpoint", () =>
+              raceProviderRefreshAbort(context.signal, this.checkEndpoint(provider)),
+            );
+          }
           const available = await context.runActivity("availability", () =>
             raceProviderRefreshAbort(context.signal, client.isAvailable(context.signal)),
           );
@@ -1265,7 +1382,7 @@ export class ProviderSnapshotManager {
         return;
       }
 
-      if (options.background && catalog.incomplete && snapshot.get(provider)?.status === "ready")
+      if (options.background && catalog.incomplete && snapshot().get(provider)?.status === "ready")
         return;
       const models = normalizeModelCatalog(catalog.models);
       if (models.length !== catalog.models.length) {
@@ -1298,6 +1415,29 @@ export class ProviderSnapshotManager {
         );
       }
     }
+  }
+
+  private checkEndpoint(provider: AgentProvider): Promise<void> {
+    const check = this.checkApiProviderEndpoint;
+    if (!check) return Promise.resolve();
+    const running = this.endpointChecks.get(provider);
+    if (running) return running;
+    const pending = check(provider)
+      .then(
+        () => {
+          this.endpointRejected.delete(provider);
+          return undefined;
+        },
+        (error: unknown) => {
+          this.endpointRejected.add(provider);
+          throw error;
+        },
+      )
+      .finally(() => {
+        if (this.endpointChecks.get(provider) === pending) this.endpointChecks.delete(provider);
+      });
+    this.endpointChecks.set(provider, pending);
+    return pending;
   }
 
   private getProviderLoad(cwdKey: string, provider: AgentProvider): ProviderLoad | undefined {
@@ -1385,6 +1525,7 @@ export class ProviderSnapshotManager {
   }
 
   private async refreshInBackground(provider: AgentProvider): Promise<void> {
+    if (this.endpointRejected.has(provider)) return;
     const targets = new Set([GLOBAL_PROVIDER_SNAPSHOT_KEY, ...this.snapshots.keys()]);
     await Promise.all(
       [...targets].map((snapshotCwd) => {
