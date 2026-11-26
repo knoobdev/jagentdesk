@@ -72,6 +72,12 @@ interface ShortcutWhen {
   terminal?: false;
   /** false = disabled when command center is open */
   commandCenter?: false;
+  /**
+   * true = the action deletes or closes data (archive, close pane). It never fires while a text
+   * field or the terminal has focus, whatever chord the user picked: Cmd+Shift+Backspace is a
+   * text-editing chord, and a workspace archived mid-sentence is the failure this prevents.
+   */
+  destructive?: true;
   /** Exact focus scope match */
   focusScope?: KeyboardFocusScope | readonly KeyboardFocusScope[];
 }
@@ -174,6 +180,8 @@ const SHORTCUT_HELP_LABEL_KEYS: Record<string, string> = {
 
 const SHORTCUT_HELP_NOTE_KEYS: Record<string, string> = {
   "show-shortcuts": "settings.shortcuts.helpNotes.showKeyboardShortcuts",
+  "archive-workspace": "settings.shortcuts.helpNotes.showKeyboardShortcuts",
+  "workspace-pane-close": "settings.shortcuts.helpNotes.showKeyboardShortcuts",
 };
 
 // --- Binding definitions ---
@@ -268,12 +276,13 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     id: "worktree-archive-cmd-shift-backspace-mac",
     action: "workspace.archive",
     combo: "Cmd+Shift+Backspace",
-    when: { mac: true, commandCenter: false },
+    when: { mac: true, commandCenter: false, destructive: true },
     help: {
       id: "archive-workspace",
       section: "projects",
       label: "Archive workspace",
       keys: ["mod", "shift", "Backspace"],
+      note: "Available when focus is not in a text field or terminal.",
     },
   },
   {
@@ -282,12 +291,13 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     id: "worktree-archive-ctrl-shift-backspace-non-mac",
     action: "workspace.archive",
     combo: "Ctrl+Shift+Backspace",
-    when: { mac: false, commandCenter: false, terminal: false },
+    when: { mac: false, commandCenter: false, destructive: true },
     help: {
       id: "archive-workspace",
       section: "projects",
       label: "Archive workspace",
       keys: ["mod", "shift", "Backspace"],
+      note: "Available when focus is not in a text field or terminal.",
     },
   },
 
@@ -801,12 +811,13 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     id: "workspace-pane-close-cmd-shift-w",
     action: "workspace.pane.close",
     combo: "Cmd+Shift+W",
-    when: { mac: true, commandCenter: false },
+    when: { mac: true, commandCenter: false, destructive: true },
     help: {
       id: "workspace-pane-close",
       section: "tabs-panes",
       label: "Close pane",
       keys: ["mod", "shift", "W"],
+      note: "Available when focus is not in a text field or terminal.",
     },
   },
 
@@ -1334,6 +1345,12 @@ function matchesCombo(combo: KeyCombo, event: KeyboardShortcutInput, isMac: bool
   return matchesKeyOrCode(combo, event);
 }
 
+const TEXT_INPUT_FOCUS_SCOPES: ReadonlySet<KeyboardFocusScope> = new Set([
+  "message-input",
+  "editable",
+  "terminal",
+]);
+
 export function matchesKeyboardShortcutContext(
   when: ShortcutWhen | undefined,
   context: KeyboardShortcutContext,
@@ -1349,6 +1366,7 @@ export function matchesKeyboardShortcutContext(
     return false;
   }
   if (when.terminal === false && context.focusScope === "terminal") return false;
+  if (when.destructive === true && TEXT_INPUT_FOCUS_SCOPES.has(context.focusScope)) return false;
   if (when.commandCenter === false && context.commandCenterOpen) return false;
   if (
     when.focusScope !== undefined &&

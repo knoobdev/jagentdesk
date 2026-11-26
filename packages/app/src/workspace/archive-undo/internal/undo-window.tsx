@@ -10,7 +10,7 @@ import {
 import { WorkspaceArchivedToast } from "./workspace-archived-toast";
 
 /** How long the archived toast, and with it the chance to undo, stays up. */
-export const WORKSPACE_ARCHIVE_UNDO_WINDOW_MS = 6000;
+export const WORKSPACE_ARCHIVE_UNDO_WINDOW_MS = 8000;
 
 export interface UndoableWorkspaceArchiveClient {
   archiveWorkspace: (workspaceId: string) => Promise<{ error: string | null; canceled?: boolean }>;

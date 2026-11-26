@@ -146,7 +146,10 @@ stay archived. A failed worktree recreation or workspace record write leaves age
 Each recovered agent runs the provider's native unarchive hook before interactive resume and history
 hydration. History navigation alone preserves both archive states.
 
-The archive toast offers Undo for six seconds, with Cmd/Ctrl+Z outside text fields and terminals.
+The archive toast offers Undo for eight seconds, with Cmd/Ctrl+Z outside text fields and terminals.
+The archive shortcut itself never fires from a text field or terminal: Cmd/Ctrl+Shift+Backspace
+is also a text-editing chord. Bindings marked `destructive` in
+`packages/app/src/keyboard/keyboard-shortcuts.ts` keep that guard when the user rebinds them.
 The daemon serializes archive and undo per workspace across connections. Tabs and layout survive
 until the undo window closes; a canceled archive keeps them.
 

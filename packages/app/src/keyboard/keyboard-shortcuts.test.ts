@@ -103,6 +103,23 @@ function expectNoShortcutResolution(input: {
   expect(result.nextChordState).toEqual(initialChordState());
 }
 
+// Archive chords for the destructive-shortcut tests (spec 11 §10).
+const ARCHIVE_EVENTS = [
+  {
+    isMac: true,
+    event: { key: "Backspace", code: "Backspace", metaKey: true, shiftKey: true },
+  },
+  {
+    isMac: false,
+    event: { key: "Backspace", code: "Backspace", ctrlKey: true, shiftKey: true },
+  },
+];
+
+const TEXT_SCOPES = ["message-input", "editable", "terminal"] as const;
+const ARCHIVE_FROM_TEXT = ARCHIVE_EVENTS.flatMap(({ isMac, event }) =>
+  TEXT_SCOPES.map((focusScope) => ({ isMac, event, focusScope })),
+);
+
 interface MatchingShortcutCase {
   name: string;
   event: Partial<KeyboardShortcutInput>;
@@ -453,6 +470,45 @@ describe("keyboard-shortcuts", () => {
           event: { key: "z", code: "KeyZ", metaKey: true },
           context: { isMac: true, focusScope },
         });
+      },
+    );
+  });
+
+  // Spec 11 §10 / A11.10.1: Cmd+Shift+Backspace is a text-editing chord, so a destructive
+  // shortcut must never fire from a text field or the terminal, even after a rebind.
+  describe("destructive shortcuts", () => {
+    it.each(ARCHIVE_EVENTS)("archives outside text fields (mac: $isMac)", ({ isMac, event }) => {
+      expectShortcutResolution({ event, context: { isMac }, action: "workspace.archive" });
+    });
+
+    it.each(ARCHIVE_FROM_TEXT)(
+      "does not archive from $focusScope (mac: $isMac)",
+      ({ isMac, event, focusScope }) => {
+        expectNoShortcutResolution({ event, context: { isMac, focusScope } });
+      },
+    );
+
+    it("does not close the pane from the composer", () => {
+      expectNoShortcutResolution({
+        event: { key: "W", code: "KeyW", metaKey: true, shiftKey: true },
+        context: { isMac: true, focusScope: "message-input" },
+      });
+    });
+
+    it.each(["message-input", "editable", "terminal"] as const)(
+      "keeps the guard on a rebound archive shortcut (%s)",
+      (focusScope) => {
+        const bindings = buildEffectiveBindings({
+          "worktree-archive-cmd-shift-backspace-mac": "Cmd+Alt+Backspace",
+        });
+        const event = { key: "Backspace", code: "Backspace", metaKey: true, altKey: true };
+        expect(
+          resolveShortcut({ event, context: { isMac: true, focusScope }, bindings }).match,
+        ).toBeNull();
+        expect(
+          resolveShortcut({ event, context: { isMac: true, focusScope: "other" }, bindings }).match
+            ?.action,
+        ).toBe("workspace.archive");
       },
     );
   });
