@@ -79,13 +79,18 @@ import {
   SessionContinuity,
 } from "./session-ledger/session-continuity.js";
 import { handoffBudgetTokens } from "./session-ledger/ledger-render.js";
+import { DurableContext } from "./durable-context/durable-context.js";
+import { LESSON_INSTRUCTION } from "./durable-context/instructions.js";
+import type { DurableContextSettings, MemoryPort } from "./memory-port.js";
 import type { LedgerTimelineRow } from "./session-ledger/ledger-builder.js";
 import type { LedgerMergeResult } from "./session-ledger/ledger-merge.js";
 import type {
   HandoffReason,
+  LedgerCompaction,
   LedgerHandoffRecord,
   LedgerNote,
   LedgerOpenItem,
+  LedgerRegrounding,
   SessionLedgerUpdateInput,
 } from "./session-ledger/ledger-schema.js";
 import { getAgentProviderDefinition } from "@jagentdesk/protocol/provider-manifest";
@@ -508,7 +513,7 @@ function prependTurnContext(
 export interface SwitchAgentProviderOptions {
   /** A running turn is waited for by default; "interrupt" stops it first. */
   whenBusy?: "wait" | "interrupt";
-  reason?: "manual" | "failover";
+  reason?: "manual" | "failover" | "rollover";
 }
 
 export interface SwitchAgentProviderResult {
@@ -537,7 +542,19 @@ export interface SessionLedgerView {
   nextStep: LedgerNote | null;
   handoffs: LedgerHandoffRecord[];
   providerSessions: SessionLedgerProviderSession[];
+  compactions: LedgerCompaction[];
+  regroundings: LedgerRegrounding[];
 }
+
+/** Spec 42 §7: the one visible turn "Capture lessons" sends. */
+export const CAPTURE_LESSONS_PROMPT = [
+  "Capture lessons: look back over this session and list the lessons and working procedures a future agent in this project should know —",
+  "corrections the user made, mistakes you made and then confirmed the right way for, conventions and commands you found.",
+  'Save each one with the remember tool: kind "lesson", status "pending", one sentence written as the rule to follow, and citations',
+  "(the file that shows it, and if you can a short exact excerpt from it). Skip anything you are not sure of and anything already",
+  "in AGENTS.md or CLAUDE.md. Do not change files in this turn. End with a short list of what you saved; the user reviews them under",
+  "Memory → Pending lessons.",
+].join(" ");
 
 function providerLabel(provider: string): string {
   try {
@@ -554,6 +571,34 @@ function createSessionContinuity(options: AgentManagerOptions): SessionContinuit
     ? (agentId: string) => registry.ledgerPathFor(agentId)
     : async () => null;
   return new SessionContinuity(new SessionLedgerStore(resolvePath, options.logger));
+}
+
+const DURABLE_CONTEXT_OFF: DurableContextSettings = {
+  regroundAfterCompaction: false,
+  recitation: false,
+  ledgerNudge: false,
+  learnFromCorrections: false,
+  lessonExpiry: false,
+};
+
+function durableLedgerFields(ledger: {
+  durable?: { compactions: LedgerCompaction[]; regroundings: LedgerRegrounding[] };
+}): { compactions: LedgerCompaction[]; regroundings: LedgerRegrounding[] } {
+  return {
+    compactions: ledger.durable?.compactions ?? [],
+    regroundings: ledger.durable?.regroundings ?? [],
+  };
+}
+
+function switchRowMessage(input: {
+  reason: "manual" | "failover" | "rollover";
+  from: string;
+  target: string;
+}): string {
+  if (input.reason === "failover")
+    return `${input.from} hit its usage limit — switched to ${input.target}`;
+  if (input.reason === "rollover") return `Rolled over to a fresh session · ${input.target}`;
+  return `Switched to ${input.target}`;
 }
 
 function countUserTurns(rows: readonly LedgerTimelineRow[], afterSeq: number): number {
@@ -1182,6 +1227,15 @@ export class AgentManager {
   private readonly onUsageBilled?: AgentManagerOptions["onUsageBilled"];
 
   private readonly continuity: SessionContinuity;
+  private readonly durable: DurableContext;
+  /**
+   * Spec 42 switches and the Memory port. The daemon wires them at startup (defaults on); an
+   * AgentManager nobody wired (embedders, unit tests) runs with durable context off.
+   */
+  private durablePorts: {
+    settings(): DurableContextSettings | undefined;
+    memory(): MemoryPort | undefined;
+  } | null = null;
   private readonly resolveModelContextWindow?: AgentManagerOptions["resolveModelContextWindow"];
   private readonly resolveProviderLabel?: AgentManagerOptions["resolveProviderLabel"];
   private readonly resolveContinuityConfig?: AgentManagerOptions["resolveContinuityConfig"];
@@ -1219,6 +1273,16 @@ export class AgentManager {
     this.setOperatorContext(options.operatorContext);
     this.logger = options.logger.child({ module: "agent", component: "agent-manager" });
     this.continuity = createSessionContinuity(options);
+    this.durable = new DurableContext({
+      store: this.continuity.store,
+      settings: () =>
+        this.durablePorts?.settings() ?? (this.durablePorts ? undefined : DURABLE_CONTEXT_OFF),
+      memory: () => this.durablePorts?.memory(),
+      rows: (agentId) => this.timelineStore.fetch(agentId, { direction: "tail", limit: 0 }).rows,
+      appendTimelineItem: (agentId, item) => this.appendTimelineItem(agentId, item),
+      labelFor: (provider) => this.labelFor(provider),
+      logger: this.logger,
+    });
     this.resolveModelContextWindow = options.resolveModelContextWindow;
     this.resolveProviderLabel = options.resolveProviderLabel;
     this.resolveContinuityConfig = options.resolveContinuityConfig;
@@ -1379,6 +1443,14 @@ export class AgentManager {
 
   setTurnContextProvider(provider: AgentManager["turnContextProvider"]): void {
     this.turnContextProvider = provider;
+  }
+
+  /** Spec 42: where the durable-context switches and the Memory port come from (bootstrap). */
+  setDurableContextPorts(ports: {
+    settings(): DurableContextSettings | undefined;
+    memory(): MemoryPort | undefined;
+  }): void {
+    this.durablePorts = ports;
   }
 
   setAppendSystemPrompt(prompt: string | null | undefined): void {
@@ -2687,7 +2759,7 @@ export class AgentManager {
     modelId: string | null,
     options: SwitchAgentProviderOptions = {},
   ): Promise<SwitchAgentProviderResult | null> {
-    if (this.requireSessionAgent(agentId).provider === provider) {
+    if (this.requireSessionAgent(agentId).provider === provider && options.reason !== "rollover") {
       await this.setAgentModel(agentId, modelId);
       return null;
     }
@@ -2734,7 +2806,8 @@ export class AgentManager {
     const rows = this.fetchTimeline(agentId, { direction: "tail", limit: 0 }).rows;
     const record = await this.registry?.get(agentId);
     const providerSessions = this.captureOutgoingProviderSession(existing, rows, record ?? null);
-    const target = providerSessions[provider] ?? null;
+    // A rollover (spec 42 §6) always opens a fresh native session on the same provider.
+    const target = options.reason === "rollover" ? null : (providerSessions[provider] ?? null);
 
     // Provider-specific selections (mode/thinking/options/extra) do not map across providers;
     // the new provider starts from its defaults.
@@ -2870,10 +2943,15 @@ export class AgentManager {
     mode: "resume" | "handoff";
     target: StoredProviderSession | null;
     providerSessions: Record<string, StoredProviderSession>;
-    reason: "manual" | "failover";
+    reason: "manual" | "failover" | "rollover";
   }): Promise<SwitchAgentProviderResult> {
     const { registered, fromProvider, mode, reason } = input;
     const agentId = registered.id;
+    await this.durable
+      .onFreshSession(agentId)
+      .catch((error: unknown) =>
+        this.logger.warn({ err: error, agentId }, "Durable context reset after switch failed"),
+      );
     const toProvider = registered.provider;
     const model = registered.config.model ?? registered.runtimeInfo?.model ?? null;
     const handoff = await this.stageProviderHandoff({
@@ -2891,10 +2969,11 @@ export class AgentManager {
     const appended = await this.appendTimelineItem(agentId, {
       type: "notification",
       level: "info",
-      message:
-        reason === "failover"
-          ? `${this.labelFor(fromProvider)} hit its usage limit — switched to ${target}`
-          : `Switched to ${target}`,
+      message: switchRowMessage({
+        reason,
+        from: this.labelFor(fromProvider),
+        target,
+      }),
       providerSwitch: {
         fromProvider,
         toProvider,
@@ -3073,6 +3152,31 @@ export class AgentManager {
     return { handoff };
   }
 
+  /**
+   * Spec 42 §6 "Rollover to a fresh session": ends the current native session and opens a new one
+   * on the same provider and model, staging the ledger handoff (ledger, artifact index, last three
+   * turns verbatim) for the next turn. Same agent id and timeline. Only on the user's request.
+   */
+  async rolloverAgent(agentId: string): Promise<SwitchAgentProviderResult> {
+    const agent = this.requireSessionAgent(agentId);
+    const model = agent.config.model ?? agent.runtimeInfo?.model ?? null;
+    const result = await this.switchAgentProvider(agentId, agent.provider, model, {
+      reason: "rollover",
+    });
+    if (!result) throw new Error(`Rollover of ${agentId} did not open a new session`);
+    return result;
+  }
+
+  /**
+   * Spec 42 §7 "Capture lessons": one visible turn, sent the way a user message is, asking the
+   * agent to save pending lessons. Exactly one model turn; nothing hidden.
+   */
+  async captureLessons(agentId: string): Promise<void> {
+    this.requireAgent(agentId);
+    if (!this.failoverResend) throw new Error("Capture lessons is not wired");
+    await this.failoverResend(agentId, CAPTURE_LESSONS_PROMPT);
+  }
+
   /** "Continue with …" on a usage-limit row: switch and resend the failed turn's message. */
   async continueAfterUsageLimit(agentId: string, target: ProviderModelRef): Promise<void> {
     this.requireAgent(agentId);
@@ -3165,6 +3269,7 @@ export class AgentManager {
       nextStep: ledger.nextStep,
       handoffs: ledger.handoffs,
       providerSessions: sessions,
+      ...durableLedgerFields(ledger),
     };
   }
 
@@ -3800,7 +3905,7 @@ export class AgentManager {
   }): Promise<string | null> {
     const { agent, agentId, pendingRun, prompt, options, promptStart } = params;
     try {
-      const { enriched, context, handoff } = await this.buildTurnPrompt(agent, prompt);
+      const { enriched, context, handoff, durable } = await this.buildTurnPrompt(agent, prompt);
       this.failover.rememberPrompt(agentId, prompt);
       if (promptStart?.admit?.() === false) {
         this.runs.settleForegroundRun(agentId, pendingRun.token);
@@ -3809,6 +3914,7 @@ export class AgentManager {
       const result = await agent.session.startTurn(enriched, options);
       context?.accepted();
       if (handoff) await this.clearPendingHandoff(agentId, handoff.id);
+      await this.acceptDurableTurn(agentId, durable, options?.clientMessageId);
       if (pendingRun.settled) {
         throw new Error(`Agent ${agentId} run was canceled before its turn started`);
       }
@@ -3876,11 +3982,52 @@ export class AgentManager {
     enriched: AgentPromptInput;
     context: { text: string; accepted: () => void } | null | undefined;
     handoff: { id: string; text: string } | null;
+    durable: Awaited<ReturnType<DurableContext["prepareTurn"]>>;
   }> {
     const context = await this.turnContextProvider?.(agent.id);
     const handoff = await this.preparePendingHandoff(agent);
-    const enriched = prependTurnContext(prependTurnContext(prompt, handoff?.text), context?.text);
-    return { enriched, context, handoff };
+    const durable = await this.prepareDurableTurn(agent, prompt);
+    const enriched = prependTurnContext(
+      prependTurnContext(durable?.prompt ?? prompt, handoff?.text),
+      context?.text,
+    );
+    return { enriched, context, handoff, durable };
+  }
+
+  private async acceptDurableTurn(
+    agentId: string,
+    durable: Awaited<ReturnType<DurableContext["prepareTurn"]>>,
+    messageId: string | undefined,
+  ): Promise<void> {
+    if (!durable) return;
+    try {
+      await durable.accepted({ messageId: messageId ?? null });
+    } catch (error) {
+      this.logger.warn({ err: error, agentId }, "Durable context record failed");
+    }
+  }
+
+  /** Spec 42 §2–§3 additions to this turn's message. Durable-context trouble never blocks a turn. */
+  private async prepareDurableTurn(
+    agent: ActiveManagedAgent,
+    prompt: AgentPromptInput,
+  ): Promise<Awaited<ReturnType<DurableContext["prepareTurn"]>>> {
+    try {
+      return await this.durable.prepareTurn(this.durableView(agent), prompt);
+    } catch (error) {
+      this.logger.warn({ err: error, agentId: agent.id }, "Durable context unavailable for turn");
+      return null;
+    }
+  }
+
+  private durableView(agent: ManagedAgent) {
+    return {
+      id: agent.id,
+      provider: agent.provider,
+      cwd: agent.cwd,
+      sessionId: agent.persistence?.sessionId ?? null,
+      lastUsage: agent.lastUsage,
+    };
   }
 
   /**
@@ -6238,6 +6385,7 @@ export class AgentManager {
         this.onStreamThreadStarted(agent);
         return undefined;
       case "usage_updated":
+        if (!options?.fromHistory) this.durable.observeUsage(this.durableView(agent), event.usage);
         agent.lastUsage = event.usage;
         // Remember this turn's running usage so it can be billed even if the
         // turn ends via cancel/fail (no turn_completed). Reset on turn start.
@@ -6361,6 +6509,8 @@ export class AgentManager {
       }
 
       this.recordAndDispatchTimelineItem(agent.id, item, event.provider, event.turnId);
+      if (item.type === "compaction")
+        this.durable.observeTimelineItem(this.durableView(agent), item);
       if (item.type === "user_message") {
         agent.lastUserMessageAt = new Date();
         this.emitState(agent);
@@ -6452,9 +6602,11 @@ export class AgentManager {
     );
     if (terminalDisposition === "stale") return;
     if (event.usage) {
+      this.durable.observeUsage(this.durableView(agent), event.usage);
       agent.lastUsage = { ...agent.lastUsage, ...event.usage };
       this.accumulateUsageTotals(agent, event.usage);
     }
+    this.durable.onTurnEnded(agent.id);
     // The turn reached a clean end: its usage (if any) is now billed via
     // `event.usage`, so drop the per-turn tracker to avoid re-billing it if a
     // stray canceled/failed event arrives for the same turn.
@@ -7244,6 +7396,12 @@ export class AgentManager {
     return { storedConfig, launchConfig };
   }
 
+  /** Spec 42 §4: agents are told to save lessons only while Memory and the switch are on. */
+  private lessonLearningEnabled(): boolean {
+    if (!this.durablePorts?.memory()) return false;
+    return this.durablePorts.settings()?.learnFromCorrections ?? true;
+  }
+
   private applyDaemonAppendSystemPrompt(
     config: AgentSessionConfig,
     options: { sessionLedgerTool?: boolean } = {},
@@ -7252,6 +7410,7 @@ export class AgentManager {
       composeSystemPromptParts(
         this.appendSystemPrompt,
         options.sessionLedgerTool ? SESSION_LEDGER_INSTRUCTION : undefined,
+        options.sessionLedgerTool && this.lessonLearningEnabled() ? LESSON_INSTRUCTION : undefined,
       ) ?? "";
     const operatorContext = this.operatorContext.trim();
     const next = { ...config };
@@ -7332,6 +7491,7 @@ export class AgentManager {
     }
     const context: AgentLaunchContext = {
       agentId,
+      ...(this.durablePorts ? { compactionHooks: this.durable.hooksFor(agentId) } : {}),
       ...pluginPromptContext(appendSystemPrompt),
       mcpServers,
       mcpServerOwners,

@@ -3893,6 +3893,10 @@ export class Session {
         return this.handleAgentContinuitySetRequest(msg);
       case "agent.failover.continue.request":
         return this.handleAgentFailoverContinueRequest(msg);
+      case "agent.rollover.request":
+        return this.handleAgentRolloverRequest(msg);
+      case "agent.lessons.capture.request":
+        return this.handleAgentLessonsCaptureRequest(msg);
       default:
         return undefined;
     }
@@ -9113,6 +9117,44 @@ export class Session {
     }
     this.emit({
       type: "agent.failover.continue.response",
+      payload: { requestId: msg.requestId, agentId: msg.agentId, accepted: error === null, error },
+    });
+  }
+
+  private async handleAgentRolloverRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.rollover.request" }>,
+  ): Promise<void> {
+    let error: string | null = null;
+    let sessionId: string | null = null;
+    let handoffId: string | null = null;
+    try {
+      await this.ensureContinuityAgentLoaded(msg.agentId);
+      const result = await this.agentManager.rolloverAgent(msg.agentId);
+      sessionId = result.sessionId;
+      handoffId = result.handoffId;
+    } catch (caught) {
+      error = caught instanceof Error ? caught.message : String(caught);
+      this.sessionLogger.error({ err: caught, agentId: msg.agentId }, "Rollover failed");
+    }
+    this.emit({
+      type: "agent.rollover.response",
+      payload: { requestId: msg.requestId, agentId: msg.agentId, sessionId, handoffId, error },
+    });
+  }
+
+  private async handleAgentLessonsCaptureRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.lessons.capture.request" }>,
+  ): Promise<void> {
+    let error: string | null = null;
+    try {
+      await this.ensureContinuityAgentLoaded(msg.agentId);
+      await this.agentManager.captureLessons(msg.agentId);
+    } catch (caught) {
+      error = caught instanceof Error ? caught.message : String(caught);
+      this.sessionLogger.error({ err: caught, agentId: msg.agentId }, "Capture lessons failed");
+    }
+    this.emit({
+      type: "agent.lessons.capture.response",
       payload: { requestId: msg.requestId, agentId: msg.agentId, accepted: error === null, error },
     });
   }

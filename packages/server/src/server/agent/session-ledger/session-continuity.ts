@@ -48,7 +48,7 @@ export interface StageHandoffInput extends LedgerDocumentInput {
 
 /** Ledger reads, anchored note merges and handoff staging for one daemon. No model is ever called. */
 export class SessionContinuity {
-  constructor(private readonly store: SessionLedgerStore) {}
+  constructor(readonly store: SessionLedgerStore) {}
 
   read(agentId: string): Promise<StoredSessionLedger> {
     return this.store.read(agentId);

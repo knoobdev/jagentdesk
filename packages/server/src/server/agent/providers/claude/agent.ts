@@ -121,6 +121,7 @@ import {
   type AgentCapabilityFlags,
   type AgentClient,
   type AgentCreateSessionOptions,
+  type AgentCompactionHooks,
   type AgentLaunchContext,
   type AgentMetadata,
   type AgentMetric,
@@ -528,6 +529,8 @@ interface ClaudeAgentSessionOptions {
   resolveBinary: () => Promise<string>;
   rewindSdk?: ClaudeRewindSdk;
   spawnEnvOverlay?: () => Promise<Record<string, string> | null>;
+  /** Spec 42 §3: PreCompact instruction and PostCompact summary. */
+  compactionHooks?: AgentCompactionHooks;
 }
 
 type ClaudeThinkingEffort = "low" | "medium" | "high" | "xhigh" | "max";
@@ -1756,6 +1759,7 @@ export class ClaudeAgentClient implements AgentClient {
       runtimeSettings: this.runtimeSettings,
       agentId: launchContext?.agentId,
       launchEnv: launchContext?.env,
+      compactionHooks: launchContext?.compactionHooks,
       persistSession: options?.persistSession,
       logger: this.logger,
       queryFactory: this.queryFactory,
@@ -1787,6 +1791,7 @@ export class ClaudeAgentClient implements AgentClient {
       handle,
       agentId: launchContext?.agentId,
       launchEnv: launchContext?.env,
+      compactionHooks: launchContext?.compactionHooks,
       logger: this.logger,
       queryFactory: this.queryFactory,
       resolveBinary: this.resolveBinary,
@@ -2479,6 +2484,7 @@ class ClaudeAgentSession implements AgentSession {
   private readonly launchEnv?: Record<string, string>;
 
   private readonly agentId?: string;
+  private readonly compactionHooks?: AgentCompactionHooks;
 
   private readonly defaults?: { agents?: Record<string, AgentDefinition> };
 
@@ -2692,6 +2698,7 @@ class ClaudeAgentSession implements AgentSession {
     this.resolveBinary = options.resolveBinary;
     this.rewindSdk = options.rewindSdk ?? realClaudeRewindSdk;
     this.spawnEnvOverlay = options.spawnEnvOverlay;
+    this.compactionHooks = options.compactionHooks;
     this.contextUsage = new ClaudeContextUsageState(
       getClaudeContextWindowMaxTokens(this.config.model),
     );
@@ -4146,7 +4153,11 @@ class ClaudeAgentSession implements AgentSession {
       // subagents keep running. Without this declaration an interrupt kills every one of them.
       // Claude stops a helper itself with its TaskStop tool.
       perTaskStopAffordance: true,
-      hooks: { ...this.buildSubagentEffortHooks(), Stop: [{ hooks: [this.observeStopHook] }] },
+      hooks: {
+        ...this.buildSubagentEffortHooks(),
+        Stop: [{ hooks: [this.observeStopHook] }],
+        ...this.buildCompactionHooks(),
+      },
       ...(this.persistSession === undefined ? {} : { persistSession: this.persistSession }),
       env: sdkEnv,
     };
@@ -5854,6 +5865,33 @@ class ClaudeAgentSession implements AgentSession {
   }
 
   // Observation-only, like the effort hooks: it never alters turn control.
+  /**
+   * Spec 42 §3: PreCompact asks the compaction to keep what the ledger tracks; PostCompact hands
+   * Claude's summary to the daemon, which keeps it next to the ledger. Neither alters the turn.
+   */
+  private buildCompactionHooks(): NonNullable<ClaudeOptions["hooks"]> {
+    const hooks = this.compactionHooks;
+    if (!hooks) return {};
+    const preCompact: HookCallback = async (input) => {
+      if (input.hook_event_name !== "PreCompact") return {};
+      const instruction = hooks.preCompactInstruction();
+      return instruction ? { systemMessage: instruction } : {};
+    };
+    const postCompact: HookCallback = async (input) => {
+      if (input.hook_event_name !== "PostCompact") return {};
+      try {
+        hooks.onCompactSummary({ summary: input.compact_summary, trigger: input.trigger ?? null });
+      } catch (error) {
+        this.logger.warn({ err: error }, "PostCompact summary was not recorded");
+      }
+      return {};
+    };
+    return {
+      PreCompact: [{ hooks: [preCompact] }],
+      PostCompact: [{ hooks: [postCompact] }],
+    };
+  }
+
   private readonly observeStopHook: HookCallback = async (input) => {
     if (input.hook_event_name === "Stop") this.runtimeSafety.observeStop(input.session_crons);
     return {};

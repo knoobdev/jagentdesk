@@ -9,6 +9,8 @@ const SYSTEM_ERROR_PREFIX = "[System Error]";
 export interface LedgerTimelineRow {
   seq: number;
   item: AgentTimelineItem;
+  /** ISO time the row was written; the artifact index shows it (spec 42 §2). */
+  timestamp?: string;
 }
 
 export interface LedgerGoal {
@@ -25,10 +27,13 @@ export interface LedgerFile {
   operations: LedgerFileOperation[];
   firstSeq: number;
   lastSeq: number;
+  lastOperation?: LedgerFileOperation;
+  lastAt?: string;
 }
 
 export interface LedgerCommand {
   seq: number;
+  at?: string;
   command: string;
   exitCode: number | null;
   failed: boolean;
@@ -38,6 +43,7 @@ export interface LedgerCommand {
 
 export interface LedgerError {
   seq: number;
+  at?: string;
   message: string;
 }
 
@@ -105,10 +111,12 @@ class LedgerFactCollector {
   readonly turns: LedgerTurn[] = [];
   private readonly commandIndexByCallId = new Map<string, number>();
   private currentTurn: LedgerTurn | null = null;
+  private at: string | undefined;
 
   constructor(private readonly cwd: string | undefined) {}
 
-  add(seq: number, item: AgentTimelineItem): void {
+  add(seq: number, item: AgentTimelineItem, at?: string): void {
+    this.at = at;
     switch (item.type) {
       case "user_message":
         this.addUserMessage(seq, item.text.trim());
@@ -117,7 +125,7 @@ class LedgerFactCollector {
         this.addAssistantMessage(seq, item.text.trim());
         break;
       case "error":
-        this.errors.push({ seq, message: item.message });
+        this.errors.push({ seq, message: item.message, ...(this.at ? { at: this.at } : {}) });
         break;
       case "tool_call":
         this.addToolCall(seq, item);
@@ -175,6 +183,7 @@ class LedgerFactCollector {
     const exitCode = typeof detail.exitCode === "number" ? detail.exitCode : null;
     const failed = item.status === "failed" || (exitCode !== null && exitCode !== 0);
     const command: LedgerCommand = { seq, command: detail.command, exitCode, failed };
+    if (this.at) command.at = this.at;
     if (failed && detail.output) {
       command.outputTail = tailLines(detail.output, FAILED_COMMAND_TAIL_LINES);
     }
@@ -194,6 +203,8 @@ class LedgerFactCollector {
     if (existing) {
       if (!existing.operations.includes(operation)) existing.operations.push(operation);
       existing.lastSeq = seq;
+      existing.lastOperation = operation;
+      if (this.at) existing.lastAt = this.at;
       return;
     }
     this.files.set(display, {
@@ -201,6 +212,8 @@ class LedgerFactCollector {
       operations: [operation],
       firstSeq: seq,
       lastSeq: seq,
+      lastOperation: operation,
+      ...(this.at ? { lastAt: this.at } : {}),
     });
   }
 }
@@ -219,7 +232,7 @@ export function collectTimelineLedgerFacts(input: {
   let latestSeq = 0;
   for (const row of input.rows) {
     latestSeq = Math.max(latestSeq, row.seq);
-    if (row.seq > sinceSeq) collector.add(row.seq, row.item);
+    if (row.seq > sinceSeq) collector.add(row.seq, row.item, row.timestamp);
   }
   return {
     goals: collector.goals,

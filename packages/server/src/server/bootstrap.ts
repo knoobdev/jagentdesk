@@ -1741,6 +1741,11 @@ export async function createJAgentDeskDaemon(
     }),
   });
   pluginRuntime.builtinDaemon = builtinDaemon;
+  // Spec 42: durable agent context reads its switches and lessons through the Memory port.
+  agentManager.setDurableContextPorts({
+    settings: () => builtinDaemon.port("memory")?.durableSettings(),
+    memory: () => builtinDaemon.enabledPort("memory"),
+  });
   // Spec mode's launch environment (spec 28): the provider process sees the shared checkout env.
   agentManager.setLaunchEnvProvider(
     (agentId) => builtinDaemon.enabledPort("specMode")?.launchEnv(agentId) ?? null,

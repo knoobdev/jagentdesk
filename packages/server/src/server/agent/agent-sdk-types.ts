@@ -4,8 +4,13 @@ import type {
   AgentOptionToggleControl,
 } from "@jagentdesk/protocol/agent-types";
 export type { AgentOptionControl, AgentOptionSelectControl, AgentOptionToggleControl };
-import type { ProviderSwitchNotice, UsageLimitNotice } from "@jagentdesk/protocol/agent-types";
-export type { ProviderSwitchNotice, UsageLimitNotice };
+import type {
+  ContextCompactionNotice,
+  ProviderSwitchNotice,
+  RegroundingNotice,
+  UsageLimitNotice,
+} from "@jagentdesk/protocol/agent-types";
+export type { ContextCompactionNotice, ProviderSwitchNotice, RegroundingNotice, UsageLimitNotice };
 import type { AgentMessage } from "@jagentdesk/protocol/agent-message";
 import type { Options as ClaudeAgentOptions } from "@anthropic-ai/claude-agent-sdk";
 import type {
@@ -419,6 +424,10 @@ export type AgentTimelineItem =
       providerSwitch?: ProviderSwitchNotice;
       /** Set on the row a usage-limit failure appends when no failover ran (spec 40 §4). */
       usageLimit?: UsageLimitNotice;
+      /** Set on the "Context compacted" row (spec 42 §1). */
+      contextCompaction?: ContextCompactionNotice;
+      /** Set on the "Re-grounded after compaction" row (spec 42 §2). */
+      regrounding?: RegroundingNotice;
     }
   | CompactionTimelineItem
   | PluginTimelineItem;
@@ -691,7 +700,20 @@ export interface AgentSessionConfig {
   internal?: boolean;
 }
 
+/**
+ * Spec 42 §3: provider compaction hooks (Claude PreCompact / PostCompact). Runtime-only, never
+ * persisted; providers without compaction hooks ignore it.
+ */
+export interface AgentCompactionHooks {
+  /** Extra instructions for the compaction itself, or null to add none. */
+  preCompactInstruction(): string | null;
+  /** The provider's own summary after a compaction, kept to compare with the ledger. */
+  onCompactSummary(input: { summary: string; trigger: "auto" | "manual" | null }): void;
+}
+
 export interface AgentLaunchContext {
+  /** Spec 42 §3 compaction hooks; runtime-only. */
+  compactionHooks?: AgentCompactionHooks;
   /** Launch-only instructions contributed by plugins. */
   appendSystemPrompt?: string[];
   /** Launch-only plugin MCP servers and their owners; never persisted. */

@@ -14,7 +14,7 @@ export const LedgerOpenItemSchema = LedgerNoteSchema.extend({
 });
 
 export const HandoffModeSchema = z.enum(["handoff", "delta"]);
-export const HandoffReasonSchema = z.enum(["manual", "failover", "child"]);
+export const HandoffReasonSchema = z.enum(["manual", "failover", "child", "rollover"]);
 
 /** A handoff or delta message the daemon sent (or staged) for a provider that took over the agent. */
 export const LedgerHandoffRecordSchema = z.object({
@@ -31,6 +31,39 @@ export const LedgerHandoffRecordSchema = z.object({
   budgetTokens: z.number().int(),
 });
 
+/** One compaction the daemon saw (spec 42 §1), with Claude's own summary when it reported one. */
+export const LedgerCompactionSchema = z.object({
+  id: z.string(),
+  at: z.string(),
+  provider: z.string(),
+  trigger: z.string().nullable(),
+  preTokens: z.number().nullable(),
+  postTokens: z.number().nullable(),
+  inferred: z.boolean(),
+  summary: z.string().nullable(),
+});
+
+/** A "Where we are" block the daemon sent after a compaction (spec 42 §2). */
+export const LedgerRegroundingSchema = z.object({
+  id: z.string(),
+  at: z.string(),
+  compactionId: z.string().nullable(),
+  text: z.string(),
+  estimatedTokens: z.number().int(),
+});
+
+/** Spec 42 per-agent state; survives a daemon restart between a compaction and the next turn. */
+export const LedgerDurableStateSchema = z.object({
+  /** Compaction cycle: grows by one with every compaction or fresh session. */
+  cycle: z.number().int(),
+  /** The cycle the 80 % ledger nudge was last sent in (at most once per cycle). */
+  nudgedCycle: z.number().int().nullable(),
+  /** Set by a compaction; the next turn carries the re-grounding block and clears it. */
+  pendingRegrounding: z.object({ compactionId: z.string() }).nullable(),
+  compactions: z.array(LedgerCompactionSchema),
+  regroundings: z.array(LedgerRegroundingSchema),
+});
+
 export const StoredSessionLedgerSchema = z.object({
   version: z.literal(1),
   agentId: z.string(),
@@ -42,6 +75,7 @@ export const StoredSessionLedgerSchema = z.object({
   handoffs: z.array(LedgerHandoffRecordSchema),
   /** Staged text the next turn on the new provider carries; cleared once that turn starts. */
   pendingHandoff: z.object({ id: z.string(), text: z.string() }).nullable(),
+  durable: LedgerDurableStateSchema.optional(),
 });
 
 export type LedgerNote = z.infer<typeof LedgerNoteSchema>;
@@ -50,6 +84,22 @@ export type LedgerHandoffRecord = z.infer<typeof LedgerHandoffRecordSchema>;
 export type HandoffMode = z.infer<typeof HandoffModeSchema>;
 export type HandoffReason = z.infer<typeof HandoffReasonSchema>;
 export type StoredSessionLedger = z.infer<typeof StoredSessionLedgerSchema>;
+export type LedgerCompaction = z.infer<typeof LedgerCompactionSchema>;
+export type LedgerRegrounding = z.infer<typeof LedgerRegroundingSchema>;
+export type LedgerDurableState = z.infer<typeof LedgerDurableStateSchema>;
+
+export const MAX_STORED_COMPACTIONS = 20;
+export const MAX_STORED_REGROUNDINGS = 10;
+
+export function emptyDurableState(): LedgerDurableState {
+  return {
+    cycle: 0,
+    nudgedCycle: null,
+    pendingRegrounding: null,
+    compactions: [],
+    regroundings: [],
+  };
+}
 
 export const MAX_STORED_HANDOFFS = 10;
 

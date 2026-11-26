@@ -136,7 +136,13 @@ describe("collectTimelineLedgerFacts", () => {
     expect(facts.goals[1]?.text).toHaveLength(4000);
     expect(facts.goals[1]?.originalLength).toBe(4100);
     expect(facts.files).toEqual([
-      { path: "src/parser.ts", operations: ["read", "edit"], firstSeq: 2, lastSeq: 3 },
+      {
+        path: "src/parser.ts",
+        operations: ["read", "edit"],
+        firstSeq: 2,
+        lastSeq: 3,
+        lastOperation: "edit",
+      },
     ]);
     expect(facts.commands[0]).toMatchObject({ command: "npm test", exitCode: 1, failed: true });
     expect(facts.commands[0]?.outputTail?.split("\n")).toHaveLength(20);

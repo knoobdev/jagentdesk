@@ -2755,6 +2755,8 @@ export class VoiceAssistantWebSocketServer {
         idleRuntimeCleanupSetting: true,
         // COMPAT(crossProviderContinuity): added in v0.10.2, remove gate after 2027-05-26.
         crossProviderContinuity: true,
+        // COMPAT(durableContext): added in v0.10.2, remove gate after 2027-05-26.
+        durableContext: true,
         // COMPAT(agentForkContext): added in v0.1.102, remove gate after 2026-12-28.
         agentForkContext: true,
         // COMPAT(agentForkContextCursor): added in v0.1.108, remove gate after 2027-01-14.
