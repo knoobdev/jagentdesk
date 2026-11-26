@@ -103,8 +103,8 @@ jobs:
             gh release create "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --title "JAgentDesk $RELEASE_TAG" \
-              --notes "macOS: on Apple Silicon, download the asset named macOS-Apple-Silicon. Do not install the Intel x64 asset on Apple Silicon; it runs under Rosetta and is intentionally rejected by the app." \
-              --generate-notes
+              --notes "Release notes are added after the assets are verified." \
+              --latest=false
           fi
 
   desktop:

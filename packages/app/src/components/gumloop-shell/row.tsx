@@ -45,7 +45,7 @@ export function GumloopRow({
       testID={testID}
     >
       {leading}
-      {Icon ? <Icon size={18} uniProps={foreground} /> : null}
+      {Icon ? <Icon size={16} uniProps={foreground} /> : null}
       <Text numberOfLines={1} style={styles.label}>
         {label}
       </Text>
@@ -54,16 +54,18 @@ export function GumloopRow({
   );
 }
 
+// Spec 38 §4.2 "Nav chính": 32 px rows, a 16 px icon at x = 20 and a 14/500 label at x = 44 (the
+// sidebar puts the row at x = 10, so 10 px padding + 16 px icon + 8 px gap).
 const styles = StyleSheet.create((theme: Theme) => ({
   row: {
-    height: { xs: 44, md: 34 },
+    height: { xs: 44, md: 32 },
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 8,
     paddingHorizontal: 10,
     borderRadius: 8,
   },
-  label: { flex: 1, fontSize: 16, fontWeight: "500", color: theme.colors.foreground },
+  label: { flex: 1, fontSize: 14, fontWeight: "500", color: theme.colors.foreground },
   selected: { backgroundColor: theme.chrome.selectedRow },
   hovered: { backgroundColor: theme.colors.surfaceSidebarHover },
 }));

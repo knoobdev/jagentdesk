@@ -93,10 +93,13 @@ const styles = StyleSheet.create((theme) => {
   const geometry = createControlGeometry(theme);
 
   return {
+    // Spec 38 §4.6 "Nút chính" / "Nút viền": 14/500 text, 36 px high (small 32 px) on desktop.
+    // Phones keep the touch height.
     gumloopButton: { borderRadius: 10 },
-    gumloopSmall: { minHeight: 34 },
+    gumloopMedium: { minHeight: { xs: geometry.buttonMd.minHeight, md: 36 } },
+    gumloopSmall: { minHeight: 32 },
     gumloopHeaderAction: { minHeight: 36, height: 36 },
-    gumloopText: { fontSize: 16, fontWeight: "500" },
+    gumloopText: { fontSize: 14, fontWeight: "500" },
     base: {
       flexDirection: "row",
       alignItems: "center",
@@ -230,6 +233,7 @@ export function Button({
       sizeStyle,
       variantStyle,
       gumloop && styles.gumloopButton,
+      gumloop && size === "md" && styles.gumloopMedium,
       gumloop && size === "sm" && styles.gumloopSmall,
       gumloop && inPageHeader && styles.gumloopHeaderAction,
       pressed ? styles.pressed : null,

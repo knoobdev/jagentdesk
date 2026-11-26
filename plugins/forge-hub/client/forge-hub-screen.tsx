@@ -36,6 +36,7 @@ import {
   useState,
   type ComponentType,
   type MutableRefObject,
+  type ReactNode,
 } from "react";
 import {
   ActivityIndicator,
@@ -8159,9 +8160,16 @@ export function ForgeHubScreen({ serverId }: { serverId: string }) {
     );
   };
 
+  let topRow: ReactNode = null;
+  // Gumloop desktop: the shared page header gives Forge its title row, description and window
+  // drag region (spec 38 §4.1). Classic keeps the transparent drag strip.
+  if (!isCompact && isGumloop) {
+    topRow = <PageHeader icon={GitPullRequest} title="Forge" description={FORGE_DESCRIPTION} />;
+  }
   return (
     <View style={styles.container}>
-      {isCompact ? null : (
+      {topRow}
+      {isCompact || isGumloop ? null : (
         // Transparent, full-width DRAG strip. Hiding the app rail on Forge also
         // removed the window-chrome drag region, so the window could not be
         // moved. This restores it (WebkitAppRegion:"drag" on web/Electron) while

@@ -1,5 +1,6 @@
 export { PageHeader } from "@/components/headers/page-header";
 export {
+  GUMLOOP_PAGE_GUTTER,
   gumloopChipStyles,
   gumloopListStyles,
   gumloopTabStyles,
@@ -260,6 +261,7 @@ export { formatTokenCount } from "@/components/context-window-meter.utils";
 export { usageHistoryQueryKey, type UsageHistory } from "@/data/usage-history-query";
 export {
   useGumloopDesktopShell,
+  useGumloopPageGutterStyle,
   useIsGumloopTheme,
 } from "@/components/gumloop-shell/use-gumloop-chrome";
 

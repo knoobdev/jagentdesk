@@ -19,7 +19,7 @@ import { useDesktopIpcErrorReporter } from "@/desktop/hooks/desktop-ipc-error";
 import type { DesktopSettings } from "@/desktop/settings/desktop-settings";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { upsertDesktopDaemonConnection } from "@/runtime/daemon-start-service";
-import { getConnectionMode } from "@/tailscale";
+import { getTailnetMode } from "@/tailscale";
 import { confirmDialog } from "@/utils/confirm-dialog";
 
 type DesktopDaemonSettings = DesktopSettings["daemon"];
@@ -66,14 +66,14 @@ export function useBuiltInDaemonManagement(
             }),
           persistSettings: (next) => updateSettings(next) as Promise<void>,
           startDaemon: async () =>
-            startDesktopDaemon({ enableTailscale: (await getConnectionMode()) === "tailscale" }),
+            startDesktopDaemon({ enableTailscale: (await getTailnetMode()) === "tailnet" }),
           stopDaemon: () => stopDesktopDaemon("settings"),
         });
         if (result.kind === "enabled") {
           const upsertResult = await upsertDesktopDaemonConnection(
             getHostRuntimeStore(),
             result.newStatus,
-            await getConnectionMode(),
+            await getTailnetMode(),
           );
           if (!upsertResult.ok) {
             throw new DaemonConnectionRegistrationError(upsertResult.error);

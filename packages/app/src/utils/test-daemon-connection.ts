@@ -24,6 +24,7 @@ import {
   createDesktopLocalDaemonTransportFactory,
 } from "@/desktop/daemon/desktop-daemon-transport";
 import { getMobileDeviceName } from "./device-identity";
+import { directTcpClientConfig } from "@/runtime/direct-tcp-client-config";
 
 export interface DaemonProbeClient {
   readonly lastError: string | null;
@@ -251,11 +252,7 @@ export async function buildClientConfig(
   }
 
   if (connection.type === "directTcp") {
-    return {
-      ...base,
-      url: buildDaemonWebSocketUrl(connection.endpoint, { useTls: connection.useTls ?? false }),
-      ...(connection.password ? { password: connection.password } : {}),
-    };
+    return { ...base, ...directTcpClientConfig({ serverId, connection }) };
   }
 
   return buildTailnetClientConfig(connection, serverId, base, options);

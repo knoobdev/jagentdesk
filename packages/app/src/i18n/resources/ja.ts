@@ -1092,10 +1092,6 @@ export const ja: TranslationResources = {
     },
   },
   connection: {
-    localMode: {
-      mobileWarning:
-        "ローカルモードが有効です。Tailscale モードに戻すまで、モバイル端末は Tailscale 経由でこのコンピューターに接続できません。",
-    },
     timingOut: {
       tailnet: {
         title: "{{hostName}} に接続できませんでした",
@@ -1558,6 +1554,11 @@ export const ja: TranslationResources = {
   onboarding: {
     title: "JAgentDeskへようこそ",
     subtitle: "始めるにはコンピューターに接続してください",
+    welcomeDescription:
+      "ワークステーションで動作するコーディングエージェントをこのデバイスから操作します。",
+    getStarted: "はじめる",
+    connectTitle: "ワークステーションに接続",
+    connectFooter: "ワークステーションで JAgentDesk → Pair a device を開いてください。",
     actions: {
       settings: "設定",
     },
@@ -1666,11 +1667,15 @@ export const ja: TranslationResources = {
       },
       scanQr: {
         title: "QRコードをスキャン",
-        description: "Tailnet 接続。",
+        description: "暗号化されたリレー接続。",
       },
       pasteLink: {
         title: "ペアリングリンクを貼り付け",
-        description: "Tailnet 接続。",
+        description: "暗号化されたリレー接続。",
+      },
+      tailscale: {
+        title: "Tailscale にサインイン",
+        description: "tailnet に参加して直接接続します。",
       },
     },
     direct: {

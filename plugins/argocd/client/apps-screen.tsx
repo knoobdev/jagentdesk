@@ -1,3 +1,4 @@
+import { useGumloopPageGutterStyle } from "../../../packages/app/src/plugins/builtin/host-api";
 import { useRouter } from "../../../packages/app/src/plugins/builtin/host-api";
 import { useCallback, useMemo, useState } from "react";
 import { ScrollView, Text, View } from "react-native";
@@ -50,6 +51,7 @@ export function ArgoCdAppsScreen({
   serverId: string;
   instanceId: string;
 }) {
+  const gutter = useGumloopPageGutterStyle();
   const router = useRouter();
   const isCompact = useIsCompactFormFactor();
   const hostConnected = useHostRuntimeIsConnected(serverId);
@@ -101,7 +103,7 @@ export function ArgoCdAppsScreen({
       return (
         <View style={styles.page}>
           <PageHeader icon={Ship} title="Argo CD" description="Applications" />
-          <View style={styles.padded}>
+          <View style={[styles.padded, gutter]}>
             <Alert
               variant="error"
               title="Unable to load Argo CD instances"
@@ -140,7 +142,7 @@ export function ArgoCdAppsScreen({
         description={instance.url}
         actions={headerActions}
       />
-      <View style={styles.statusLine}>
+      <View style={[styles.statusLine, gutter]}>
         <InstanceStateDot state={instance.state} />
         <Text style={styles.statusText} numberOfLines={1}>
           {[
@@ -156,7 +158,7 @@ export function ArgoCdAppsScreen({
         horizontal
         showsHorizontalScrollIndicator={false}
         style={styles.tabsScroll}
-        contentContainerStyle={styles.tabs}
+        contentContainerStyle={[styles.tabs, gutter]}
       >
         <SegmentedControl
           size="sm"
@@ -198,6 +200,7 @@ function InstanceBody({
   onInstance,
   onManage,
 }: InstanceBodyProps) {
+  const gutter = useGumloopPageGutterStyle();
   const appsState = apps.state;
   const appsError = appsState.status === "error" ? appsState : null;
   const sessionLost =
@@ -205,7 +208,7 @@ function InstanceBody({
 
   if (needsSignIn(instance) || sessionLost) {
     return (
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.padded}>
+      <ScrollView style={styles.scroll} contentContainerStyle={[styles.padded, gutter]}>
         <View style={[settingsStyles.card, styles.signInCard]} testID="argocd-apps-signin">
           <Text style={styles.signInTitle}>
             {instance.state === "needs_reauth" || sessionLost
@@ -220,7 +223,7 @@ function InstanceBody({
 
   if (tab !== "apps") {
     return (
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.padded}>
+      <ScrollView style={styles.scroll} contentContainerStyle={[styles.padded, gutter]}>
         <ArgoCdSettingsList client={client} instanceId={instance.id} kind={tab} />
       </ScrollView>
     );
@@ -228,7 +231,7 @@ function InstanceBody({
 
   if (appsState.status === "error") {
     return (
-      <View style={styles.padded}>
+      <View style={[styles.padded, gutter]}>
         <Alert variant="error" title="Unable to load applications" description={appsState.error}>
           <View style={styles.alertActions}>
             <Button size="sm" variant="outline" onPress={apps.retry}>

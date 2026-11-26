@@ -2,7 +2,7 @@ import type {
   DesktopDaemonStartOptions,
   DesktopDaemonStatus,
 } from "@/desktop/daemon/desktop-daemon";
-import type { ConnectionMode } from "@/tailscale";
+import type { TailnetMode } from "@/tailscale";
 
 interface DesktopDaemonRestartStatus {
   desktopManaged: boolean;
@@ -20,7 +20,7 @@ export interface SettingsDaemonRestartDeps {
   getDesktopDaemonStatus: () => Promise<DesktopDaemonRestartStatus>;
   getDesktopSettings: () => Promise<DesktopDaemonRestartSettings>;
   restartDesktopDaemon: (options?: DesktopDaemonStartOptions) => Promise<DesktopDaemonStatus>;
-  getConnectionMode?: () => Promise<ConnectionMode | null>;
+  getTailnetMode?: () => Promise<TailnetMode | null>;
   restartServer: (reason: string) => Promise<unknown>;
 }
 
@@ -54,8 +54,8 @@ export async function restartDaemonFromSettings(
   deps: SettingsDaemonRestartDeps,
 ): Promise<void> {
   if (await isLocalDesktopManagedDaemon(hostServerId, deps)) {
-    const connectionMode = await deps.getConnectionMode?.();
-    await deps.restartDesktopDaemon({ enableTailscale: connectionMode === "tailscale" });
+    const tailnetMode = await deps.getTailnetMode?.();
+    await deps.restartDesktopDaemon({ enableTailscale: tailnetMode === "tailnet" });
     return;
   }
 

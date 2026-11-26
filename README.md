@@ -47,6 +47,14 @@ Jira, Argo CD, forges and devices, Bots, and connected hosts.
 
 ---
 
+## 🩹 v0.10.1
+
+A fix release: the iOS app opens again, desktop plugins load, and Docker no longer piles up `docker events`
+processes. First run is simpler — the desktop connects to its own daemon, and a phone pairs by **Scan QR
+code** or **Paste pairing link** through the encrypted relay, with Tailscale optional. Bots can be created
+without an identity, have searchable model pickers and explain themselves in the app. Details:
+**[docs/releases/v0.10.1.md](docs/releases/v0.10.1.md)**.
+
 ## ✨ New in v0.10.0
 
 The full list of changes is in **[docs/releases/v0.10.0.md](docs/releases/v0.10.0.md)**.
@@ -191,13 +199,18 @@ Every release is described in [CHANGELOG.md](CHANGELOG.md) and on the
 
 Download a prebuilt app from the **[latest release](https://github.com/knoobdev/jagentdesk/releases/latest)**
 (macOS Apple Silicon and Intel, Windows x64 and ARM64, Linux x64, Android APK, iOS IPA). The desktop app
-starts its own daemon.
+starts its own daemon and connects to it.
+
+To add your phone: on the desktop open **Pair a device**; on the phone tap **Scan QR code** (or **Paste
+pairing link**) and confirm the same six-digit code on both screens. The link goes through the encrypted
+relay, so no Tailscale account is needed; **Sign in to Tailscale** is there if you want a direct tailnet
+connection.
 
 > **macOS:** on Apple Silicon, download the **macOS-Apple-Silicon** asset. Do not install the Intel x64
 > asset on Apple Silicon — it would run under Rosetta and the app refuses to start.
 
 To build from source you need **Node.js 22.20.0** and npm (the repo ships a `.tool-versions` file for
-[mise](https://mise.jdx.dev/)). Local Android builds need the Android SDK; local iOS builds need Xcode.
+[mise](https://mise.jdx.dev/)). Local Android builds need the Android SDK; local iOS builds need Xcode 26.
 
 ```bash
 git clone https://github.com/knoobdev/jagentdesk.git
@@ -276,7 +289,7 @@ GitHub release. To cut one:
 ```bash
 # set "version" in the root package.json, then sync every workspace:
 npm run version:sync-internal
-git tag v0.10.0
+git tag v0.10.1
 git push origin main --tags
 ```
 

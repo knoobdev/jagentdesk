@@ -1,5 +1,6 @@
 import {
   useSafeAreaInsets,
+  useGumloopPageGutterStyle,
   AdaptiveTextInput,
   Alert,
   Button,
@@ -445,9 +446,10 @@ export function BrowseTab({
       ) : null,
     [directory, handleLoadMore, hasNextPage, isFetchingNextPage, t],
   );
+  const gutter = useGumloopPageGutterStyle();
   const contentStyle = useMemo(
-    () => [styles.listContent, { paddingBottom: insets.bottom + 24 }],
-    [insets.bottom],
+    () => [styles.listContent, gutter, { paddingBottom: insets.bottom + 24 }],
+    [gutter, insets.bottom],
   );
   return (
     <FlatList

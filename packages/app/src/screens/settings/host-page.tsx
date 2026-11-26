@@ -70,7 +70,7 @@ import { formatLatency } from "@/utils/latency";
 import { ICON_SIZE } from "@/styles/theme";
 import type { Theme } from "@/styles/theme";
 import { getProviderIcon } from "@/components/provider-icons";
-import { getConnectionMode } from "@/tailscale";
+import { getTailnetMode } from "@/tailscale";
 import { IdleRuntimeCleanupCard } from "./idle-runtime-cleanup-card";
 import { RestartRecoveryCard } from "./restart-recovery-card";
 import { BuiltinAgentSettingsCards } from "@/plugins/builtin/surfaces";
@@ -739,7 +739,7 @@ function RestartDaemonCard({ host }: { host: HostProfile }) {
             getDesktopDaemonStatus,
             getDesktopSettings: loadDesktopSettings,
             restartDesktopDaemon,
-            getConnectionMode,
+            getTailnetMode,
             restartServer: (reason) => daemonClient.restartServer(reason),
           },
         );
@@ -1602,7 +1602,7 @@ function RemoveHostSection({
         return;
       }
       setStatus(
-        await startDesktopDaemon({ enableTailscale: (await getConnectionMode()) === "tailscale" }),
+        await startDesktopDaemon({ enableTailscale: (await getTailnetMode()) === "tailnet" }),
       );
     },
     [setStatus, updateSettings],

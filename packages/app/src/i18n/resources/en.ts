@@ -1085,10 +1085,6 @@ export const en = {
     saving: "Saving...",
   },
   connection: {
-    localMode: {
-      mobileWarning:
-        "Local mode is on. Mobile devices can't connect to this computer over Tailscale until you switch back to Tailscale mode.",
-    },
     timingOut: {
       tailnet: {
         title: "{{hostName}} couldn't connect",
@@ -1546,6 +1542,10 @@ export const en = {
   onboarding: {
     title: "Welcome to JAgentDesk",
     subtitle: "Connect your computer to get started",
+    welcomeDescription: "Control the coding agents running on your workstation from this device.",
+    getStarted: "Get started",
+    connectTitle: "Connect your workstation",
+    connectFooter: "On your workstation, open JAgentDesk → Pair a device.",
     actions: {
       settings: "Settings",
     },
@@ -1696,11 +1696,15 @@ export const en = {
       },
       scanQr: {
         title: "Scan QR code",
-        description: "Tailnet connection.",
+        description: "Encrypted relay connection.",
       },
       pasteLink: {
         title: "Paste pairing link",
-        description: "Tailnet connection.",
+        description: "Encrypted relay connection.",
+      },
+      tailscale: {
+        title: "Sign in to Tailscale",
+        description: "Join your tailnet for a direct connection.",
       },
     },
     direct: {

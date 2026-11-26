@@ -23,7 +23,6 @@ import {
   relayConnectionFromOffer,
   disambiguateHostLabels,
   hostHasLocalConnection,
-  hostHasTailnetConnection,
   readHostRegistry,
   writeHostRegistry,
   forgetUnreadableHost,
@@ -58,6 +57,8 @@ import {
   normalizeHostPort,
 } from "@/utils/daemon-endpoints";
 import { getRelayDeviceSigning, prepareRelayDeviceSigning } from "@/utils/relay-device-signing";
+import { loadDesktopSignedLocalHosts } from "@/runtime/desktop-signed-local-hosts";
+import { directTcpClientConfig } from "@/runtime/direct-tcp-client-config";
 import { resolveAppVersion } from "@/utils/app-version";
 import { ConnectionOfferSchema, type ConnectionOffer } from "@jagentdesk/protocol/connection-offer";
 import { shouldUseDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
@@ -65,11 +66,10 @@ import { isWeb, isNative } from "@/constants/platform";
 import { connectToDaemon } from "@/utils/test-daemon-connection";
 import { getOrCreateClientId } from "@/utils/client-id";
 import {
-  clearConnectionMode,
-  getConnectionMode,
+  getTailnetMode,
   getTailscaleLoginAdapter,
-  subscribeConnectionMode,
-  type ConnectionMode,
+  subscribeTailnetMode,
+  type TailnetMode,
 } from "@/tailscale";
 import { type ConnectionCandidate, type ConnectionProbeState } from "@/utils/connection-selection";
 import {
@@ -508,10 +508,12 @@ function toSnapshotConnectionPatch(
 
 export function buildConnectionCandidates(
   host: HostProfile,
-  connectionMode: ConnectionMode | null = isWeb ? "local" : null,
+  tailnetMode: TailnetMode | null = isWeb ? "off" : null,
 ): ConnectionCandidate[] {
+  // A phone that has not paired yet (`null`) dials relay only; it must not
+  // touch localhost or a tailnet it never joined.
   const connections = host.connections.filter(
-    (connection) => connectionMode !== null || connection.type === "relay",
+    (connection) => tailnetMode !== null || connection.type === "relay",
   );
   const rank = (connection: HostConnection): number => {
     if (connection.id === host.preferredConnectionId) return 0;
@@ -627,10 +629,7 @@ function createDefaultDeps(
       if (connection.type === "directTcp") {
         return new DaemonClient({
           ...base,
-          url: buildDaemonWebSocketUrl(connection.endpoint, {
-            useTls: connection.useTls ?? false,
-          }),
-          ...(connection.password ? { password: connection.password } : {}),
+          ...directTcpClientConfig({ serverId: host.serverId, connection }),
         });
       }
       if (connection.type === "relay") {
@@ -756,10 +755,10 @@ export class HostRuntimeController {
   private switchRequestVersion = 0;
   private probeRequestVersion = 0;
   private probeCycleInFlight: Promise<void> | null = null;
-  private connectionMode: ConnectionMode | null;
+  private tailnetMode: TailnetMode | null;
   // REQ 4: count consecutive failed connect attempts on a LOCAL connection.
   // Reset to 0 whenever the host reaches online, its active connection changes,
-  // or the connection mode changes.
+  // or the tailnet mode changes.
   private localRetryCount = 0;
   // Session-share GUEST connections are remote (over a Cloudflare tunnel), not a local daemon, so
   // they must keep retrying on transient drops (idle/network change) instead of hitting the
@@ -775,13 +774,13 @@ export class HostRuntimeController {
     host: HostProfile;
     deps?: HostRuntimeControllerDeps;
     onReconcileServerId?: (oldId: string, newId: string) => void;
-    connectionMode?: ConnectionMode | null;
+    tailnetMode?: TailnetMode | null;
   }) {
     this.host = input.host;
     this.deps = input.deps ?? createDefaultDeps();
     this.onReconcileServerId = input.onReconcileServerId ?? null;
-    // ADR-0010: no auto "local" default on native (see buildConnectionCandidates).
-    this.connectionMode = input.connectionMode ?? (isWeb ? "local" : null);
+    // ADR-0010: no localhost default on native (see buildConnectionCandidates).
+    this.tailnetMode = input.tailnetMode ?? (isWeb ? "off" : null);
     this.connectionMachineState = {
       tag: "booting",
     };
@@ -942,11 +941,11 @@ export class HostRuntimeController {
     await this.runProbeCycleNow();
   }
 
-  setConnectionMode(value: ConnectionMode | null): void {
-    if (this.connectionMode === value) {
+  setTailnetMode(value: TailnetMode | null): void {
+    if (this.tailnetMode === value) {
       return;
     }
-    this.connectionMode = value;
+    this.tailnetMode = value;
     // A mode change is a fresh start for the local-retry budget.
     this.resetLocalRetries();
     // Invalidate an in-flight local probe and immediately re-evaluate the
@@ -959,7 +958,7 @@ export class HostRuntimeController {
   /**
    * Clear the local-retry budget and resume auto-retrying. Called when the user
    * explicitly retries a local host that had exhausted its attempts, and on
-   * connection-mode changes.
+   * tailnet-mode changes.
    */
   resetLocalRetries(): void {
     this.localRetryCount = 0;
@@ -1098,7 +1097,7 @@ export class HostRuntimeController {
 
   private async runProbeCycle(): Promise<void> {
     const requestVersion = ++this.probeRequestVersion;
-    const candidates = buildConnectionCandidates(this.host, this.connectionMode);
+    const candidates = buildConnectionCandidates(this.host, this.tailnetMode);
     const activeId = this.snapshot.activeConnectionId;
     const activeAllowed = candidates.some((candidate) => candidate.connectionId === activeId);
     if (!activeAllowed && activeId) {
@@ -1659,10 +1658,10 @@ export class HostRuntimeStore {
   // by useSyncExternalStore) and only recomputes when the host list changes.
   private hostsDisplaySource: HostProfile[] | null = null;
   private hostsDisplay: HostProfile[] = [];
-  // The connection mode the memoized display list was computed for. REQ 2 hides
-  // tailnet-only hosts in local mode, so the memo must recompute when the mode
-  // changes even if the raw `hosts` reference did not.
-  private hostsDisplayMode: ConnectionMode | null = null;
+  // The tailnet mode the memoized display list was computed for. REQ 2 hides
+  // tailnet-only hosts while the tailnet is off, so the memo must recompute
+  // when the mode changes even if the raw `hosts` reference did not.
+  private hostsDisplayMode: TailnetMode | null = null;
   private hostAppearanceMutationTail: Promise<void> = Promise.resolve();
   private hostRegistryStatus: HostRegistryStatus = "loading";
   private deps: HostRuntimeControllerDeps;
@@ -1675,15 +1674,10 @@ export class HostRuntimeStore {
   private bootPromise: Promise<void> | null = null;
   private registryLoad: Promise<void> | null = null;
   private readonly hostConfirmations = new HostConfirmations();
-  private connectionMode: ConnectionMode | null = null;
-  private connectionModeUnsubscribe: (() => void) | null = null;
+  private tailnetMode: TailnetMode | null = null;
+  private tailnetModeUnsubscribe: (() => void) | null = null;
   private storage: HostRuntimeStorage;
   private replicaCache: ReplicaCache;
-  // REQ 6: raised (once) when the user switches to Local while at least one
-  // tailnet host exists — mobile devices cannot connect over Tailscale in Local
-  // mode. Consumed by the UI, which shows a warning toast.
-  private pendingLocalModeWarning = false;
-  private localModeWarningListeners = new Set<() => void>();
   // REQ 3: the persisted set of hosts that were failing to connect, so the app
   // can re-notify on the next launch. Kept in memory and mirrored to storage.
   private timingOutHosts: TimingOutHostEntry[] = [];
@@ -1708,47 +1702,19 @@ export class HostRuntimeStore {
   // --- Host registry ---
 
   getHosts(): HostProfile[] {
-    if (this.hostsDisplaySource !== this.hosts || this.hostsDisplayMode !== this.connectionMode) {
-      // REQ 2: in Local mode a host reachable ONLY over the tailnet cannot be
-      // connected to, so hide it. Tailscale mode and the pre-login `null` gate
-      // keep every host visible.
+    if (this.hostsDisplaySource !== this.hosts || this.hostsDisplayMode !== this.tailnetMode) {
+      // REQ 2: with the tailnet off, a host reachable ONLY over the tailnet
+      // cannot be connected to, so hide it. Tailnet mode and the unpaired
+      // `null` state keep every host visible.
       const visible =
-        this.connectionMode === "local"
+        this.tailnetMode === "off"
           ? this.hosts.filter((host) => hostHasLocalConnection(host))
           : this.hosts;
       this.hostsDisplay = disambiguateHostLabels(visible);
       this.hostsDisplaySource = this.hosts;
-      this.hostsDisplayMode = this.connectionMode;
+      this.hostsDisplayMode = this.tailnetMode;
     }
     return this.hostsDisplay;
-  }
-
-  /** True when any registered host has a tailnet connection (REQ 6). */
-  hasTailnetHost(): boolean {
-    return this.hosts.some((host) => hostHasTailnetConnection(host));
-  }
-
-  // --- Local-mode mobile-connectivity warning (REQ 6) ---
-
-  subscribeLocalModeWarning(listener: () => void): () => void {
-    this.localModeWarningListeners.add(listener);
-    return () => {
-      this.localModeWarningListeners.delete(listener);
-    };
-  }
-
-  /** Read and clear the one-shot "mobile can't connect in Local mode" warning. */
-  consumeLocalModeWarning(): boolean {
-    const pending = this.pendingLocalModeWarning;
-    this.pendingLocalModeWarning = false;
-    return pending;
-  }
-
-  private raiseLocalModeWarning(): void {
-    this.pendingLocalModeWarning = true;
-    for (const listener of this.localModeWarningListeners) {
-      listener();
-    }
   }
 
   // --- Timing-out hosts persistence (REQ 3) ---
@@ -1874,19 +1840,14 @@ export class HostRuntimeStore {
   }
 
   private async runBoot(): Promise<void> {
-    this.connectionMode = await getConnectionMode();
-    this.connectionModeUnsubscribe?.();
-    this.connectionModeUnsubscribe = subscribeConnectionMode(() => {
-      void getConnectionMode().then((nextMode) => {
-        if (nextMode !== this.connectionMode) {
-          // REQ 6: warn once when switching to Local while tailnet hosts exist,
-          // since mobile devices can no longer reach the daemon over Tailscale.
-          if (nextMode === "local" && this.hasTailnetHost()) {
-            this.raiseLocalModeWarning();
-          }
-          this.connectionMode = nextMode;
+    this.tailnetMode = await getTailnetMode();
+    this.tailnetModeUnsubscribe?.();
+    this.tailnetModeUnsubscribe = subscribeTailnetMode(() => {
+      void getTailnetMode().then((nextMode) => {
+        if (nextMode !== this.tailnetMode) {
+          this.tailnetMode = nextMode;
           for (const controller of this.controllers.values()) {
-            controller.setConnectionMode(nextMode);
+            controller.setTailnetMode(nextMode);
           }
           this.emitHostList();
         }
@@ -1894,6 +1855,13 @@ export class HostRuntimeStore {
       });
     });
     const override = readConfiguredLocalDaemonOverride();
+    if (shouldUseDesktopDaemon()) {
+      // The Local connection to the bundled daemon signs its hello (ADR-0010):
+      // load which daemons are ours and the desktop device key before the
+      // first controller dials.
+      await loadDesktopSignedLocalHosts();
+      await prepareRelayDeviceSigning().catch(() => undefined);
+    }
     await this.loadTimingOutHosts();
     await this.loadHostBackups();
     await this.loadRegistry();
@@ -1908,11 +1876,10 @@ export class HostRuntimeStore {
       return;
     }
 
-    // A native device must not touch localhost before the user explicitly
-    // chooses Local. `null` is the first-run login gate and `tailscale` must
-    // use only tailnet connections; neither state may silently fall back to
-    // the legacy localhost bootstrap.
-    if (shouldUseDesktopDaemon() || this.connectionMode !== "local") {
+    // Only a device with the tailnet off may run the legacy localhost
+    // bootstrap. An unpaired phone (`null`) must not touch localhost, and the
+    // desktop registers its bundled daemon through the daemon start service.
+    if (shouldUseDesktopDaemon() || this.tailnetMode !== "off") {
       return;
     }
 
@@ -2401,23 +2368,6 @@ export class HostRuntimeStore {
     const remaining = this.hosts.filter((daemon) => daemon.serverId !== serverId);
     this.setHostsAndSync(remaining);
     await this.persistHosts();
-    await this.resetConnectionModeWhenHostsEmpty();
-  }
-
-  /**
-   * Deleting the last host returns the app to the first-run connection gate.
-   * Without this, a persisted `"local"` mode locks the user into Local forever:
-   * `shouldRedirectToDesktopTailscaleLogin` never offers the login/choice screen
-   * once a mode is chosen, and the built-in daemon silently re-seeds a Local host
-   * on the next launch — so the user can never reach Tailscale login again. Only
-   * user-initiated removals that empty the registry reset the mode; `null` is the
-   * choose-Tailscale-or-Local gate.
-   */
-  private async resetConnectionModeWhenHostsEmpty(): Promise<void> {
-    if (this.hosts.length > 0 || this.connectionMode === null) {
-      return;
-    }
-    await clearConnectionMode();
   }
 
   async removeConnection(serverId: string, connectionId: string): Promise<void> {
@@ -2446,7 +2396,6 @@ export class HostRuntimeStore {
       .filter((entry): entry is HostProfile => entry !== null);
     this.setHostsAndSync(next);
     await this.persistHosts();
-    await this.resetConnectionModeWhenHostsEmpty();
   }
 
   private async upsertHostConnection(input: {
@@ -2564,7 +2513,7 @@ export class HostRuntimeStore {
       const controller = new HostRuntimeController({
         host,
         deps: this.deps,
-        connectionMode: this.connectionMode,
+        tailnetMode: this.tailnetMode,
         onReconcileServerId: (oldId, newId) => this.reconcileServerId(oldId, newId),
       });
       this.controllers.set(host.serverId, controller);

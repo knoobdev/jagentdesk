@@ -1,3 +1,4 @@
+import { useGumloopPageGutterStyle } from "../../../../packages/app/src/plugins/builtin/host-api";
 import { useEffect, useMemo, useState } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { RefreshCw } from "lucide-react-native";
@@ -62,8 +63,9 @@ export function InstalledSection({ client, serverId }: { client: DaemonClient; s
     [accounts.data],
   );
 
+  const gutter = useGumloopPageGutterStyle();
   return (
-    <ScrollView contentContainerStyle={styles.section} testID="sideload-installed">
+    <ScrollView contentContainerStyle={[styles.section, gutter]} testID="sideload-installed">
       <Text style={styles.sectionTitle}>Installed apps</Text>
       {apps.error ? (
         <Alert variant="error" title="Could not load apps" description={errorText(apps.error)} />

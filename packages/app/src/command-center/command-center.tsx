@@ -1192,10 +1192,13 @@ const styles = StyleSheet.create((theme) => ({
   results: { flex: 1 },
   // Sections and rows take their height from list-metrics; these styles only place content in it.
   section: { justifyContent: "flex-end" },
+  // Row labels and group titles take the theme's menu tokens (Gumloop: 14 px rows, 12/600 titles;
+  // spec 38 §4.6 "Menu"). Line heights stay fixed, so list-metrics remains the layout.
   sectionLabel: {
     paddingHorizontal: theme.spacing[4],
     paddingBottom: COMMAND_CENTER_SECTION_GAP,
-    fontSize: theme.fontSize.sm,
+    fontSize: theme.chrome.menuGroupTitleSize,
+    fontWeight: theme.chrome.menuGroupTitleWeight,
     lineHeight: COMMAND_CENTER_LINE_HEIGHT.sectionLabel,
     color: theme.colors.foregroundMuted,
   },
@@ -1222,14 +1225,14 @@ const styles = StyleSheet.create((theme) => ({
   textContent: { flex: 1, minWidth: 0 },
   title: {
     color: theme.colors.foreground,
-    fontSize: theme.fontSize.base,
+    fontSize: theme.chrome.menuItemFontSize,
     lineHeight: COMMAND_CENTER_LINE_HEIGHT.title,
     flexShrink: 1,
   },
   fileLine: {
     flex: 1,
     minWidth: 0,
-    fontSize: theme.fontSize.base,
+    fontSize: theme.chrome.menuItemFontSize,
     lineHeight: COMMAND_CENTER_LINE_HEIGHT.singleLine,
   },
   fileName: { color: theme.colors.foreground },
@@ -1279,7 +1282,7 @@ const styles = StyleSheet.create((theme) => ({
   },
   breadcrumbGroup: {
     color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.base,
+    fontSize: theme.chrome.menuItemFontSize,
     lineHeight: COMMAND_CENTER_LINE_HEIGHT.singleLine,
     flexShrink: 0,
   },

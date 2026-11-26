@@ -3,13 +3,15 @@ import { router, useLocalSearchParams } from "expo-router";
 import { MarkdownRenderer } from "@/components/markdown/renderer";
 import { useCallback } from "react";
 import { useMemo, useState } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
 import type { Bot, BotItem, BotQuestion } from "@jagentdesk/protocol/bots/types";
 import type { Review, ReviewFinding } from "@jagentdesk/protocol/review/types";
 import type { ParsedDiffFile } from "@jagentdesk/protocol/messages";
 import { Button } from "@/components/ui/button";
+import { gumloopListStyles } from "@/components/gumloop-shell/list-styles";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { DiffViewer } from "@/components/diff-viewer";
 import { ScrollableCodeSurface } from "@/components/ui/scrollable-code-surface";
 import { PermissionRequestCard } from "@/agent-stream/view";
@@ -21,6 +23,7 @@ import { useItems, useBotsConnection, useBotsMutation, botsKey } from "./queries
 import { sortItems } from "./model";
 import { styles } from "./styles";
 import { Section, QueryNotice, ErrorNotice, Input } from "./ui";
+import { TabHint } from "./help";
 export function WorkerPermissions({
   serverId,
   bot,
@@ -487,12 +490,30 @@ function ItemRow({
   select: (id: string) => void;
 }) {
   const { t } = useTranslation();
+  const isGumloop = useIsGumloopTheme();
   const open = useCallback(
     function open() {
       select(item.id);
     },
     [select, item],
   );
+  // Gumloop lists items as 44px divided rows (spec 38 §4.6) instead of stacked buttons.
+  if (isGumloop)
+    return (
+      <Pressable
+        onPress={open}
+        accessibilityRole="button"
+        style={[gumloopListStyles.row, styles.itemRow, active && styles.itemRowActive]}
+        testID={`bot-item-${item.id}`}
+      >
+        <Text style={styles.itemStatus} numberOfLines={1}>
+          {t(`bots.${item.status}`)}
+        </Text>
+        <Text style={styles.itemTitle} numberOfLines={1}>
+          {item.title}
+        </Text>
+      </Pressable>
+    );
   return (
     <Button
       variant={active ? "secondary" : "outline"}
@@ -503,9 +524,10 @@ function ItemRow({
     </Button>
   );
 }
-export function BotItems({ serverId, botId }: { serverId: string; botId: string }) {
+export function BotItems({ serverId, bot }: { serverId: string; bot: Bot }) {
   const { t } = useTranslation();
-  const query = useItems(serverId, botId);
+  const query = useItems(serverId, bot.id);
+  const isGumloop = useIsGumloopTheme();
   const [expanded, setExpanded] = useState(false);
   const params = useLocalSearchParams<{ itemId?: string }>();
   const selectedId = params.itemId;
@@ -523,11 +545,20 @@ export function BotItems({ serverId, botId }: { serverId: string; botId: string 
     <ScrollView contentContainerStyle={styles.body} testID="bots-items">
       <QueryNotice query={query} />
       {query.isSuccess && !items.length ? (
-        <Text style={styles.muted}>{t("bots.noItems")}</Text>
+        <TabHint i18nKey="bots.help.items" bot={bot} testID="bot-items-empty" />
       ) : null}
-      {visible.map((item) => (
-        <ItemRow key={item.id} item={item} active={selectedId === item.id} select={setSelectedId} />
-      ))}
+      {visible.length ? (
+        <View style={isGumloop ? styles.itemListFlush : styles.itemList}>
+          {visible.map((item) => (
+            <ItemRow
+              key={item.id}
+              item={item}
+              active={selectedId === item.id}
+              select={setSelectedId}
+            />
+          ))}
+        </View>
+      ) : null}
       {!expanded && items.length > 5 ? (
         <Button variant="ghost" onPress={showMore}>
           {t("bots.showMore", { count: items.length - 5 })}

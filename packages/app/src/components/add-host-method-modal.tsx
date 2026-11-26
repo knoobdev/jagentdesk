@@ -1,35 +1,55 @@
-import { useCallback, useMemo } from "react";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Pressable, Text, View } from "react-native";
-import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { QrCode, Link2, ClipboardPaste, Globe } from "lucide-react-native";
+import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import { Link2 } from "lucide-react-native";
 import { AdaptiveModalSheet, type SheetHeader } from "./adaptive-modal-sheet";
-import { isFdroidBuild } from "@/constants/build-profile";
-import { isNative } from "@/constants/platform";
+import { ConnectWorkstationOptions } from "./connect-workstation";
+import { getIsElectron, isNative } from "@/constants/platform";
+import type { Theme } from "@/styles/theme";
+
+const ThemedLink2 = withUnistyles(Link2);
+const iconProps = (theme: Theme) => ({ color: theme.colors.foreground });
 
 const styles = StyleSheet.create((theme) => ({
   option: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[4],
-    padding: theme.spacing[4],
-    borderRadius: theme.borderRadius.xl,
-    backgroundColor: theme.colors.surface2,
+    gap: theme.spacing[3],
+    minHeight: 64,
+    paddingHorizontal: theme.spacing[4],
+    paddingVertical: theme.spacing[3],
+    borderRadius: 10,
+    backgroundColor: theme.colors.surface1,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  iconCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
     borderWidth: 1,
     borderColor: theme.colors.border,
   },
   optionText: {
     color: theme.colors.foreground,
     fontSize: theme.fontSize.base,
-    fontWeight: theme.fontWeight.normal,
+    fontWeight: theme.fontWeight.medium,
   },
   optionSubtext: {
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.sm,
-    marginTop: theme.spacing[1],
+    marginTop: 2,
   },
   optionBody: {
     flex: 1,
+  },
+  footer: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
+    textAlign: "center",
   },
 }));
 
@@ -42,6 +62,11 @@ export interface AddHostMethodModalProps {
   onTailscale: () => void;
 }
 
+/**
+ * Add a host (ADR-0056): the same three ways as onboarding's "Connect your
+ * workstation". The plain browser build cannot scan or join a tailnet, so it
+ * keeps the direct address form next to the pairing link.
+ */
 export function AddHostMethodModal({
   visible,
   onClose,
@@ -50,25 +75,9 @@ export function AddHostMethodModal({
   onPasteLink,
   onTailscale,
 }: AddHostMethodModalProps) {
-  const { theme } = useUnistyles();
   const { t } = useTranslation();
   const header = useMemo<SheetHeader>(() => ({ title: t("pairing.connectionMethods.title") }), [t]);
-
-  const handleDirect = useCallback(() => {
-    onDirectConnection();
-  }, [onDirectConnection]);
-
-  const handleScan = useCallback(() => {
-    onScanQr();
-  }, [onScanQr]);
-
-  const handlePaste = useCallback(() => {
-    onPasteLink();
-  }, [onPasteLink]);
-
-  const handleTailscale = useCallback(() => {
-    onTailscale();
-  }, [onTailscale]);
+  const isBrowser = !isNative && !getIsElectron();
 
   return (
     <AdaptiveModalSheet
@@ -77,70 +86,33 @@ export function AddHostMethodModal({
       onClose={onClose}
       testID="add-host-method-modal"
     >
-      <Pressable
-        style={styles.option}
-        onPress={handleDirect}
-        accessibilityRole="button"
-        accessibilityLabel={t("pairing.connectionMethods.direct.title")}
-        testID="add-host-method-direct"
-      >
-        <Link2 size={18} color={theme.colors.foreground} />
-        <View style={styles.optionBody}>
-          <Text style={styles.optionText}>{t("pairing.connectionMethods.direct.title")}</Text>
-          <Text style={styles.optionSubtext}>
-            {t("pairing.connectionMethods.direct.description")}
-          </Text>
-        </View>
-      </Pressable>
+      <ConnectWorkstationOptions
+        onScanQr={onScanQr}
+        onPasteLink={onPasteLink}
+        onSignInTailscale={onTailscale}
+      />
 
-      {isNative && !isFdroidBuild ? (
+      {isBrowser ? (
         <Pressable
           style={styles.option}
-          onPress={handleScan}
+          onPress={onDirectConnection}
           accessibilityRole="button"
-          accessibilityLabel={t("pairing.connectionMethods.scanQr.title")}
+          accessibilityLabel={t("pairing.connectionMethods.direct.title")}
+          testID="add-host-method-direct"
         >
-          <QrCode size={18} color={theme.colors.foreground} />
+          <View style={styles.iconCircle}>
+            <ThemedLink2 size={18} uniProps={iconProps} />
+          </View>
           <View style={styles.optionBody}>
-            <Text style={styles.optionText}>{t("pairing.connectionMethods.scanQr.title")}</Text>
+            <Text style={styles.optionText}>{t("pairing.connectionMethods.direct.title")}</Text>
             <Text style={styles.optionSubtext}>
-              {t("pairing.connectionMethods.scanQr.description")}
+              {t("pairing.connectionMethods.direct.description")}
             </Text>
           </View>
         </Pressable>
       ) : null}
 
-      <Pressable
-        style={styles.option}
-        onPress={handleTailscale}
-        accessibilityRole="button"
-        accessibilityLabel="Pair over Tailscale"
-        testID="add-host-method-tailscale"
-      >
-        <Globe size={18} color={theme.colors.foreground} />
-        <View style={styles.optionBody}>
-          <Text style={styles.optionText}>Pair over Tailscale</Text>
-          <Text style={styles.optionSubtext}>
-            Connect directly through your tailnet, then confirm with the 6-digit code.
-          </Text>
-        </View>
-      </Pressable>
-
-      <Pressable
-        style={styles.option}
-        onPress={handlePaste}
-        accessibilityRole="button"
-        accessibilityLabel={t("pairing.connectionMethods.pasteLink.title")}
-        testID="add-host-method-pair-link"
-      >
-        <ClipboardPaste size={18} color={theme.colors.foreground} />
-        <View style={styles.optionBody}>
-          <Text style={styles.optionText}>{t("pairing.connectionMethods.pasteLink.title")}</Text>
-          <Text style={styles.optionSubtext}>
-            {t("pairing.connectionMethods.pasteLink.description")}
-          </Text>
-        </View>
-      </Pressable>
+      <Text style={styles.footer}>{t("onboarding.connectFooter")}</Text>
     </AdaptiveModalSheet>
   );
 }

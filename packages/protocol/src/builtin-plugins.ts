@@ -44,7 +44,7 @@ export const BUILTIN_PLUGIN_FEATURES = {
   "openrouter-host-usage-source": [],
   "zai-usage-source": [],
 
-  bots: ["bots"],
+  bots: ["bots", "botsOptionalIdentity"],
   "goose-provider": [],
   "fx-provider": [],
   "hoplite-provider": [],

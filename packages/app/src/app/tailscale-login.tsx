@@ -17,7 +17,7 @@ import {
   getSnapshot,
   getTailscaleLoginAdapter,
   refreshTailscaleStatus,
-  setConnectionMode,
+  setTailnetMode,
   useTailscaleLoginStatus,
 } from "@/tailscale";
 import type { TailscaleLoginAdapter } from "@/tailscale";
@@ -99,11 +99,6 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.sm,
     textAlign: "center",
-  },
-  connectionTypeRow: {
-    flexDirection: "row",
-    gap: theme.spacing[2],
-    flexWrap: "wrap",
   },
   error: {
     color: theme.colors.destructive,
@@ -303,6 +298,9 @@ export default function TailscaleLoginRoute() {
     if (params.returnTo === "pair-verify") {
       return "/pair-verify";
     }
+    if (params.returnTo === "pair-start") {
+      return "/pair-start?step=connect" as Href;
+    }
     if (params.returnTo === "host-overview" && typeof params.serverId === "string") {
       return buildSettingsHostSectionRoute(params.serverId, "host");
     }
@@ -310,6 +308,7 @@ export default function TailscaleLoginRoute() {
   }, [params.returnTo, params.serverId]);
   const canReturnToOverview =
     params.returnTo === "host-overview" && typeof params.serverId === "string";
+  const canReturnToConnect = params.returnTo === "pair-start";
   const isManagementRoute = params.manage === "true";
   const adapter = useMemo<TailscaleLoginAdapter>(() => getTailscaleLoginAdapter(), []);
   const isDesktopLogin = adapter.platform === "desktop";
@@ -329,7 +328,6 @@ export default function TailscaleLoginRoute() {
   const [authKeyInProgress, setAuthKeyInProgress] = useState(false);
   const [authKey, setAuthKey] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [connectionType, setConnectionType] = useState<"tailscale" | "local">("tailscale");
 
   const handleBackToOverview = useCallback(() => {
     router.replace(returnTo);
@@ -363,7 +361,7 @@ export default function TailscaleLoginRoute() {
             tailscaleConnected: true,
           }
         : await getDesktopDaemonStatus();
-    const result = await upsertDesktopDaemonConnection(store, daemonStatus, "tailscale");
+    const result = await upsertDesktopDaemonConnection(store, daemonStatus, "tailnet");
     if (!result.ok) {
       throw new Error(result.error);
     }
@@ -375,7 +373,7 @@ export default function TailscaleLoginRoute() {
     if (!mountedRef.current) {
       return;
     }
-    await setConnectionMode("tailscale");
+    await setTailnetMode("tailnet");
     if (!isManagementRoute) {
       router.replace(returnTo as Href);
     }
@@ -572,16 +570,6 @@ export default function TailscaleLoginRoute() {
   } else if (awaitingConnection) {
     interactiveButtonLabel = t("tailscaleLogin.awaitingConnection");
   }
-  const showLocalFallback = !adapter.isSupported && !isDesktopLogin;
-  const handleSelectTailscaleConnectionType = useCallback(() => setConnectionType("tailscale"), []);
-  const handleSelectLocalConnectionType = useCallback(() => setConnectionType("local"), []);
-  const handleContinueLocal = useCallback(async () => {
-    await setConnectionMode("local");
-    router.replace("/");
-  }, [router]);
-  const localConnectionDescription = showLocalFallback
-    ? "This mobile build cannot embed Tailscale yet. Use Local pairing, or install the supported iOS build."
-    : "Use the local JAgentDesk daemon on this computer.";
 
   const connectionContent = (() => {
     if (isManagementRoute && tailscaleStatus.kind === "connected") {
@@ -609,22 +597,6 @@ export default function TailscaleLoginRoute() {
       return (
         <View style={styles.card} testID="tailscale-login-manage-card">
           <Text style={styles.connectingText}>{t("tailscaleLogin.manageChecking")}</Text>
-        </View>
-      );
-    }
-
-    if (connectionType === "local" || showLocalFallback) {
-      return (
-        <View style={styles.card}>
-          <Text style={styles.subtitle}>{localConnectionDescription}</Text>
-          <Button
-            variant="default"
-            size="lg"
-            onPress={handleContinueLocal}
-            testID="connection-local-continue"
-          >
-            Continue with Local
-          </Button>
         </View>
       );
     }
@@ -726,28 +698,6 @@ export default function TailscaleLoginRoute() {
             <Text style={styles.subtitle}>{pageSubtitle}</Text>
           </View>
 
-          {isDesktopLogin ? (
-            <View style={styles.card}>
-              <Text style={styles.fieldLabel}>Connect type</Text>
-              <View style={styles.connectionTypeRow}>
-                <Button
-                  variant={connectionType === "tailscale" ? "default" : "secondary"}
-                  onPress={handleSelectTailscaleConnectionType}
-                  testID="connection-type-tailscale"
-                >
-                  Tailscale (default)
-                </Button>
-                <Button
-                  variant={connectionType === "local" ? "default" : "secondary"}
-                  onPress={handleSelectLocalConnectionType}
-                  testID="connection-type-local"
-                >
-                  Local
-                </Button>
-              </View>
-            </View>
-          ) : null}
-
           {connectionContent}
 
           {canReturnToOverview ? (
@@ -759,6 +709,18 @@ export default function TailscaleLoginRoute() {
               testID="tailscale-login-back-to-overview"
             >
               {t("tailscaleLogin.backToOverview")}
+            </Button>
+          ) : null}
+
+          {canReturnToConnect ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onPress={handleBackToOverview}
+              disabled={busy}
+              testID="tailscale-login-back-to-connect"
+            >
+              {t("common.actions.back")}
             </Button>
           ) : null}
 

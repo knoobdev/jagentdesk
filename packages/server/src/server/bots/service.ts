@@ -17,7 +17,7 @@ import {
 import type { BotsPush, BotsRequest } from "@jagentdesk/protocol/bots/rpc-schemas";
 import { computeNextRunAt, validateScheduleCadence } from "../schedule/cron.js";
 import type { PushNotificationSender } from "../push/notifications.js";
-import { BotStorage } from "./storage.js";
+import { BotStorage, botIdentity } from "./storage.js";
 import type { BotRuntime, BotRuntimeEvent } from "./runtime.js";
 import { commentItem, patchItem } from "./items.js";
 import { mentionedSlugs } from "./context.js";
@@ -110,7 +110,11 @@ export class BotsService {
     return bot;
   }
   async update(id: string, raw: BotPatch): Promise<Bot> {
-    const patch = BotPatchSchema.parse(raw);
+    const parsed = BotPatchSchema.parse(raw);
+    const patch =
+      parsed.identity === undefined
+        ? parsed
+        : { ...parsed, identity: botIdentity(parsed.identity) };
     const bot = this.storage.bot(id);
     if (
       Object.keys(patch).some((k) => ["unattended", "provider", "model", "modeId"].includes(k)) &&

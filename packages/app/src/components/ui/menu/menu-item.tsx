@@ -394,8 +394,11 @@ const styles = StyleSheet.create((theme) => ({
     paddingTop: theme.spacing[2],
     paddingBottom: theme.spacing[1],
   },
+  // Group titles, label size and pointer row height come from the theme's menu tokens (Gumloop:
+  // 12/600 titles, 14 px labels, 32 px rows; spec 38 §4.6 "Menu").
   labelText: {
-    fontSize: theme.fontSize.sm,
+    fontSize: theme.chrome.menuGroupTitleSize,
+    fontWeight: theme.chrome.menuGroupTitleWeight,
     color: theme.colors.foregroundMuted,
   },
   // `border` sits between surface1 and surface2, which put it within a hair of the hover fill and
@@ -445,7 +448,7 @@ const styles = StyleSheet.create((theme) => ({
   item: {
     flexDirection: "row",
     alignItems: "center",
-    minHeight: MENU_ITEM_HEIGHT,
+    minHeight: { xs: MENU_ITEM_HEIGHT.xs, md: theme.chrome.menuItemHeight },
     gap: theme.spacing[2],
     marginHorizontal: theme.spacing[1],
     paddingHorizontal: theme.spacing[2],
@@ -498,7 +501,7 @@ const styles = StyleSheet.create((theme) => ({
     opacity: 0.72,
   },
   itemText: {
-    fontSize: theme.fontSize.base,
+    fontSize: theme.chrome.menuItemFontSize,
     lineHeight: MENU_ITEM_LINE_HEIGHT,
     color: theme.colors.foreground,
     fontWeight: theme.fontWeight.normal,

@@ -1100,10 +1100,6 @@ export const es: TranslationResources = {
     },
   },
   connection: {
-    localMode: {
-      mobileWarning:
-        "El modo Local está activado. Los dispositivos móviles no pueden conectarse a este equipo mediante Tailscale hasta que vuelvas al modo Tailscale.",
-    },
     timingOut: {
       tailnet: {
         title: "{{hostName}} no se conectó",
@@ -1568,6 +1564,11 @@ export const es: TranslationResources = {
   onboarding: {
     title: "Bienvenido aJAgentDesk",
     subtitle: "Conecte su computadora para comenzar",
+    welcomeDescription:
+      "Controla desde este dispositivo los agentes de programación que se ejecutan en tu estación de trabajo.",
+    getStarted: "Empezar",
+    connectTitle: "Conecta tu estación de trabajo",
+    connectFooter: "En tu estación de trabajo, abre JAgentDesk → Pair a device.",
     actions: {
       settings: "Ajustes",
     },
@@ -1676,11 +1677,15 @@ export const es: TranslationResources = {
       },
       scanQr: {
         title: "Escanea el códigoQR",
-        description: "Conexión a través de tailnet.",
+        description: "Conexión cifrada mediante relay.",
       },
       pasteLink: {
         title: "Pegar enlace de emparejamiento",
-        description: "Conexión a través de tailnet.",
+        description: "Conexión cifrada mediante relay.",
+      },
+      tailscale: {
+        title: "Iniciar sesión en Tailscale",
+        description: "Únete a tu tailnet para una conexión directa.",
       },
     },
     direct: {

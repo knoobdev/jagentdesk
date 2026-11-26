@@ -11,6 +11,8 @@ import {
   ErrorBanner,
   Tabs,
   jiraStyles,
+  GUMLOOP_PAGE_GUTTER,
+  useGumloopDesktopShell,
 } from "../../../packages/app/src/plugins/builtin/host-api";
 import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
 import { StyleSheet } from "react-native-unistyles";
@@ -351,6 +353,7 @@ function useAssistantContext(
 export function JiraScreen({ serverId }: { serverId: string }) {
   const supportsJira = useHostFeature(serverId, "jira");
   const isCompact = useIsCompactFormFactor();
+  const gumloopDesktop = useGumloopDesktopShell(true);
   const isFocused = useIsFocused();
   const { location, go } = useJiraNav();
   const connections = useJiraConnections(serverId);
@@ -448,7 +451,7 @@ export function JiraScreen({ serverId }: { serverId: string }) {
         (overlay ?? main)
       ) : (
         <View style={jiraStyles.body}>
-          <View style={jiraStyles.main}>{main}</View>
+          <View style={[jiraStyles.main, gumloopDesktop && styles.gumloopMain]}>{main}</View>
           {issuePanel ? <View style={styles.issueDock}>{issuePanel}</View> : null}
           {assistantPanel ? <View style={styles.assistantDock}>{assistantPanel}</View> : null}
         </View>
@@ -467,6 +470,9 @@ export function JiraScreen({ serverId }: { serverId: string }) {
 }
 
 const styles = StyleSheet.create((theme: Theme) => ({
+  // Jira's views pad their scroll content by 16 px; the rest makes up the shared Gumloop page
+  // gutter (spec 38 §4.1, A38.4i).
+  gumloopMain: { paddingHorizontal: GUMLOOP_PAGE_GUTTER - theme.spacing[4] },
   subHeader: {
     paddingHorizontal: theme.spacing[4],
     paddingTop: theme.spacing[2],

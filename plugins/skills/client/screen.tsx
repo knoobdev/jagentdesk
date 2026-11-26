@@ -1,6 +1,7 @@
 import {
   PageHeader,
   Alert,
+  useGumloopPageGutterStyle,
   Button,
   useHostRuntimeClient,
   useHostRuntimeIsConnected,
@@ -153,6 +154,7 @@ export function SkillsScreen({ serverId }: { serverId: string }) {
       ? t("skillsHub.tabs.installedCount", { count: installedCount })
       : t("skillsHub.tabs.installed");
 
+  const gutter = useGumloopPageGutterStyle();
   const tabBar = useMemo(
     () => (
       <View style={styles.bar}>
@@ -194,7 +196,7 @@ export function SkillsScreen({ serverId }: { serverId: string }) {
         tabs={tabBar}
       />
       {connected ? null : (
-        <View style={styles.alert}>
+        <View style={[styles.alert, gutter]}>
           <Alert variant="warning" title={t("skillsHub.offline")} />
         </View>
       )}

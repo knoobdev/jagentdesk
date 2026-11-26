@@ -1,5 +1,8 @@
 import { gumloopTabStyles } from "@/components/gumloop-shell/list-styles";
-import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import {
+  useGumloopPageGutterStyle,
+  useIsGumloopTheme,
+} from "@/components/gumloop-shell/use-gumloop-chrome";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FlatList,
@@ -334,9 +337,10 @@ export function MarketplaceScreen() {
   let numColumns = isCompact ? 1 : 2;
   if (isThemesTab) numColumns = isCompact ? 2 : 3;
   const columnWrapperStyle = numColumns > 1 ? styles.columnWrap : undefined;
+  const gutter = useGumloopPageGutterStyle();
   const contentStyle = useMemo(
-    () => [styles.listContent, { paddingBottom: insets.bottom + 24 }],
-    [insets.bottom],
+    () => [styles.listContent, gutter, { paddingBottom: insets.bottom + 24 }],
+    [gutter, insets.bottom],
   );
 
   const renderItem = useCallback(
@@ -387,7 +391,7 @@ export function MarketplaceScreen() {
   const listHeader = useMemo(
     () => (
       <View style={styles.header}>
-        <View style={isGumloop ? gumloopTabStyles.row : styles.tabRow}>
+        <View style={isGumloop ? [gumloopTabStyles.row, styles.gumloopTabRow] : styles.tabRow}>
           <MarketplaceTabButton
             label={t("marketplace.tabs.browse")}
             active={isBrowseTab}
@@ -537,6 +541,8 @@ const styles = StyleSheet.create((theme: Theme) => ({
   root: { flex: 1, backgroundColor: theme.colors.surface0 },
   listContent: { padding: theme.spacing[4], paddingTop: 0, gap: theme.spacing[3] },
   columnWrap: { gap: theme.spacing[3] },
+  // The tab tray hugs its tabs, like every other Gumloop page's tabs.
+  gumloopTabRow: { alignSelf: "flex-start" },
   cell: { flex: 1, marginBottom: theme.spacing[3] },
   header: { gap: theme.spacing[3], marginBottom: theme.spacing[1] },
   tabRow: {

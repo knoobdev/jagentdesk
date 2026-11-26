@@ -65,4 +65,24 @@ describe("theme shell chrome", () => {
     expect(GUMLOOP_LIGHT_CHROME.controlRadius).toBe(10);
     expect(GUMLOOP_LIGHT_CHROME.cardRadius).toBe(14);
   });
+
+  // Spec 38 §4.6 "Menu" (A38.4k): Gumloop menus read at 14 px on 32 px rows with 12/600 group
+  // titles; classic themes keep their menu sizes.
+  it("gives Gumloop menus 14 px labels, 32 px rows and 12/600 group titles", () => {
+    for (const chrome of [GUMLOOP_LIGHT_CHROME, GUMLOOP_DARK_CHROME]) {
+      expect(chrome.menuItemFontSize).toBe(14);
+      expect(chrome.menuItemHeight).toBe(32);
+      expect(chrome.contextMenuItemHeight).toBe(32);
+      expect(chrome.menuGroupTitleSize).toBe(12);
+      expect(chrome.menuGroupTitleWeight).toBe("600");
+    }
+    for (const theme of [lightTheme, darkTheme, darkZincTheme, darkPureBlackTheme]) {
+      expect(theme.chrome.menuItemFontSize).toBe(16);
+      expect(theme.chrome.menuItemHeight).toBe(28);
+      expect(theme.chrome.contextMenuItemHeight).toBe(36);
+      expect(theme.chrome.contextMenuItemPaddingVertical).toBe(8);
+      expect(theme.chrome.menuGroupTitleSize).toBe(14);
+      expect(theme.chrome.menuGroupTitleWeight).toBe("400");
+    }
+  });
 });

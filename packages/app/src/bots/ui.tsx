@@ -15,6 +15,9 @@ export function Input({
   testID,
   editable = true,
   resetKey,
+  hint,
+  error,
+  placeholder,
 }: {
   label: string;
   value: string;
@@ -23,10 +26,15 @@ export function Input({
   testID?: string;
   editable?: boolean;
   resetKey?: string | number;
+  /** 13 px help under the field; wraps, unlike the shared Field hint. */
+  hint?: string;
+  /** Shown under the field in place of the hint. */
+  error?: string | null;
+  placeholder?: string;
 }) {
   const compact = useIsCompactFormFactor();
   return (
-    <Field label={label}>
+    <Field label={label} error={error} testID={testID ? `${testID}-field` : undefined}>
       <FormTextInput
         accessibilityLabel={label}
         value={value}
@@ -38,8 +46,14 @@ export function Input({
         editable={editable}
         size={compact ? "md" : "sm"}
         autoCapitalize="none"
+        placeholder={placeholder}
         testID={testID}
       />
+      {hint && !error ? (
+        <Text style={styles.hint} testID={testID ? `${testID}-field-hint` : undefined}>
+          {hint}
+        </Text>
+      ) : null}
     </Field>
   );
 }

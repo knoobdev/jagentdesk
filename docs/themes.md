@@ -48,8 +48,9 @@ One 324px sidebar (`sidebar.tsx`) holds all app navigation.
 
 Destinations come from `useAppNavItems` and the plugin registries, so a plugin turned on or off on the
 host adds or removes its entry without a reload. A destination only shows while its plugin is
-enabled. Tools starts folded when it has more than six entries. The Tools and Projects folds persist
-per device (`sidebar-state.ts`).
+enabled. Tools and Projects start open, and their folds persist per device (`sidebar-state.ts`). Keep
+Tools open by default: up to v0.10.0 it folded itself past six entries and users never found Docker,
+Data or Jira. The persisted state is versioned, so a fold saved by v0.10.0 is dropped once on upgrade.
 
 Opening a workspace, Settings, or a built-in destination with a left panel drills the sidebar in:
 

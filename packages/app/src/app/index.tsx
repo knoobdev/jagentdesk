@@ -14,27 +14,11 @@ import {
 } from "@/stores/navigation-active-workspace-store";
 import { shouldUseDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
 import { isNative } from "@/constants/platform";
-import { useConnectionMode } from "@/tailscale";
+import { resolveOnboardingRoute } from "@/navigation/onboarding-route";
 import { readGuestShareHint } from "@/screens/share/guest-share-screen";
 
 const isDesktop = shouldUseDesktopDaemon();
-let nativePairingOnboardingLatched = false;
-
-function shouldResumeNativePairing(input: {
-  isNative: boolean;
-  connectionMode: string | null;
-  hostRegistryStatus: "loading" | "ready";
-  hostCount: number;
-}): boolean {
-  if (!input.isNative || input.connectionMode !== "tailscale" || input.hostCount > 0) {
-    nativePairingOnboardingLatched = false;
-    return false;
-  }
-  if (input.hostRegistryStatus === "ready") {
-    nativePairingOnboardingLatched = true;
-  }
-  return nativePairingOnboardingLatched;
-}
+let nativeOnboardingLatched = false;
 
 export default function Index() {
   const pathname = usePathname();
@@ -51,7 +35,6 @@ export default function Index() {
     workspaceSelectionServerId,
     workspaceSelectionWorkspaceId,
   );
-  const { mode: connectionMode, loaded: connectionModeLoaded } = useConnectionMode();
 
   // Session-share guest mode (ADR-0019): a served share page carries a hint — go straight to the
   // guest screen (its own scoped runtime), skipping host list / pairing / workspace selection.
@@ -59,28 +42,16 @@ export default function Index() {
     return <Redirect href={"/share" as Href} />;
   }
 
-  // Hydrate the user's selected transport before routing. Tailscale health is
-  // deliberately not part of this gate: the native node is restored in the
-  // background and the host runtime owns its connecting/offline state.
-  if (!connectionModeLoaded) {
-    return <StartupSplashScreen bootstrapState={isDesktop ? bootstrapState : undefined} />;
-  }
-
-  if ((isNative || isDesktop) && connectionMode === null) {
-    return <Redirect href={isNative ? ("/pair-start" as Href) : "/tailscale-login"} />;
-  }
-
-  // A mobile install that remembers Tailscale mode but has no saved desktop
-  // must resume onboarding. This also recovers an interrupted first pairing
-  // without sending the user to a login screen before an offer exists.
-  if (
-    shouldResumeNativePairing({
-      isNative,
-      connectionMode,
-      hostRegistryStatus,
-      hostCount: hosts.length,
-    })
-  ) {
+  // ADR-0056: a phone without a host opens onboarding; the desktop and the
+  // browser go through the startup resolver (the desktop lands on its Local host).
+  const onboarding = resolveOnboardingRoute({
+    isNative,
+    hostRegistryStatus,
+    hostCount: hosts.length,
+    latched: nativeOnboardingLatched,
+  });
+  nativeOnboardingLatched = onboarding.latched;
+  if (onboarding.route === "connect-workstation") {
     return <Redirect href={"/pair-start" as Href} />;
   }
 

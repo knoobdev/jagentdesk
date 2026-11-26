@@ -13,6 +13,7 @@ import { Alert } from "@/components/ui/alert";
 import { useBotsConnection, useBotAgent, botsKey } from "./queries";
 import { styles } from "./styles";
 import { QueryNotice, ErrorNotice } from "./ui";
+import { TabHint } from "./help";
 interface HomeMarkdownFile extends ExplorerFile {
   content: string;
 }
@@ -146,14 +147,17 @@ export function HomeFiles({ serverId, bot }: { serverId: string; bot: Bot }) {
     },
     [setPath],
   );
+  const intro = <TabHint i18nKey="bots.help.soulMemory" bot={bot} testID="bot-soul-memory-hint" />;
   if (!bot.agentId)
     return (
       <View style={styles.body}>
+        {intro}
         <Text style={styles.muted}>{t("bots.initializeHome")}</Text>
       </View>
     );
   return (
     <ScrollView contentContainerStyle={styles.body}>
+      {intro}
       <View style={styles.row}>
         <Button variant={path === "SOUL.md" ? "default" : "outline"} onPress={openSoul}>
           {t("bots.soul")}

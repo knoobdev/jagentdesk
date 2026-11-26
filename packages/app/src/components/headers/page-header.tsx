@@ -1,4 +1,5 @@
 import { useGumloopDesktopShell } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { GUMLOOP_PAGE_GUTTER } from "@/components/gumloop-shell/list-styles";
 import { useMemo, type ReactNode } from "react";
 import { Text, View } from "react-native";
 import type { LucideIcon } from "lucide-react-native";
@@ -6,6 +7,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import type { Theme } from "@/styles/theme";
+import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { CompactBackButton } from "./compact-back-button";
 import { PageHeaderActionContext } from "./page-header-context";
 
@@ -15,7 +17,10 @@ interface PageHeaderProps {
   /** The section's icon — the same one the rail / sidebar uses for it. */
   icon: LucideIcon;
   title: string;
-  /** One line saying what the page is for (two on phones). Omit when the title says it all (Home). */
+  /**
+   * One line saying what the page is for (two on phones). Every top-level page has one, Home
+   * included (spec 38 §4.1, A38.4j); plugin screens use their manifest `description`.
+   */
   description?: string | null;
   /** Right-side buttons: use `<Button size="sm" leftIcon={…}>`, so every page matches. */
   actions?: ReactNode;
@@ -32,7 +37,8 @@ interface PageHeaderProps {
  * buttons on the right, a one-line description below, then the page's tabs.
  *
  * In the Gumloop desktop shell the title row is the page's top row: 60 px (72 px with a
- * description), so the title lines up with the sidebar's brand row (spec 38 §4.1, A38.4e).
+ * description), so the title lines up with the sidebar's brand row (spec 38 §4.1, A38.4e). It
+ * sits on the shared 32 px page gutter (`GUMLOOP_PAGE_GUTTER`); the page body uses the same one.
  */
 export function PageHeader({
   icon,
@@ -68,6 +74,9 @@ export function PageHeader({
     return (
       <View style={containerStyle} testID={testID}>
         <View style={description ? styles.gumloopRowWithDescription : styles.gumloopRow}>
+          {/* No window title bar in this shell: the title row drags the window and a double
+              click zooms it, like the sidebar's brand row (spec 38 §4.1, A38.4h). */}
+          <TitlebarDragRegion />
           <View style={styles.gumloopTitleBlock}>
             <Text style={styles.gumloopTitle} numberOfLines={1} testID="page-header-title">
               {title}
@@ -111,7 +120,12 @@ const GUMLOOP_TITLE_ROW = 60;
 const GUMLOOP_TITLE_ROW_WITH_DESCRIPTION = 72;
 
 const styles = StyleSheet.create((theme: Theme) => ({
-  gumloopContainer: { paddingHorizontal: 82, paddingTop: 0, paddingBottom: 16, gap: 0 },
+  gumloopContainer: {
+    paddingHorizontal: GUMLOOP_PAGE_GUTTER,
+    paddingTop: 0,
+    paddingBottom: 16,
+    gap: 0,
+  },
   gumloopRow: {
     height: GUMLOOP_TITLE_ROW,
     flexDirection: "row",
@@ -128,7 +142,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
   },
   gumloopTitleBlock: { flexShrink: 1, minWidth: 0, gap: 2 },
   gumloopTitle: {
-    fontSize: 22,
+    fontSize: 20,
     lineHeight: 28,
     fontWeight: "600",
     color: theme.colors.foreground,

@@ -1,6 +1,71 @@
 import type { AgentProvider, ProviderSnapshotEntry } from "@jagentdesk/protocol/agent-types";
 import { BotInputSchema, type Bot, type BotInput } from "@jagentdesk/protocol/bots/types";
 
+const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const SLUG_MAX = 64;
+const NAME_MAX = 64;
+export const IDENTITY_MAX = 500;
+const DEFAULT_INTERVAL_MINUTES = 60;
+
+export type BotFormField =
+  | "name"
+  | "slug"
+  | "identity"
+  | "provider"
+  | "model"
+  | "mode"
+  | "interval";
+/** i18n keys, one per field that holds a wrong value. */
+export type BotFieldErrors = Partial<Record<BotFormField, string>>;
+export interface BotFormValidation {
+  errors: BotFieldErrors;
+  /** i18n key naming the first empty required field; Create stays disabled while it is set. */
+  missing: string | null;
+}
+
+/** Lowercase, hyphen-separated slug from a display name ("Heo Con" → "heo-con"). */
+export function slugFromName(name: string): string {
+  return name
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/gi, "d")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, SLUG_MAX)
+    .replace(/-+$/g, "");
+}
+
+function parseInterval(value: string): number | null {
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const minutes = Number(trimmed);
+  return Number.isSafeInteger(minutes) && minutes >= 1 ? minutes : null;
+}
+
+export function validateBotDraft(draft: BotDraft): BotFormValidation {
+  const errors: BotFieldErrors = {};
+  const name = draft.name.trim();
+  if (name.length > NAME_MAX) errors.name = "bots.errors.nameTooLong";
+  if (draft.slug && (draft.slug.length > SLUG_MAX || !SLUG_PATTERN.test(draft.slug)))
+    errors.slug = "bots.errors.slug";
+  if (draft.identity.trim().length > IDENTITY_MAX) errors.identity = "bots.errors.identityTooLong";
+  if (draft.lookAround && parseInterval(draft.interval) === null)
+    errors.interval = "bots.errors.interval";
+  let missing: string | null = null;
+  if (!name) missing = "bots.required.name";
+  else if (!draft.slug) missing = "bots.required.slug";
+  else if (!draft.provider) missing = "bots.required.provider";
+  else if (!draft.model) missing = "bots.required.model";
+  else if (!draft.modeId) missing = "bots.required.mode";
+  return { errors, missing };
+}
+
+export interface BotInputOptions {
+  /** The host accepts an empty identity (`features.botsOptionalIdentity`). */
+  optionalIdentity: boolean;
+}
+
 export interface BotDraft {
   name: string;
   slug: string;
@@ -15,6 +80,8 @@ export interface BotDraft {
   unattended: boolean;
   lookAround: boolean;
   interval: string;
+  /** Set once the owner types a slug; until then the slug follows the name. */
+  slugEdited: boolean;
 }
 export class BotFormModel {
   private listeners = new Set<() => void>();
@@ -34,7 +101,8 @@ export class BotFormModel {
         defaultRepo: "",
         unattended: false,
         lookAround: false,
-        interval: "60",
+        interval: String(DEFAULT_INTERVAL_MINUTES),
+        slugEdited: false,
       };
       return;
     }
@@ -52,6 +120,7 @@ export class BotFormModel {
       unattended: bot.unattended,
       lookAround: bot.lookAround.enabled,
       interval: String(bot.lookAround.intervalMinutes),
+      slugEdited: true,
     };
   }
 
@@ -62,9 +131,28 @@ export class BotFormModel {
     };
   };
   getState = () => this.state;
-  set<K extends keyof BotDraft>(key: K, value: BotDraft[K]) {
-    this.state = { ...this.state, [key]: value };
+  private publish(state: BotDraft) {
+    this.state = state;
     for (const listener of this.listeners) listener();
+  }
+  set<K extends keyof BotDraft>(key: K, value: BotDraft[K]) {
+    this.publish({ ...this.state, [key]: value });
+  }
+  setName(name: string) {
+    const draft = this.state;
+    this.publish({ ...draft, name, slug: draft.slugEdited ? draft.slug : slugFromName(name) });
+  }
+  /** Clearing the slug hands it back to the name. */
+  setSlug(slug: string) {
+    const edited = slug !== "";
+    this.publish({
+      ...this.state,
+      slug: edited ? slug : slugFromName(this.state.name),
+      slugEdited: edited,
+    });
+  }
+  validation(): BotFormValidation {
+    return validateBotDraft(this.state);
   }
   selectProvider(entry: ProviderSnapshotEntry) {
     const models = entry.models ?? [];
@@ -91,18 +179,27 @@ export class BotFormModel {
     this.state = { ...this.state, modeId: value, modeLabel: label };
     for (const listener of this.listeners) listener();
   }
-  input(): BotInput | null {
+  input(options: BotInputOptions): BotInput | null {
     const draft = this.state;
+    const validation = validateBotDraft(draft);
+    if (validation.missing || Object.keys(validation.errors).length > 0) return null;
+    const name = draft.name.trim();
+    const identity = draft.identity.trim();
     const result = BotInputSchema.safeParse({
-      name: draft.name,
+      name,
       slug: draft.slug,
-      identity: draft.identity,
+      // COMPAT(botsOptionalIdentity): added in v0.10.1; older hosts require an identity, so the
+      // name stands in. Remove after 2027-05-26.
+      identity: identity !== "" || options.optionalIdentity ? identity : name,
       provider: draft.provider,
       model: draft.model,
       modeId: draft.modeId,
       defaultRepo: draft.defaultRepo.trim() || undefined,
       unattended: draft.unattended,
-      lookAround: { enabled: draft.lookAround, intervalMinutes: Number(draft.interval) },
+      lookAround: {
+        enabled: draft.lookAround,
+        intervalMinutes: parseInterval(draft.interval) ?? DEFAULT_INTERVAL_MINUTES,
+      },
     });
     return result.success ? result.data : null;
   }

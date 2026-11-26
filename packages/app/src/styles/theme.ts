@@ -674,6 +674,14 @@ export interface ShellChrome {
   searchHeight: number;
   searchRadius: number;
   tableRowHeight: number;
+  /**
+   * Row floors and vertical padding for plugin tables. They are tokens rather than a
+   * `chrome.kind` check because Unistyles on web compiles theme values to CSS variables, so a
+   * comparison inside a StyleSheet never matches there. Classic keeps its content-sized rows.
+   */
+  tableRowMinHeight: number;
+  tableRowTwoLineMinHeight: number;
+  tableRowPaddingVertical: number;
   switchWidth: number;
   switchHeight: number;
   switchThumbSize: number;
@@ -690,6 +698,17 @@ export interface ShellChrome {
   chipActiveForeground: string;
   sectionTitleWeight: "400" | "500" | "600";
   rowTitleWeight: "400" | "500" | "600";
+  /**
+   * Menus (dropdown, ⋮, context menu, Command Center): label size, pointer row heights and group
+   * titles. Gumloop reads at 14 px on 32 px rows with 12/600 group titles (spec 38 §4.6 "Menu");
+   * classic keeps its own sizes. Phones keep their touch heights from the menu components.
+   */
+  menuItemFontSize: number;
+  menuItemHeight: number;
+  contextMenuItemHeight: number;
+  contextMenuItemPaddingVertical: number;
+  menuGroupTitleSize: number;
+  menuGroupTitleWeight: "400" | "500" | "600";
 }
 
 interface ClassicChromeSource {
@@ -744,6 +763,9 @@ function classicChrome(c: ClassicChromeSource): ShellChrome {
     searchHeight: 34,
     searchRadius: BORDER_RADIUS.md,
     tableRowHeight: 44,
+    tableRowMinHeight: 0,
+    tableRowTwoLineMinHeight: 0,
+    tableRowPaddingVertical: SPACING[2],
     switchWidth: 34,
     switchHeight: 20,
     switchThumbSize: 16,
@@ -758,6 +780,12 @@ function classicChrome(c: ClassicChromeSource): ShellChrome {
     chipActiveForeground: c.foreground,
     sectionTitleWeight: "400",
     rowTitleWeight: "400",
+    menuItemFontSize: FONT_SIZE.base,
+    menuItemHeight: 28,
+    contextMenuItemHeight: 36,
+    contextMenuItemPaddingVertical: SPACING[2],
+    menuGroupTitleSize: FONT_SIZE.sm,
+    menuGroupTitleWeight: "400",
   };
 }
 
@@ -1149,7 +1177,11 @@ function gumloopChrome(c: typeof gumloopLightColors, dark: boolean): ShellChrome
     modalRadius: 16,
     searchHeight: 46,
     searchRadius: 10,
-    tableRowHeight: 72,
+    // Spec 38 §4.6 "Bảng": every Gumloop list/table row is 44px (72px read as too sparse).
+    tableRowHeight: 44,
+    tableRowMinHeight: 44,
+    tableRowTwoLineMinHeight: 56,
+    tableRowPaddingVertical: 0,
     switchWidth: 44,
     switchHeight: 24,
     switchThumbSize: 20,
@@ -1164,6 +1196,12 @@ function gumloopChrome(c: typeof gumloopLightColors, dark: boolean): ShellChrome
     chipActiveForeground: c.foreground,
     sectionTitleWeight: "500",
     rowTitleWeight: "500",
+    menuItemFontSize: FONT_SIZE.sm,
+    menuItemHeight: 32,
+    contextMenuItemHeight: 32,
+    contextMenuItemPaddingVertical: SPACING[1],
+    menuGroupTitleSize: FONT_SIZE.xs,
+    menuGroupTitleWeight: "600",
   };
 }
 export const GUMLOOP_LIGHT_CHROME = gumloopChrome(gumloopLightColors, false);

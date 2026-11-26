@@ -77,11 +77,17 @@ substitutes. Times use Unix milliseconds; cron defaults to UTC unless `timezone`
 | `schedules.save`                                     | `{botId, scheduleId?, schedule: {name, cron, timezone?, prompt, enabled}}` | `{schedule}`                                   |
 | `schedules.delete`                                   | `{botId, scheduleId}`                                                      | `{}`                                           |
 
-BotInput requires `slug`, `name`, `identity`, `provider`, `model`, `modeId`. Optional:
-`thinkingOptionId`, `unattended` (false), `defaultRepo`, `lookAround` (disabled, 60 minutes),
-`githubLogin`, `jiraAccounts: [{connectionId, accountId}]`. BotPatch contains optional versions
-of these fields except immutable `slug`. Returned Bot also has `id`, `agentId?`, `paused`,
-`schedules`, `createdAt_ms`, `updatedAt_ms`.
+BotInput requires `slug`, `name`, `provider`, `model`, `modeId`. Optional: `identity` (up to
+500 characters), `thinkingOptionId`, `unattended` (false), `defaultRepo`, `lookAround`
+(disabled, 60 minutes), `githubLogin`, `jiraAccounts: [{connectionId, accountId}]`. BotPatch
+contains optional versions of these fields except immutable `slug`. Returned Bot also has `id`,
+`agentId?`, `paused`, `schedules`, `createdAt_ms`, `updatedAt_ms`.
+
+An empty identity on create or update is stored as the daemon's default line
+(`DEFAULT_BOT_IDENTITY` in `packages/server/src/server/bots/storage.ts`), which also seeds
+`SOUL.md`. Returned Bots always carry a non-empty identity because apps released before
+`server_info.features.botsOptionalIdentity` reject an empty one. Against a host without that
+flag the app sends the name as the identity (`COMPAT(botsOptionalIdentity)`).
 
 Questions have `text`, `options` (up to 8), optional zero-based `recommended`, and `answer?`.
 An item can have at most five. Partial answers keep Needs you; the last answer wakes the bot.

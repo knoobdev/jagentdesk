@@ -5,6 +5,8 @@ import { SidebarViewPicker } from "@/plugins/sidebar-view/picker";
 import { AppearanceText as Text } from "@/appearance/text";
 import { Portal } from "@gorhom/portal";
 import { GUMLOOP_PANEL_HOST } from "@/components/gumloop-shell/sidebar-state";
+import { GUMLOOP_PAGE_GUTTER } from "@/components/gumloop-shell/list-styles";
+import { settingsPageDescription } from "@/screens/settings/page-description";
 import { useGumloopDesktopShell } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { usePluginDisplayName } from "@/plugins/plugin-list";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
@@ -96,7 +98,7 @@ import { DesktopPermissionsSection } from "@/desktop/components/desktop-permissi
 import { BrowserDataSection } from "@/desktop/browser/settings/browser-data-section";
 import { IntegrationsSection } from "@/desktop/components/integrations-section";
 import { isElectronRuntime } from "@/desktop/host";
-import { setConnectionMode, useConnectionMode } from "@/tailscale";
+import { getSnapshot as getTailscaleSnapshot, setTailnetModeIfUnset } from "@/tailscale";
 import { useAppDiagnosticStore } from "@/diagnostics/store";
 import { settingsStyles } from "@/styles/settings";
 import { THINKING_TONE_NATIVE_PCM_BASE64 } from "@/utils/thinking-tone.native-pcm";
@@ -151,9 +153,21 @@ import { navigateToLastWorkspace } from "@/stores/navigation-active-workspace-st
 // View model
 // ---------------------------------------------------------------------------
 
-function SettingsDesktopHeader({ title, children }: { title: string; children: ReactNode }) {
+function SettingsDesktopHeader({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
   const gumloop = useGumloopDesktopShell(true);
-  return gumloop ? <PageHeader icon={Settings} title={title} description="" /> : children;
+  return gumloop ? (
+    <PageHeader icon={Settings} title={title} description={description} />
+  ) : (
+    children
+  );
 }
 
 export type SettingsView =
@@ -722,6 +736,7 @@ function HostPicker({
   onAddHost,
   enableBuiltInDaemonOption,
 }: HostPickerProps) {
+  const gumloop = useGumloopDesktopShell(true);
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const triggerRef = useRef<View | null>(null);
@@ -775,7 +790,13 @@ function HostPicker({
             <HostStatusDot serverId={activeHost.serverId} />
           </View>
         ) : null}
-        <Text style={sidebarStyles.pickerTriggerLabel} numberOfLines={1}>
+        <Text
+          style={[
+            sidebarStyles.pickerTriggerLabel,
+            gumloop && sidebarStyles.gumloopPickerTriggerLabel,
+          ]}
+          numberOfLines={1}
+        >
           {activeHost?.label ?? t("settings.groups.host")}
         </Text>
       </ComboboxTrigger>
@@ -788,7 +809,11 @@ function SidebarGroup({ label, children }: { label?: string; children: ReactNode
   const gumloop = useGumloopDesktopShell(true);
   return (
     <View style={[sidebarStyles.group, gumloop && sidebarStyles.gumloopList]}>
-      {label ? <Text style={sidebarStyles.groupLabel}>{label}</Text> : null}
+      {label ? (
+        <Text style={gumloop ? sidebarStyles.gumloopGroupLabel : sidebarStyles.groupLabel}>
+          {label}
+        </Text>
+      ) : null}
       <View style={[sidebarStyles.island, gumloop && sidebarStyles.gumloopIsland]}>{children}</View>
     </View>
   );
@@ -819,8 +844,8 @@ function SettingsSidebar({
   const { t } = useTranslation();
   const hosts = useHosts();
   const localServerId = useLocalDaemonServerId();
-  const { mode: connectionMode } = useConnectionMode();
-  const localServerIdForOrdering = connectionMode === "local" ? localServerId : null;
+  // The desktop always reaches its bundled daemon locally, so it sorts first.
+  const localServerIdForOrdering = localServerId;
   const sortedHosts = useSortedHosts(hosts, localServerIdForOrdering);
   const hasHosts = sortedHosts.length > 0;
   const enableBuiltInDaemonOption = useEnableBuiltInDaemonOption();
@@ -987,8 +1012,8 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   const insetBottomStyle = useMemo(() => ({ paddingBottom: insets.bottom }), [insets.bottom]);
   const hosts = useHosts();
   const localServerId = useLocalDaemonServerId();
-  const { mode: connectionMode } = useConnectionMode();
-  const localServerIdForOrdering = connectionMode === "local" ? localServerId : null;
+  // The desktop always reaches its bundled daemon locally, so it sorts first.
+  const localServerIdForOrdering = localServerId;
   const sortedHosts = useSortedHosts(hosts, localServerIdForOrdering);
   const selectedSettingsHostServerId = useSettingsHostSelection();
 
@@ -1088,17 +1113,16 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   }, [handleAddHost, openAddHostIntent]);
 
   const handleSelectDirectConnection = useCallback(() => {
-    // Selecting the direct form is an explicit Local choice. Persist it before
-    // probing so a successful direct connection cannot be stored while the
-    // runtime is still filtering for Tailscale connections.
-    void setConnectionMode("local")
+    // An unpaired device dials relay only. Record a mode before probing so the
+    // direct connection is dialed once saved; an existing sign-in is kept.
+    void setTailnetModeIfUnset("off")
       .then(() => {
         setIsAddHostMethodVisible(false);
         setIsDirectHostVisible(true);
         return undefined;
       })
       .catch(() => {
-        Alert.alert("Connection setup failed", "JAgentDesk could not save Local connection mode.");
+        Alert.alert("Connection setup failed", "JAgentDesk could not save the connection setting.");
       });
   }, []);
 
@@ -1110,24 +1134,13 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
 
   const handleSelectTailscale = useCallback(() => {
     setIsAddHostMethodVisible(false);
-    // A tailnet offer already contains the daemon address and public key.
-    // Never ask users to manually copy protocol fields; mobile obtains them
-    // from the desktop QR/deep-link and only asks for the six-digit proof.
-    if (isNative) {
-      router.push({ pathname: "/pair-scan", params: { source: "settings" } });
-      return;
-    }
-    // Desktop is the offer source, not a QR scanner. Open its real pairing
-    // screen so it generates the QR/deep-link and six-digit proof.
-    if (activeHostServerId) {
-      router.replace(buildSettingsHostSectionRoute(activeHostServerId, "pair-device"));
-      return;
-    }
-    // On a fresh desktop there is no host yet. The explicit login gate starts
-    // the app-owned daemon, joins Tailscale, and then the runtime creates the
-    // first tailnet host from its verified status. Do not silently no-op.
-    router.replace("/tailscale-login");
-  }, [activeHostServerId, router]);
+    // ADR-0056: "Sign in to Tailscale" joins this device to the tailnet so
+    // tailnet-only pairing links work. Pairing itself stays on Scan/Paste.
+    router.push({
+      pathname: "/tailscale-login",
+      params: getTailscaleSnapshot().kind === "connected" ? { manage: "true" } : {},
+    });
+  }, [router]);
 
   const handleHostAdded = useCallback(
     ({ serverId }: { serverId: string }) => {
@@ -1205,9 +1218,9 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   }, [closeAddConnectionFlow, router]);
 
   const handleHostRemoved = useCallback(() => {
-    // Removing a host must never silently switch transport to Local. Return to
-    // the explicit connection chooser so the user chooses Local or Tailscale.
-    router.replace(isNative ? "/pair-start" : "/tailscale-login");
+    // A phone with no host goes back to "Connect your workstation"; the desktop
+    // and the browser go back through the startup route.
+    router.replace(isNative ? "/pair-start?step=connect" : "/");
   }, [router]);
 
   const handleBackToRoot = useCallback(() => {
@@ -1456,7 +1469,10 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
         )}
         <WindowChromeRegion corners="top-right">
           <View style={desktopStyles.contentPane} testID="settings-detail-pane">
-            <SettingsDesktopHeader title={detailHeader?.title ?? "Settings"}>
+            <SettingsDesktopHeader
+              title={detailHeader?.title ?? "Settings"}
+              description={settingsPageDescription(view)}
+            >
               <ScreenHeader
                 borderless={!detailHeader}
                 left={desktopDetailHeaderLeft}
@@ -1504,7 +1520,13 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     backgroundColor: theme.chrome.pageCanvas,
   },
-  gumloopContent: { maxWidth: 1134, paddingHorizontal: 82, paddingTop: 0, alignSelf: "stretch" },
+  // Full width on the shared page gutter, like every Gumloop page (spec 38 §4.1, A38.4i).
+  gumloopContent: {
+    maxWidth: "100%",
+    paddingHorizontal: GUMLOOP_PAGE_GUTTER,
+    paddingTop: 0,
+    alignSelf: "stretch",
+  },
   content: {
     padding: theme.spacing[4],
     paddingTop: theme.spacing[6],
@@ -1569,6 +1591,14 @@ const sidebarStyles = StyleSheet.create((theme) => ({
   gumloopContainer: { paddingHorizontal: 10, paddingBottom: 16 },
   gumloopIsland: { gap: 3 },
   gumloopList: { paddingHorizontal: 0, gap: 3 },
+  // Group titles read like the sidebar's Tools and Projects headings: 14 px muted (spec 38 §4.2).
+  gumloopGroupLabel: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.normal,
+    color: theme.colors.foregroundMuted,
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+  },
   desktopContainer: {
     width: SETTINGS_DESKTOP_SIDEBAR_WIDTH,
     flexShrink: 1,
@@ -1650,6 +1680,7 @@ const sidebarStyles = StyleSheet.create((theme) => ({
     color: theme.colors.foreground,
     fontWeight: theme.fontWeight.normal,
   },
+  gumloopPickerTriggerLabel: { fontSize: theme.fontSize.sm, fontWeight: "500" },
   // Match the setting items' icon footprint so the host label aligns with them.
   pickerTriggerDot: {
     width: densityIconBox("md"),
