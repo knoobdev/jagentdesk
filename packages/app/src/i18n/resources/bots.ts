@@ -1,4 +1,5 @@
 import { botsOrcaStrings } from "./bots-orca";
+import { botsOrcaPhoneStrings } from "./bots-orca-phone";
 import { botsJadDialogsStrings } from "./bots-jad-dialogs";
 import { botsJadItemsStrings } from "./bots-jad-items";
 import { botsJadPanelsStrings } from "./bots-jad-panels";
@@ -177,9 +178,11 @@ const botsJadStrings = {
   },
 } as const;
 
-/** `bots.*`: Orca's strings verbatim (`bots-orca.ts`), and JAgentDesk's under `bots.jad`. */
+/** `bots.*`: Orca's strings verbatim (`bots-orca.ts`), Orca's phone strings under `bots.phone`
+ *  (`bots-orca-phone.ts`), and JAgentDesk's under `bots.jad`. */
 export const botsStrings = {
   ...botsOrcaStrings,
+  phone: botsOrcaPhoneStrings,
   jad: {
     ...botsJadStrings,
     items: botsJadItemsStrings,
