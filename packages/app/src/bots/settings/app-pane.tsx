@@ -1,6 +1,7 @@
-// Settings › Plugins › Bots (spec 37.4.12): "Enable bots" turns the host's `bots` built-in plugin on
-// or off; "Ask before a new Home Chat" is this device's. Ported from Orca dfdb4fda (MIT)
-// src/renderer/src/components/settings/bots/BotsSettingsPane.tsx:1-59.
+// The app's Bots settings (spec 37.4.12), split by p176's settings map (Paseo #10933): "Enable bots"
+// turns the host's `bots` built-in plugin on or off and sits in Host › Plugins; "Ask before a new
+// Home Chat" is stored on this device and sits in This device › Chat & panes. Ported from Orca
+// dfdb4fda (MIT) src/renderer/src/components/settings/bots/BotsSettingsPane.tsx:1-59.
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SettingsCard, SettingsRow } from "@/components/settings";
@@ -13,8 +14,6 @@ import { useBotsPreferences } from "./preferences-store";
 export function BotsAppSettingsSection({ serverId }: { serverId: string }) {
   const { t } = useTranslation();
   const plugins = useBuiltinPlugins(serverId);
-  const ask = useBotsPreferences((state) => state.askNewHomeChat);
-  const setAsk = useBotsPreferences((state) => state.setAskNewHomeChat);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const bots = plugins.data?.plugins.find((plugin) => plugin.id === "bots");
@@ -51,19 +50,30 @@ export function BotsAppSettingsSection({ serverId }: { serverId: string }) {
             testID="bots-app-settings-enable"
           />
         </SettingsRow>
-        {enabled ? (
-          <SettingsRow
-            label={t("bots.settingsBots.askNewHomeChat")}
-            hint={t("bots.settingsBots.askNewHomeChatDescription")}
-          >
-            <Switch
-              value={ask}
-              onValueChange={setAsk}
-              accessibilityLabel={t("bots.settingsBots.askNewHomeChat")}
-              testID="bots-app-settings-ask-new-home-chat"
-            />
-          </SettingsRow>
-        ) : null}
+      </SettingsCard>
+    </SettingsSection>
+  );
+}
+
+/** This device › Chat & panes › Bots: whether "New Home Chat" asks before it replaces a bot's chat. */
+export function BotsDeviceSettingsSection() {
+  const { t } = useTranslation();
+  const ask = useBotsPreferences((state) => state.askNewHomeChat);
+  const setAsk = useBotsPreferences((state) => state.setAskNewHomeChat);
+  return (
+    <SettingsSection title={t("bots.settingsBots.title")} testID="bots-device-settings">
+      <SettingsCard>
+        <SettingsRow
+          label={t("bots.settingsBots.askNewHomeChat")}
+          hint={t("bots.settingsBots.askNewHomeChatDescription")}
+        >
+          <Switch
+            value={ask}
+            onValueChange={setAsk}
+            accessibilityLabel={t("bots.settingsBots.askNewHomeChat")}
+            testID="bots-app-settings-ask-new-home-chat"
+          />
+        </SettingsRow>
       </SettingsCard>
     </SettingsSection>
   );

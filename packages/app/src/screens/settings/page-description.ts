@@ -10,7 +10,7 @@ const SECTION_DESCRIPTIONS: Record<string, string> = {
   hosts: "Hosts this device connects to.",
   appearance: "Theme, text size and layout.",
   sidebar: "What the sidebar shows and in which order.",
-  chat: "Sending, files, terminals and the browser on this device.",
+  chat: "Sending, files, terminals, the browser and Bots on this device.",
   shortcuts: "Keyboard shortcuts in this app.",
   notifications: "Notifications and microphone access for this app.",
   diagnostics: "Logs and checks for troubleshooting.",

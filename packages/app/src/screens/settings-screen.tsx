@@ -96,6 +96,7 @@ import { AddHostModal } from "@/components/add-host-modal";
 import { PairLinkModal } from "@/components/pair-link-modal";
 import { KeyboardShortcutsSection } from "@/screens/settings/keyboard-shortcuts-section";
 import { EditorSection } from "@/screens/settings/editor-section";
+import { BotsDeviceSettingsSection } from "@/bots/settings/app-pane";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
@@ -1558,6 +1559,7 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
               />
               <EditorSection />
               {isDesktopApp ? <BrowserDataSection /> : null}
+              <BotsDeviceSettingsSection />
             </>
           );
         case "shortcuts":
