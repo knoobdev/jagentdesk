@@ -11,7 +11,14 @@ import {
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { Pressable, Text, View, useWindowDimensions } from "react-native";
+import {
+  Pressable,
+  Text,
+  View,
+  useWindowDimensions,
+  type StyleProp,
+  type ViewStyle,
+} from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { ChevronLeft } from "lucide-react-native";
@@ -31,7 +38,7 @@ import { useRetainedPanelActive } from "@/components/retained-panel";
 import { useMenuContext, MenuContextProvider } from "./menu-context";
 import { MenuPage } from "./menu-item";
 import { currentPageId, isSubPageOpen } from "./menu-navigation";
-import { AnchoredSurface, MenuOverlay } from "./menu-overlay";
+import { AnchoredSurface, MenuOverlay, type AnchoredSurfaceBoundary } from "./menu-overlay";
 import { getMenuSheetBottomPadding } from "./menu-sheet-layout";
 import type { Alignment, Placement } from "./menu-anchor";
 import type { KeyboardFocusScope } from "@/keyboard/actions";
@@ -122,6 +129,10 @@ export interface MenuSurfaceProps {
   fullWidth?: boolean;
   horizontalPadding?: number;
   scrollable?: boolean;
+  /** Popover only: keep the surface inside this view instead of the window. */
+  boundary?: AnchoredSurfaceBoundary;
+  /** Popover only: overrides the surface's radius or border for a panel that needs its own. */
+  surfaceStyle?: StyleProp<ViewStyle>;
   testID?: string;
   /** Limits ordinary app shortcuts to the time this menu owns keyboard focus. */
   keyboardFocusScope?: KeyboardFocusScope;
@@ -224,6 +235,8 @@ function MenuPopoverSurface({
   fullWidth = false,
   horizontalPadding = 16,
   scrollable = false,
+  boundary,
+  surfaceStyle,
   testID,
   keyboardFocusScope,
 }: MenuSurfaceProps): ReactElement | null {
@@ -280,6 +293,8 @@ function MenuPopoverSurface({
             fullWidth={fullWidth}
             horizontalPadding={horizontalPadding}
             scrollable={scrollable}
+            boundary={boundary}
+            surfaceStyle={surfaceStyle}
             testID={testID}
             keyboardFocusScope={keyboardFocusScope}
           >

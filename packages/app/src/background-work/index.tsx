@@ -8,17 +8,16 @@ import {
 } from "react";
 import { Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
-import { Activity, ChevronLeft, CircleDashed, SquareTerminal } from "lucide-react-native";
-import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { ComposerTrackPill, ComposerTrackRow } from "@/composer/tracks";
+import { StyleSheet } from "react-native-unistyles";
+import { ComposerTrackPill, ComposerTrackRow, useComposerTrackPanelRoom } from "@/composer/tracks";
 import { LiveElapsed } from "@/components/message";
 import { Button } from "@/components/ui/button";
 import { useMenuContext, type MenuPageDefinition } from "@/components/ui/menu";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { CODE_SURFACE_DATASET } from "@/styles/code-surface";
-import type { Theme } from "@/styles/theme";
 import type { JAgentDeskAgentBackgroundWorkItem } from "@jagentdesk/client";
 import { BackgroundWorkDetail } from "./detail";
+import { backgroundWorkKind, BackgroundWorkKindIcon } from "./kind";
 import { backgroundWorkText } from "./presentation";
 import {
   consumeBackgroundWorkTrackOpen,
@@ -27,27 +26,6 @@ import {
   type BackgroundWorkModel,
 } from "./shared";
 export { createHostBackgroundWorkModel } from "./host";
-
-const ThemedSquareTerminal = withUnistyles(SquareTerminal);
-const ThemedActivity = withUnistyles(Activity);
-const ThemedCircleDashed = withUnistyles(CircleDashed);
-const ThemedChevronLeft = withUnistyles(ChevronLeft);
-const foregroundMutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
-
-type BackgroundWorkKind = "shell" | "monitor" | "heartbeat" | "other";
-
-function kindKey(kind: string): BackgroundWorkKind {
-  if (kind === "shell" || kind === "monitor" || kind === "heartbeat") return kind;
-  return "other";
-}
-
-function KindIcon({ kind }: { kind: BackgroundWorkKind }): ReactElement {
-  if (kind === "shell")
-    return <ThemedSquareTerminal size={14} uniProps={foregroundMutedColorMapping} />;
-  if (kind === "monitor" || kind === "heartbeat")
-    return <ThemedActivity size={14} uniProps={foregroundMutedColorMapping} />;
-  return <ThemedCircleDashed size={14} uniProps={foregroundMutedColorMapping} />;
-}
 
 type TrackRow =
   | { state: "live"; item: JAgentDeskAgentBackgroundWorkItem }
@@ -85,12 +63,7 @@ export interface BackgroundWorkTrackProps {
   onOpenInTab?: (itemId: string) => void;
 }
 
-/** Height of the output in a popover or sheet; the tab lets it fill the pane. */
-const PANEL_OUTPUT_HEIGHT = 220;
-const SHEET_OUTPUT_HEIGHT = 300;
-/** The popover holds a terminal, which needs a definite width. */
-const POPOVER_DETAIL_WIDTH = 560;
-/** Room for the facts and the output; the surface still clamps to the viewport. */
+/** Room for the header, command and output; the panel still fits the chat area above the pills. */
 const POPOVER_DETAIL_MAX_HEIGHT = 720;
 
 function detailPageId(itemId: string): string {
@@ -121,13 +94,13 @@ export function BackgroundWorkTrack({
   }, []);
   const pages = useMemo<MenuPageDefinition[] | undefined>(() => {
     if (!isCompact) return undefined;
+    // Full-height pages: the detail draws its own Back row, and the output takes the rest.
     return rows.map((row) => ({
       id: detailPageId(row.item.id),
-      title: t("message.backgroundWork.detail.title"),
-      hoverIntent: false,
+      fill: true,
       content: <SheetDetailPage serverId={serverId} agentId={agentId} item={row.item} />,
     }));
-  }, [agentId, isCompact, rows, serverId, t]);
+  }, [agentId, isCompact, rows, serverId]);
   // A sidebar line asks for the track to open when it navigates here.
   const openRequest = useBackgroundWorkTrackOpenRequest(serverId, agentId);
   useEffect(() => {
@@ -150,6 +123,7 @@ export function BackgroundWorkTrack({
   else if (running > 1) label = t("message.backgroundWork.pillMany", { count: running });
 
   const selectedRow = selected ? rows.find((row) => row.item.id === selected) : undefined;
+  const showsDetail = !isCompact && selected !== null;
   return (
     <ComposerTrackPill
       testID="background-work"
@@ -158,7 +132,8 @@ export function BackgroundWorkTrack({
       open={open}
       onOpenChange={setOpen}
       pages={pages}
-      panelMaxHeight={!isCompact && selected ? POPOVER_DETAIL_MAX_HEIGHT : undefined}
+      panelMaxHeight={showsDetail ? POPOVER_DETAIL_MAX_HEIGHT : undefined}
+      panelSurfaceStyle={showsDetail ? styles.detailSurface : undefined}
     >
       {!isCompact && selected ? (
         <PopoverDetail
@@ -197,29 +172,21 @@ function PopoverDetail({
   onBack: () => void;
   onOpenInTab?: () => void;
 }): ReactElement {
-  const { t } = useTranslation();
+  const room = useComposerTrackPanelRoom();
   return (
-    <View style={styles.popoverDetail}>
-      <ComposerTrackRow
-        onPress={onBack}
-        closeOnSelect={false}
-        accessibilityLabel={t("message.backgroundWork.detail.back")}
-        testID="background-work-detail-back"
-      >
-        <ThemedChevronLeft size={16} uniProps={foregroundMutedColorMapping} />
-        <Text style={styles.label}>{t("message.backgroundWork.title")}</Text>
-      </ComposerTrackRow>
-      <BackgroundWorkDetail
-        serverId={serverId}
-        agentId={agentId}
-        itemId={itemId}
-        fallbackItem={fallbackItem}
-        variant="panel"
-        outputHeight={PANEL_OUTPUT_HEIGHT}
-        onOpenInTab={onOpenInTab}
-        onDismissed={onBack}
-      />
-    </View>
+    <BackgroundWorkDetail
+      serverId={serverId}
+      agentId={agentId}
+      itemId={itemId}
+      fallbackItem={fallbackItem}
+      variant="popover"
+      popoverMaxHeight={
+        room === null ? POPOVER_DETAIL_MAX_HEIGHT : Math.min(room, POPOVER_DETAIL_MAX_HEIGHT)
+      }
+      onBack={onBack}
+      onOpenInTab={onOpenInTab}
+      onDismissed={onBack}
+    />
   );
 }
 
@@ -242,8 +209,8 @@ function SheetDetailPage({
       agentId={agentId}
       itemId={item.id}
       fallbackItem={item}
-      variant="panel"
-      outputHeight={SHEET_OUTPUT_HEIGHT}
+      variant="sheet"
+      onBack={back}
       onDismissed={back}
     />
   );
@@ -344,7 +311,7 @@ function BackgroundWorkRowContent({
 }): ReactElement {
   const { t } = useTranslation();
   const { item } = row;
-  const kind = kindKey(item.kind);
+  const kind = backgroundWorkKind(item.kind);
   const kindLabel = t(`message.backgroundWork.${kind}`);
   const { title, command } = backgroundWorkText(item, kindLabel);
   const stop = useCallback(() => {
@@ -360,7 +327,7 @@ function BackgroundWorkRowContent({
   const labelIsCommand = Boolean(command ?? item.command);
   return (
     <>
-      <KindIcon kind={kind} />
+      <BackgroundWorkKindIcon kind={kind} />
       <Text
         style={labelIsCommand ? styles.commandLabel : styles.label}
         numberOfLines={1}
@@ -432,8 +399,9 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foreground,
   },
   facts: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
-  popoverDetail: {
-    width: POPOVER_DETAIL_WIDTH,
-    maxWidth: "100%",
+  // The detail is a panel, not a menu: radius 12 and the standard border (spec 04 §27c).
+  detailSurface: {
+    borderRadius: theme.borderRadius.xl,
+    borderColor: theme.colors.border,
   },
 }));

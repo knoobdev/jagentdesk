@@ -94,12 +94,18 @@ export function useBackgroundWorkOutput(input: {
   itemId: string;
   enabled: boolean;
   onWrite: (write: BackgroundWorkOutputWrite) => void;
-}): { status: BackgroundWorkOutputStatus; getBuffer: () => BackgroundWorkOutputBuffer } {
+}): {
+  status: BackgroundWorkOutputStatus;
+  /** False until the task has written something; the view shows "Waiting for output…". */
+  hasOutput: boolean;
+  getBuffer: () => BackgroundWorkOutputBuffer;
+} {
   const { serverId, agentId, itemId, enabled } = input;
   const { t } = useTranslation();
   const client = useHostRuntimeClient(serverId);
   const connected = useHostRuntimeIsConnected(serverId);
   const [status, setStatus] = useState<BackgroundWorkOutputStatus>("connecting");
+  const [hasOutput, setHasOutput] = useState(false);
   const bufferRef = useRef<BackgroundWorkOutputBuffer>(EMPTY_OUTPUT_BUFFER);
   const onWriteRef = useRef(input.onWrite);
   onWriteRef.current = input.onWrite;
@@ -137,6 +143,7 @@ export function useBackgroundWorkOutput(input: {
             }
             const next = applyOutputChunk(bufferRef.current, push, skippedLabelRef.current);
             bufferRef.current = next.buffer;
+            setHasOutput(next.buffer.text.length > 0);
             onWriteRef.current(next.write);
             setStatus("live");
           },
@@ -155,5 +162,5 @@ export function useBackgroundWorkOutput(input: {
   }, [agentId, client, connected, enabled, itemId]);
 
   const getBuffer = useCallback(() => bufferRef.current, []);
-  return { status, getBuffer };
+  return { status, hasOutput, getBuffer };
 }

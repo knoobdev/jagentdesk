@@ -99,16 +99,17 @@ function clampToDisplayArea(input: {
   y: number;
   contentSize: Size;
   displayArea: Rect;
+  edgePadding: number;
 }): { x: number; y: number } {
-  const { x, y, contentSize, displayArea } = input;
+  const { x, y, contentSize, displayArea, edgePadding } = input;
   return {
     x: Math.max(
-      displayArea.x + EDGE_PADDING,
-      Math.min(displayArea.x + displayArea.width - contentSize.width - EDGE_PADDING, x),
+      displayArea.x + edgePadding,
+      Math.min(displayArea.x + displayArea.width - contentSize.width - edgePadding, x),
     ),
     y: Math.max(
-      displayArea.y + EDGE_PADDING,
-      Math.min(displayArea.y + displayArea.height - contentSize.height - EDGE_PADDING, y),
+      displayArea.y + edgePadding,
+      Math.min(displayArea.y + displayArea.height - contentSize.height - edgePadding, y),
     ),
   };
 }
@@ -120,6 +121,7 @@ export function computePosition({
   placement,
   alignment,
   offset,
+  edgePadding = EDGE_PADDING,
 }: {
   triggerRect: Rect;
   contentSize: Size;
@@ -127,6 +129,8 @@ export function computePosition({
   placement: Placement;
   alignment: Alignment;
   offset: number;
+  /** Gap kept to the display area's edges; defaults to the screen-edge gap. */
+  edgePadding?: number;
 }): { x: number; y: number; actualPlacement: Placement } {
   const actualPlacement = flipPlacement({
     placement,
@@ -141,7 +145,10 @@ export function computePosition({
     alignment,
     offset,
   });
-  return { ...clampToDisplayArea({ ...anchored, contentSize, displayArea }), actualPlacement };
+  return {
+    ...clampToDisplayArea({ ...anchored, contentSize, displayArea, edgePadding }),
+    actualPlacement,
+  };
 }
 
 export function getTransformOrigin(

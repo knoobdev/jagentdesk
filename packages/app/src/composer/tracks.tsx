@@ -1,5 +1,22 @@
-import { useCallback, useMemo, useState, type ReactElement, type ReactNode } from "react";
-import { Pressable, Text, View } from "react-native";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+  type RefObject,
+} from "react";
+import {
+  Pressable,
+  Text,
+  View,
+  type LayoutChangeEvent,
+  type StyleProp,
+  type ViewStyle,
+} from "react-native";
 import { GestureDetector } from "react-native-gesture-handler";
 import Animated from "react-native-reanimated";
 import { StyleSheet } from "react-native-unistyles";
@@ -11,6 +28,7 @@ import {
   MenuTrigger,
   useMenuContext,
   useMenuDepth,
+  type AnchoredSurfaceBoundary,
   type MenuPageDefinition,
   type MenuTriggerState,
 } from "@/components/ui/menu";
@@ -26,6 +44,7 @@ import { usePanelAwareHorizontalScrollGesture } from "@/mobile-panels/gestures";
 import { getStatusDotColor } from "@/utils/status-dot-color";
 import { STATUS_INDICATOR_FILLED_DOT_SIZE } from "@/utils/status-indicator-geometry";
 import type { SidebarStateBucket } from "@/utils/sidebar-agent-state";
+import { SPACING } from "@/styles/theme";
 import { COMPOSER_PILL_CLEARANCE, composerPillStyles } from "./pill-styles";
 
 /**
@@ -44,42 +63,89 @@ import { COMPOSER_PILL_CLEARANCE, composerPillStyles } from "./pill-styles";
 export function ComposerTrackBar({ children }: { children: ReactNode }): ReactElement {
   const scrollGesture = usePanelAwareHorizontalScrollGesture();
   const scrollBoundary = useHorizontalScrollBoundary();
-  return (
-    <View
-      style={styles.bar}
-      dataSet={CHAT_COLUMN_RAIL_DATASET}
-      pointerEvents="box-none"
-      testID="composer-track-bar"
-    >
-      <View style={styles.trackViewport} pointerEvents="box-none">
-        <GestureDetector gesture={scrollGesture}>
-          <Animated.ScrollView
-            testID="composer-track-scroll"
-            style={styles.trackScroller}
-            horizontal
-            keyboardShouldPersistTaps="handled"
-            showsHorizontalScrollIndicator={false}
-            onLayout={scrollBoundary.onLayout}
-            onContentSizeChange={scrollBoundary.onContentSizeChange}
-            onScroll={scrollBoundary.onScroll}
-            scrollEventThrottle={16}
-          >
-            <View style={styles.track} pointerEvents="box-none">
-              {children}
-            </View>
-          </Animated.ScrollView>
-        </GestureDetector>
-        <HorizontalScrollBoundaryShades
-          visible
-          backdrop="surface"
-          testIDPrefix="composer-track-scroll-shade"
-          bottomInset={0}
-          leftStyle={scrollBoundary.leftShadeStyle}
-          rightStyle={scrollBoundary.rightShadeStyle}
-        />
-      </View>
-    </View>
+  const chatAreaRef = useRef<View>(null);
+  const [areaHeight, setAreaHeight] = useState<number | null>(null);
+  const [barHeight, setBarHeight] = useState<number | null>(null);
+  const onAreaLayout = useCallback((event: LayoutChangeEvent) => {
+    setAreaHeight(event.nativeEvent.layout.height);
+  }, []);
+  const onBarLayout = useCallback((event: LayoutChangeEvent) => {
+    setBarHeight(event.nativeEvent.layout.height);
+  }, []);
+  const chatArea = useMemo<ComposerTrackChatArea>(
+    () => ({
+      ref: chatAreaRef,
+      panelRoom:
+        areaHeight === null || barHeight === null
+          ? null
+          : Math.max(0, areaHeight - barHeight - PANEL_OFFSET - PANEL_CHAT_AREA_INSET),
+    }),
+    [areaHeight, barHeight],
   );
+  return (
+    <ComposerTrackChatAreaContext.Provider value={chatArea}>
+      {/* The chat area the bar floats over: its panels open inside it, not across the window. */}
+      <View
+        ref={chatAreaRef}
+        style={styles.chatArea}
+        pointerEvents="none"
+        collapsable={false}
+        onLayout={onAreaLayout}
+        testID="composer-track-chat-area"
+      />
+      <View
+        style={styles.bar}
+        onLayout={onBarLayout}
+        dataSet={CHAT_COLUMN_RAIL_DATASET}
+        pointerEvents="box-none"
+        testID="composer-track-bar"
+      >
+        <View style={styles.trackViewport} pointerEvents="box-none">
+          <GestureDetector gesture={scrollGesture}>
+            <Animated.ScrollView
+              testID="composer-track-scroll"
+              style={styles.trackScroller}
+              horizontal
+              keyboardShouldPersistTaps="handled"
+              showsHorizontalScrollIndicator={false}
+              onLayout={scrollBoundary.onLayout}
+              onContentSizeChange={scrollBoundary.onContentSizeChange}
+              onScroll={scrollBoundary.onScroll}
+              scrollEventThrottle={16}
+            >
+              <View style={styles.track} pointerEvents="box-none">
+                {children}
+              </View>
+            </Animated.ScrollView>
+          </GestureDetector>
+          <HorizontalScrollBoundaryShades
+            visible
+            backdrop="surface"
+            testIDPrefix="composer-track-scroll-shade"
+            bottomInset={0}
+            leftStyle={scrollBoundary.leftShadeStyle}
+            rightStyle={scrollBoundary.rightShadeStyle}
+          />
+        </View>
+      </View>
+    </ComposerTrackChatAreaContext.Provider>
+  );
+}
+
+interface ComposerTrackChatArea {
+  ref: RefObject<View | null>;
+  /** Height a panel has between the pills and the chat area's top inset; null until measured. */
+  panelRoom: number | null;
+}
+
+const ComposerTrackChatAreaContext = createContext<ComposerTrackChatArea | null>(null);
+
+/**
+ * How tall a track panel may be: the chat area above the pill row, less the panel's offset and
+ * top inset. A panel that fits its content to this never needs to scroll its own frame.
+ */
+export function useComposerTrackPanelRoom(): number | null {
+  return useContext(ComposerTrackChatAreaContext)?.panelRoom ?? null;
 }
 
 export interface ComposerTrackPillSegment {
@@ -110,6 +176,8 @@ export interface ComposerTrackPillProps {
   onOpenChange?: (open: boolean) => void;
   /** A panel showing more than rows (a background task's output) can ask for more height. */
   panelMaxHeight?: number;
+  /** Overrides the panel surface's chrome (radius, border) while it shows something other than rows. */
+  panelSurfaceStyle?: StyleProp<ViewStyle>;
 }
 
 /**
@@ -127,6 +195,8 @@ const PANEL_MAX_HEIGHT = 440;
  * separate from the pill that opened it.
  */
 const PANEL_OFFSET = 12;
+/** A panel never comes closer than this to the chat area's edges (spec 04 §27c). */
+const PANEL_CHAT_AREA_INSET = SPACING[4];
 
 export function ComposerTrackPill({
   segments,
@@ -138,7 +208,16 @@ export function ComposerTrackPill({
   open,
   onOpenChange,
   panelMaxHeight = PANEL_MAX_HEIGHT,
+  panelSurfaceStyle,
 }: ComposerTrackPillProps): ReactElement {
+  const chatArea = useContext(ComposerTrackChatAreaContext);
+  const chatAreaRef = chatArea?.ref;
+  const panelRoom = chatArea?.panelRoom ?? null;
+  const boundary = useMemo<AnchoredSurfaceBoundary | undefined>(
+    () => (chatAreaRef ? { ref: chatAreaRef, padding: PANEL_CHAT_AREA_INSET } : undefined),
+    [chatAreaRef],
+  );
+  const maxHeight = panelRoom === null ? panelMaxHeight : Math.min(panelMaxHeight, panelRoom);
   return (
     <MenuRoot compactMode="sheet" open={open} onOpenChange={onOpenChange}>
       <ComposerTrackPillTrigger
@@ -154,7 +233,9 @@ export function ComposerTrackPill({
         pages={pages}
         minWidth={PANEL_MIN_WIDTH}
         maxWidth={PANEL_MAX_WIDTH}
-        maxHeight={panelMaxHeight}
+        maxHeight={maxHeight}
+        boundary={boundary}
+        surfaceStyle={panelSurfaceStyle}
         scrollable
         testID={`${testID}-panel`}
       >
@@ -406,6 +487,13 @@ const styles = StyleSheet.create((theme) => {
   } as const;
 
   return {
+    chatArea: {
+      position: "absolute",
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+    },
     bar: {
       position: "absolute",
       left: 0,
