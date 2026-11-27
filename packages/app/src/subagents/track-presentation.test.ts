@@ -5,7 +5,9 @@ import {
   buildSubagentPillPresentation,
   buildSubagentRowPresentationData,
   countFinishedSubagents,
+  orderSubagentRowsForTrack,
   resolveRowLabel,
+  subagentRowOutcome,
 } from "./track-presentation";
 
 function row(
@@ -306,5 +308,68 @@ describe("provider-owned row subtitles", () => {
         providerRow({ description: null, subtitle: null, title: "general-purpose" }),
       ).subtitle,
     ).toBe("");
+  });
+});
+
+describe("a long Claude fan-out with one failed child", () => {
+  // The reported case: dozens of Task children, almost all completed, a few the user stopped,
+  // and one that Claude Code itself reported failed (an API error) somewhere in the middle.
+  function child(index: number, status: ProviderSubagentRow["status"]): ProviderSubagentRow {
+    return {
+      kind: "provider",
+      id: `toolu_${index}`,
+      parentAgentId: "parent",
+      provider: "claude",
+      title: "general-purpose",
+      description: `Task ${index}`,
+      subtitle: "general-purpose · Opus 5.5 · High · 459.3k tokens",
+      status,
+      requiresAttention: status === "failed",
+      createdAt: new Date(Date.UTC(2026, 10, 25, 0, index)),
+    };
+  }
+  const fanOut: ProviderSubagentRow[] = Array.from({ length: 64 }, (_, index) => {
+    if (index === 31) return child(index, "failed");
+    if (index === 60 || index === 61 || index === 62) return child(index, "canceled");
+    return child(index, "completed");
+  });
+
+  beforeAll(async () => {
+    if (!i18n.isInitialized) await i18n.init();
+    await i18n.changeLanguage("en");
+  });
+
+  it("counts only the child that failed, not the ones the user stopped", () => {
+    expect(buildSubagentPillPresentation(i18n.t, fanOut).segments).toEqual([
+      { bucket: "failed", text: "1 failed" },
+    ]);
+  });
+
+  it("lists the failed child first, so the count points at a visible row", () => {
+    const ordered = orderSubagentRowsForTrack(fanOut);
+    expect(ordered[0]?.id).toBe("toolu_31");
+    expect(ordered).toHaveLength(fanOut.length);
+  });
+
+  it("keeps launch order within each state", () => {
+    const ordered = orderSubagentRowsForTrack([
+      child(3, "completed"),
+      child(1, "running"),
+      child(2, "failed"),
+      child(0, "running"),
+    ]).map((entry) => entry.id);
+    expect(ordered).toEqual(["toolu_2", "toolu_1", "toolu_0", "toolu_3"]);
+  });
+
+  it("marks the failed row failed and a stopped row stopped, never failed", () => {
+    expect(subagentRowOutcome(child(31, "failed"))).toBe("failed");
+    expect(subagentRowOutcome(child(60, "canceled"))).toBe("stopped");
+    expect(subagentRowOutcome(child(0, "completed"))).toBeNull();
+    expect(subagentRowOutcome(child(1, "running"))).toBeNull();
+  });
+
+  it("marks a managed child that errored as failed", () => {
+    expect(subagentRowOutcome(row({ id: "m", status: "error" }))).toBe("failed");
+    expect(subagentRowOutcome(row({ id: "n", status: "idle" }))).toBeNull();
   });
 });

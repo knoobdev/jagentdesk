@@ -1991,6 +1991,8 @@ export const ja: TranslationResources = {
     pillLabelNeedsInputOne: "1 件が入力待ち",
     pillLabelNeedsInputMany: "{{count}} 件が入力待ち",
     pillLabelReadyToReview: "{{count}} 件レビュー待ち",
+    rowFailed: "失敗",
+    rowStopped: "停止",
     detachAction: "{{label}}を切り離す",
     detachTooltip: "サブエージェントを切り離す",
     archiveAction: "{{label}}をアーカイブ",

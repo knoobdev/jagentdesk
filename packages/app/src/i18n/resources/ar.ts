@@ -2001,6 +2001,8 @@ export const ar: TranslationResources = {
     pillLabelNeedsInputOne: "واحد يحتاج إدخالاً",
     pillLabelNeedsInputMany: "{{count}} تحتاج إدخالاً",
     pillLabelReadyToReview: "{{count}} جاهزة للمراجعة",
+    rowFailed: "فشل",
+    rowStopped: "متوقف",
     detachAction: "فصل {{label}}",
     detachTooltip: "فصل الوكيل الفرعي",
     archiveAction: "أرشيف{{label}}",

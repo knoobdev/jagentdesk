@@ -2018,6 +2018,8 @@ export const en = {
     pillLabelNeedsInputOne: "1 needs input",
     pillLabelNeedsInputMany: "{{count}} need input",
     pillLabelReadyToReview: "{{count}} ready to review",
+    rowFailed: "Failed",
+    rowStopped: "Stopped",
     detachAction: "Detach {{label}}",
     detachTooltip: "Detach subagent",
     archiveAction: "Archive {{label}}",

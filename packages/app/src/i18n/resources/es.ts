@@ -2001,6 +2001,8 @@ export const es: TranslationResources = {
     pillLabelNeedsInputOne: "1 necesita datos",
     pillLabelNeedsInputMany: "{{count}} necesitan datos",
     pillLabelReadyToReview: "{{count}} para revisar",
+    rowFailed: "Falló",
+    rowStopped: "Detenido",
     detachAction: "Separar {{label}}",
     detachTooltip: "Separar subagente",
     archiveAction: "Archivo{{label}}",

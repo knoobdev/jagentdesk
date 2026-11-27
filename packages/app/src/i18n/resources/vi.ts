@@ -33,6 +33,8 @@ export const vi = {
     pillLabelNeedsInputOne: "1 cần nhập",
     pillLabelNeedsInputMany: "{{count}} cần nhập",
     pillLabelReadyToReview: "{{count}} chờ xem",
+    rowFailed: "Lỗi",
+    rowStopped: "Đã dừng",
     parent: {
       openParent: "Open parent",
 

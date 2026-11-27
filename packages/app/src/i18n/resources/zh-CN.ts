@@ -1935,6 +1935,8 @@ export const zhCN: TranslationResources = {
     pillLabelNeedsInputOne: "1 个需要输入",
     pillLabelNeedsInputMany: "{{count}} 个需要输入",
     pillLabelReadyToReview: "{{count}} 个待查看",
+    rowFailed: "失败",
+    rowStopped: "已停止",
     detachAction: "分离 {{label}}",
     detachTooltip: "分离 subagent",
     archiveAction: "归档 {{label}}",
