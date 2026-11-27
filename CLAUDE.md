@@ -82,7 +82,7 @@ At the start of non-trivial work, list `docs/` and skim anything relevant to the
 | [docs/ad-hoc-daemon-testing.md](docs/ad-hoc-daemon-testing.md)         | Isolated in-process daemon test harness                                                                                                |
 | [docs/browser-capture-harness.md](docs/browser-capture-harness.md)     | Real-Electron browser screenshot harness and compositor-surface gotcha                                                                 |
 | [docs/android.md](docs/android.md)                                     | App variants, local/cloud builds, EAS workflows, version codes, F-Droid source builds and store metadata                               |
-| [docs/releases/v0.12.1.md](docs/releases/v0.12.1.md)                   | Release notes for v0.12.1; older versions sit next to it in `docs/releases/`                                                           |
+| [docs/releases/v0.12.2.md](docs/releases/v0.12.2.md)                   | Release notes for v0.12.2; older versions sit next to it in `docs/releases/`                                                           |
 | [SECURITY.md](SECURITY.md)                                             | Relay threat model, E2E encryption, DNS rebinding, agent auth                                                                          |
 | [public-docs/security.md](public-docs/security.md)                     | Public security guide — architecture, connection methods, relay encryption, best practices                                             |
 

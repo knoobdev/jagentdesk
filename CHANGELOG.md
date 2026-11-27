@@ -1,9 +1,34 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.12.1`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.12.2`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.12.2 — 2026-11-27
+
+The desktop app no longer quits when a browser tab or its window renderer dies; background browser tabs are visible; bot
+automations on Schedules; bot and Telegram fixes; Paseo 0.18.0. Full notes: [docs/releases/v0.12.2.md](docs/releases/v0.12.2.md).
+
+### Changes
+
+- In-app browser tabs: a count next to the notifications bell and a pill above the agent's composer list every live tab
+  (title, host, workspace, agent, Loading / Not responding / Crashed) with Show, Close and Close all.
+- Bot automations are core schedules owned by the bot, listed on the Schedules screen with a bot filter; existing ones move
+  over on first start.
+- Paseo 0.18.0: per-device notification settings and a plugin notification API, diff/patch highlighting, agent-profile system
+  prompts, reliable OpenCode turn stops, Pi steering, PR fetch from the right remote, gentler ACP probing, Antigravity
+  thinking levels.
+
+### Fixes
+
+- Desktop main process no longer stops when a browser tab is torn down during its identity apply, when a held tab never gets
+  a renderer, or when the window renderer is killed; the identity apply times out after 10 s and the tab shows Not
+  responding. Closing a tab no longer leaves an empty profile folder; empty ones are removed on start.
+- Bots: first-run screen leaves when the bot speaks, with Try again on failure; Telegram owner linking with a deep link and a
+  live Linked state; clearer approval cards, Needs you rows and item activity.
+- Composer and sidebar: failed subagents first, one-line background rows with Dismiss all, steady command block on phones,
+  Usage summary back after a window reload, spaced from the Connection card, with each provider's own icon.
 
 ## v0.12.1 — 2026-11-27
 
