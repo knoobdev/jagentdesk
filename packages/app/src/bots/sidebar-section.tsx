@@ -446,7 +446,7 @@ function PreviewFace({
   }, [onNavigate, serverId, bot.id]);
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={bot.name} onPress={open}>
-      <BotAvatar bot={bot} size={20} radius={5} />
+      <BotAvatar bot={bot} serverId={serverId} size={20} radius={5} />
     </Pressable>
   );
 }
@@ -567,6 +567,7 @@ function BotSidebarEntry({
           <View style={styles.avatarSlot}>
             <BotAvatar
               bot={bot}
+              serverId={serverId}
               size={16}
               radius={4}
               style={bot.paused ? styles.dimmed : undefined}
@@ -905,6 +906,7 @@ function BotGroupRow({
           <BotAvatar
             key={bot.id}
             bot={bot}
+            serverId={serverId}
             size={16}
             radius={4}
             style={index > 0 ? styles.faceOverlap : undefined}

@@ -11,6 +11,7 @@ import {
   type BotMascotId,
 } from "@jagentdesk/protocol/bots/rules";
 import type { Bot } from "@jagentdesk/protocol/bots/types";
+import { useBotsRead } from "./queries";
 import {
   OUTFIT_SHEET_COLUMNS,
   OUTFIT_SHEET_ROWS,
@@ -47,6 +48,8 @@ export function botInitial(name: string): string {
 
 export interface BotPicture {
   mascot: BotMascotId | null;
+  /** An uploaded picture (`upload:<sha16>`), as a data URI, once read. */
+  uri?: string | null;
   color: string;
   outfit: BotAvatarOutfitId | null;
   initial: string;
@@ -65,22 +68,33 @@ export function botPicture(
 
 export const BotAvatar = memo(function BotAvatar({
   bot,
+  serverId,
   size = 16,
   radius,
   style,
   testID,
 }: {
-  bot: Pick<Bot, "name" | "avatar" | "avatarColor" | "avatarOutfit">;
+  bot: Pick<Bot, "name" | "avatar" | "avatarColor" | "avatarOutfit"> & { id?: string };
+  /** With the bot's id: reads an uploaded picture (`bots.avatar.read`). */
+  serverId?: string;
   size?: number;
   /** Defaults to a quarter of the size (4 px at 16 px, `BORDER_RADIUS.base`). */
   radius?: number;
   style?: StyleProp<ViewStyle>;
   testID?: string;
 }) {
-  const { name, avatar, avatarColor, avatarOutfit } = bot;
+  const { id, name, avatar, avatarColor, avatarOutfit } = bot;
+  const uploaded = Boolean(avatar?.startsWith("upload:") && serverId && id);
+  const upload = useBotsRead(
+    serverId ?? "",
+    "bots.avatar.read.request",
+    { botId: id ?? "" },
+    { enabled: uploaded, select: (payload) => payload.png },
+  );
+  const uri = uploaded && upload.data ? `data:image/png;base64,${upload.data}` : null;
   const picture = useMemo(
-    () => botPicture({ name, avatar, avatarColor, avatarOutfit }),
-    [name, avatar, avatarColor, avatarOutfit],
+    () => ({ ...botPicture({ name, avatar, avatarColor, avatarOutfit }), uri }),
+    [name, avatar, avatarColor, avatarOutfit, uri],
   );
   return (
     <BotAvatarTile picture={picture} size={size} radius={radius} style={style} testID={testID} />
@@ -115,6 +129,9 @@ export function BotAvatarTile({
     () => [styles.letter, { fontSize: Math.max(8, Math.round(size * 0.6)) }],
     [size],
   );
+  if (picture.uri) {
+    return <UploadedTile uri={picture.uri} tileStyle={tileStyle} layer={layer} testID={testID} />;
+  }
   if (!mascot) {
     return (
       <View style={tileStyle} testID={testID} accessibilityElementsHidden>
@@ -136,6 +153,26 @@ export function BotAvatarTile({
         <Image source={botMascotAsset(mascot)} style={[styles.layer, layer]} />
       )}
       {outfit ? <OutfitLayer outfit={outfit} id={mascot} size={size} /> : null}
+    </View>
+  );
+}
+
+function UploadedTile({
+  uri,
+  tileStyle,
+  layer,
+  testID,
+}: {
+  uri: string;
+  tileStyle: StyleProp<ViewStyle>;
+  layer: { width: number; height: number };
+  testID?: string;
+}) {
+  const source = useMemo(() => ({ uri }), [uri]);
+  const imageStyle = useMemo(() => [styles.layer, layer], [layer]);
+  return (
+    <View style={tileStyle} testID={testID} accessibilityElementsHidden>
+      <Image source={source} style={imageStyle} />
     </View>
   );
 }

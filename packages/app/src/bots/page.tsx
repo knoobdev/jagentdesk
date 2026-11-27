@@ -145,7 +145,7 @@ function BotPage({ serverId, bot }: { serverId: string; bot: Bot }) {
     <View style={styles.screen} testID="bot-page">
       <View style={styles.centre}>
         <View style={styles.header} testID="bot-page-header">
-          <BotAvatar bot={bot} size={16} radius={4} />
+          <BotAvatar bot={bot} serverId={serverId} size={16} radius={4} />
           <Text style={styles.title} numberOfLines={1}>
             {bot.name}
           </Text>

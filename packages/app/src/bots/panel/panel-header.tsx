@@ -107,7 +107,7 @@ export function BotPanelHeader({
   return (
     <View style={styles.header} testID="bot-panel-header">
       <View style={styles.picture}>
-        <BotAvatar bot={bot} size={28} radius={7} />
+        <BotAvatar bot={bot} serverId={serverId} size={28} radius={7} />
         {!bot.paused && (live.needsYou > 0 || live.working > 0 || quiet.running !== null) ? (
           <View
             style={[styles.state, live.needsYou > 0 ? styles.stateNeeds : styles.stateWorking]}
