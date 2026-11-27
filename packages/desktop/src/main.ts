@@ -77,6 +77,7 @@ import {
   registerAttachedJAgentDeskBrowser,
   setWorkspaceActiveJAgentDeskBrowserId,
   listLiveJAgentDeskBrowserTabs,
+  setJAgentDeskBrowserNotResponding,
   trackJAgentDeskBrowserLiveTab,
   unregisterJAgentDeskBrowserHost,
 } from "./features/browser-webviews/index.js";
@@ -1191,6 +1192,8 @@ async function createWindow(
       initialUrl: takeInitialGuestLoad(contents),
       identity: applyStealthToWebContents(contents),
       identityProtected: isIdentityProtected,
+      setNotResponding: (notResponding) =>
+        setJAgentDeskBrowserNotResponding(contents.id, notResponding),
     });
     contents.once("destroyed", () => {
       pendingBrowserWindowOpenRequests.delete(contents.id);

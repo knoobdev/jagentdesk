@@ -2,8 +2,8 @@ import log from "electron-log";
 import type { IdentityOutcome } from "./browser-stealth.js";
 import { isGuestGone, runWhenGuestSettled } from "./guest-teardown.js";
 
-/** How long a held first load waits for the identity before the timeout policy applies. */
-export const IDENTITY_LOAD_TIMEOUT_MS = 20_000;
+/** How long a held first load waits for the identity before the timeout policy applies (spec 04 §27d.3). */
+export const IDENTITY_LOAD_TIMEOUT_MS = 10_000;
 
 export interface HeldGuestContents {
   readonly id: number;
@@ -26,12 +26,16 @@ export function loadHeldGuestUrlAfterIdentity(input: {
   initialUrl: string | null;
   identity: Promise<IdentityOutcome>;
   identityProtected: () => boolean;
+  /** Marks the tab "Not responding" in the open browser tabs list (spec 04 §27d.1/§27d.3). */
+  setNotResponding?: (notResponding: boolean) => void;
   timeoutMs?: number;
 }): void {
   const { contents, initialUrl, identity, identityProtected } = input;
+  const setNotResponding = input.setNotResponding ?? (() => {});
   if (!initialUrl) {
     return;
   }
+  let timedOut = false;
   const webContentsId = contents.id;
   let settled = false;
   const load = () => {
@@ -55,6 +59,9 @@ export function loadHeldGuestUrlAfterIdentity(input: {
     if (settled || isGuestGone(contents)) {
       return;
     }
+    timedOut = true;
+    log.warn("[browser-stealth] identity apply timed out", { webContentsId });
+    setNotResponding(true);
     if (!identityProtected()) {
       log.warn("[browser-stealth] identity still pending; loading with the session identity", {
         webContentsId,
@@ -68,6 +75,9 @@ export function loadHeldGuestUrlAfterIdentity(input: {
   }, input.timeoutMs ?? IDENTITY_LOAD_TIMEOUT_MS);
   timer.unref?.();
   const onOutcome = (outcome: IdentityOutcome) => {
+    if (timedOut && outcome !== "closed") {
+      setNotResponding(false);
+    }
     if (settled) {
       return;
     }

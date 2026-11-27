@@ -5,7 +5,8 @@ import { watchGuestTeardown } from "./guest-teardown.js";
 
 vi.mock("electron-log", () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
-const { loadHeldGuestUrlAfterIdentity } = await import("./browser-guest-initial-load.js");
+const { IDENTITY_LOAD_TIMEOUT_MS, loadHeldGuestUrlAfterIdentity } =
+  await import("./browser-guest-initial-load.js");
 
 const URL = "https://example.com/";
 
@@ -135,5 +136,31 @@ describe("loadHeldGuestUrlAfterIdentity", () => {
     identity.resolve("applied");
     await settle();
     expect(guest.loads).toEqual([URL]);
+  });
+
+  it("marks the tab not responding at the timeout and clears it when the identity lands", async () => {
+    const guest = new FakeGuest();
+    const identity = deferred();
+    const states: boolean[] = [];
+    loadHeldGuestUrlAfterIdentity({
+      contents: guest,
+      initialUrl: URL,
+      identity: identity.promise,
+      identityProtected: () => true,
+      setNotResponding: (notResponding) => states.push(notResponding),
+      timeoutMs: 5,
+    });
+    await settle(20);
+    expect(states).toEqual([true]);
+    expect(guest.loads).toEqual([]);
+
+    identity.resolve("applied");
+    await settle();
+    expect(states).toEqual([true, false]);
+    expect(guest.loads).toEqual([URL]);
+  });
+
+  it("waits 10 s by default (spec 04 §27d.3)", () => {
+    expect(IDENTITY_LOAD_TIMEOUT_MS).toBe(10_000);
   });
 });
