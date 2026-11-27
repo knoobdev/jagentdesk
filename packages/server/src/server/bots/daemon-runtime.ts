@@ -8,6 +8,7 @@ import {
   ORCHESTRATION_BRIEF_LABEL,
 } from "@jagentdesk/protocol/orchestration";
 import type { AgentManager } from "../agent/agent-manager.js";
+import type { StoredAgentRecord } from "../agent/agent-storage.js";
 import {
   createAgentCommand,
   type CreateAgentCommandDependencies,
@@ -51,10 +52,12 @@ const ReviewOutputSchema = z.object({
 function snapshotOf(
   manager: AgentManager,
   agent: ReturnType<AgentManager["listAgents"]>[number],
+  storedTitle: string | null | undefined,
 ): BotAgentSnapshot {
   const snapshot: BotAgentSnapshot = {
     id: agent.id,
-    title: agent.config.title ?? agent.id,
+    // A resumed agent's config has no title; the stored record keeps it.
+    title: agent.config.title ?? storedTitle ?? agent.id,
     labels: agent.labels,
     busy: manager.hasInFlightRun(agent.id) || agent.lifecycle === "running",
     lifecycle: agent.lifecycle,
@@ -74,6 +77,25 @@ function snapshotOf(
   }
   if (agent.workspaceId) snapshot.workspaceId = agent.workspaceId;
   const parent = agent.labels["jagentdesk.parent-agent-id"];
+  if (parent) snapshot.parentId = parent;
+  return snapshot;
+}
+
+/** An agent with no live runtime, from its stored record: not busy, nothing pending. */
+function storedSnapshotOf(record: StoredAgentRecord): BotAgentSnapshot {
+  const snapshot: BotAgentSnapshot = {
+    id: record.id,
+    title: record.title ?? record.id,
+    labels: record.labels,
+    busy: false,
+    lifecycle: record.lastStatus,
+    pendingPermissions: [],
+    createdAt_ms: Date.parse(record.createdAt),
+    updatedAt_ms: Date.parse(record.updatedAt),
+    cwd: record.cwd,
+  };
+  if (record.workspaceId) snapshot.workspaceId = record.workspaceId;
+  const parent = record.labels["jagentdesk.parent-agent-id"];
   if (parent) snapshot.parentId = parent;
   return snapshot;
 }
@@ -586,7 +608,17 @@ export class DaemonBotRuntime implements BotRuntime {
   }
   agents(bot: Bot): BotAgentSnapshot[] {
     const manager = this.deps.agentManager;
-    const all = manager.listAgents();
+    const live = manager.listAgents();
+    const liveIds = new Set(live.map((agent) => agent.id));
+    const records = this.deps.create.agentStorage.listLoaded();
+    const storedTitles = new Map(records.map((record) => [record.id, record.title]));
+    // Agents load on demand after a restart, and idle ones are closed to free their runtime; the
+    // stored record keeps them in the bot's tree (its Home Chat, workers and their worktrees)
+    // until they are archived.
+    const stored = records.filter(
+      (record) => !liveIds.has(record.id) && !record.archivedAt && !record.internal,
+    );
+    const all: { id: string; labels: Record<string, string> }[] = [...live, ...stored];
     const owned = new Set(
       all
         .filter((agent) => agent.labels[BOT_ID_LABEL] === bot.id || agent.id === bot.agentId)
@@ -603,7 +635,12 @@ export class DaemonBotRuntime implements BotRuntime {
         }
       }
     }
-    return all.filter((agent) => owned.has(agent.id)).map((agent) => snapshotOf(manager, agent));
+    return [
+      ...live
+        .filter((agent) => owned.has(agent.id))
+        .map((agent) => snapshotOf(manager, agent, storedTitles.get(agent.id))),
+      ...stored.filter((record) => owned.has(record.id)).map(storedSnapshotOf),
+    ];
   }
   async handOver(bot: Bot, workspaceId: string): Promise<{ title: string; agentIds: string[] }> {
     const manager = this.deps.agentManager;
