@@ -8,6 +8,7 @@ import { invalidateCommandsForProviderChange } from "@/agent-commands/cache";
 import type { ProviderSnapshotEntry } from "@jagentdesk/protocol/agent-types";
 import { orderCheckoutDiffFiles } from "@/git/diff-order";
 import { daemonConfigQueryKey } from "@/data/daemon-config";
+import { usageReportsQueryKey } from "@/usage/query-keys";
 import { usageHistoryQueryKey, type UsageHistory } from "@/data/usage-history-query";
 import type { LifetimeUsage, UsageDayRollup } from "@jagentdesk/protocol/usage-history";
 import { daemonPairingOfferQueryKey } from "@/data/daemon-pairing";
@@ -107,6 +108,13 @@ const RECONNECT_REPAIR_POLICIES: ReconnectRepairPolicy[] = [
     domain: "daemonConfig",
     invalidate: ({ queryClient, serverId }) => {
       void queryClient.invalidateQueries({ queryKey: daemonConfigQueryKey(serverId) });
+    },
+  },
+  {
+    // A restarted daemon may have new numbers; the sidebar summary keeps the old ones until then.
+    domain: "usageReports",
+    invalidate: ({ queryClient, serverId }) => {
+      void queryClient.invalidateQueries({ queryKey: usageReportsQueryKey(serverId) });
     },
   },
   {

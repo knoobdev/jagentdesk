@@ -297,6 +297,7 @@ export const zhCN: TranslationResources = {
     archived: {
       callout: "此 Agent 已归档",
       unarchive: "取消归档",
+      unarchiving: "正在取消归档...",
     },
   },
   sessions: {
@@ -436,6 +437,35 @@ export const zhCN: TranslationResources = {
       shell: "Shell",
       monitor: "监控",
       other: "其他任务",
+      detail: {
+        back: "返回后台任务列表",
+        open: "查看详情：{{label}}",
+        statusValue: {
+          running: "运行中",
+          finished: "已完成",
+          failed: "失败",
+          stopped: "已停止",
+        },
+        copied: "已复制",
+        copyCommand: "复制命令",
+        showMore: "显示更多",
+        showLess: "收起",
+        waitingForOutput: "等待输出…",
+        startedAt: "{{time}} 开始",
+        copyOutput: "复制输出",
+        output: "输出",
+        jumpToLatest: "跳到最新",
+        openInTab: "在标签页中打开",
+        outputUnavailable: "{{provider}} 不提供输出",
+        outputLoading: "正在加载输出…",
+        outputError: "无法读取输出",
+        outputSkipped: "已跳过较早的输出",
+        updateHost: "请更新主机以查看此任务的输出",
+        disconnected: "主机已断开",
+        loading: "正在加载详情…",
+        notFound: "主机已不再记录此后台任务",
+        tabTitle: "后台任务",
+      },
     },
     todo: {
       title: "任务",
@@ -1898,6 +1928,13 @@ export const zhCN: TranslationResources = {
       backToParent: "Back to parent",
     },
 
+    pillLabelOne: "1 个 subagent",
+    pillLabelMany: "{{count}} 个 subagent",
+    pillLabelWorking: "{{count}} 个运行中",
+    pillLabelFailed: "{{count}} 个失败",
+    pillLabelNeedsInputOne: "1 个需要输入",
+    pillLabelNeedsInputMany: "{{count}} 个需要输入",
+    pillLabelReadyToReview: "{{count}} 个待查看",
     detachAction: "分离 {{label}}",
     detachTooltip: "分离 subagent",
     archiveAction: "归档 {{label}}",
@@ -2037,7 +2074,7 @@ export const zhCN: TranslationResources = {
     title: "设置",
     loading: "正在加载设置...",
     groups: {
-      app: "应用",
+      app: "此设备",
       host: "主机",
     },
     hostPicker: {
@@ -2054,6 +2091,10 @@ export const zhCN: TranslationResources = {
     },
     groupInfo: "关于 {{title}}",
     sections: {
+      hosts: "主机",
+      sidebar: "侧边栏",
+      chatAndPanes: "聊天与面板",
+      notifications: "通知",
       general: "通用",
       connection: "连接",
       appearance: "外观",
@@ -2063,6 +2104,14 @@ export const zhCN: TranslationResources = {
       permissions: "权限",
       diagnostics: "诊断",
     },
+    clientHosts: {
+      title: "已保存的主机",
+      info: "此设备连接的主机。这里的名称、图标、徽章和连接路径仅影响此设备。",
+      offline: "离线",
+    },
+    chat: {
+      sendingTitle: "发送",
+    },
     editor: {
       title: "编辑器",
       vimKeybindings: "Vim 键位",
@@ -2070,7 +2119,8 @@ export const zhCN: TranslationResources = {
     },
     plugins: pluginSettings["zh-CN"],
     hostSections: {
-      tools: "Tools",
+      daemon: "守护进程",
+      tools: "工具与提示词",
       plugins: "插件",
       projects: "项目",
       connections: "连接",
@@ -2651,7 +2701,12 @@ export const zhCN: TranslationResources = {
         save: "Save",
         emptyState: "No profiles yet. Add one to launch terminals with a specific command.",
       },
+      tools: {
+        instructionsTitle: "指令",
+        toolsTitle: "代理工具",
+      },
       daemon: {
+        runtimeTitle: "代理运行时",
         rename: {
           editLabel: "编辑标签",
           title: "重命名 Host",

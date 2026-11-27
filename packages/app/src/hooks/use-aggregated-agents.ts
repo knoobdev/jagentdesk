@@ -5,6 +5,7 @@ import { useSessionStore } from "@/stores/session-store";
 import type { AgentDirectoryEntry } from "@/types/agent-directory";
 import type { Agent } from "@/stores/session-store";
 import { getHostRuntimeStore, useHosts } from "@/runtime/host-runtime";
+import { isBotAgent } from "@/bots/bot-agents";
 
 export interface AggregatedAgent extends AgentDirectoryEntry {
   serverId: string;
@@ -73,6 +74,10 @@ export function useAggregatedAgents(options?: {
       const serverLabel = serverLabelById.get(serverId) ?? serverId;
       for (const agent of agents.values()) {
         if (agent.background || (!includeArchived && agent.archivedAt)) {
+          continue;
+        }
+        // A bot's agents show under the bot, not in the regular lists.
+        if (isBotAgent(agent, (id) => agents.get(id))) {
           continue;
         }
         const nextAgent: AggregatedAgent = {

@@ -1,4 +1,139 @@
-export const botsStrings = {
+import { botsOrcaStrings } from "./bots-orca";
+import { botsOrcaPhoneStrings } from "./bots-orca-phone";
+import { botsJadDialogsStrings } from "./bots-jad-dialogs";
+import { botsJadItemsStrings } from "./bots-jad-items";
+import { botsJadPanelsStrings } from "./bots-jad-panels";
+import { botsJadSettingsStrings } from "./bots-jad-settings";
+
+// Over Orca's `bots.share` (see `botsStrings`).
+const botsShareStrings = {
+  // Bot sharing (spec 37.13): Orca dfdb4fda src/renderer/src/i18n/locales/en.json `bots.share.*`
+  // verbatim with "Orca" -> "JAgentDesk". relayOff and receive.linkPlaceholder are spec 37.13.1 and
+  // 37.13.3; share, retry and error.{limit,unavailable,badLink,invalid,reviewExpired} have no Orca
+  // line (Orca Cloud fails differently) and are JAgentDesk's.
+  share: {
+    shareBot: "Share bot\u2026",
+    share: "Share",
+    none: "None",
+    updatedAt: "Updated {{date}}",
+    upToDate: "Up to date",
+    changedSince: "Bot changed since",
+    copied: "Copied",
+    linkStatusUnavailable: "Couldn\u2019t check the share link",
+    nextUpdate: "Next update",
+    sameLink: "Goes to the same link. Copies already made stay as they are.",
+    updating: "Updating\u2026",
+    publishing: "Publishing\u2026",
+    view: "View",
+    goToLine: "Go to line",
+    description: "Anyone with the link can make a copy.",
+    removeSecret: "Remove the secret to publish",
+    cancel: "Cancel",
+    updateLink: "Update link",
+    publishLink: "Publish link",
+    lines: "{{count}} lines",
+    oneLine: "1 line",
+    flagOnLine: "{{flag}} on line {{line}}",
+    memory: "Memory",
+    memoryLimit: "Up to {{count}} files",
+    linkCopied: "Link copied",
+    stopped: "Stopped sharing {{name}}",
+    fileLinkNotShared: "Has a symlink or hard link \u00b7 not shared",
+    tooLargeNotShared: "Too large \u00b7 not shared",
+    unreadableNotShared: "Can't be read \u00b7 not shared",
+    overLimitNotShared: "Over the skill limit \u00b7 not shared",
+    notShared: "Not shared",
+    setupNote: "Setup note",
+    skills: "Skills",
+    automations: "Automations",
+    includeMemory: "Include memory",
+    safetyCheck: "Safety check",
+    countOf: "{{picked}} of {{all}}",
+    soul: "Soul",
+    add: "Add",
+    isShared: "{{name}} is shared",
+    stopSharing: "Stop sharing",
+    done: "Done",
+    stopTitle: "Stop sharing {{name}}?",
+    stopDescription: "The link stops working.",
+    copyLink: "Copy link",
+    notIncluded: "Not included",
+    secretFound: "1 secret found",
+    secretsFound: "{{count}} secrets found",
+    oneWarning: "1 warning",
+    warnings: "{{count}} warnings",
+    nothingFound: "Nothing found",
+    whereLine: "{{where}}, line {{line}}",
+    relayOff: "Turn on the relay in Settings \u203a Connections to share bots.",
+    retry: "Retry",
+    flag: {
+      secret: "Secret",
+      pipeToShell: "Runs a downloaded script",
+      sudo: "Runs as administrator",
+      sendsFile: "Sends a file",
+      hiddenUnicode: "Hidden characters",
+      runnable: "Runnable file",
+    },
+    receive: {
+      fromLinkMenu: "From a link\u2026",
+      fromLink: "From a link",
+      pasteDescription: "Paste a link someone shared.",
+      link: "Link",
+      linkPlaceholder: "https://desk-relay.jagents.workers.dev/s/\u2026",
+      continue: "Continue",
+      have: "You already have this bot",
+      haveDetail: "{{name}} \u00b7 made {{date}}",
+      close: "Close",
+      open: "Open",
+      stopped: "This link no longer works",
+      stoppedDetail: "Ask whoever shared it for a new one.",
+      origin: "From {{who}}'s link",
+      originAnonymous: "From a shared link",
+      back: "Back",
+    },
+    review: {
+      reviewAgain: "Review again",
+      updated: "{{who}} updated this bot. Review it again.",
+      theSharer: "The sharer",
+      notNow: "Not now",
+      createBot: "Create bot\u2026",
+      accounts: "Accounts to connect",
+      leftOut: "Left out",
+      none: "None",
+      off: "Off",
+      files: "{{count}} files",
+      flagLine: "{{flag}}, line {{line}}",
+      byline: "{{who}} \u00b7 {{date}} \u00b7 Not reviewed",
+      someone: "Someone",
+      memoryIndex: "Its memory index, with the shared notes",
+    },
+    copy: {
+      sharedBy: "Shared by {{who}}",
+      viewOriginal: "View original",
+      originalGone: "No longer available",
+    },
+    error: {
+      blocked: "A secret was found in what would be shared. Remove it, then try again.",
+      noteSecret: "The setup note looks like it holds a secret. Remove it, then try again.",
+      expired: "This share preview expired. Open Share bot again.",
+      stopped: "This link was stopped. Publish to make a new link.",
+      tooLarge: "This bot is too large to share. Leave out some memory or skills, then try again.",
+      limit: "This host already has 20 live share links. Stop sharing one, then try again.",
+      unavailable: "Couldn\u2019t reach the relay to share this bot. Try again.",
+      badLink: "This isn\u2019t a bot share link.",
+      invalid:
+        "This link\u2019s bot couldn\u2019t be opened: the link or its contents don\u2019t match.",
+      reviewExpired: "This review expired. Open the link again.",
+    },
+  },
+} as const;
+
+// Strings JAgentDesk owns (round-1 surfaces still in use, and the lines spec 37 adds to Orca's:
+// GitLab and Telegram rows, Review before done, the Look around / Tidy memory result lines).
+const botsJadStrings = {
+  // Orca dfdb4fda en.json `restartContinued` (the native chat's restart notice), "Orca" -> "JAgentDesk".
+  restartContinued:
+    "JAgentDesk asked this agent to continue after a restart. Your own prompt was not re-sent.",
   slack: {
     title: "Slack",
     createApp: "Create Slack app",
@@ -168,3 +303,23 @@ export const botsStrings = {
     mode: "Pick a mode.",
   },
 } as const;
+
+/** `bots.*`: Orca's strings verbatim (`bots-orca.ts`), Orca's phone strings under `bots.phone`
+ *  (`bots-orca-phone.ts`), and JAgentDesk's under `bots.jad`. */
+export const botsStrings = {
+  ...botsOrcaStrings,
+  share: {
+    ...botsOrcaStrings.share,
+    ...botsShareStrings.share,
+    receive: { ...botsOrcaStrings.share.receive, ...botsShareStrings.share.receive },
+    error: { ...botsOrcaStrings.share.error, ...botsShareStrings.share.error },
+  },
+  phone: botsOrcaPhoneStrings,
+  jad: {
+    ...botsJadStrings,
+    items: botsJadItemsStrings,
+    settings: botsJadSettingsStrings,
+    dialogs: botsJadDialogsStrings,
+    panels: botsJadPanelsStrings,
+  },
+};

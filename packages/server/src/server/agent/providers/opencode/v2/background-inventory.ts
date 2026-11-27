@@ -1,9 +1,11 @@
 import type { OpenCodeEvent, SessionMessageInfo, ShellInfo } from "@opencode/client";
 import type { AgentStreamEvent } from "../../../agent-sdk-types.js";
+import type { BackgroundWorkOutputSource } from "../../../background-work/index.js";
 import type { V2Api } from "./api.js";
 import { messages } from "./history.js";
 
 type InventoryEvent = Extract<AgentStreamEvent, { type: "background_work" }>;
+type EndedEvent = Extract<AgentStreamEvent, { type: "background_work_ended" }>;
 type RelevantEvent = Extract<
   OpenCodeEvent,
   {
@@ -82,7 +84,7 @@ export class OpenCodeBackgroundInventory {
   constructor(options: {
     id: string;
     cwd: string;
-    emit: (event: InventoryEvent) => void;
+    emit: (event: InventoryEvent | EndedEvent) => void;
     report: (error: unknown) => void;
   }) {
     this.id = options.id;
@@ -92,7 +94,7 @@ export class OpenCodeBackgroundInventory {
   }
   private readonly id: string;
   private readonly cwd: string;
-  private readonly emit: (event: InventoryEvent) => void;
+  private readonly emit: (event: InventoryEvent | EndedEvent) => void;
   private readonly report: (error: unknown) => void;
   snapshot() {
     return this.current;
@@ -204,6 +206,7 @@ export class OpenCodeBackgroundInventory {
       return;
     }
     this.apply(event);
+    if (event.type === "shell.exited") this.ended(event.data);
     if (event.type !== "session.tool.input.started" && event.type !== "session.tool.input.ended") {
       this.dirty = true;
       if (!this.retrying) this.refresh();
@@ -276,6 +279,44 @@ export class OpenCodeBackgroundInventory {
     }, 5000);
     this.timer.unref();
   }
+  /** ADR-0062: the exit status OpenCode reports for a promoted shell. */
+  private ended(data: { id: string; exit?: number; status: string }) {
+    if (!this.promoted.has(data.id)) return;
+    let status: "finished" | "failed" | "stopped" = "stopped";
+    if (data.status === "exited") status = data.exit ? "failed" : "finished";
+    this.emit({
+      type: "background_work_ended",
+      provider: "opencode",
+      end: {
+        id: data.id,
+        status,
+        ...(typeof data.exit === "number" ? { exitCode: data.exit } : {}),
+      },
+    });
+  }
+
+  /** ADR-0062: OpenCode serves each shell's output by byte cursor (`shell.output`). */
+  private outputSource(id: string): BackgroundWorkOutputSource {
+    return {
+      type: "reader",
+      read: async ({ cursor, limit }) => {
+        const client = this.client;
+        if (!client) throw new Error("OpenCode is not connected");
+        const { data } = await client.shell.output({
+          id,
+          location: { directory: this.cwd },
+          cursor,
+          limit,
+        });
+        return {
+          bytes: Buffer.from(data.output, "utf8"),
+          nextCursor: data.cursor,
+          size: data.size,
+        };
+      },
+    };
+  }
+
   private publish(shells: ShellInfo[]) {
     const live = new Set(
       shells
@@ -294,13 +335,18 @@ export class OpenCodeBackgroundInventory {
             shell.metadata.sessionID === this.id &&
             this.promoted.has(shell.id),
         )
-        .map((shell) => ({
-          id: shell.id,
-          kind: "shell",
-          description: this.descriptions.get(shell.id) ?? null,
-          command: shell.command || undefined,
-          canStop: true,
-        })),
+        .map((shell) => {
+          const item: NonNullable<InventoryEvent["items"]>[number] = {
+            id: shell.id,
+            kind: "shell",
+            description: this.descriptions.get(shell.id) ?? null,
+            command: shell.command || undefined,
+            canStop: true,
+            output: this.outputSource(shell.id),
+          };
+          if (shell.cwd) item.cwd = shell.cwd;
+          return item;
+        }),
     };
     this.emit(this.current);
     this.notify();

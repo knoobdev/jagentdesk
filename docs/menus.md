@@ -73,6 +73,10 @@ Pages are data rather than nested children because the popover renders them as _
 root surface — a flyout nested inside the root's box would be clipped by its `overflow: hidden`.
 Declaring them separately is what lets one model drive both presentations.
 
+A trigger whose own action is the common case takes `onPress`: in the popover a press or Enter runs
+it and closes the menu, and hover opens the page with the other choices (Bots' "New bot"). The sheet
+has no hover, so there a press still opens the page.
+
 `menu-navigation.ts` holds that model, and it is pure: the open flyout chain and the mobile push
 stack are the same path, so the popover renders every entry in it and the sheet renders only the
 last. Nothing else differs between the two.
@@ -181,6 +185,12 @@ and a column of icons there is decoration competing with the values you actually
 - The separator is the one row-level thing that asks for vertical space of its own, and now that
   rows carry none, that is still one number controlling one gap. It takes no horizontal margin and
   the page has no horizontal padding, so the rule runs the full width of the surface.
+- A popover opened from inside one pane can be held inside that pane with `MenuSurface`'s
+  `boundary` (the pane's ref and an edge inset). The window is the default boundary, and a 560 px
+  panel anchored on a pill near the chat column's left edge then hangs over the sidebar. Composer
+  track pills pass the chat area with a 16 px inset and cap the panel at the room above the pill
+  row (`useComposerTrackPanelRoom`), so a panel with an output box sizes the box to fit instead of
+  scrolling its own frame (spec 04 §27c).
 - Separators use `borderAccent`, the same colour the surface outlines itself with. `border` sits
   between `surface1` and `surface2`, which put it within a hair of the hover fill and made
   separators disappear against a hovered row.

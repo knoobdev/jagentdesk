@@ -266,15 +266,19 @@ const DirectoryCheckpointSchema = z.strictObject({
   agents: DirectoryCursorSchema.optional(),
 });
 
-// Old checkpoints could describe a baseline that an overlapping refresh had discarded.
-// Revalidate directory contents once without evicting cached rows or timelines.
+// A checkpoint is trusted only when this version wrote it. Earlier writers could store one for a
+// directory the cache no longer held: unversioned ones after an overlapping refresh, version 1
+// after another tab evicted the host. Rejecting them revalidates directory contents once without
+// evicting cached rows or timelines.
+const DIRECTORY_CHECKPOINT_VERSION = 2;
+
 const StoredDirectoryCheckpointSchema = z.strictObject({
-  version: z.literal(1),
+  version: z.literal(DIRECTORY_CHECKPOINT_VERSION),
   cursors: DirectoryCheckpointSchema,
 });
 
 function serializeDirectoryCheckpoint(cursors: DirectoryCheckpoint) {
-  return { version: 1 as const, cursors };
+  return { version: DIRECTORY_CHECKPOINT_VERSION, cursors };
 }
 
 function deserializeDirectoryCheckpoint(payload: string): DirectoryCheckpoint {
@@ -1119,12 +1123,21 @@ export class ReplicaCache {
           await this.ensureStoredIndex();
           const changes = this.materializePendingChanges(pending);
           const { changes: boundedChanges, evicted } = await this.fitChangesToBudget(changes);
-          if (boundedChanges.upserts.length > 0 || boundedChanges.deletes.length > 0) {
-            await this.rowStore.apply(boundedChanges);
-            this.applyStoredChanges(boundedChanges);
+          const baselines = new Set(
+            [...pending.baselines].filter((serverId) => !evicted.has(serverId)),
+          );
+          if (
+            baselines.size > 0 ||
+            boundedChanges.upserts.length > 0 ||
+            boundedChanges.deletes.length > 0
+          ) {
+            const accepted = await this.rowStore.apply(boundedChanges, {
+              directoryBaselines: baselines,
+            });
+            this.applyStoredChanges(accepted ?? boundedChanges);
           }
-          for (const serverId of pending.baselines) {
-            if (!evicted.has(serverId)) this.invalidatedHosts.delete(serverId);
+          for (const serverId of baselines) {
+            this.invalidatedHosts.delete(serverId);
           }
         } catch {
           this.restorePendingChanges(pending);

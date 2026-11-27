@@ -929,3 +929,52 @@ it("defers layout fit until all replay chunks commit", async () => {
   mounted.runtime.resize({ shouldClaim: true, forceClaim: true });
   expect(getBrowserTerminal().cols).toBe(latestSize(mounted.sizes).cols);
 });
+
+// ADR-0062: a background task's output is shown in a read-only terminal.
+describe("read-only viewer", () => {
+  it("takes no typed input, keeps a scrolled-up viewport and reports it", async () => {
+    await page.viewport(900, 600);
+    const mounted = createTerminalHost({ width: 720, height: 200 });
+    const scrolled: boolean[] = [];
+    mounted.runtime.setCallbacks({
+      callbacks: {
+        onInput: (data) => {
+          mounted.inputs.push(data);
+        },
+        onScrolledChange: (value) => {
+          scrolled.push(value);
+        },
+      },
+    });
+    mounted.runtime.setReadOnly({ readOnly: true });
+    await waitFor({ predicate: () => window.__jagentdeskTerminal !== undefined });
+    const terminal = window.__jagentdeskTerminal!;
+    expect(terminal.options.disableStdin).toBe(true);
+
+    typeText(mounted, "x");
+    expect(mounted.inputs).toEqual([]);
+
+    const lines = Array.from({ length: 200 }, (_, index) => `line-${index + 1}`).join("\r\n");
+    mounted.runtime.write({ data: terminalOutput(`${lines}\r\n`) });
+    await waitFor({ predicate: () => terminal.buffer.active.baseY > 0 });
+
+    terminal.scrollLines(-50);
+    await waitFor({ predicate: () => scrolled.at(-1) === true });
+    const viewportY = terminal.buffer.active.viewportY;
+
+    mounted.runtime.write({ data: terminalOutput("line-201\r\nline-202\r\n") });
+    await waitFor({
+      predicate: () =>
+        terminal.buffer.active
+          .getLine(terminal.buffer.active.baseY)
+          ?.translateToString()
+          .includes("line") ?? false,
+    });
+    await nextFrame();
+    expect(terminal.buffer.active.viewportY).toBe(viewportY);
+
+    mounted.runtime.scrollToBottom();
+    expect(terminal.buffer.active.viewportY).toBe(terminal.buffer.active.baseY);
+    expect(scrolled.at(-1)).toBe(false);
+  });
+});

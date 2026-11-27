@@ -1,12 +1,12 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useAppSettings } from "@/hooks/use-settings";
 import {
   useActiveWorkspaceSelection,
   useLastWorkspaceSelection,
 } from "@/stores/navigation-active-workspace-store";
 import {
-  resolveUsageHostId,
   resolveUsageModalHostId,
+  resolveUsageSummaryHostId,
   type UsageHost,
   type UsageHostChoice,
 } from "./model";
@@ -29,9 +29,16 @@ function useUsageHostChoice(): UsageHostChoice {
   };
 }
 
-/** The host the sidebar Usage row reads, or null when none reports usage. */
-export function useUsageHostId(): string | null {
-  return resolveUsageHostId(useUsageHostChoice());
+/**
+ * The host the sidebar Usage row reads, or null when none reports usage. The host it shows stays
+ * while it reconnects, so the summary keeps its last numbers.
+ */
+export function useUsageSummaryHostId(): string | null {
+  const choice = useUsageHostChoice();
+  const [shownServerId, setShownServerId] = useState<string | null>(null);
+  const serverId = resolveUsageSummaryHostId(choice, shownServerId);
+  if (serverId !== shownServerId) setShownServerId(serverId);
+  return serverId;
 }
 
 /**

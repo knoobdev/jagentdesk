@@ -318,6 +318,7 @@ export const ru: TranslationResources = {
     archived: {
       callout: "Этот агент находится в архиве",
       unarchive: "Разархивировать",
+      unarchiving: "Разархивация...",
     },
   },
   sessions: {
@@ -458,6 +459,35 @@ export const ru: TranslationResources = {
       shell: "Оболочка",
       monitor: "Монитор",
       other: "Другая задача",
+      detail: {
+        back: "Назад к фоновой работе",
+        open: "Подробнее: {{label}}",
+        statusValue: {
+          running: "Выполняется",
+          finished: "Завершена",
+          failed: "Ошибка",
+          stopped: "Остановлена",
+        },
+        copied: "Скопировано",
+        copyCommand: "Копировать команду",
+        showMore: "Показать больше",
+        showLess: "Свернуть",
+        waitingForOutput: "Ожидание вывода…",
+        startedAt: "запущено в {{time}}",
+        copyOutput: "Копировать вывод",
+        output: "Вывод",
+        jumpToLatest: "К последнему",
+        openInTab: "Открыть во вкладке",
+        outputUnavailable: "Вывод недоступен для {{provider}}",
+        outputLoading: "Загрузка вывода…",
+        outputError: "Не удалось прочитать вывод",
+        outputSkipped: "часть вывода пропущена",
+        updateHost: "Обновите хост, чтобы видеть вывод этой задачи",
+        disconnected: "Хост отключён",
+        loading: "Загрузка сведений…",
+        notFound: "Хост больше не знает эту фоновую задачу",
+        tabTitle: "Фоновая задача",
+      },
     },
     todo: {
       title: "Задачи",
@@ -2006,6 +2036,13 @@ export const ru: TranslationResources = {
       backToParent: "Back to parent",
     },
 
+    pillLabelOne: "1 субагент",
+    pillLabelMany: "Субагентов: {{count}}",
+    pillLabelWorking: "{{count}} в работе",
+    pillLabelFailed: "{{count}} с ошибкой",
+    pillLabelNeedsInputOne: "1 ожидает ввода",
+    pillLabelNeedsInputMany: "{{count}} ожидают ввода",
+    pillLabelReadyToReview: "{{count}} на проверку",
     detachAction: "Отсоединить {{label}}",
     detachTooltip: "Отсоединить субагент",
     archiveAction: "Архив{{label}}",
@@ -2150,7 +2187,7 @@ export const ru: TranslationResources = {
     title: "Настройки",
     loading: "Загрузка настроек...",
     groups: {
-      app: "Приложение",
+      app: "Это устройство",
       host: "Host",
     },
     hostPicker: {
@@ -2167,6 +2204,10 @@ export const ru: TranslationResources = {
     },
     groupInfo: "О{{title}}",
     sections: {
+      hosts: "Хосты",
+      sidebar: "Боковая панель",
+      chatAndPanes: "Чат и панели",
+      notifications: "Уведомления",
       general: "Общий",
       connection: "Подключение",
       appearance: "Появление",
@@ -2176,6 +2217,14 @@ export const ru: TranslationResources = {
       permissions: "Разрешения",
       diagnostics: "Диагностика",
     },
+    clientHosts: {
+      title: "Сохранённые хосты",
+      info: "Хосты, к которым подключается это устройство. Имена, значки, бейджи и маршруты здесь влияют только на это устройство.",
+      offline: "Оффлайн",
+    },
+    chat: {
+      sendingTitle: "Отправка",
+    },
     editor: {
       title: "Редактор",
       vimKeybindings: "Клавиши Vim",
@@ -2183,7 +2232,8 @@ export const ru: TranslationResources = {
     },
     plugins: pluginSettings.ru,
     hostSections: {
-      tools: "Tools",
+      daemon: "Демон",
+      tools: "Инструменты и промпты",
       plugins: "Плагины",
       projects: "Проекты",
       connections: "Соединения",
@@ -2778,7 +2828,12 @@ export const ru: TranslationResources = {
         save: "Save",
         emptyState: "No profiles yet. Add one to launch terminals with a specific command.",
       },
+      tools: {
+        instructionsTitle: "Инструкции",
+        toolsTitle: "Инструменты агентов",
+      },
       daemon: {
+        runtimeTitle: "Среда выполнения агентов",
         rename: {
           editLabel: "Изменить ярлык",
           title: "Переименовать хост",

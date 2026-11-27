@@ -8,7 +8,79 @@ export interface AgentBackgroundWorkInput {
   description: string | null;
   command?: string;
   canStop?: boolean;
+  /** The folder the work runs in, when the provider reports it. Never sent in the list. */
+  cwd?: string;
+  /** Where the work's output can be read (ADR-0062). Daemon-only; never sent to clients. */
+  output?: BackgroundWorkOutputSource;
 }
+
+/** One page of output read through a provider API. */
+export interface BackgroundWorkOutputPage {
+  /** Raw bytes the provider returned for `[cursor, nextCursor)`. */
+  bytes: Uint8Array;
+  /** Byte offset after this page. */
+  nextCursor: number;
+  /** Total bytes the provider holds for this work. */
+  size: number;
+}
+
+/**
+ * The single output source a provider attached to one background item. The daemon reads
+ * nothing else for it (ADR-0062 §3): no RPC takes a path.
+ */
+export type BackgroundWorkOutputSource =
+  | {
+      type: "file";
+      /** Resolves the file the provider wrote for this item, or null when it is not readable. */
+      locate(): Promise<BackgroundWorkOutputFile | null>;
+    }
+  | {
+      type: "reader";
+      read(input: { cursor: number; limit: number }): Promise<BackgroundWorkOutputPage>;
+    };
+
+export interface BackgroundWorkOutputFile {
+  path: string;
+  /** The opened file must resolve inside one of these folders. */
+  roots: readonly string[];
+}
+
+export type BackgroundWorkStatus = "running" | "finished" | "failed" | "stopped";
+
+/** How one item ended, when the provider says so. */
+export interface AgentBackgroundWorkEnd {
+  id: string;
+  status: Exclude<BackgroundWorkStatus, "running">;
+  exitCode?: number | null;
+  /** Late output source, e.g. the output file named in the end notice. */
+  output?: BackgroundWorkOutputSource;
+}
+
+/** What `detail` knows about one item, live or recently ended. */
+export interface AgentBackgroundWorkDetail {
+  item: AgentBackgroundWorkItem;
+  status: BackgroundWorkStatus;
+  endedAt: string | null;
+  exitCode: number | null;
+  cwd: string | null;
+  output: BackgroundWorkOutputSource | null;
+}
+
+interface ItemExtras {
+  cwd?: string;
+  output?: BackgroundWorkOutputSource;
+}
+
+interface EndedWork {
+  item: AgentBackgroundWorkItem;
+  endedAt: string;
+  status: Exclude<BackgroundWorkStatus, "running">;
+  exitCode: number | null;
+  extras: ItemExtras;
+}
+
+/** Ended items kept per agent so their detail and output stay readable after they finish. */
+const MAX_ENDED_PER_AGENT = 50;
 
 export interface AgentBackgroundWorkItem extends AgentBackgroundWorkInput {
   startedAt: string;
@@ -63,6 +135,10 @@ function encodeProviderItemId(id: string): string {
 export class AgentBackgroundWorkStore {
   private readonly providerItems = new Map<string, AgentBackgroundWorkItem[]>();
   private readonly daemonItems = new Map<string, Map<string, DaemonBackgroundWork>>();
+  private readonly extras = new Map<string, Map<string, ItemExtras>>();
+  private readonly ended = new Map<string, EndedWork[]>();
+  /** End notices that arrived while the item was still listed. */
+  private readonly pendingEnds = new Map<string, Map<string, AgentBackgroundWorkEnd>>();
 
   apply(
     agentId: string,
@@ -73,10 +149,13 @@ export class AgentBackgroundWorkStore {
     const previousById = new Map(previous?.map((item) => [item.id, item]));
     const seen = new Set<string>();
     const next: AgentBackgroundWorkItem[] = [];
+    const extras = this.extras.get(agentId) ?? new Map<string, ItemExtras>();
     for (const input of inputs) {
       const id = encodeProviderItemId(input.id);
       if (seen.has(id)) continue;
       seen.add(id);
+      extras.set(id, mergeExtras(extras.get(id), input));
+      this.forgetEnded(agentId, id);
       next.push({
         id,
         kind: input.kind,
@@ -88,9 +167,104 @@ export class AgentBackgroundWorkStore {
         startedAt: previousById.get(id)?.startedAt ?? timestamp,
       });
     }
+    this.extras.set(agentId, extras);
+    this.retire(agentId, previous ?? [], seen, timestamp);
     if (previous && sameItems(previous, next)) return null;
     this.providerItems.set(agentId, next);
     return this.list(agentId);
+  }
+
+  /**
+   * Records how an item ended. A notice for a listed item waits until the inventory drops it;
+   * a notice for an item that already left updates its ended record.
+   */
+  end(agentId: string, end: AgentBackgroundWorkEnd): void {
+    const id = encodeProviderItemId(end.id);
+    const record = this.ended.get(agentId)?.find((work) => work.item.id === id);
+    if (record) {
+      applyEnd(record, end);
+      return;
+    }
+    if (!this.providerItems.get(agentId)?.some((item) => item.id === id)) return;
+    const pending = this.pendingEnds.get(agentId) ?? new Map<string, AgentBackgroundWorkEnd>();
+    pending.set(id, { ...pending.get(id), ...end });
+    this.pendingEnds.set(agentId, pending);
+  }
+
+  /** The item's detail while it runs, or for a while after it ended. */
+  detail(agentId: string, itemId: string): AgentBackgroundWorkDetail | null {
+    const live = this.providerItems.get(agentId)?.find((item) => item.id === itemId);
+    if (live) {
+      const extras = this.extras.get(agentId)?.get(itemId);
+      return {
+        item: live,
+        status: "running",
+        endedAt: null,
+        exitCode: null,
+        cwd: extras?.cwd ?? null,
+        output: extras?.output ?? null,
+      };
+    }
+    const daemon = this.daemonItems.get(agentId)?.get(itemId);
+    if (daemon) {
+      return {
+        item: daemon.item,
+        status: "running",
+        endedAt: null,
+        exitCode: null,
+        cwd: null,
+        output: null,
+      };
+    }
+    const ended = this.ended.get(agentId)?.find((work) => work.item.id === itemId);
+    if (!ended) return null;
+    const { canStop: _canStop, stopToken: _stopToken, ...item } = ended.item;
+    return {
+      item,
+      status: ended.status,
+      endedAt: ended.endedAt,
+      exitCode: ended.exitCode,
+      cwd: ended.extras.cwd ?? null,
+      output: ended.extras.output ?? null,
+    };
+  }
+
+  private retire(
+    agentId: string,
+    previous: readonly AgentBackgroundWorkItem[],
+    live: ReadonlySet<string>,
+    timestamp: string,
+    status: EndedWork["status"] = "finished",
+  ): void {
+    const extras = this.extras.get(agentId);
+    const pending = this.pendingEnds.get(agentId);
+    for (const item of previous) {
+      if (live.has(item.id)) continue;
+      const end = pending?.get(item.id);
+      pending?.delete(item.id);
+      const record: EndedWork = {
+        item,
+        endedAt: timestamp,
+        status,
+        exitCode: null,
+        extras: extras?.get(item.id) ?? {},
+      };
+      if (end) applyEnd(record, end);
+      extras?.delete(item.id);
+      const ended = this.ended.get(agentId) ?? [];
+      ended.unshift(record);
+      ended.length = Math.min(ended.length, MAX_ENDED_PER_AGENT);
+      this.ended.set(agentId, ended);
+    }
+    if (pending?.size === 0) this.pendingEnds.delete(agentId);
+    if (extras?.size === 0) this.extras.delete(agentId);
+  }
+
+  private forgetEnded(agentId: string, id: string): void {
+    const ended = this.ended.get(agentId);
+    if (!ended) return;
+    const index = ended.findIndex((work) => work.item.id === id);
+    if (index >= 0) ended.splice(index, 1);
   }
 
   setDaemonBackgroundWork(input: DaemonBackgroundWorkInput): AgentBackgroundWorkItem[] | null {
@@ -158,10 +332,41 @@ export class AgentBackgroundWorkStore {
     return runningCount === count ? { count } : { count, runningCount };
   }
 
-  clear(agentId: string): AgentBackgroundWorkItem[] | null {
-    if (!this.providerItems.delete(agentId)) return null;
+  clear(
+    agentId: string,
+    timestamp: string = new Date().toISOString(),
+  ): AgentBackgroundWorkItem[] | null {
+    const previous = this.providerItems.get(agentId);
+    if (!previous) return null;
+    // A reset drops the roster: the provider process that owned it went away. Work listed
+    // again later comes back as live.
+    this.retire(agentId, previous, new Set(), timestamp, "stopped");
+    this.providerItems.delete(agentId);
     return this.list(agentId);
   }
+
+  /** The agent is gone; nothing about its work stays readable. */
+  forget(agentId: string): void {
+    this.ended.delete(agentId);
+    this.pendingEnds.delete(agentId);
+    this.extras.delete(agentId);
+  }
+}
+
+/** A provider may report the folder or output source in a later update than the first. */
+function mergeExtras(known: ItemExtras | undefined, input: AgentBackgroundWorkInput): ItemExtras {
+  const merged: ItemExtras = {};
+  const cwd = input.cwd ?? known?.cwd;
+  const output = input.output ?? known?.output;
+  if (cwd) merged.cwd = cwd;
+  if (output) merged.output = output;
+  return merged;
+}
+
+function applyEnd(record: EndedWork, end: AgentBackgroundWorkEnd): void {
+  record.status = end.status;
+  if (end.exitCode !== undefined) record.exitCode = end.exitCode;
+  if (end.output) record.extras = { ...record.extras, output: end.output };
 }
 
 function sameItems(

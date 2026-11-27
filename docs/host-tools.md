@@ -77,7 +77,7 @@ sources, `release.ts` resolves and verifies downloads, `installer.ts` plans and 
 
 ## App
 
-**Settings → host → Tools** (the "Host tools" page) lists every capability with its state, version
+**Settings → host → Tools & prompts** (its "Host tools" section) lists every capability with its state, version
 and reason, has **Check again**, and installs a missing tool after showing its plan, with live
 output. Built-in destinations with `hostCapabilities` use the same report: **Devices** in the
 sidebar appears only on hosts that report a simulator, emulator, physical-device or sideload

@@ -26,6 +26,11 @@ import { formatCompactWorkspaceTitle } from "@/screens/workspace/workspace-heade
 import { useIsGumloopTheme } from "./use-gumloop-chrome";
 import { GUMLOOP_COMPACT_ACTIONS_HOST } from "./sidebar-state";
 import type { Theme } from "@/styles/theme";
+import {
+  PhoneBotsHeaderAction,
+  PhoneBotsHeaderTitle,
+  useBotsRouteTarget,
+} from "@/bots/phone/header";
 
 const ThemedMenu = withUnistyles(Menu);
 const ThemedPanelRight = withUnistyles(PanelRight);
@@ -56,6 +61,8 @@ export function GumloopCompactHeader({ enabled }: { enabled: boolean }) {
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
   const route = parseHostWorkspaceRouteFromPathname(pathname);
+  // A bot's page names the bot and opens its panel (spec 37.6).
+  const botsRoute = useBotsRouteTarget();
   const workspace = useWorkspace(route?.serverId ?? null, route?.workspaceId ?? null);
   const nav = useAppNavItems();
   const active = nav.find((item) => item.isActive);
@@ -123,13 +130,25 @@ export function GumloopCompactHeader({ enabled }: { enabled: boolean }) {
         >
           <ThemedMenu size={22} uniProps={foreground} />
         </HeaderToggleButton>
-        <Text style={styles.title} numberOfLines={1} testID="compact-header-title">
-          {title}
-        </Text>
+        <PhoneBotsHeaderTitle target={botsRoute}>
+          <Text style={styles.title} numberOfLines={1} testID="compact-header-title">
+            {title}
+          </Text>
+        </PhoneBotsHeaderTitle>
         {route ? <PortalHost name={GUMLOOP_COMPACT_ACTIONS_HOST} /> : null}
-        {verticalActions ? <View style={styles.button} /> : action}
+        {verticalActions ? (
+          <View style={styles.button} />
+        ) : (
+          <PhoneBotsHeaderAction target={botsRoute} buttonStyle={styles.button}>
+            {action}
+          </PhoneBotsHeaderAction>
+        )}
       </WindowChromeSafeArea>
-      <WindowLayoutActions active={enabled}>{action}</WindowLayoutActions>
+      <WindowLayoutActions active={enabled}>
+        <PhoneBotsHeaderAction target={botsRoute} buttonStyle={styles.button}>
+          {action}
+        </PhoneBotsHeaderAction>
+      </WindowLayoutActions>
     </View>
   );
 }

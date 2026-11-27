@@ -302,7 +302,7 @@ export default function TailscaleLoginRoute() {
       return "/pair-start?step=connect" as Href;
     }
     if (params.returnTo === "host-overview" && typeof params.serverId === "string") {
-      return buildSettingsHostSectionRoute(params.serverId, "host");
+      return buildSettingsHostSectionRoute(params.serverId, "daemon");
     }
     return "/";
   }, [params.returnTo, params.serverId]);

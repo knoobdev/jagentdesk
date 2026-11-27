@@ -300,6 +300,7 @@ export const es: TranslationResources = {
     archived: {
       callout: "Este agente está archivado.",
       unarchive: "Desarchivar",
+      unarchiving: "Desarchivando...",
     },
   },
   sessions: {
@@ -439,6 +440,35 @@ export const es: TranslationResources = {
       shell: "Consola",
       monitor: "Monitor",
       other: "Otro trabajo",
+      detail: {
+        back: "Volver al trabajo en segundo plano",
+        open: "Ver detalles: {{label}}",
+        statusValue: {
+          running: "En ejecución",
+          finished: "Terminada",
+          failed: "Fallida",
+          stopped: "Detenida",
+        },
+        copied: "Copiado",
+        copyCommand: "Copiar comando",
+        showMore: "Mostrar más",
+        showLess: "Mostrar menos",
+        waitingForOutput: "Esperando salida…",
+        startedAt: "iniciada {{time}}",
+        copyOutput: "Copiar salida",
+        output: "Salida",
+        jumpToLatest: "Ir a lo último",
+        openInTab: "Abrir en pestaña",
+        outputUnavailable: "La salida no está disponible para {{provider}}",
+        outputLoading: "Cargando salida…",
+        outputError: "No se pudo leer la salida",
+        outputSkipped: "se omitió salida anterior",
+        updateHost: "Actualiza el host para ver la salida de esta tarea",
+        disconnected: "Host desconectado",
+        loading: "Cargando detalles…",
+        notFound: "El host ya no conoce esta tarea en segundo plano",
+        tabTitle: "Tarea en segundo plano",
+      },
     },
     todo: {
       title: "Tareas",
@@ -1964,6 +1994,13 @@ export const es: TranslationResources = {
       backToParent: "Back to parent",
     },
 
+    pillLabelOne: "1 subagente",
+    pillLabelMany: "{{count}} subagentes",
+    pillLabelWorking: "{{count}} en ejecución",
+    pillLabelFailed: "{{count}} con error",
+    pillLabelNeedsInputOne: "1 necesita datos",
+    pillLabelNeedsInputMany: "{{count}} necesitan datos",
+    pillLabelReadyToReview: "{{count}} para revisar",
     detachAction: "Separar {{label}}",
     detachTooltip: "Separar subagente",
     archiveAction: "Archivo{{label}}",
@@ -2102,7 +2139,7 @@ export const es: TranslationResources = {
     title: "Ajustes",
     loading: "Cargando configuración...",
     groups: {
-      app: "Aplicación",
+      app: "Este dispositivo",
       host: "Host",
     },
     hostPicker: {
@@ -2119,6 +2156,10 @@ export const es: TranslationResources = {
     },
     groupInfo: "Acerca de{{title}}",
     sections: {
+      hosts: "Hosts",
+      sidebar: "Barra lateral",
+      chatAndPanes: "Chat y paneles",
+      notifications: "Notificaciones",
       general: "General",
       connection: "Conexión",
       appearance: "Apariencia",
@@ -2128,6 +2169,14 @@ export const es: TranslationResources = {
       permissions: "Permisos",
       diagnostics: "Diagnóstico",
     },
+    clientHosts: {
+      title: "Hosts guardados",
+      info: "Hosts a los que se conecta este dispositivo. Los nombres, iconos, insignias y rutas aquí solo afectan a este dispositivo.",
+      offline: "Desconectado",
+    },
+    chat: {
+      sendingTitle: "Envío",
+    },
     editor: {
       title: "Editor",
       vimKeybindings: "Atajos de Vim",
@@ -2135,7 +2184,8 @@ export const es: TranslationResources = {
     },
     plugins: pluginSettings.es,
     hostSections: {
-      tools: "Tools",
+      daemon: "Daemon",
+      tools: "Herramientas e instrucciones",
       plugins: "Plugins",
       projects: "Proyectos",
       connections: "Conexiones",
@@ -2729,7 +2779,12 @@ export const es: TranslationResources = {
         save: "Save",
         emptyState: "No profiles yet. Add one to launch terminals with a specific command.",
       },
+      tools: {
+        instructionsTitle: "Instrucciones",
+        toolsTitle: "Herramientas de agentes",
+      },
       daemon: {
+        runtimeTitle: "Ejecución de agentes",
         rename: {
           editLabel: "Editar etiqueta",
           title: "Cambiar nombre de host",

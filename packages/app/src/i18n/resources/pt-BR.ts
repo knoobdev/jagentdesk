@@ -299,6 +299,7 @@ export const ptBR: TranslationResources = {
     archived: {
       callout: "Este agente está arquivado",
       unarchive: "Desarquivar",
+      unarchiving: "Desarquivando...",
     },
   },
   sessions: {
@@ -438,6 +439,35 @@ export const ptBR: TranslationResources = {
       shell: "Shell",
       monitor: "Monitor",
       other: "Outro trabalho",
+      detail: {
+        back: "Voltar ao trabalho em segundo plano",
+        open: "Ver detalhes: {{label}}",
+        statusValue: {
+          running: "Em execução",
+          finished: "Concluída",
+          failed: "Falhou",
+          stopped: "Parada",
+        },
+        copied: "Copiado",
+        copyCommand: "Copiar comando",
+        showMore: "Mostrar mais",
+        showLess: "Mostrar menos",
+        waitingForOutput: "Aguardando saída…",
+        startedAt: "iniciada às {{time}}",
+        copyOutput: "Copiar saída",
+        output: "Saída",
+        jumpToLatest: "Ir para o fim",
+        openInTab: "Abrir em aba",
+        outputUnavailable: "A saída não está disponível para {{provider}}",
+        outputLoading: "Carregando saída…",
+        outputError: "Não foi possível ler a saída",
+        outputSkipped: "saída anterior omitida",
+        updateHost: "Atualize o host para ver a saída desta tarefa",
+        disconnected: "Host desconectado",
+        loading: "Carregando detalhes…",
+        notFound: "O host não conhece mais esta tarefa em segundo plano",
+        tabTitle: "Tarefa em segundo plano",
+      },
     },
     todo: {
       title: "Tarefas",
@@ -1948,6 +1978,13 @@ export const ptBR: TranslationResources = {
       backToParent: "Back to parent",
     },
 
+    pillLabelOne: "1 subagente",
+    pillLabelMany: "{{count}} subagentes",
+    pillLabelWorking: "{{count}} em execução",
+    pillLabelFailed: "{{count}} com falha",
+    pillLabelNeedsInputOne: "1 precisa de resposta",
+    pillLabelNeedsInputMany: "{{count}} precisam de resposta",
+    pillLabelReadyToReview: "{{count}} para revisar",
     detachAction: "Desanexar {{label}}",
     detachTooltip: "Desanexar subagente",
     archiveAction: "Arquivar {{label}}",
@@ -2086,7 +2123,7 @@ export const ptBR: TranslationResources = {
     title: "Configurações",
     loading: "Carregando configurações...",
     groups: {
-      app: "App",
+      app: "Este dispositivo",
       host: "Host",
     },
     hostPicker: {
@@ -2103,6 +2140,10 @@ export const ptBR: TranslationResources = {
     },
     groupInfo: "Sobre {{title}}",
     sections: {
+      hosts: "Hosts",
+      sidebar: "Barra lateral",
+      chatAndPanes: "Chat e painéis",
+      notifications: "Notificações",
       general: "Geral",
       connection: "Conexão",
       appearance: "Aparência",
@@ -2112,6 +2153,14 @@ export const ptBR: TranslationResources = {
       permissions: "Permissões",
       diagnostics: "Diagnósticos",
     },
+    clientHosts: {
+      title: "Hosts salvos",
+      info: "Hosts aos quais este dispositivo se conecta. Nomes, ícones, selos e rotas aqui afetam apenas este dispositivo.",
+      offline: "Offline",
+    },
+    chat: {
+      sendingTitle: "Envio",
+    },
     editor: {
       title: "Editor",
       vimKeybindings: "Atalhos do Vim",
@@ -2119,7 +2168,8 @@ export const ptBR: TranslationResources = {
     },
     plugins: pluginSettings["pt-BR"],
     hostSections: {
-      tools: "Tools",
+      daemon: "Daemon",
+      tools: "Ferramentas e instruções",
       plugins: "Plugins",
       projects: "Projetos",
       connections: "Conexões",
@@ -2712,7 +2762,12 @@ export const ptBR: TranslationResources = {
         emptyState:
           "Nenhum perfil ainda. Adicione um para abrir terminais com um comando específico.",
       },
+      tools: {
+        instructionsTitle: "Instruções",
+        toolsTitle: "Ferramentas de agentes",
+      },
       daemon: {
+        runtimeTitle: "Execução de agentes",
         rename: {
           editLabel: "Editar rótulo",
           title: "Renomear host",

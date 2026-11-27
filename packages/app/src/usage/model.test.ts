@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { i18n } from "@/i18n/i18next";
 import {
+  dropsReports,
   resolveUsageReport,
   markUsageRefreshFailure,
   displayPercent,
@@ -9,6 +10,7 @@ import {
   resolveUsageRefresh,
   resolveUsageHostId,
   resolveUsageModalHostId,
+  resolveUsageSummaryHostId,
   resolveUsageView,
   settleReports,
   upsertReport,
@@ -147,6 +149,66 @@ describe("resolveUsageHostId", () => {
         activeServerId: "old",
         hosts: hosts.slice(0, 2),
       }),
+    ).toBeNull();
+  });
+});
+
+describe("dropsReports", () => {
+  const claude = entry({ sourceId: "claude" });
+  const codex = entry({ sourceId: "codex" });
+
+  it("is true when a shown report is missing from the settled list", () => {
+    expect(dropsReports([claude, codex], [claude])).toBe(true);
+    expect(dropsReports([claude], [])).toBe(true);
+  });
+
+  it("is false when every shown report is still listed, or nothing was shown", () => {
+    expect(dropsReports([claude], [codex, claude])).toBe(false);
+    expect(dropsReports([], [])).toBe(false);
+  });
+});
+
+describe("resolveUsageSummaryHostId", () => {
+  const solo = (isConnected: boolean): UsageHost[] => [
+    { serverId: "a", label: "Alpha", isConnected, supportsUsage: true },
+  ];
+
+  it("keeps the shown host while it reconnects", () => {
+    const choice = { pickedServerId: null, activeServerId: "a", hosts: solo(false) };
+    expect(resolveUsageHostId(choice)).toBeNull();
+    expect(resolveUsageSummaryHostId(choice, "a")).toBe("a");
+  });
+
+  it("keeps the shown host over another connected host while it reconnects", () => {
+    const choice = {
+      pickedServerId: "offline",
+      activeServerId: "offline",
+      hosts,
+    };
+    expect(resolveUsageSummaryHostId(choice, "offline")).toBe("offline");
+  });
+
+  it("moves to the newly chosen host, never keeping the old one's place", () => {
+    expect(
+      resolveUsageSummaryHostId({ pickedServerId: "b", activeServerId: "b", hosts }, "a"),
+    ).toBe("b");
+    expect(
+      resolveUsageSummaryHostId({ pickedServerId: null, activeServerId: "b", hosts }, "offline"),
+    ).toBe("b");
+  });
+
+  it("drops a host that left the host list", () => {
+    expect(
+      resolveUsageSummaryHostId({ pickedServerId: null, activeServerId: null, hosts: [] }, "a"),
+    ).toBeNull();
+  });
+
+  it("does not take a disconnected host it never showed", () => {
+    expect(
+      resolveUsageSummaryHostId(
+        { pickedServerId: null, activeServerId: "a", hosts: solo(false) },
+        null,
+      ),
     ).toBeNull();
   });
 });

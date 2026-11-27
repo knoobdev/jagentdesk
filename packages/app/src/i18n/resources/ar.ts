@@ -312,6 +312,7 @@ export const ar: TranslationResources = {
     archived: {
       callout: "تمت أرشفة هذا الوكيل",
       unarchive: "إلغاء الأرشفة",
+      unarchiving: "جارٍ إلغاء الأرشفة...",
     },
   },
   sessions: {
@@ -451,6 +452,35 @@ export const ar: TranslationResources = {
       shell: "الصدفة",
       monitor: "المراقبة",
       other: "عمل آخر",
+      detail: {
+        back: "العودة إلى العمل في الخلفية",
+        open: "عرض التفاصيل: {{label}}",
+        statusValue: {
+          running: "قيد التشغيل",
+          finished: "انتهت",
+          failed: "فشلت",
+          stopped: "أُوقفت",
+        },
+        copied: "تم النسخ",
+        copyCommand: "نسخ الأمر",
+        showMore: "عرض المزيد",
+        showLess: "عرض أقل",
+        waitingForOutput: "في انتظار المخرجات…",
+        startedAt: "بدأ {{time}}",
+        copyOutput: "نسخ المخرجات",
+        output: "المخرجات",
+        jumpToLatest: "الانتقال إلى الأحدث",
+        openInTab: "فتح في علامة تبويب",
+        outputUnavailable: "المخرجات غير متاحة لـ {{provider}}",
+        outputLoading: "جارٍ تحميل المخرجات…",
+        outputError: "تعذّرت قراءة المخرجات",
+        outputSkipped: "تم تخطي مخرجات سابقة",
+        updateHost: "حدّث المضيف لرؤية مخرجات هذه المهمة",
+        disconnected: "المضيف غير متصل",
+        loading: "جارٍ تحميل التفاصيل…",
+        notFound: "لم يعد المضيف يعرف هذه المهمة",
+        tabTitle: "مهمة في الخلفية",
+      },
     },
     todo: {
       title: "المهام",
@@ -1964,6 +1994,13 @@ export const ar: TranslationResources = {
       backToParent: "Back to parent",
     },
 
+    pillLabelOne: "وكيل فرعي واحد",
+    pillLabelMany: "{{count}} وكلاء فرعيين",
+    pillLabelWorking: "{{count}} قيد التشغيل",
+    pillLabelFailed: "{{count}} فشلت",
+    pillLabelNeedsInputOne: "واحد يحتاج إدخالاً",
+    pillLabelNeedsInputMany: "{{count}} تحتاج إدخالاً",
+    pillLabelReadyToReview: "{{count}} جاهزة للمراجعة",
     detachAction: "فصل {{label}}",
     detachTooltip: "فصل الوكيل الفرعي",
     archiveAction: "أرشيف{{label}}",
@@ -2107,7 +2144,7 @@ export const ar: TranslationResources = {
     title: "إعدادات",
     loading: "جارٍ تحميل الإعدادات...",
     groups: {
-      app: "برنامج",
+      app: "هذا الجهاز",
       host: "Host",
     },
     hostPicker: {
@@ -2124,6 +2161,10 @@ export const ar: TranslationResources = {
     },
     groupInfo: "حول{{title}}",
     sections: {
+      hosts: "المضيفون",
+      sidebar: "الشريط الجانبي",
+      chatAndPanes: "الدردشة والأجزاء",
+      notifications: "الإشعارات",
       general: "عام",
       connection: "الاتصال",
       appearance: "مظهر",
@@ -2133,6 +2174,14 @@ export const ar: TranslationResources = {
       permissions: "الأذونات",
       diagnostics: "التشخيص",
     },
+    clientHosts: {
+      title: "المضيفون المحفوظون",
+      info: "المضيفون الذين يتصل بهم هذا الجهاز. الأسماء والأيقونات والشارات والمسارات هنا تؤثر على هذا الجهاز فقط.",
+      offline: "غير متصل",
+    },
+    chat: {
+      sendingTitle: "الإرسال",
+    },
     editor: {
       title: "المحرر",
       vimKeybindings: "اختصارات Vim",
@@ -2140,7 +2189,8 @@ export const ar: TranslationResources = {
     },
     plugins: pluginSettings.ar,
     hostSections: {
-      tools: "Tools",
+      daemon: "الخدمة",
+      tools: "الأدوات والتعليمات",
       plugins: "الإضافات",
       projects: "المشاريع",
       connections: "اتصالات",
@@ -2725,7 +2775,12 @@ export const ar: TranslationResources = {
         save: "Save",
         emptyState: "No profiles yet. Add one to launch terminals with a specific command.",
       },
+      tools: {
+        instructionsTitle: "التعليمات",
+        toolsTitle: "أدوات الوكلاء",
+      },
       daemon: {
+        runtimeTitle: "بيئة تشغيل الوكلاء",
         rename: {
           editLabel: "تحرير التسمية",
           title: "إعادة تسمية المضيف",

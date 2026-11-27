@@ -14,6 +14,7 @@ import {
   useHosts,
 } from "@/runtime/host-runtime";
 import { useSessionStore } from "@/stores/session-store";
+import { isBotAgent } from "@/bots/bot-agents";
 import { buildAgentDirectoryState } from "@/utils/agent-directory-sync";
 import { agentHistoryQueryKey, allAgentHistoryQueryKey } from "./agent-history-query-key";
 
@@ -78,6 +79,11 @@ interface AgentHistoryBatchPage {
 
 type AgentHistoryCursorByServerId = Record<string, string | null>;
 
+/** An agent the host already sent this client (a worker's bot parent may not be on this page). */
+function sessionAgent(serverId: string, agentId: string) {
+  return useSessionStore.getState().sessions[serverId]?.agents.get(agentId);
+}
+
 export async function fetchAgentHistoryPage(input: {
   client: AgentHistoryClient;
   serverId: string;
@@ -96,9 +102,12 @@ export async function fetchAgentHistoryPage(input: {
     serverId: input.serverId,
     entries: payload.entries,
   });
+  // A bot's agents (its Home Chat, runs and workers) are its history, under the bot.
+  const lookup = (id: string) => agents.get(id) ?? sessionAgent(input.serverId, id);
+  const listed = Array.from(agents.values()).filter((agent) => !isBotAgent(agent, lookup));
   return {
     isSearchTruncated: payload.searchTruncated === true,
-    agents: Array.from(agents.values(), (agent) => ({
+    agents: listed.map((agent) => ({
       id: agent.id,
       serverId: input.serverId,
       serverLabel: input.serverId,

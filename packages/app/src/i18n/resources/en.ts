@@ -291,6 +291,7 @@ export const en = {
     archived: {
       callout: "This agent is archived",
       unarchive: "Unarchive",
+      unarchiving: "Unarchiving...",
     },
   },
   sessions: {
@@ -430,6 +431,35 @@ export const en = {
       shell: "Shell",
       monitor: "Monitor",
       other: "Other work",
+      detail: {
+        back: "Back to background work",
+        open: "Show details: {{label}}",
+        statusValue: {
+          running: "Running",
+          finished: "Finished",
+          failed: "Failed",
+          stopped: "Stopped",
+        },
+        copied: "Copied",
+        copyCommand: "Copy command",
+        showMore: "Show more",
+        showLess: "Show less",
+        waitingForOutput: "Waiting for output…",
+        startedAt: "started {{time}}",
+        copyOutput: "Copy output",
+        output: "Output",
+        jumpToLatest: "Jump to latest",
+        openInTab: "Open in tab",
+        outputUnavailable: "Output isn't available for {{provider}}",
+        outputLoading: "Loading output…",
+        outputError: "Could not read the output",
+        outputSkipped: "earlier output skipped",
+        updateHost: "Update the host to see this task's output",
+        disconnected: "Host disconnected",
+        loading: "Loading details…",
+        notFound: "This background task is no longer known to the host",
+        tabTitle: "Background task",
+      },
     },
     todo: {
       title: "Tasks",
@@ -1981,6 +2011,13 @@ export const en = {
       backToParent: "Back to parent",
     },
 
+    pillLabelOne: "1 subagent",
+    pillLabelMany: "{{count}} subagents",
+    pillLabelWorking: "{{count}} working",
+    pillLabelFailed: "{{count}} failed",
+    pillLabelNeedsInputOne: "1 needs input",
+    pillLabelNeedsInputMany: "{{count}} need input",
+    pillLabelReadyToReview: "{{count}} ready to review",
     detachAction: "Detach {{label}}",
     detachTooltip: "Detach subagent",
     archiveAction: "Archive {{label}}",
@@ -2115,7 +2152,7 @@ export const en = {
     title: "Settings",
     loading: "Loading settings...",
     groups: {
-      app: "App",
+      app: "This device",
       host: "Host",
     },
     hostPicker: {
@@ -2132,6 +2169,10 @@ export const en = {
     },
     groupInfo: "About {{title}}",
     sections: {
+      hosts: "Hosts",
+      sidebar: "Sidebar",
+      chatAndPanes: "Chat & panes",
+      notifications: "Notifications",
       general: "General",
       connection: "Connection",
       appearance: "Appearance",
@@ -2141,6 +2182,14 @@ export const en = {
       permissions: "Permissions",
       diagnostics: "Diagnostics",
     },
+    clientHosts: {
+      title: "Saved hosts",
+      info: "Hosts this device connects to. Names, icons, badges, and routes here only affect this device.",
+      offline: "Offline",
+    },
+    chat: {
+      sendingTitle: "Sending",
+    },
     editor: {
       title: "Editor",
       vimKeybindings: "Vim keybindings",
@@ -2148,7 +2197,8 @@ export const en = {
     },
     plugins: pluginSettings.en,
     hostSections: {
-      tools: "Tools",
+      daemon: "Daemon",
+      tools: "Tools & prompts",
       plugins: "Plugins",
       projects: "Projects",
       connections: "Connections",
@@ -2734,7 +2784,12 @@ export const en = {
         save: "Save",
         emptyState: "No profiles yet. Add one to launch terminals with a specific command.",
       },
+      tools: {
+        instructionsTitle: "Instructions",
+        toolsTitle: "Agent tools",
+      },
       daemon: {
+        runtimeTitle: "Agent runtime",
         rename: {
           editLabel: "Edit label",
           title: "Rename host",

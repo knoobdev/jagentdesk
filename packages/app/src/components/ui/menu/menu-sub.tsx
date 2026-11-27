@@ -35,6 +35,7 @@ export function MenuSubTrigger({
   indicator = false,
   leading,
   disabled,
+  onPress,
   testID,
   children,
 }: PropsWithChildren<{
@@ -51,6 +52,13 @@ export function MenuSubTrigger({
    */
   leading?: ReactElement | null;
   disabled?: boolean;
+  /**
+   * In a popover, pressing the row (or Enter) runs this and closes the menu; hover still opens the
+   * page. For a row whose own action is the common case and whose page lists the other ways, like
+   * Bots' "New bot" (Orca SidebarBotsSection.tsx:250). The sheet has no hover, so there a press
+   * still opens the page.
+   */
+  onPress?: () => void;
   testID?: string;
 }>): ReactElement {
   const menu = useMenuContext("MenuSubTrigger");
@@ -66,9 +74,15 @@ export function MenuSubTrigger({
   const isOpen = isSubPageOpen(menu.path, { id, depth });
   const isPopover = menu.presentation === "popover";
 
+  const acts = onPress !== undefined && isPopover;
   const handleSelect = useCallback(() => {
+    if (acts && onPress) {
+      menu.setOpen(false);
+      onPress();
+      return;
+    }
     menu.openSub({ id, depth });
-  }, [menu, id, depth]);
+  }, [acts, menu, id, depth, onPress]);
 
   const handlePointerEnter = useCallback(
     (event: PointerEvent) => {

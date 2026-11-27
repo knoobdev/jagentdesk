@@ -14,7 +14,7 @@ Each live agent in `AgentManager` carries a `lastStatus` of `initializing`, `idl
 
 ## Restart recovery
 
-Recovery is opt-in: Settings → host → Agents → **Resume agents after restart**
+Recovery is opt-in: Settings → host → Daemon → **Resume agents after restart**
 (`agents.resumeOnStartup`). After restart it sends `agents.resumePrompt` (default
 `Resume working.`) only to agents interrupted during a running turn. Idle agents stay dormant. Archived, internal, daemon-owned and archived-workspace agents
 are excluded. A slow or unavailable provider holds back only its own agent.
@@ -36,7 +36,7 @@ Idle runtimes are released after one hour while their saved conversations remain
 Reopening a runtime starts a fresh idle window without changing sidebar activity timestamps.
 Tracked background work, outstanding local finish subscriptions, queued messages, and provider
 safety vetoes keep runtimes resident. Claude session crons and `/loop` wakeups are process-local
-work and prevent release. Hosts can disable cleanup live with Settings → host → Agents → **Release idle agents**
+work and prevent release. Hosts can disable cleanup live with Settings → host → Daemon → **Release idle agents**
 (`agents.idleRuntimeCleanup`). The timer lives in
 `packages/server/src/server/agent/idle-runtime-cleanup/`.
 
@@ -138,6 +138,26 @@ provider the daemon writes them from the inventory (`agent/background-work/timel
 an item first appears and one when a live update drops it, with the elapsed time. An inventory
 reset (`items: null` on reconnect) is not an end. The rows are `tool_call` items with
 `metadata.source: "background_work"`, so old clients show them as plain tool calls.
+
+### Detail and output
+
+`agent.background_work.get_detail.request` returns one item, live or recently ended (status, exit
+code, folder, `outputAvailable`), and `agent.background_work.output.subscribe.request` streams its
+output as `agent.background_work.output` pushes: the last 256 KiB on open, then at most 64 KiB/s.
+Gate both on `features.backgroundWorkOutput` (ADR-0062).
+
+Neither RPC takes a path. A provider attaches one output source to its own item, and the daemon
+reads only that:
+
+| Provider | Source                                                                                                                                                                                   |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude   | The file Claude Code names in the Bash result and the task notification, `<tmp>/claude-<uid>/<project>/<session>/tasks/<task>.output`; a Monitor's file is found by session and task id. |
+| OpenCode | `shell.output` by byte cursor, polled while someone watches.                                                                                                                             |
+| Codex    | None: the app-server has `list`, `terminate` and `clean` for background terminals but no read. The folder comes from the list's `cwd`.                                                   |
+| Others   | None.                                                                                                                                                                                    |
+
+A file source is opened only when it resolves inside the provider's own temp folder and is not a
+symlink (`agent/background-work/output-stream.ts`). Output never goes into the daemon log.
 
 ## Archive
 

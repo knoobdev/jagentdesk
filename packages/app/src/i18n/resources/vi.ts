@@ -26,6 +26,13 @@ export const vi = {
   memory: memoryStrings,
   subagents: {
     title: "Các tác tử con",
+    pillLabelOne: "1 tác tử con",
+    pillLabelMany: "{{count}} tác tử con",
+    pillLabelWorking: "{{count}} đang chạy",
+    pillLabelFailed: "{{count}} lỗi",
+    pillLabelNeedsInputOne: "1 cần nhập",
+    pillLabelNeedsInputMany: "{{count}} cần nhập",
+    pillLabelReadyToReview: "{{count}} chờ xem",
     parent: {
       openParent: "Open parent",
 
@@ -352,6 +359,23 @@ export const vi = {
     },
   },
   settings: {
+    groups: {
+      app: "Thiết bị này",
+      host: "Host",
+    },
+    sections: {
+      hosts: "Host",
+      chatAndPanes: "Chat & khung",
+      notifications: "Thông báo",
+    },
+    clientHosts: {
+      title: "Host đã lưu",
+      info: "Các host thiết bị này kết nối tới. Tên, biểu tượng, huy hiệu và đường kết nối ở đây chỉ áp dụng cho thiết bị này.",
+      offline: "Ngoại tuyến",
+    },
+    chat: {
+      sendingTitle: "Gửi",
+    },
     shortcuts: {
       help: {
         cycleEffort: "Cycle effort",
@@ -430,7 +454,8 @@ export const vi = {
       },
     },
     hostSections: {
-      tools: "Công cụ",
+      tools: "Công cụ & lời nhắc",
+      daemon: "Daemon",
     },
     hostTools: {
       title: "Công cụ của host",
@@ -947,7 +972,40 @@ export const vi = {
       forked: "Đang train {{name}}",
     },
   },
-  message: { turnFooter: { workedFor: "Worked for {{duration}}" } },
+  message: {
+    turnFooter: { workedFor: "Worked for {{duration}}" },
+    backgroundWork: {
+      detail: {
+        back: "Quay lại danh sách việc nền",
+        open: "Xem chi tiết: {{label}}",
+        statusValue: {
+          running: "Đang chạy",
+          finished: "Đã xong",
+          failed: "Lỗi",
+          stopped: "Đã dừng",
+        },
+        copied: "Đã sao chép",
+        copyCommand: "Sao chép lệnh",
+        showMore: "Xem thêm",
+        showLess: "Thu gọn",
+        waitingForOutput: "Đang chờ output…",
+        startedAt: "bắt đầu {{time}}",
+        copyOutput: "Sao chép output",
+        output: "Output",
+        jumpToLatest: "Xuống mới nhất",
+        openInTab: "Mở thành tab",
+        outputUnavailable: "{{provider}} không có output để xem",
+        outputLoading: "Đang tải output…",
+        outputError: "Không đọc được output",
+        outputSkipped: "đã bỏ qua một phần output cũ",
+        updateHost: "Cập nhật host để xem output của việc này",
+        disconnected: "Mất kết nối host",
+        loading: "Đang tải chi tiết…",
+        notFound: "Host không còn biết việc nền này",
+        tabTitle: "Việc nền",
+      },
+    },
+  },
   workspace: {
     header: {
       actions: {

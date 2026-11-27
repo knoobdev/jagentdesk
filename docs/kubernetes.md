@@ -53,7 +53,7 @@ StatefulSets, **Rollback** for Deployments, **Trigger** / **Suspend** / **Resume
 operation, so scale and restart behave like `kubectl`.
 
 Helm releases show values and history, with rollback and uninstall. They need `helm` on the daemon
-host; Settings → host → Tools can install it ([Host tools](host-tools.md)).
+host; Settings → host → Tools & prompts can install it ([Host tools](host-tools.md)).
 
 ## Ask AI
 

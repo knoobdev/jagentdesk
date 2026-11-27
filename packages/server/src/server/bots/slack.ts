@@ -15,6 +15,7 @@ import { MAX_HOOK_BODY_BYTES, type HookDelivery, type HookResponse } from "@jage
 import { FileSecretStore, type SecretStore } from "../database/secret-store.js";
 import type { RelayControlHandler } from "../relay-transport.js";
 import type { BotsService } from "./service.js";
+import type { BotConnectorSummary } from "./hooks/connectors.js";
 import { SlackApi } from "./slack-api.js";
 
 const AllowedUser = z.object({ id: z.string(), name: z.string() });
@@ -203,6 +204,12 @@ export class BotsSlack implements RelayControlHandler {
     url.pathname = `/hooks/slack/${relay.serverId}/${hookId}`;
     url.search = "";
     return url.toString();
+  }
+  /** `Bot.slack` on the bot record (bots contract): connected and the workspace name. */
+  summary(botId: string): BotConnectorSummary {
+    const connection = this.connection(botId);
+    if (!connection.connected) return { connected: false };
+    return { connected: true, ...(connection.workspace ? { label: connection.workspace } : {}) };
   }
   status(botId: string): SlackStatus {
     const connection = this.connection(botId);

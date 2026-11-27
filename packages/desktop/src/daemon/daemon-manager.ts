@@ -14,6 +14,7 @@ import {
   resolveJAgentDeskHome,
   signNonce as signDeviceNonce,
   spawnProcess,
+  stripAppImageRuntimeEnv,
   type DeviceKeyPair,
 } from "@jagentdesk/server";
 import {
@@ -790,6 +791,9 @@ function buildDaemonBaseEnv(
     // action either. The auth-key action is the only path allowed to use it.
     delete baseEnv.JAGENTDESK_TAILSCALE_AUTH_KEY;
   }
+  // Electron main keeps the AppImage variables for itself; the daemon and the shells it
+  // starts must not inherit them (zsh would override argv[0] from ARGV0).
+  stripAppImageRuntimeEnv(baseEnv);
   return baseEnv;
 }
 

@@ -98,8 +98,10 @@ describe("Gumloop sidebar model", () => {
       ),
     ).toBe(false);
   });
+  it("keeps the root sidebar on bot pages, where the Bots section is the left panel", () => {
+    expect(resolveSidebarDrillIn("/h/one/bots?botId=b")).toBeNull();
+  });
   it.each([
-    "bots",
     "docker",
     "database/db",
     "cluster/c",

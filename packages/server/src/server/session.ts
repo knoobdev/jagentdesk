@@ -64,6 +64,11 @@ import {
   isDaemonBackgroundWorkItem,
   type AgentBackgroundWorkItem,
 } from "./agent/background-work/index.js";
+import {
+  followBackgroundWorkOutput,
+  type BackgroundWorkOutputChunk,
+  type StopFollowing,
+} from "./agent/background-work/output-stream.js";
 import equal from "fast-deep-equal";
 import { v4 as uuidv4 } from "uuid";
 import { lstat, mkdir, mkdtemp, rename, rm, stat } from "node:fs/promises";
@@ -368,6 +373,8 @@ type ProviderSubagentManagerEvent = Extract<
 // Clients before 0.1.45 validate providers with z.enum(["claude", "codex", "opencode"]) and reject
 // the entire session message if they encounter an unknown provider.
 const LEGACY_PROVIDER_IDS = new Set(["claude", "codex", "opencode"]);
+/** Each stream follows one file or provider API; a viewer needs one or two at a time. */
+const MAX_BACKGROUND_WORK_OUTPUTS_PER_SESSION = 8;
 
 const FULL_AGENT_ID_PATTERN = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
@@ -951,6 +958,18 @@ function resolveWorkspaceCreationService(
   );
 }
 
+/**
+ * Agent IDs the client holds after a fetch_agents snapshot. `null` when the client may page
+ * further, so removals for agents beyond the first page are never suppressed.
+ */
+function resolveAgentSubscriptionSnapshotIds(
+  payload: { entries: ReadonlyArray<{ agent: { id: string } }>; pageInfo: { hasMore: boolean } },
+  request: { page?: { cursor?: string } },
+): Iterable<string> | null {
+  if (payload.pageInfo.hasMore || Boolean(request.page?.cursor)) return null;
+  return payload.entries.map((entry) => entry.agent.id);
+}
+
 export class Session {
   private readonly authorization: SessionAuthorization;
   private readonly connectedHostSession: ConnectedHostSession | null;
@@ -1086,6 +1105,7 @@ export class Session {
   private unsubscribeProjectMutations: (() => void) | null = null;
 
   private unsubscribeWorkspaceMutations: (() => void) | null = null;
+  private unsubscribeBeforeWorkspacePublish: (() => void) | null = null;
 
   private readonly pluginRuntime: SessionOptions["pluginRuntime"];
 
@@ -1099,6 +1119,8 @@ export class Session {
   private registryMutationQueue: Promise<void> = Promise.resolve();
 
   private isCleanedUp = false;
+  /** ADR-0062 output streams this client opened, by subscription id. */
+  private readonly backgroundWorkOutputs = new Map<string, { stop: StopFollowing | null }>();
 
   private viewedTimelineAgentIds = new Set<string>();
 
@@ -1359,6 +1381,8 @@ export class Session {
       unarchiveWorkspace: async (workspace) => {
         await this.workspaceProvisioning.ensureWorkspaceRecordUnarchived(workspace);
       },
+      waitForDeferredPublication: (workspaceId) =>
+        this.workspaceRegistry.waitForDeferredPublication?.(workspaceId) ?? Promise.resolve(false),
       isCheckoutUntrusted: (checkoutPath) =>
         isCheckoutUntrusted(this.workspaceRegistry, checkoutPath),
       syncCheckoutWorktreeManager: async ({
@@ -2115,6 +2139,7 @@ export class Session {
     workspace: PersistedWorkspaceRecord,
   ): Promise<void> {
     try {
+      await this.agentUpdates.flushPendingUpdates();
       await this.workspaceGitObserver.syncObserverForWorkspace(workspace);
       if (workspace.kind !== "directory") {
         // Recovery can refresh Git before this session starts observing again.
@@ -2310,6 +2335,11 @@ export class Session {
       this.workspaceRegistry.subscribeToMutations?.((mutation) =>
         this.enqueueRegistryMutation(() => this.handleWorkspaceMutation(mutation)),
       ) ?? null;
+    this.unsubscribeBeforeWorkspacePublish?.();
+    this.unsubscribeBeforeWorkspacePublish =
+      this.workspaceRegistry.subscribeBeforePublish?.(() =>
+        this.agentUpdates.flushPendingUpdates(),
+      ) ?? null;
   }
 
   private enqueueRegistryMutation(handleMutation: () => Promise<void>): Promise<void> {
@@ -2335,6 +2365,7 @@ export class Session {
       if (this.isCleanedUp) {
         return;
       }
+      await this.agentUpdates.flushPendingUpdates();
       await this.emitWorkspaceUpdatesForWorkspaceIds(
         [mutation.workspaceId],
         mutation.expectsInitialAgent ? { optimisticStatus: "running" } : undefined,
@@ -2382,7 +2413,11 @@ export class Session {
         return;
       }
       const projectWorkspaceIds = (await this.workspaceRegistry.list())
-        .filter((workspace) => workspace.projectId === mutation.projectId)
+        .filter(
+          (workspace) =>
+            workspace.projectId === mutation.projectId &&
+            !this.workspaceRegistry.isBroadcastDeferred?.(workspace.workspaceId),
+        )
         .map((workspace) => workspace.workspaceId);
 
       if (mutation.kind === "remove") {
@@ -3477,6 +3512,12 @@ export class Session {
         return this.handleAgentBackgroundWorkListRequest(msg);
       case "agent.background_work.stop.request":
         return this.handleAgentBackgroundWorkStopRequest(msg);
+      case "agent.background_work.get_detail.request":
+        return this.handleAgentBackgroundWorkDetailRequest(msg);
+      case "agent.background_work.output.subscribe.request":
+        return this.handleAgentBackgroundWorkOutputSubscribeRequest(msg);
+      case "agent.background_work.output.unsubscribe.request":
+        return this.handleAgentBackgroundWorkOutputUnsubscribeRequest(msg);
       case "agent.provider_subagents.timeline.get.request":
         return this.handleProviderSubagentTimelineRequest(msg, source);
       case "agent.timeline.set_subscription.request":
@@ -7198,7 +7239,11 @@ export class Session {
       return;
     }
 
-    const uniqueWorkspaceIds = new Set(Array.from(workspaceIds));
+    const uniqueWorkspaceIds = new Set<string>();
+    for (const workspaceId of workspaceIds) {
+      if (this.workspaceRegistry.isBroadcastDeferred?.(workspaceId)) continue;
+      uniqueWorkspaceIds.add(workspaceId);
+    }
     if (uniqueWorkspaceIds.size === 0) {
       return;
     }
@@ -7409,6 +7454,7 @@ export class Session {
       }
 
       const payload = await this.listFetchAgentsEntries(request);
+      const snapshotAgentIds = resolveAgentSubscriptionSnapshotIds(payload, request);
       const snapshotUpdatedAtByAgentId = new Map<string, number>();
       for (const entry of payload.entries) {
         const parsedUpdatedAt = Date.parse(entry.agent.updatedAt);
@@ -7427,7 +7473,10 @@ export class Session {
       });
 
       if (subscriptionId) {
-        this.agentUpdates.flushBootstrapped(subscriptionId, { snapshotUpdatedAtByAgentId });
+        this.agentUpdates.flushBootstrapped(subscriptionId, {
+          snapshotUpdatedAtByAgentId,
+          snapshotAgentIds,
+        });
       }
     } catch (error) {
       if (subscriptionId) {
@@ -9069,6 +9118,159 @@ export class Session {
     }
   }
 
+  private async handleAgentBackgroundWorkDetailRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.background_work.get_detail.request" }>,
+  ): Promise<void> {
+    const reply = (
+      payload: Pick<
+        Extract<
+          SessionOutboundMessage,
+          { type: "agent.background_work.get_detail.response" }
+        >["payload"],
+        "detail" | "error"
+      >,
+    ) =>
+      this.emit({
+        type: "agent.background_work.get_detail.response",
+        payload: { requestId: msg.requestId, agentId: msg.agentId, itemId: msg.itemId, ...payload },
+      });
+    try {
+      const target = await this.resolveBackgroundWorkAgent(msg.agentId);
+      if ("error" in target) throw new Error(target.error);
+      const detail = this.agentManager.getAgentBackgroundWorkDetail(msg.agentId, msg.itemId);
+      if (!detail) throw new Error("Background work not found");
+      const [item] = this.projectBackgroundWorkItems([detail.item]);
+      const output = detail.output;
+      const outputAvailable =
+        output?.type === "reader" ||
+        (output?.type === "file" && (await output.locate().catch(() => null)) !== null);
+      const owner = target.agent ?? target.record;
+      reply({
+        detail: {
+          id: item.id,
+          kind: item.kind,
+          description: item.description,
+          ...(item.command ? { command: item.command } : {}),
+          startedAt: item.startedAt,
+          status: detail.status,
+          endedAt: detail.endedAt,
+          exitCode: detail.exitCode,
+          // Provider work starts in the agent's folder unless the provider says otherwise.
+          cwd: detail.cwd ?? (isDaemonBackgroundWorkItem(item) ? null : (owner?.cwd ?? null)),
+          provider: owner?.provider ?? "",
+          outputAvailable,
+          ...(item.canStop ? { canStop: true } : {}),
+          ...(item.stopToken ? { stopToken: item.stopToken } : {}),
+        },
+        error: null,
+      });
+    } catch (error) {
+      reply({ detail: null, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  private async handleAgentBackgroundWorkOutputSubscribeRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.background_work.output.subscribe.request" }>,
+  ): Promise<void> {
+    const { agentId, itemId, subscriptionId } = msg;
+    const respond = (error: string | null) =>
+      this.emit({
+        type: "agent.background_work.output.subscribe.response",
+        payload: { requestId: msg.requestId, subscriptionId, agentId, itemId, error },
+      });
+    this.stopBackgroundWorkOutput(subscriptionId);
+    if (this.backgroundWorkOutputs.size >= MAX_BACKGROUND_WORK_OUTPUTS_PER_SESSION) {
+      respond("Too many open background task outputs");
+      return;
+    }
+    // Reserve the id so an unsubscribe that races the open cancels it.
+    const entry: { stop: StopFollowing | null } = { stop: null };
+    this.backgroundWorkOutputs.set(subscriptionId, entry);
+    const push = (chunk: BackgroundWorkOutputChunk) =>
+      this.emit({
+        type: "agent.background_work.output",
+        payload: {
+          subscriptionId,
+          agentId,
+          itemId,
+          chunk: chunk.chunk,
+          offset: chunk.offset,
+          nextOffset: chunk.nextOffset,
+          ...(chunk.reset ? { reset: true } : {}),
+        },
+      });
+    // The tail is read while opening; it goes out after the response.
+    let pending: BackgroundWorkOutputChunk[] | null = [];
+    try {
+      const target = await this.resolveBackgroundWorkAgent(agentId);
+      if ("error" in target) throw new Error(target.error);
+      // ADR-0062 §3: only the source attached to this agent's own item is read.
+      const detail = this.agentManager.getAgentBackgroundWorkDetail(agentId, itemId);
+      if (!detail) throw new Error("Background work not found");
+      if (!detail.output) throw new Error("Output isn't available for this background task");
+      const stop = await followBackgroundWorkOutput({
+        source: detail.output,
+        onChunk: (chunk) => {
+          if (pending) pending.push(chunk);
+          else push(chunk);
+        },
+        onError: () => {
+          if (this.backgroundWorkOutputs.get(subscriptionId) !== entry) return;
+          this.backgroundWorkOutputs.delete(subscriptionId);
+          this.emit({
+            type: "agent.background_work.output",
+            payload: {
+              subscriptionId,
+              agentId,
+              itemId,
+              chunk: "",
+              offset: 0,
+              error: "Output is no longer readable",
+            },
+          });
+        },
+      });
+      if (this.backgroundWorkOutputs.get(subscriptionId) !== entry || this.isCleanedUp) {
+        stop();
+        respond("Output subscription was closed");
+        return;
+      }
+      entry.stop = stop;
+    } catch (error) {
+      if (this.backgroundWorkOutputs.get(subscriptionId) === entry)
+        this.backgroundWorkOutputs.delete(subscriptionId);
+      // Messages never carry the output file's path or contents.
+      const message =
+        error instanceof Error && !("code" in error) ? error.message : "Output is not readable";
+      respond(message);
+      return;
+    }
+    respond(null);
+    const ready = pending;
+    pending = null;
+    for (const chunk of ready) push(chunk);
+  }
+
+  private async handleAgentBackgroundWorkOutputUnsubscribeRequest(
+    msg: Extract<
+      SessionInboundMessage,
+      { type: "agent.background_work.output.unsubscribe.request" }
+    >,
+  ): Promise<void> {
+    this.stopBackgroundWorkOutput(msg.subscriptionId);
+    this.emit({
+      type: "agent.background_work.output.unsubscribe.response",
+      payload: { requestId: msg.requestId, subscriptionId: msg.subscriptionId, error: null },
+    });
+  }
+
+  private stopBackgroundWorkOutput(subscriptionId: string): void {
+    const entry = this.backgroundWorkOutputs.get(subscriptionId);
+    if (!entry) return;
+    this.backgroundWorkOutputs.delete(subscriptionId);
+    entry.stop?.();
+  }
+
   private async readAgentBackgroundWork(agentId: string): Promise<AgentBackgroundWorkItem[]> {
     const target = await this.resolveBackgroundWorkAgent(agentId);
     if ("error" in target) throw new Error(target.error);
@@ -9985,6 +10187,8 @@ export class Session {
   public async cleanup(): Promise<void> {
     this.sessionLogger.trace({}, "agent.session.lifecycle.cleanup");
     this.isCleanedUp = true;
+    for (const subscriptionId of this.backgroundWorkOutputs.keys())
+      this.stopBackgroundWorkOutput(subscriptionId);
     await this.delivery.close();
 
     if (this.unsubscribeAgentEvents) {
@@ -9995,6 +10199,8 @@ export class Session {
     this.unsubscribeProjectMutations = null;
     this.unsubscribeWorkspaceMutations?.();
     this.unsubscribeWorkspaceMutations = null;
+    this.unsubscribeBeforeWorkspacePublish?.();
+    this.unsubscribeBeforeWorkspacePublish = null;
     this.unsubscribePluginChanges?.();
     this.unsubscribePluginChanges = null;
     this.agentUpdates.dispose();

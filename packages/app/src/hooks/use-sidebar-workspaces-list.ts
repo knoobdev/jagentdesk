@@ -1,4 +1,9 @@
 import { useShallow } from "zustand/react/shallow";
+import {
+  botOwnedWorkspaceKeys,
+  isInBotHome,
+  useBotOwnedWorkspaces,
+} from "@/bots/owned-workspaces-store";
 import { useCallback, useEffect, useMemo } from "react";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import { useCreateFlowStore } from "@/stores/create-flow-store";
@@ -137,9 +142,15 @@ export function useSidebarWorkspacesList(options?: {
   const workspaceSort = useSidebarViewStore((state) => state.workspaceSort);
   const hostProjects = useHostProjects(hydratedServerIds, workspaceSort);
   const showBackground = useSidebarViewStore((state) => state.showBackground);
+  // A bot's handed workspaces and its workers' worktrees list under the bot, not here (spec 37.4.1).
+  const botOwned = useBotOwnedWorkspaces((state) => state.byBot);
   const hiddenWorkspaceKeys = useSessionStore(
     useShallow((state) => {
-      const keys = new Set<string>();
+      const keys = botOwnedWorkspaceKeys(
+        botOwned,
+        (serverId, agentId) => state.sessions[serverId]?.agents.get(agentId)?.workspaceId,
+        (serverId) => state.sessions[serverId]?.workspaces.values() ?? [],
+      );
       if (showBackground) return keys;
       for (const serverId of hydratedServerIds) {
         for (const workspace of state.sessions[serverId]?.workspaces.values() ?? []) {
@@ -150,13 +161,27 @@ export function useSidebarWorkspacesList(options?: {
     }),
   );
 
+  // A bot's home folder is the project its Home Chat runs in; it lists under the bot instead.
+  const botHomes = useMemo(
+    () => Object.values(botOwned).flatMap((owned) => (owned.home ? [owned.home] : [])),
+    [botOwned],
+  );
+  const listedProjects = useMemo(
+    () =>
+      botHomes.length === 0
+        ? hostProjects
+        : hostProjects.filter(
+            (project) => !botHomes.some((home) => isInBotHome(project.iconWorkingDir, home)),
+          ),
+    [botHomes, hostProjects],
+  );
   const sidebarModel = useMemo(
     () =>
       buildSidebarWorkspacePlacementModel({
-        projects: hostProjects,
+        projects: listedProjects,
         hiddenWorkspaceKeys,
       }),
-    [hostProjects, hiddenWorkspaceKeys],
+    [listedProjects, hiddenWorkspaceKeys],
   );
 
   const projects = sidebarModel.projects.length > 0 ? sidebarModel.projects : EMPTY_PROJECTS;

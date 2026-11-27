@@ -36,8 +36,8 @@ Jira, Argo CD, forges and devices, Bots, and connected hosts.
 - **Workspaces** — projects, Git worktrees, branches and pull requests; a Changes view with diffs,
   commit and push; files with Preview and an editable Source view; terminals that keep 10,000 rows and
   survive daemon restarts.
-- **Bots** — long-lived assistants that plan work, hand it to worker agents in their own worktrees, get
-  it cross-reviewed and report back — in the app or in Slack.
+- **Bots** — long-lived assistants that plan work, hand it to worker agents in their own worktrees and
+  report back; reach them from the app, Slack, GitHub, GitLab or Telegram, and share them by link.
 - **Connected hosts** — pair daemons with each other so agents can start and message agents on another
   machine.
 - **Usage and Insights** — plan limits, reset times and run-out forecasts for every agent account, plus
@@ -52,6 +52,13 @@ Jira, Argo CD, forges and devices, Bots, and connected hosts.
 - **Schedules, heartbeats and loops**, voice input, a CLI (`jagentdesk`), and a UI in nine languages.
 
 ---
+
+## ✨ New in v0.12.0
+
+Bots rebuilt the way Orca does them — a Bots section in the sidebar, a bot page with its Home Chat and activity panel, workers
+in their own worktrees, items with quick answers, templates and mascots, on desktop and phones — reachable from GitHub, GitLab
+and Telegram and shareable by link. Background tasks open into a detail view with live output. Details:
+**[docs/releases/v0.12.0.md](docs/releases/v0.12.0.md)**.
 
 ## ✨ New in v0.11.1
 
@@ -302,7 +309,7 @@ GitHub release. To cut one:
 ```bash
 # set "version" in the root package.json, then sync every workspace:
 npm run version:sync-internal
-git tag v0.11.1
+git tag v0.12.0
 git push origin main --tags
 ```
 

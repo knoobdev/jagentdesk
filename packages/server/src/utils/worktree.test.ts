@@ -264,6 +264,37 @@ describe("jagentdesk worktree manager", () => {
     expect(existsSync(join(repoDir, "ran.txt"))).toBe(false);
   });
 
+  it("keeps a deleted worktree separate from the JAgentDesk worktree that holds its daemon home", async () => {
+    const outer = await createLegacyWorktreeForTest({
+      branchName: "outer-branch",
+      cwd: repoDir,
+      baseBranch: "main",
+      worktreeSlug: "outer",
+      jagentdeskHome,
+    });
+    const nestedJAgentDeskHome = join(outer.worktreePath, ".dev-home");
+    const inner = await createLegacyWorktreeForTest({
+      branchName: "inner-branch",
+      cwd: repoDir,
+      baseBranch: "main",
+      worktreeSlug: "inner",
+      jagentdeskHome: nestedJAgentDeskHome,
+    });
+    rmSync(inner.worktreePath, { recursive: true, force: true });
+    execFileSync("git", ["worktree", "prune"], { cwd: repoDir });
+
+    await expect(
+      isJAgentDeskOwnedWorktreeCwd(inner.worktreePath, { jagentdeskHome: nestedJAgentDeskHome }),
+    ).resolves.toMatchObject({ allowed: true, worktreePath: inner.worktreePath });
+
+    await deleteJAgentDeskWorktree({
+      cwd: repoDir,
+      worktreePath: inner.worktreePath,
+      jagentdeskHome: nestedJAgentDeskHome,
+    });
+    expect(existsSync(join(outer.worktreePath, "file.txt"))).toBe(true);
+  });
+
   it("rejects paths that are not under the jagentdesk worktrees root", async () => {
     const outsidePath = join(tempDir, "outside-jagentdesk-home");
     mkdirSync(outsidePath, { recursive: true });

@@ -5,55 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
 import { afterEach, expect, it } from "vitest";
-import type { Bot, BotItem } from "@jagentdesk/protocol/bots/types";
-import type { ReviewFinding } from "@jagentdesk/protocol/review/types";
+import type { Bot } from "@jagentdesk/protocol/bots/types";
 import { BotStorage, DEFAULT_BOT_IDENTITY } from "./storage.js";
-import { BotsService } from "./service.js";
-import type { BotRuntime, BotRuntimeEvent, BotReviewRole } from "./runtime.js";
+import { BotsService, RESTART_CONTINUATION_PROMPT } from "./service.js";
+import { FakeBotRuntime } from "./test-utils/fake-runtime.js";
 
-class Runtime implements BotRuntime {
-  sent: { id: string; text: string }[] = [];
-  findings: ReviewFinding[] = [];
-  reviews: BotReviewRole[] = [];
-  callbacks = new Set<(e: BotRuntimeEvent) => void>();
-  async configure(): Promise<void> {}
-  async ensureSupervisor(bot: Bot): Promise<string> {
-    return `supervisor:${bot.id}`;
-  }
-  busy(): boolean {
-    return false;
-  }
-  async send(id: string, text: string): Promise<void> {
-    this.sent.push({ id, text });
-  }
-  async startWorker(
-    _bot: Bot,
-    item: BotItem,
-    repo: string,
-    _assignment: string,
-    linked: (id: string, worktree: string, base: string) => void,
-  ): Promise<string> {
-    linked(`worker:${item.id}`, `${repo}-worktree`, "base");
-    return `worker:${item.id}`;
-  }
-  async review(_bot: Bot, _item: BotItem, role: BotReviewRole) {
-    this.reviews.push(role);
-    return {
-      agentId: `reviewer:${role}`,
-      coverage: "all changed files",
-      findings: role === "pentester" ? this.findings : [],
-    };
-  }
-  async diff(): Promise<string> {
-    return "diff --git sum.js\n+return a+b";
-  }
-  async cancel(): Promise<void> {}
-  onEvent(cb: (e: BotRuntimeEvent) => void) {
-    this.callbacks.add(cb);
-    return () => this.callbacks.delete(cb);
-  }
-  dispose(): void {}
-}
+class Runtime extends FakeBotRuntime {}
 const homes: string[] = [];
 const services: BotsService[] = [];
 afterEach(async () => {
@@ -78,16 +35,20 @@ function setup(now = Date.UTC(2026, 0, 1)) {
     },
   };
 }
-async function createBot(service: BotsService) {
-  return service.create({
-    slug: "builder",
-    name: "Builder",
-    identity: "Fix bugs",
-    provider: "claude",
-    model: "default",
-    modeId: "default",
-    defaultRepo: "/repo",
-  });
+async function createBot(service: BotsService, extra: { reviewBeforeDone?: boolean } = {}) {
+  return service.create(
+    {
+      slug: "builder",
+      name: "Builder",
+      identity: "Fix bugs",
+      provider: "claude",
+      model: "default",
+      modeId: "default",
+      defaultRepo: "/repo",
+      ...extra,
+    },
+    { kickoff: null },
+  );
 }
 it("creates a bot with an empty identity and seeds SOUL.md with the default (A37.5.1)", async () => {
   const { service } = setup();
@@ -108,21 +69,23 @@ it("creates a bot with an empty identity and seeds SOUL.md with the default (A37
   const listed = await service.handle({ type: "bots.list.request", requestId: "list" });
   expect((listed as { bots: Bot[] }).bots.map((b) => b.slug)).toEqual(["heocon"]);
   const soul = readFileSync(join(service.storage.botHome(bot), "SOUL.md"), "utf8");
-  expect(soul).toBe(`# heocon\n\n${DEFAULT_BOT_IDENTITY}\n`);
+  // Orca's starter soul (`shared/bot-soul.ts`) when Identity is empty.
+  expect(soul).toBe(
+    "# heocon\n\nDescribe heocon here: what it is for, how it talks, and what it must never do.\n",
+  );
+  // A new bot's Home Chat gets JAgentDesk's kickoff turn.
+  expect(service.storage.pending(bot.id).map((m) => m.source)).toEqual(["jagentdesk"]);
   const cleared = await service.update(bot.id, { identity: "  " });
   expect(cleared.identity).toBe(DEFAULT_BOT_IDENTITY);
-  const withoutField = await service.create({
-    slug: "no-field",
-    name: "No field",
-    provider: "claude",
-    model: "default",
-    modeId: "default",
-  });
+  const withoutField = await service.create(
+    { slug: "no-field", name: "No field", provider: "claude", model: "default", modeId: "default" },
+    { kickoff: null },
+  );
   expect(withoutField.identity).toBe(DEFAULT_BOT_IDENTITY);
 });
 it("runs three reviews, sends two fix rounds, then escalates with the findings", async () => {
   const { service, runtime } = setup();
-  const b = await createBot(service);
+  const b = await createBot(service, { reviewBeforeDone: true });
   const item = service.addItem(b.id, "Fix sum", "Tests pass");
   await service.startWorker(b.id, item.id, undefined, "Fix sum");
   runtime.findings = [
@@ -149,7 +112,7 @@ it("runs three reviews, sends two fix rounds, then escalates with the findings",
 });
 it("security finding blocks until the fix is clean; then records summary and diff", async () => {
   const { service, runtime } = setup();
-  const b = await createBot(service);
+  const b = await createBot(service, { reviewBeforeDone: true });
   const i = service.addItem(b.id, "Fix", "No eval");
   await service.startWorker(b.id, i.id, undefined, "Fix");
   runtime.findings = [
@@ -228,29 +191,20 @@ it("answers each question once and wakes only when all questions are answered", 
   expect(service.storage.pending(b.id)).toHaveLength(1);
 });
 
-it("look-around obeys the interval and room handoffs ignore code, deduplicate and bound loops", async () => {
-  const { service, setTime } = setup();
+it("room handoffs ignore code, deduplicate and bound loops", async () => {
+  const { service } = setup();
   const builder = await createBot(service);
-  const reviewer = await service.create({
-    slug: "reviewer",
-    name: "Reviewer",
-    identity: "Review changes",
-    provider: "claude",
-    model: "default",
-    modeId: "default",
-  });
-  await service.update(builder.id, { lookAround: { enabled: true, intervalMinutes: 1 } });
-  service.start();
-  await service.settled();
-  setTime(builder.createdAt_ms + 60000);
-  await service.tick();
-  await service.settled();
-  await service.tick();
-  await service.settled();
-  expect(
-    service.storage.history(builder.id).filter((m) => m.source === "look_around"),
-  ).toHaveLength(1);
-  service.stop();
+  const reviewer = await service.create(
+    {
+      slug: "reviewer",
+      name: "Reviewer",
+      identity: "Review changes",
+      provider: "claude",
+      model: "default",
+      modeId: "default",
+    },
+    { kickoff: null },
+  );
   const room = service.saveRoom({ name: "Engineering", memberBotIds: [builder.id, reviewer.id] });
   service.sendRoom(room.id, "`@builder`\n> @reviewer", "quoted");
   expect(service.storage.pending(reviewer.id)).toEqual([]);
@@ -264,7 +218,7 @@ it("look-around obeys the interval and room handoffs ignore code, deduplicate an
 
 it("refuses completion if the worktree changes while its reviews run", async () => {
   const { service, runtime } = setup();
-  const b = await createBot(service);
+  const b = await createBot(service, { reviewBeforeDone: true });
   const item = service.addItem(b.id, "Fix", "Tests pass");
   await service.startWorker(b.id, item.id, undefined, "Fix");
   let reads = 0;
@@ -315,14 +269,17 @@ it("publishes lazy Supervisor readiness so clients can attach permission cards a
 it("cold restart continues a running background supervisor once with generic recovery enabled", async () => {
   const { service: before, runtime: oldRuntime } = setup();
   const bot = await createBot(before);
-  const idle = await before.create({
-    slug: "idle",
-    name: "Idle",
-    identity: "Wait",
-    provider: "claude",
-    model: "default",
-    modeId: "default",
-  });
+  const idle = await before.create(
+    {
+      slug: "idle",
+      name: "Idle",
+      identity: "Wait",
+      provider: "claude",
+      model: "default",
+      modeId: "default",
+    },
+    { kickoff: null },
+  );
   before.start();
   before.wake(bot.id, "A chat turn with no item yet", "chat", "interrupted");
   await before.settled();
@@ -385,7 +342,29 @@ it("cold restart continues a running background supervisor once with generic rec
   expect(generic).toEqual(["foreground"]);
   expect(runtime.sent.filter(({ id }) => id === supervisorId)).toHaveLength(1);
   expect(runtime.sent.filter(({ id }) => id === "idle-supervisor")).toEqual([]);
-  expect(runtime.sent.find(({ id }) => id === supervisorId)?.text).toContain("daemon resumed");
+  expect(runtime.sent.find(({ id }) => id === supervisorId)?.text).toBe(
+    `[restart]\n${RESTART_CONTINUATION_PROMPT}`,
+  );
+});
+
+it("cold restart leaves an idle bot with open items asleep (no model turn)", async () => {
+  const { service: before } = setup();
+  const bot = await createBot(before);
+  before.addItem(bot.id, "Fix sum", "Tests pass");
+  const home = homes.at(-1)!;
+  await before.dispose();
+  services.splice(services.indexOf(before), 1);
+  const runtime = new Runtime();
+  const restarted = new BotsService(new BotStorage(home), runtime, {
+    logger: pino({ level: "silent" }),
+  });
+  services.push(restarted);
+  restarted.start();
+  await restarted.settled();
+  await restarted.tick();
+  await restarted.settled();
+  expect(runtime.sent).toEqual([]);
+  expect(restarted.storage.items(bot.id).map((item) => item.title)).toEqual(["Fix sum"]);
 });
 
 it("cold restart retries an undelivered active wake without also scheduling a continuation", async () => {

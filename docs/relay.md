@@ -12,11 +12,17 @@ hostnames or `host:port`; a bare hostname uses port 443. TLS defaults to true.
 `JAGENTDESK_RELAY_ENABLED`, `JAGENTDESK_RELAY_ENDPOINT`, and
 `JAGENTDESK_RELAY_USE_TLS` override persisted values at startup.
 
-Toggle **Enable relay** in Settings → host → Connections (the daemon config RPC
+Toggle **Enable relay** in Settings → Hosts → the host (the daemon config RPC
 behind it sets `relay.enabled`) to start or stop the relay without restarting the
 daemon. An explicit enabled override from the environment
 or a launch flag pins that setting for the run. Endpoint and TLS changes take
 effect at the next daemon launch.
+
+Bot share links (`/s/<shareId>`, [bots.md](bots.md#sharing)) need the R2 bucket bound as
+`SHARES` in `packages/relay/wrangler.toml`. Create it once with
+`wrangler r2 bucket create desk-relay-shares` before deploying; without the binding the Worker
+answers `503` and `share_create` fails with `unavailable`. `wrangler dev --local` simulates the
+bucket, so pass `--persist-to <temp dir>` in tests to keep its state out of the package.
 
 ## Trust boundaries
 

@@ -15,8 +15,10 @@ import {
   decodeWorkspaceIdFromPathSegment,
   encodeFilePathForPathSegment,
   encodeWorkspaceIdForPathSegment,
+  buildClientHostSettingsRoute,
   isSettingsSectionSlug,
   normalizeHostSectionSlug,
+  normalizeSettingsSectionSlug,
   normalizeProjectSettingsRouteId,
   parseHostAgentRouteFromPathname,
   parseHostWorkspaceOpenIntentFromPathname,
@@ -186,11 +188,11 @@ describe("workspace route parsing", () => {
 
 describe("projects settings routes", () => {
   it("buildSettingsAddHostRoute opens settings with the add-host flag", () => {
-    expect(buildSettingsAddHostRoute()).toBe("/settings/general?addHost=1");
+    expect(buildSettingsAddHostRoute()).toBe("/settings/hosts?addHost=1");
   });
 
   it("buildSettingsAddHostRoute accepts a repeatable intent id", () => {
-    expect(buildSettingsAddHostRoute("retry 1")).toBe("/settings/general?addHost=retry%201");
+    expect(buildSettingsAddHostRoute("retry 1")).toBe("/settings/hosts?addHost=retry%201");
   });
 
   it("buildProjectsSettingsRoute scopes the list to a host", () => {
@@ -245,25 +247,46 @@ describe("global routes", () => {
 
 describe("host settings section slugs", () => {
   it("keeps current host settings sections", () => {
-    expect(normalizeHostSectionSlug("connections")).toBe("connections");
-    expect(normalizeHostSectionSlug("pair-device")).toBe("pair-device");
+    expect(normalizeHostSectionSlug("providers")).toBe("providers");
+    expect(normalizeHostSectionSlug("agent-profiles")).toBe("agent-profiles");
+    expect(normalizeHostSectionSlug("tools")).toBe("tools");
     expect(normalizeHostSectionSlug("agents")).toBe("agents");
     expect(normalizeHostSectionSlug("orchestration")).toBe("orchestration");
-    expect(normalizeHostSectionSlug("workspaces")).toBe("workspaces");
     expect(normalizeHostSectionSlug("projects")).toBe("projects");
-    expect(normalizeHostSectionSlug("providers")).toBe("providers");
+    expect(normalizeHostSectionSlug("workspaces")).toBe("workspaces");
     expect(normalizeHostSectionSlug("usage")).toBe("usage");
-    expect(normalizeHostSectionSlug("host")).toBe("host");
+    expect(normalizeHostSectionSlug("pair-device")).toBe("pair-device");
+    expect(normalizeHostSectionSlug("daemon")).toBe("daemon");
   });
 
   it("maps old host settings sections to their new names", () => {
-    expect(normalizeHostSectionSlug("daemon")).toBe("host");
+    expect(normalizeHostSectionSlug("host")).toBe("daemon");
+    expect(normalizeHostSectionSlug("devices")).toBe("pair-device");
+  });
+
+  it("moves a saved host's connections to this device's Hosts page", () => {
+    expect(normalizeHostSectionSlug("connections")).toBeNull();
+    expect(buildClientHostSettingsRoute("host a")).toBe("/settings/device-hosts/host%20a");
   });
 });
 
 describe("settings section slugs", () => {
   it("no longer treats daemon as a valid app-level settings section", () => {
     expect(isSettingsSectionSlug("daemon")).toBe(false);
+  });
+
+  it("includes the device sections", () => {
+    for (const section of ["general", "hosts", "chat", "notifications", "diagnostics"]) {
+      expect(isSettingsSectionSlug(section)).toBe(true);
+    }
+  });
+
+  it("maps legacy app settings sections to their consolidated sections", () => {
+    expect(normalizeSettingsSectionSlug("editor")).toBe("chat");
+    expect(normalizeSettingsSectionSlug("integrations")).toBe("general");
+    expect(normalizeSettingsSectionSlug("permissions")).toBe("notifications");
+    expect(normalizeSettingsSectionSlug("connection")).toBe("hosts");
+    expect(normalizeSettingsSectionSlug("nope")).toBeNull();
   });
 });
 

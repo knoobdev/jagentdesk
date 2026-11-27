@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { botIdFromLabels, stripBotEnvelope } from "./envelope";
+import {
+  botEnvelopeSource,
+  botIdFromLabels,
+  isBotRestartWake,
+  stripBotEnvelope,
+  stripBotQuietMarker,
+} from "./envelope";
 
 describe("stripBotEnvelope", () => {
   it("drops the source line the daemon prefixes", () => {
@@ -14,10 +20,28 @@ describe("stripBotEnvelope", () => {
   });
 });
 
+describe("isBotRestartWake", () => {
+  it("knows the daemon's restart turn and nothing the owner typed", () => {
+    expect(botEnvelopeSource("[restart]\nJAgentDesk restarted, so…")).toBe("restart");
+    expect(isBotRestartWake("[restart]\nJAgentDesk restarted, so…")).toBe(true);
+    expect(isBotRestartWake("[resume]\nThe daemon resumed.")).toBe(true);
+    expect(isBotRestartWake("[chat]\n[restart]\nhi")).toBe(false);
+    expect(isBotRestartWake("restart")).toBe(false);
+  });
+});
+
 describe("botIdFromLabels", () => {
   it("reads the supervisor label", () => {
     expect(botIdFromLabels({ "jagentdesk.bot.id": "b1" })).toBe("b1");
     expect(botIdFromLabels({})).toBeNull();
     expect(botIdFromLabels(undefined)).toBeNull();
+  });
+});
+
+describe("stripBotQuietMarker", () => {
+  it("hides a reply that only says the quiet marker and trims a trailing one", () => {
+    expect(stripBotQuietMarker("[[quiet]]")).toBe("");
+    expect(stripBotQuietMarker("Done with #3.\n[[quiet]]  ")).toBe("Done with #3.");
+    expect(stripBotQuietMarker("Talk about [[quiet]] later.")).toBe("Talk about [[quiet]] later.");
   });
 });

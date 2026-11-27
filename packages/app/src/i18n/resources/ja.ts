@@ -305,6 +305,7 @@ export const ja: TranslationResources = {
     archived: {
       callout: "このエージェントはアーカイブされています",
       unarchive: "アーカイブ解除",
+      unarchiving: "アーカイブ解除中...",
     },
   },
   sessions: {
@@ -445,6 +446,35 @@ export const ja: TranslationResources = {
       shell: "シェル",
       monitor: "監視",
       other: "その他の作業",
+      detail: {
+        back: "バックグラウンド作業に戻る",
+        open: "詳細を表示: {{label}}",
+        statusValue: {
+          running: "実行中",
+          finished: "完了",
+          failed: "失敗",
+          stopped: "停止",
+        },
+        copied: "コピーしました",
+        copyCommand: "コマンドをコピー",
+        showMore: "さらに表示",
+        showLess: "表示を減らす",
+        waitingForOutput: "出力を待っています…",
+        startedAt: "{{time}} に開始",
+        copyOutput: "出力をコピー",
+        output: "出力",
+        jumpToLatest: "最新へ移動",
+        openInTab: "タブで開く",
+        outputUnavailable: "{{provider}} では出力を表示できません",
+        outputLoading: "出力を読み込み中…",
+        outputError: "出力を読み取れませんでした",
+        outputSkipped: "以前の出力を省略しました",
+        updateHost: "このタスクの出力を見るにはホストを更新してください",
+        disconnected: "ホストとの接続が切れました",
+        loading: "詳細を読み込み中…",
+        notFound: "このバックグラウンドタスクはホストにもう存在しません",
+        tabTitle: "バックグラウンドタスク",
+      },
     },
     todo: {
       title: "タスク",
@@ -1954,6 +1984,13 @@ export const ja: TranslationResources = {
       backToParent: "Back to parent",
     },
 
+    pillLabelOne: "サブエージェント 1 件",
+    pillLabelMany: "サブエージェント {{count}} 件",
+    pillLabelWorking: "{{count}} 件実行中",
+    pillLabelFailed: "{{count}} 件失敗",
+    pillLabelNeedsInputOne: "1 件が入力待ち",
+    pillLabelNeedsInputMany: "{{count}} 件が入力待ち",
+    pillLabelReadyToReview: "{{count}} 件レビュー待ち",
     detachAction: "{{label}}を切り離す",
     detachTooltip: "サブエージェントを切り離す",
     archiveAction: "{{label}}をアーカイブ",
@@ -2095,7 +2132,7 @@ export const ja: TranslationResources = {
     title: "設定",
     loading: "設定を読み込み中...",
     groups: {
-      app: "アプリ",
+      app: "このデバイス",
       host: "ホスト",
     },
     hostPicker: {
@@ -2112,6 +2149,10 @@ export const ja: TranslationResources = {
     },
     groupInfo: "{{title}}について",
     sections: {
+      hosts: "ホスト",
+      sidebar: "サイドバー",
+      chatAndPanes: "チャットとペイン",
+      notifications: "通知",
       general: "一般",
       connection: "接続",
       appearance: "外観",
@@ -2121,6 +2162,14 @@ export const ja: TranslationResources = {
       permissions: "権限",
       diagnostics: "診断",
     },
+    clientHosts: {
+      title: "保存済みホスト",
+      info: "このデバイスが接続するホストです。ここでの名前、アイコン、バッジ、経路はこのデバイスにのみ反映されます。",
+      offline: "オフライン",
+    },
+    chat: {
+      sendingTitle: "送信",
+    },
     editor: {
       title: "エディター",
       vimKeybindings: "Vim キーバインド",
@@ -2128,7 +2177,8 @@ export const ja: TranslationResources = {
     },
     plugins: pluginSettings.ja,
     hostSections: {
-      tools: "Tools",
+      daemon: "デーモン",
+      tools: "ツールとプロンプト",
       plugins: "プラグイン",
       projects: "プロジェクト",
       connections: "接続",
@@ -2718,7 +2768,12 @@ export const ja: TranslationResources = {
         emptyState:
           "プロファイルがまだありません。特定のコマンドでターミナルを起動するために追加してください。",
       },
+      tools: {
+        instructionsTitle: "指示",
+        toolsTitle: "エージェントツール",
+      },
       daemon: {
+        runtimeTitle: "エージェントランタイム",
         rename: {
           editLabel: "ラベルを編集",
           title: "ホストの名前を変更",

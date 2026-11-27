@@ -1,32 +1,29 @@
-import { usePaneContext } from "@/panels/pane-context";
-import { useSubagentSheetTab } from "./sheet-tab";
-import { useSheetPanePage } from "@/screens/workspace/sheet-pane";
-import { ComposerTrackPill, ComposerTrackRow } from "@/composer/tracks";
-import { ComposerStackTrack } from "@/composer/stack-track";
-import { iconButtonChromeStyle } from "@/components/ui/icon-button-chrome";
-import { useAgentFactsLine } from "@/panels/agent-facts-line";
 import type { AgentAddress } from "@jagentdesk/protocol/addresses";
 import { useHosts } from "@/runtime/host-runtime";
-
-import { useCallback, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useMemo, type ReactElement } from "react";
 import { Pressable, Text, View, type PressableStateCallbackType } from "react-native";
 import { useTranslation } from "react-i18next";
 import { Archive, Unlink } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { getProviderIcon } from "@/components/provider-icons";
+import { ComposerTrackActions, ComposerTrackPill, ComposerTrackRow } from "@/composer/tracks";
+import { iconButtonChromeStyle } from "@/components/ui/icon-button-chrome";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { isNative } from "@/constants/platform";
+import { useAgentFactsLine } from "@/panels/agent-facts-line";
+import { useSheetPanePage } from "@/screens/workspace/sheet-pane";
 import {
   WorkspaceTabIcon,
   type WorkspaceTabPresentation,
 } from "@/screens/workspace/workspace-tab-presentation";
+import type { SheetTab } from "@/stores/workspace-layout-store";
 import type { Theme } from "@/styles/theme";
 import type { SubagentRow } from "./select";
 import {
+  buildSubagentPillPresentation,
   buildSubagentRowPresentationData,
   countFinishedSubagents,
-  formatHeaderLabel,
 } from "./track-presentation";
 
 const ThemedArchive = withUnistyles(Archive);
@@ -42,10 +39,17 @@ export interface SubagentsTrackProps {
   rows: SubagentRow[];
   onOpenSubagent: (address: AgentAddress) => void;
   onOpenProviderSubagent: (parentAgentId: string, subagentId: string) => void;
+  /**
+   * The sheet a row opens, or null when it opens as a tab. A sheet replaces the list in place and
+   * Back returns to it; a tab replaces the list's pane, so choosing it ends the list.
+   */
+  sheetTabFor: (row: SubagentRow) => SheetTab | null;
   onArchiveSubagent: (address: AgentAddress) => void;
   onArchiveFinished?: () => void;
   onDetachSubagent?: (address: AgentAddress) => void;
 }
+
+const ROW_ICON_SIZE = 14;
 
 function buildRowPresentation(row: SubagentRow): WorkspaceTabPresentation {
   const data = buildSubagentRowPresentationData(row);
@@ -57,159 +61,98 @@ function buildRowPresentation(row: SubagentRow): WorkspaceTabPresentation {
   };
 }
 
+/**
+ * The agent's children as one pill in the composer's track rail: a mark and a count per state,
+ * and a panel listing every child (Paseo 0.17.5 `subagents/track.tsx`).
+ */
 export function SubagentsTrack({
   serverId,
   rows,
   onOpenSubagent,
   onOpenProviderSubagent,
+  sheetTabFor,
   onArchiveSubagent,
   onArchiveFinished,
   onDetachSubagent,
 }: SubagentsTrackProps): ReactElement | null {
   const { t } = useTranslation();
-  const compact = useIsCompactFormFactor();
-  const [expanded, setExpanded] = useState(false);
-
-  const toggleExpanded = useCallback(() => {
-    setExpanded((current) => !current);
-  }, []);
-
-  const finishedCount = countFinishedSubagents(rows);
-  const headerAction = useMemo(
+  const sheetPanePage = useSheetPanePage();
+  // A child on another host has no tab in this workspace, so it never opens as a sheet here.
+  const sheets = useMemo(
     () =>
-      finishedCount > 0 && onArchiveFinished ? (
-        <SubagentActionButton
-          accessibilityLabel={t("subagents.archiveFinishedAction")}
-          testID="subagents-track-archive-finished"
-          tooltipLabel={t("subagents.archiveFinishedTooltip")}
-          icon="archive"
-          visible
-          onPress={onArchiveFinished}
-        />
-      ) : null,
-    [finishedCount, onArchiveFinished, t],
+      rows.map((row) =>
+        row.kind === "jagentdesk" && row.address.serverId !== serverId ? null : sheetTabFor(row),
+      ),
+    [rows, serverId, sheetTabFor],
+  );
+  const pages = useMemo(
+    () => sheets.flatMap((sheet) => (sheet ? [sheetPanePage(sheet)] : [])),
+    [sheetPanePage, sheets],
   );
 
   if (rows.length === 0) {
     return null;
   }
 
-  const headerLabel = formatHeaderLabel(rows);
+  const pill = buildSubagentPillPresentation(t, rows);
+  const showArchiveFinished = countFinishedSubagents(rows) > 0 && onArchiveFinished;
 
-  if (compact)
-    return (
-      <CompactSubagentsTrack
-        serverId={serverId}
-        rows={rows}
-        onOpenSubagent={onOpenSubagent}
-        onOpenProviderSubagent={onOpenProviderSubagent}
-        onArchiveSubagent={onArchiveSubagent}
-        onArchiveFinished={onArchiveFinished}
-        onDetachSubagent={onDetachSubagent}
-      />
-    );
   return (
-    <ComposerStackTrack
-      testID="subagents-track"
-      headerTestID="subagents-track-header"
-      headerLabel={headerLabel}
-      expanded={expanded}
-      onToggle={toggleExpanded}
-      headerAction={headerAction}
+    <ComposerTrackPill
+      pages={pages}
+      testID="subagents-track-header"
+      segments={pill.segments}
+      accessibilityLabel={pill.accessibilityLabel}
+      panelTitle={t("subagents.title")}
     >
-      {rows.map((row) => (
+      {showArchiveFinished ? (
+        <ComposerTrackActions>
+          <ArchiveFinishedRow onPress={onArchiveFinished} />
+        </ComposerTrackActions>
+      ) : null}
+      {rows.map((row, index) => (
         <SubagentsTrackRow
-          serverId={serverId}
           key={row.kind === "jagentdesk" ? `${row.address.serverId}:${row.id}` : row.id}
+          serverId={serverId}
           row={row}
+          sheetTabId={sheets[index]?.tab.tabId ?? null}
           onOpenSubagent={onOpenSubagent}
           onOpenProviderSubagent={onOpenProviderSubagent}
           onArchiveSubagent={onArchiveSubagent}
           onDetachSubagent={onDetachSubagent}
         />
       ))}
-    </ComposerStackTrack>
-  );
-}
-
-function CompactSubagentsTrack(props: SubagentsTrackProps) {
-  const { t } = useTranslation();
-  const pane = usePaneContext();
-  const sheetFor = useSubagentSheetTab(`${pane.serverId}:${pane.workspaceId}`, pane.tabId);
-  const page = useSheetPanePage();
-  const sheets = useMemo(
-    () =>
-      props.rows.map((row) =>
-        row.kind === "jagentdesk" && row.address.serverId !== props.serverId ? null : sheetFor(row),
-      ),
-    [props.rows, props.serverId, sheetFor],
-  );
-  const pages = useMemo(
-    () => sheets.flatMap((sheet) => (sheet ? [page(sheet)] : [])),
-    [page, sheets],
-  );
-  const segments = useMemo(
-    () => [{ bucket: null, text: `${props.rows.length} ${t("subagents.title")}` }],
-    [props.rows.length, t],
-  );
-  return (
-    <ComposerTrackPill
-      testID="subagents-track-header"
-      segments={segments}
-      panelTitle={t("subagents.title")}
-      pages={pages}
-    >
-      {props.onArchiveFinished && countFinishedSubagents(props.rows) > 0 ? (
-        <CompactArchiveFinished onPress={props.onArchiveFinished} />
-      ) : null}
-      {props.rows.map((row, index) => (
-        <CompactSubagentRow
-          key={row.kind === "jagentdesk" ? `${row.address.serverId}:${row.id}` : row.id}
-          row={row}
-          pageId={sheets[index]?.tab.tabId}
-          onOpenSubagent={props.onOpenSubagent}
-          onOpenProviderSubagent={props.onOpenProviderSubagent}
-        />
-      ))}
     </ComposerTrackPill>
   );
 }
-function CompactArchiveFinished({ onPress }: { onPress: () => void }) {
+
+/**
+ * Bulk archive, as a row above the list rather than an icon next to the count. The pill has no
+ * header to hang an icon off, and a destructive-ish action reads better with its name attached.
+ */
+function ArchiveFinishedRow({ onPress }: { onPress: () => void }): ReactElement {
   const { t } = useTranslation();
-  return (
-    <ComposerTrackRow onPress={onPress} accessibilityLabel={t("subagents.archiveFinishedAction")}>
-      <Text style={styles.rowLabel}>{t("subagents.archiveFinishedAction")}</Text>
-    </ComposerTrackRow>
+  const renderRow = useCallback(
+    ({ active }: { active: boolean }) => (
+      <>
+        <ThemedArchive
+          size={ROW_ICON_SIZE}
+          uniProps={active ? foregroundColorMapping : foregroundMutedColorMapping}
+        />
+        <Text style={styles.rowLabel} numberOfLines={1}>
+          {t("subagents.archiveFinishedAction")}
+        </Text>
+      </>
+    ),
+    [t],
   );
-}
-function CompactSubagentRow({
-  row,
-  pageId,
-  onOpenSubagent,
-  onOpenProviderSubagent,
-}: {
-  row: SubagentRow;
-  pageId?: string;
-  onOpenSubagent: SubagentsTrackProps["onOpenSubagent"];
-  onOpenProviderSubagent: SubagentsTrackProps["onOpenProviderSubagent"];
-}) {
-  const presentation = useMemo(() => buildRowPresentation(row), [row]);
-  const open = useCallback(() => {
-    if (row.kind === "provider") onOpenProviderSubagent(row.parentAgentId, row.id);
-    else onOpenSubagent(row.address);
-  }, [onOpenProviderSubagent, onOpenSubagent, row]);
   return (
     <ComposerTrackRow
-      onPress={open}
-      opensPage={pageId}
-      closeOnSelect={!pageId}
-      accessibilityLabel={presentation.label}
-      testID={`subagents-track-row-${row.id}`}
+      accessibilityLabel={t("subagents.archiveFinishedAction")}
+      testID="subagents-track-archive-finished"
+      onPress={onPress}
     >
-      <WorkspaceTabIcon presentation={presentation} />
-      <Text style={styles.rowLabel} numberOfLines={2}>
-        {presentation.label}
-      </Text>
+      {renderRow}
     </ComposerTrackRow>
   );
 }
@@ -217,6 +160,8 @@ function CompactSubagentRow({
 interface SubagentsTrackRowProps {
   serverId: string;
   row: SubagentRow;
+  /** The sheet page the row opens in place of the list, when it opens in a sheet. */
+  sheetTabId: string | null;
   onOpenSubagent: (address: AgentAddress) => void;
   onOpenProviderSubagent: (parentAgentId: string, subagentId: string) => void;
   onArchiveSubagent: (address: AgentAddress) => void;
@@ -226,6 +171,7 @@ interface SubagentsTrackRowProps {
 function SubagentsTrackRow({
   serverId,
   row,
+  sheetTabId,
   onOpenSubagent,
   onOpenProviderSubagent,
   onArchiveSubagent,
@@ -233,7 +179,8 @@ function SubagentsTrackRow({
 }: SubagentsTrackRowProps): ReactElement {
   const { t } = useTranslation();
   const isCompact = useIsCompactFormFactor();
-  const [hovered, setHovered] = useState(false);
+  const rowServerId = row.kind === "jagentdesk" ? row.address.serverId : serverId;
+  const hostLabel = useHosts().find((host) => host.serverId === rowServerId)?.label ?? rowServerId;
   const presentation = useMemo(() => buildRowPresentation(row), [row]);
   const displayLabel =
     presentation.titleState === "loading" ? t("common.states.loading") : presentation.label;
@@ -250,56 +197,60 @@ function SubagentsTrackRow({
   const handleDetachPress = useCallback(() => {
     if (row.kind === "jagentdesk") onDetachSubagent?.(row.address);
   }, [onDetachSubagent, row]);
-  const handlePointerEnter = useCallback(() => setHovered(true), []);
-  const handlePointerLeave = useCallback(() => setHovered(false), []);
-  const hostLabel = useHosts().find(
-    (host) => row.kind === "jagentdesk" && host.serverId === row.address.serverId,
-  )?.label;
   const actionsAlwaysVisible = isNative || isCompact;
-  const actionsVisible = actionsAlwaysVisible || hovered;
+
+  const renderRow = useCallback(
+    ({ active }: { active: boolean }) => (
+      <>
+        <WorkspaceTabIcon presentation={presentation} />
+        <View style={styles.rowText}>
+          <Text style={styles.rowTitle} numberOfLines={1}>
+            {displayLabel}
+          </Text>
+          {row.kind === "jagentdesk" ? (
+            <>
+              <SubagentFacts rowId={row.id} text={rowServerId !== serverId ? hostLabel : ""} />
+              <JAgentDeskSubagentFacts serverId={rowServerId} agentId={row.id} />
+            </>
+          ) : (
+            <SubagentFacts rowId={row.id} text={presentation.subtitle} />
+          )}
+        </View>
+        {row.kind === "jagentdesk" ? (
+          <SubagentRowActions
+            rowId={row.id}
+            displayLabel={displayLabel}
+            visible={actionsAlwaysVisible || active}
+            onDetachPress={onDetachSubagent ? handleDetachPress : undefined}
+            onArchivePress={handleArchivePress}
+          />
+        ) : null}
+      </>
+    ),
+    [
+      actionsAlwaysVisible,
+      displayLabel,
+      handleArchivePress,
+      handleDetachPress,
+      hostLabel,
+      onDetachSubagent,
+      presentation,
+      row.id,
+      row.kind,
+      rowServerId,
+      serverId,
+    ],
+  );
 
   return (
-    // Wrapper View handles hover so moving the pointer between the row and
-    // the archive button doesn't drop the hover state — the same pattern
-    // used by sidebar workspace rows.
-    <View>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={displayLabel}
-        testID={`subagents-track-row-${row.id}`}
-        onPress={handlePress}
-        onHoverIn={handlePointerEnter}
-        onHoverOut={handlePointerLeave}
-      >
-        {({ pressed }) => (
-          <View style={hovered || pressed ? styles.rowActive : styles.row}>
-            <WorkspaceTabIcon presentation={presentation} />
-            <View style={styles.rowText}>
-              <Text style={styles.rowTitle} numberOfLines={1}>
-                {displayLabel}
-              </Text>
-              {row.kind === "jagentdesk" && row.address.serverId !== serverId ? (
-                <Text style={styles.rowSubtitle}>{hostLabel ?? row.address.serverId}</Text>
-              ) : null}
-              {row.kind === "jagentdesk" ? (
-                <JAgentDeskSubagentFacts serverId={row.address.serverId} agentId={row.id} />
-              ) : (
-                <SubagentFacts rowId={row.id} text={presentation.subtitle} />
-              )}
-            </View>
-            {row.kind === "jagentdesk" ? (
-              <SubagentRowActions
-                rowId={row.id}
-                displayLabel={displayLabel}
-                visible={actionsVisible}
-                onDetachPress={onDetachSubagent ? handleDetachPress : undefined}
-                onArchivePress={handleArchivePress}
-              />
-            ) : null}
-          </View>
-        )}
-      </Pressable>
-    </View>
+    <ComposerTrackRow
+      accessibilityLabel={displayLabel}
+      testID={`subagents-track-row-${row.id}`}
+      opensPage={sheetTabId ?? undefined}
+      onPress={handlePress}
+    >
+      {renderRow}
+    </ComposerTrackRow>
   );
 }
 
@@ -408,40 +359,21 @@ function SubagentActionButton({
 }
 
 const styles = StyleSheet.create((theme) => ({
+  // `flexBasis: "auto"` rather than `flex: 1`: a zero-basis label contributes nothing to the row's
+  // intrinsic width, so the panel measures itself at its floor and truncates every label at once.
+  rowLabel: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: "auto",
+    minWidth: 0,
+    fontSize: theme.fontSize.base,
+    color: theme.colors.foreground,
+  },
+  // Title over facts. The facts sit under the title rather than beside it, so a long task name
+  // keeps the row's full width and neither line truncates the other.
   rowText: { flexGrow: 1, flexShrink: 1, flexBasis: "auto", minWidth: 0 },
   rowTitle: { fontSize: theme.fontSize.base, color: theme.colors.foreground },
   rowFacts: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
-  row: {
-    minHeight: { xs: 44, md: 32 },
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[2],
-    paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[2],
-  },
-  rowActive: {
-    minHeight: { xs: 44, md: 32 },
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[2],
-    paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[2],
-    backgroundColor: theme.colors.surface2,
-  },
-  rowLabel: {
-    flex: 1,
-    minWidth: 0,
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.foreground,
-  },
-  // Keep provider context secondary and bounded so the task remains readable on compact screens.
-  rowSubtitle: {
-    flexShrink: 1,
-    minWidth: 0,
-    maxWidth: "45%",
-    fontSize: theme.fontSize.xs,
-    color: theme.colors.foregroundMuted,
-  },
   actionClusterVisible: {
     flexDirection: "row",
     alignItems: "center",
@@ -453,11 +385,6 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     gap: theme.spacing[1],
     opacity: 0,
-  },
-  actionButton: {
-    padding: theme.spacing[1],
-    alignItems: "center",
-    justifyContent: "center",
   },
   tooltipText: {
     fontSize: theme.fontSize.xs,

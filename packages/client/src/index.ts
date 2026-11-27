@@ -35,6 +35,8 @@ import type {
 } from "@jagentdesk/protocol/messages";
 import {
   DaemonClient,
+  type AgentBackgroundWorkDetail,
+  type AgentBackgroundWorkOutputPayload,
   type AgentBackgroundWorkItem,
   type FetchAgentsEntry,
   type FetchAgentsOptions,
@@ -347,6 +349,8 @@ export interface JAgentDeskAgentTimelineHandle {
 }
 
 export type JAgentDeskAgentBackgroundWorkItem = AgentBackgroundWorkItem;
+export type JAgentDeskAgentBackgroundWorkDetail = AgentBackgroundWorkDetail;
+export type JAgentDeskAgentBackgroundWorkOutput = AgentBackgroundWorkOutputPayload;
 
 export interface JAgentDeskAgentBackgroundWorkHandle {
   /** Stop one item and wait for provider confirmation. */

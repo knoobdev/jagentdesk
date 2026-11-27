@@ -40,3 +40,4 @@ export {
 } from "./menu-context";
 export { currentPageId, isSubPageOpen, MENU_ROOT_PATH, type MenuPath } from "./menu-navigation";
 export type { Alignment, Placement, Rect, Size } from "./menu-anchor";
+export type { AnchoredSurfaceBoundary } from "./menu-overlay";

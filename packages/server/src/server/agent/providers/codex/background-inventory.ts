@@ -197,7 +197,12 @@ async function readInventories({ client, threads, foreground }: ReadInventoriesI
       const page = z
         .object({
           data: z.array(
-            z.object({ itemId: z.string().optional(), processId: z.string(), command: z.string() }),
+            z.object({
+              itemId: z.string().optional(),
+              processId: z.string(),
+              command: z.string(),
+              cwd: z.string().optional(),
+            }),
           ),
           nextCursor: z.string().nullable(),
         })
@@ -226,6 +231,7 @@ async function readInventories({ client, threads, foreground }: ReadInventoriesI
           canStop: true,
           description: null,
           ...(row.command ? { command: row.command } : {}),
+          ...(row.cwd ? { cwd: row.cwd } : {}),
         });
       }
       cursor = page.nextCursor;

@@ -21,6 +21,7 @@ import { useSessionStore, type SessionState } from "@/stores/session-store";
 import { useUsageSetting } from "./setting";
 import { usageCopy } from "./copy";
 import {
+  dropsReports,
   markUsageRefreshFailure,
   replaceReport,
   resolveAgentUsageView,
@@ -33,6 +34,7 @@ import {
   type UsageRefresh,
   upsertReport,
 } from "./model";
+import { hostUsageQueryKey, usageReportsQueryKey } from "./query-keys";
 import type { UsageReportEntry, UsageView } from "./types";
 
 // The daemon caches each report for five minutes, so re-reading it is cheap.
@@ -40,18 +42,13 @@ import type { UsageReportEntry, UsageView } from "./types";
 const REPORTS_STALE_TIME_MS = 60_000;
 const REPORTS_REFETCH_INTERVAL_MS = 5 * 60_000;
 
-/** Every report list of a host: its own and each agent's. */
-function hostUsageQueryKey(serverId: string) {
-  return ["usage", serverId] as const;
-}
+// A failed list is retried a few times within seconds (1 s, 2 s, 4 s), so one dropped request
+// during a reconnect does not leave the reports stale until the next poll.
+const REPORTS_RETRY_COUNT = 3;
+const REPORTS_RETRY_MAX_DELAY_MS = 4_000;
 
-/**
- * A host's own reports. The key differs only by host, so it is read with `dataShape: "value"`:
- * a list shape keeps the previous key's data while the next one loads, which would show one host's
- * reports as another's.
- */
-function usageReportsQueryKey(serverId: string) {
-  return [...hostUsageQueryKey(serverId), "reports"] as const;
+function reportsRetryDelay(attempt: number): number {
+  return Math.min(1_000 * 2 ** attempt, REPORTS_RETRY_MAX_DELAY_MS);
 }
 
 function agentUsageQueryKey(serverId: string, agentId: string, usageScopeKey: string | undefined) {
@@ -99,6 +96,12 @@ async function streamReports(input: {
   return settleReports(queryClient.getQueryData<UsageReportEntry[]>(queryKey), reports);
 }
 
+/**
+ * Lists a host's own reports. A restarted daemon answers before its usage sources have started,
+ * with fewer reports than it had, so a list that drops shown reports does not settle at once: it
+ * fails, keeping them, and the retries ask again. The last retry, or an explicit refresh, settles
+ * whatever the host then lists. A source turned off leaves at once (`useUsageSourceUpdates`).
+ */
 async function listReports(
   queryClient: QueryClient,
   serverId: string,
@@ -107,12 +110,18 @@ async function listReports(
 ): Promise<UsageReportEntry[]> {
   const queryKey = usageReportsQueryKey(serverId);
   const attempted = queryClient.getQueryData<UsageReportEntry[]>(queryKey) ?? [];
+  let reports: UsageReportEntry[];
   try {
-    return await streamReports({ queryClient, queryKey, serverId, forceRefresh, signal });
+    reports = await streamReports({ queryClient, queryKey, serverId, forceRefresh, signal });
   } catch (error) {
     recordUsageRefreshFailure(queryClient, queryKey, attempted);
     throw error;
   }
+  const failures = queryClient.getQueryState(queryKey)?.fetchFailureCount ?? 0;
+  if (!forceRefresh && failures < REPORTS_RETRY_COUNT && dropsReports(attempted, reports)) {
+    throw new Error("The host listed fewer usage reports than it had; asking again.");
+  }
+  return reports;
 }
 
 function recordUsageRefreshFailure(
@@ -176,6 +185,8 @@ export function useHostUsage(serverId: string): { view: UsageView; refresh: () =
     enabled: isConnected && isSupported && setting.enabled,
     dataShape: "value",
     staleTimeMs: REPORTS_STALE_TIME_MS,
+    retry: REPORTS_RETRY_COUNT,
+    retryDelay: reportsRetryDelay,
   });
   const mutation = useMutation({
     mutationKey: [...usageReportsQueryKey(serverId), "refresh"],
@@ -203,28 +214,41 @@ const NO_REPORTS: UsageReportEntry[] = [];
 
 interface UsageHostReportsInput {
   serverId: string | null;
-  shouldPoll?: boolean;
+  /** The summary is on screen: fetch and poll. Otherwise only the cached reports are read. */
+  active?: boolean;
 }
 
-/** A host's reports, with periodic refresh enabled only by the visible sidebar summary. */
+/**
+ * A host's reports for the sidebar summary. The last reports stay while the host reconnects, its
+ * daemon config reloads, or a refetch fails; only usage turned off on the host hides them. The key
+ * is the host's, so another host never shows them.
+ */
 export function useUsageHostReports({
   serverId,
-  shouldPoll = false,
+  active = false,
 }: UsageHostReportsInput): UsageReportEntry[] {
   useUsageSourceUpdates(serverId);
   const setting = useUsageSetting(serverId);
+  const isConnected = useHostRuntimeIsConnected(serverId ?? "");
   const queryClient = useQueryClient();
   const query = useFetchQuery({
-    enabled: setting.enabled,
+    // A reconnect marks the reports stale (see the push router), so they refetch as soon as the
+    // host is back.
+    enabled: active && isConnected && !setting.off,
     queryKey: usageReportsQueryKey(serverId ?? ""),
     queryFn: serverId
       ? ({ signal }) => listReports(queryClient, serverId, false, signal)
       : skipToken,
     dataShape: "value",
     staleTimeMs: REPORTS_STALE_TIME_MS,
-    refetchInterval: shouldPoll ? REPORTS_REFETCH_INTERVAL_MS : false,
+    refetchInterval: active ? REPORTS_REFETCH_INTERVAL_MS : false,
+    retry: REPORTS_RETRY_COUNT,
+    retryDelay: reportsRetryDelay,
+    // Kept while the sidebar is collapsed or unmounted, so it reopens with the last numbers.
+    gcTime: Infinity,
   });
-  return setting.enabled ? (query.data ?? NO_REPORTS) : NO_REPORTS;
+  if (setting.off) return NO_REPORTS;
+  return query.data ?? NO_REPORTS;
 }
 
 /**
