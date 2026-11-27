@@ -169,6 +169,15 @@ const primaryForegroundColorMapping = (theme: Theme) => ({
   color: theme.colors.primaryForeground,
 });
 const destructiveColorMapping = (theme: Theme) => ({ color: theme.colors.destructive });
+const statusSuccessColorMapping = (theme: Theme) => ({ color: theme.colors.statusSuccess });
+const statusDangerColorMapping = (theme: Theme) => ({ color: theme.colors.statusDanger });
+const ThemedActivityCircle = withUnistyles(Circle);
+const ThemedActivityInfo = withUnistyles(Info);
+const ThemedActivityCheckCircle = withUnistyles(CheckCircle);
+const ThemedActivityXCircle = withUnistyles(XCircle);
+const ThemedActivityFileText = withUnistyles(FileText);
+const ThemedActivityChevronDown = withUnistyles(ChevronDown);
+const ThemedCompactionScissors = withUnistyles(Scissors);
 const WEB_TOOLCALL_SHIMMER_KEYFRAME_CSS = `
   @keyframes ${WEB_TOOLCALL_SHIMMER_ANIMATION_NAME} {
     0% {
@@ -1387,18 +1396,26 @@ const activityLogStylesheet = StyleSheet.create((theme) => ({
   pressableActive: {
     opacity: 0.7,
   },
-  systemBg: {
-    backgroundColor: "rgba(39, 39, 42, 0.5)",
-  },
-  infoBg: {
-    backgroundColor: "rgba(30, 58, 138, 0.3)",
+  // Notices are quiet chrome (spec 38 §2): the neutral surface and muted words; only success and
+  // error take their status pair.
+  neutralBg: {
+    backgroundColor: theme.colors.surface2,
   },
   successBg: {
-    backgroundColor: "rgba(20, 83, 45, 0.3)",
+    backgroundColor: theme.colors.statusSuccessBackground,
   },
   errorBg: {},
-  artifactBg: {
-    backgroundColor: "rgba(30, 58, 138, 0.4)",
+  mutedText: {
+    color: theme.colors.foregroundMuted,
+  },
+  foregroundText: {
+    color: theme.colors.foreground,
+  },
+  successText: {
+    color: theme.colors.statusSuccess,
+  },
+  errorText: {
+    color: theme.colors.statusDanger,
   },
   content: {
     paddingHorizontal: theme.spacing[3],
@@ -1433,7 +1450,7 @@ const activityLogStylesheet = StyleSheet.create((theme) => ({
   },
   metadataContainer: {
     marginTop: theme.spacing[2],
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    backgroundColor: theme.colors.surface3,
     borderRadius: theme.borderRadius.base,
     padding: theme.spacing[2],
     borderWidth: theme.borderWidth[1],
@@ -1464,25 +1481,34 @@ export const ActivityLog = memo(function ActivityLog({
 
   const typeConfig = {
     system: {
-      bg: activityLogStylesheet.systemBg,
-      color: "#a1a1aa",
-      Icon: Circle,
+      bg: activityLogStylesheet.neutralBg,
+      text: activityLogStylesheet.mutedText,
+      iconColor: foregroundMutedColorMapping,
+      Icon: ThemedActivityCircle,
     },
-    info: { bg: activityLogStylesheet.infoBg, color: "#60a5fa", Icon: Info },
+    info: {
+      bg: activityLogStylesheet.neutralBg,
+      text: activityLogStylesheet.mutedText,
+      iconColor: foregroundMutedColorMapping,
+      Icon: ThemedActivityInfo,
+    },
     success: {
       bg: activityLogStylesheet.successBg,
-      color: "#4ade80",
-      Icon: CheckCircle,
+      text: activityLogStylesheet.successText,
+      iconColor: statusSuccessColorMapping,
+      Icon: ThemedActivityCheckCircle,
     },
     error: {
       bg: activityLogStylesheet.errorBg,
-      color: "#f87171",
-      Icon: XCircle,
+      text: activityLogStylesheet.errorText,
+      iconColor: statusDangerColorMapping,
+      Icon: ThemedActivityXCircle,
     },
     artifact: {
-      bg: activityLogStylesheet.artifactBg,
-      color: "#93c5fd",
-      Icon: FileText,
+      bg: activityLogStylesheet.neutralBg,
+      text: activityLogStylesheet.foregroundText,
+      iconColor: foregroundMutedColorMapping,
+      Icon: ThemedActivityFileText,
     },
   };
 
@@ -1511,8 +1537,8 @@ export const ActivityLog = memo(function ActivityLog({
     [resolvedDisableOuterSpacing, config.bg, isInteractive],
   );
   const messageTextStyle = useMemo(
-    () => [activityLogStylesheet.messageText, { color: config.color }],
-    [config.color],
+    () => [activityLogStylesheet.messageText, config.text],
+    [config.text],
   );
 
   return (
@@ -1520,7 +1546,7 @@ export const ActivityLog = memo(function ActivityLog({
       <View style={activityLogStylesheet.content}>
         <View style={activityLogStylesheet.row}>
           <View style={activityLogStylesheet.iconContainer}>
-            <IconComponent size={16} color={config.color} />
+            <IconComponent size={16} uniProps={config.iconColor} />
           </View>
           <View style={activityLogStylesheet.textContainer}>
             <Text style={messageTextStyle} selectable>
@@ -1532,9 +1558,9 @@ export const ActivityLog = memo(function ActivityLog({
                   {t("message.activity.details")}
                 </Text>
                 {isExpanded ? (
-                  <ChevronDown size={12} color="#71717a" />
+                  <ThemedActivityChevronDown size={12} uniProps={foregroundMutedColorMapping} />
                 ) : (
-                  <ChevronRight size={12} color="#71717a" />
+                  <ThemedChevronRightIcon size={12} uniProps={foregroundMutedColorMapping} />
                 )}
               </View>
             )}
@@ -1597,7 +1623,7 @@ export const CompactionMarker = memo(function CompactionMarker({
         {status === "loading" ? (
           <LoadingSpinner size="small" color="#a1a1aa" />
         ) : (
-          <Scissors size={12} color="#a1a1aa" />
+          <ThemedCompactionScissors size={12} uniProps={foregroundMutedColorMapping} />
         )}
         <Text style={compactionStylesheet.text}>{label}</Text>
       </View>
