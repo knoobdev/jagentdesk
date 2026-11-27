@@ -93,6 +93,10 @@ import {
 import { NativeSkillsRequestSchemas, NativeSkillsResponseSchemas } from "./native-skills.js";
 import { MemoryRequestSchemas, MemoryResponseSchemas } from "./memory.js";
 import {
+  NotificationFeedRequestSchemas,
+  NotificationFeedResponseSchemas,
+} from "./notification-feed.js";
+import {
   UsageHistoryGetRequestSchema,
   UsageHistoryGetResponseSchema,
   UsageHistoryResetRequestSchema,
@@ -4753,6 +4757,8 @@ export const SessionEventSubscriptionSchema = z.enum([
   "agent.background_work.update",
   "terminal_attention_required",
   "plugin.notification",
+  // Only sent to clients that saw `server_info.features.notificationFeed` (ADR-0063).
+  "notifications.feed.changed",
   "status.server_info",
   "status.daemon_config_changed",
   "status.plugin_catalog_changed",
@@ -4890,6 +4896,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   SkillsMutateRequestSchema,
   ...NativeSkillsRequestSchemas,
   ...MemoryRequestSchemas,
+  ...NotificationFeedRequestSchemas,
   UsageHistoryGetRequestSchema,
   UsageHistoryResetRequestSchema,
   HostCapabilitiesRefreshRequestSchema,
@@ -5389,6 +5396,8 @@ export const ServerInfoStatusPayloadSchema = z
         pushTokenRevocation: z.boolean().optional(),
         // COMPAT(pushNotificationPreferences): added in v0.12.2, remove gate after 2027-06-01.
         pushNotificationPreferences: z.boolean().optional(),
+        // COMPAT(notificationFeed): added in v0.12.3, remove gate after 2027-06-01.
+        notificationFeed: z.boolean().optional(),
         // COMPAT(restartRecovery): added in v0.9.59, remove after 2027-05-24.
         resumeOnStartupSetting: z.boolean().optional(),
         speechSettings: z.boolean().optional(),
@@ -9677,6 +9686,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   SkillsMutateResponseSchema,
   ...NativeSkillsResponseSchemas,
   ...MemoryResponseSchemas,
+  ...NotificationFeedResponseSchemas,
   UsageHistoryGetResponseSchema,
   UsageHistoryResetResponseSchema,
   HostCapabilitiesRefreshResponseSchema,

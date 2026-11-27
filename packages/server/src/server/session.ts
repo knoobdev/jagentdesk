@@ -249,6 +249,7 @@ import { HubExecutionController } from "./hub/execution-controller.js";
 import { type HubExecutionAgents } from "./hub/daemon-executions.js";
 import { DownloadTokenStore } from "./file-download/token-store.js";
 import type { PushNotifications } from "./push/index.js";
+import type { NotificationFeed } from "./notification-feed/feed.js";
 import {
   archivePersistedWorkspaceRecord,
   archiveWorkspaceContents,
@@ -609,6 +610,9 @@ export interface SessionOptions {
   downloadTokenStore: DownloadTokenStore;
 
   pushNotifications: PushNotifications;
+
+  /** The host's notification list (ADR-0063); absent in tests that do not need it. */
+  notificationFeed?: NotificationFeed;
 
   jagentdeskHome: string;
 
@@ -1099,6 +1103,7 @@ export class Session {
   private readonly hostToolInstaller: HostToolInstaller | null | undefined;
 
   private readonly pushNotifications: PushNotifications;
+  private readonly notificationFeed: NotificationFeed | null;
   private registeredPushToken: string | null = null;
 
   private unsubscribeAgentEvents: (() => void) | null = null;
@@ -1309,6 +1314,7 @@ export class Session {
     this.onWorkspaceArchiveUpdate = options.publishWorkspaceArchiveUpdates;
     this.onWorkspaceRecovered = onWorkspaceRecovered ?? null;
     this.pushNotifications = pushNotifications;
+    this.notificationFeed = options.notificationFeed ?? null;
     this.jagentdeskHome = jagentdeskHome;
     this.messageReceipts = options.messageReceipts;
     this.creationService = resolveWorkspaceCreationService(options);
@@ -3056,7 +3062,14 @@ export class Session {
       () => this.dispatchProviderMessage(msg),
       () => this.dispatchTerminalMessage(msg, source),
       () => this.dispatchChatScheduleLoopMessage(msg),
-      () => this.botsSession?.dispatch(msg),
+      () => this.dispatchNotificationFeedMessage(msg),
+      () => {
+        // Opening a bot item on any client reads its notification rows (ADR-0063).
+        if (msg.type === "bots.items.show.request") {
+          this.notificationFeed?.markOpened({ botId: msg.botId, itemId: msg.itemId });
+        }
+        return this.botsSession?.dispatch(msg);
+      },
       () =>
         this.builtinSession.dispatch(msg, {
           supports: (capability) =>
@@ -4167,6 +4180,36 @@ export class Session {
         payload: { requestId: msg.requestId, result: null, error: message },
       });
     }
+  }
+
+  private dispatchNotificationFeedMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    const feed = this.notificationFeed;
+    if (msg.type === "notifications.feed.list.request") {
+      if (!feed) throw new Error("Notification feed is not available on this host");
+      const page = feed.list({ before: msg.before, limit: msg.limit });
+      const state = feed.state();
+      this.emit({
+        type: "notifications.feed.list.response",
+        payload: {
+          requestId: msg.requestId,
+          items: page.items,
+          hasMore: page.hasMore,
+          unreadCount: state.unreadCount,
+          unreadPlugins: state.unreadPlugins,
+        },
+      });
+      return Promise.resolve();
+    }
+    if (msg.type === "notifications.feed.mark_read.request") {
+      if (!feed) throw new Error("Notification feed is not available on this host");
+      const readIds = feed.markRead({ ids: msg.ids, all: msg.all });
+      this.emit({
+        type: "notifications.feed.mark_read.response",
+        payload: { requestId: msg.requestId, readIds, unreadCount: feed.state().unreadCount },
+      });
+      return Promise.resolve();
+    }
+    return undefined;
   }
 
   private async dispatchMiscMessage(msg: SessionInboundMessage): Promise<void> {
@@ -6044,6 +6087,7 @@ export class Session {
         ),
       );
       await Promise.all(agentIds.map((id) => this.agentManager.clearAgentAttention(id)));
+      for (const id of agentIds) this.notificationFeed?.markOpened({ agentId: id });
       if (requestId) {
         const agents = (
           await Promise.all(
@@ -6093,6 +6137,10 @@ export class Session {
     };
     if (msg.appVisible && focusedTerminalId) {
       void this.clearFocusedTerminalAttention(focusedTerminalId);
+    }
+    // An agent on screen in any client reads its notification rows (ADR-0063).
+    if (msg.appVisible && msg.focusedAgentId) {
+      this.notificationFeed?.markOpened({ agentId: msg.focusedAgentId });
     }
     if (this.registeredPushToken) {
       this.pushNotifications.renew(this.registeredPushToken);
@@ -10087,7 +10135,11 @@ export class Session {
       : this.clientCapabilities;
     // Old apps parse outbound messages strictly and do not know these types.
     if (!capabilities?.has(CLIENT_CAPS.explicitEventSubscriptions))
-      return event !== "agent.background_work.update" && event !== "plugin.notification";
+      return (
+        event !== "agent.background_work.update" &&
+        event !== "plugin.notification" &&
+        event !== "notifications.feed.changed"
+      );
     return [...this.eventSubscriptions.values()].some(
       ({ owner, events }) =>
         (!source || owner.source === source) && events.has(event as SessionEventSubscription),
