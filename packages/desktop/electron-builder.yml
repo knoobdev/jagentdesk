@@ -59,6 +59,9 @@ asarUnpack:
 extraResources:
   - from: ../app/dist
     to: app-dist
+  # Third-party notices, including Orca's MIT notice for the bot mascots (ADR-0060 §5).
+  - from: ../../THIRD_PARTY_NOTICES
+    to: THIRD_PARTY_NOTICES
   - from: ../server/dist/server/go/tsnet-bridge/tailnet-bridge
     to: bin/tailnet-bridge
   # go-ios for iPhones and iPads (spec 27.1), fetched per OS by scripts/fetch-go-ios.mjs.
