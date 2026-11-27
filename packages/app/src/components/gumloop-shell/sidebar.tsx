@@ -66,6 +66,7 @@ import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store"
 import { useSidebarViewStore } from "@/stores/sidebar-view-store";
 import { usePairDeviceModalStore } from "@/stores/pair-device-modal-store";
 import { useUsageSummary, UsageSidebarItem } from "@/usage/sidebar-item";
+import { BrowserTabsSidebarRow } from "@/desktop/browser/live-tabs/sidebar-row";
 import type { Theme } from "@/styles/theme";
 import {
   buildSettingsAddHostRoute,
@@ -243,6 +244,7 @@ function ConnectionFooter({ serverId, onNavigate }: { serverId: string; onNaviga
   const transportLabel = t(hostTransportLabelKey(snapshot?.activeConnection?.type ?? "directTcp"));
   return (
     <View style={styles.footer} testID="gumloop-sidebar-footer">
+      <BrowserTabsSidebarRow />
       <UsageSidebarItem sources={sources} onNavigate={onNavigate} />
       <Pressable
         onPress={connections}

@@ -3190,6 +3190,21 @@ export const ptBR: TranslationResources = {
     newWorkspace: "Novo",
     workspaces: "Workspaces",
   },
+  browserTabs: {
+    footerOne: "1 aba do navegador aberta",
+    footerMany: "{{count}} abas do navegador abertas",
+    title: "Abas do navegador",
+    closeAll: "Fechar todas",
+    show: "Mostrar",
+    close: "Fechar",
+    notInWorkspace: "Fora de um workspace",
+    untitled: "Nova aba",
+    status: {
+      loading: "Carregando",
+      notResponding: "Não está respondendo",
+      crashed: "Travou",
+    },
+  },
   marketplace: {
     title: "Plugin Marketplace",
     subtitle: "Discover and install community plugins for JAgentDesk.",

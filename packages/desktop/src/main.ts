@@ -76,8 +76,14 @@ import {
   unregisterJAgentDeskBrowserFromHost,
   registerAttachedJAgentDeskBrowser,
   setWorkspaceActiveJAgentDeskBrowserId,
+  listLiveJAgentDeskBrowserTabs,
+  trackJAgentDeskBrowserLiveTab,
   unregisterJAgentDeskBrowserHost,
 } from "./features/browser-webviews/index.js";
+import {
+  perTabBrowserProfileDirectoryExists,
+  pruneEmptyPerTabBrowserProfiles,
+} from "./features/browser-profile-cleanup.js";
 import {
   clearJAgentDeskBrowserProfile,
   getLegacyJAgentDeskBrowserProfileSession,
@@ -510,6 +516,35 @@ function normalizeBrowserCaptureRect(
   };
 }
 
+// Settles once empty per-tab profile directories are pruned; the IPC handlers that may open a
+// per-tab partition wait for it so a directory is never deleted while Chromium opens it.
+let perTabBrowserProfileCleanup: Promise<void> = Promise.resolve();
+
+async function prunePerTabBrowserProfiles(): Promise<void> {
+  try {
+    const result = await pruneEmptyPerTabBrowserProfiles({
+      userDataPath: app.getPath("userData"),
+      logKept: (name, data) => {
+        log.info("[browser-profile] kept per-tab profile with site data", { name, data });
+      },
+      logFailure: (name, error) => {
+        log.warn("[browser-profile] failed to remove empty per-tab profile", { name, error });
+      },
+    });
+    if (result.removed.length > 0) {
+      log.info("[browser-profile] removed empty per-tab profiles", {
+        count: result.removed.length,
+      });
+    }
+  } catch (error) {
+    log.warn("[browser-profile] per-tab profile cleanup failed", { error });
+  }
+}
+
+function startPerTabBrowserProfileCleanup(): void {
+  perTabBrowserProfileCleanup = prunePerTabBrowserProfiles();
+}
+
 ipcMain.handle("jagentdesk:browser:register-attached", (event, rawInput: unknown) => {
   const input = readAttachedBrowserInput(rawInput);
   if (!input) {
@@ -553,9 +588,14 @@ ipcMain.handle(
       );
       unregisterJAgentDeskBrowserFromHost(event.sender.id, normalizedBrowserId);
       // COMPAT(browserProfile): added in v0.1.108; remove after 2027-01-15.
-      const legacyProfile = hasOtherHost
-        ? null
-        : getLegacyJAgentDeskBrowserProfileSession(session, normalizedBrowserId);
+      // Only a per-tab profile that already exists is cleared: fromPartition creates the
+      // directory, and closing a tab must not leave an empty one behind (spec 04 §27d.4).
+      await perTabBrowserProfileCleanup;
+      const legacyProfile =
+        hasOtherHost ||
+        !perTabBrowserProfileDirectoryExists(app.getPath("userData"), normalizedBrowserId)
+          ? null
+          : getLegacyJAgentDeskBrowserProfileSession(session, normalizedBrowserId);
       if (legacyProfile) {
         try {
           await clearJAgentDeskBrowserProfile({
@@ -728,10 +768,18 @@ onDialogsChanged(({ contentsId, pendingDialog }) => {
   host.send(BROWSER_DIALOG_EVENT, { browserId, pendingDialog });
 });
 
+ipcMain.handle("jagentdesk:browser:list-live-tabs", (event) =>
+  listLiveJAgentDeskBrowserTabs(event.sender.id),
+);
+
 ipcMain.handle("jagentdesk:browser:clear-profile", async (_event, rawLegacyBrowserIds: unknown) => {
+  await perTabBrowserProfileCleanup;
+  const userDataPath = app.getPath("userData");
   const profileSessions = getJAgentDeskBrowserProfileSessions(
     session,
-    readLegacyJAgentDeskBrowserIds(rawLegacyBrowserIds),
+    readLegacyJAgentDeskBrowserIds(rawLegacyBrowserIds).filter((browserId) =>
+      perTabBrowserProfileDirectoryExists(userDataPath, browserId),
+    ),
   );
   const profileSession = profileSessions[0];
   await clearJAgentDeskBrowserProfile({
@@ -1133,6 +1181,7 @@ async function createWindow(
   });
   mainWindow.webContents.on("did-attach-webview", (_event, contents) => {
     prepareJAgentDeskBrowserWebContents(contents);
+    trackJAgentDeskBrowserLiveTab(contents);
     // alert/confirm/prompt wait for the agent or the tab's dialog bar, not a native box.
     installGuestDialogHandler(contents);
     // Anti-detection: the guest's identity (UA, Client Hints, timezone, locale, init
@@ -1337,6 +1386,7 @@ async function bootstrap(): Promise<void> {
   }
 
   await app.whenReady();
+  startPerTabBrowserProfileCleanup();
   // A plain Chrome UA for the agentic browser until a fingerprint profile arrives, and the
   // Client Hints Electron leaves off navigation requests.
   const agenticBrowserSession = session.fromPartition(JAGENTDESK_BROWSER_PROFILE_PARTITION);

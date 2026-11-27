@@ -3207,6 +3207,21 @@ export const es: TranslationResources = {
     newWorkspace: "Nuevo",
     workspaces: "Espacios de trabajo",
   },
+  browserTabs: {
+    footerOne: "1 pestaña del navegador abierta",
+    footerMany: "{{count}} pestañas del navegador abiertas",
+    title: "Pestañas del navegador",
+    closeAll: "Cerrar todas",
+    show: "Mostrar",
+    close: "Cerrar",
+    notInWorkspace: "Fuera de un espacio de trabajo",
+    untitled: "Pestaña nueva",
+    status: {
+      loading: "Cargando",
+      notResponding: "No responde",
+      crashed: "Bloqueada",
+    },
+  },
   marketplace: {
     title: "Plugin Marketplace",
     subtitle: "Discover and install community plugins for JAgentDesk.",

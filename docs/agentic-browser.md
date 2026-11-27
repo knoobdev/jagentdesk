@@ -60,6 +60,31 @@ windows, `browser_new_tab` requires a `browserHostId` from that list. Existing t
 follow their tab's window. Copy the window name from Command Center to identify it; the name
 and instance identity survive a renderer reload or daemon reconnect in that window.
 
+## Open tabs list and per-tab profiles
+
+Spec 04 §27d. Tabs the user is not looking at stay alive as webviews parked 1 × 1 px in the main
+window (`packages/app/src/desktop/browser/resident-webviews.ts`), so the sidebar footer lists every
+live webview: "N browser tabs open", with Show, Close and Close all.
+
+- The list comes from the main process, not from tab state. Main sees every attached guest, including
+  one whose browser id never registered, and its crash and hang events
+  (`packages/desktop/src/features/browser-webviews/live-tabs.ts`). The renderer adds webview elements
+  that have not attached yet and names each row from the tab that shows it.
+- A webview no tab owns still gets a row, "Not in a workspace". Show gives it a tab in the workspace
+  that opened it, or the open workspace.
+- Agent tabs sit in the inspector pane, which only renders while the file explorer is open. Show opens
+  it and selects the tab again after the explorer's own effect has focused Files or Changes.
+- A hung CDP command marks its row "Not responding" through `setJAgentDeskBrowserNotResponding`
+  (`browser-webviews/index.ts`).
+
+Before v0.1.108 every tab had its own partition, `persist:jagentdesk-browser-<id>`. Closing a tab still
+clears that legacy partition, and `session.fromPartition` creates the directory when it is missing,
+which left one empty directory per closed tab. Only a per-tab directory that already exists is
+cleared now. At startup, per-tab directories without cookie rows, Local Storage origins or IndexedDB
+databases are deleted (`packages/desktop/src/features/browser-profile-cleanup.ts`); ones with data
+stay and get one log line. The shared `jagentdesk-browser` partition and every other partition never
+match.
+
 ## Identity
 
 A tab presents either the active fingerprint profile or, when none is chosen, a plain Chrome

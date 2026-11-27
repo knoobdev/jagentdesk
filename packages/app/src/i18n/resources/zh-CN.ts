@@ -3119,6 +3119,21 @@ export const zhCN: TranslationResources = {
     newWorkspace: "新建",
     workspaces: "工作区",
   },
+  browserTabs: {
+    footerOne: "已打开 1 个浏览器标签页",
+    footerMany: "已打开 {{count}} 个浏览器标签页",
+    title: "浏览器标签页",
+    closeAll: "全部关闭",
+    show: "显示",
+    close: "关闭",
+    notInWorkspace: "不在任何工作区",
+    untitled: "新标签页",
+    status: {
+      loading: "加载中",
+      notResponding: "无响应",
+      crashed: "已崩溃",
+    },
+  },
   marketplace: {
     title: "Plugin Marketplace",
     subtitle: "Discover and install community plugins for JAgentDesk.",

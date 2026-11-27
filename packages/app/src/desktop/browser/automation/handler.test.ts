@@ -325,6 +325,12 @@ describe("mountBrowserAutomationHandler", () => {
         url: "https://example.com",
       },
     ]);
+    // Spec 04 §27d.1: the browser tabs list names the agent that opened the tab.
+    expect(useBrowserStore.getState().browsersById[result.browserId]?.openedBy).toEqual({
+      serverId: "server-1",
+      workspaceId: "wks_workspace_a",
+      agentId: "agent-1",
+    });
     expect(browser.browser.executedRequests).toEqual([
       {
         type: "browser.automation.execute.request",

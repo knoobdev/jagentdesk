@@ -3254,6 +3254,21 @@ export const fr: TranslationResources = {
     newWorkspace: "Nouveau",
     workspaces: "Espaces de travail",
   },
+  browserTabs: {
+    footerOne: "1 onglet de navigateur ouvert",
+    footerMany: "{{count}} onglets de navigateur ouverts",
+    title: "Onglets du navigateur",
+    closeAll: "Tout fermer",
+    show: "Afficher",
+    close: "Fermer",
+    notInWorkspace: "Hors espace de travail",
+    untitled: "Nouvel onglet",
+    status: {
+      loading: "Chargement",
+      notResponding: "Ne répond pas",
+      crashed: "Planté",
+    },
+  },
   marketplace: {
     title: "Plugin Marketplace",
     subtitle: "Discover and install community plugins for JAgentDesk.",
