@@ -4312,6 +4312,8 @@ export class VoiceAssistantWebSocketServer {
     title: string;
     body: string;
   }): void {
+    // Stopping the daemon ends running turns (running → idle); that is not something the agent did.
+    if (!this.acceptingConnections) return;
     const kind = `agent_${params.reason}` as const;
     if (this.notificationFeed.hasUnread({ kind, agentId: params.agentId })) return;
     this.notificationFeed.append({
