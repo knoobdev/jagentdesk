@@ -1,4 +1,4 @@
-import { useCallback, useState, type ReactElement, type ReactNode } from "react";
+import { useCallback, useMemo, useState, type ReactElement, type ReactNode } from "react";
 import { Pressable, ScrollView, Text, View, type LayoutChangeEvent } from "react-native";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronLeft, Maximize2, Square, X } from "lucide-react-native";
@@ -24,6 +24,8 @@ import { truncatePathMiddle } from "./format";
 import { DetailIconAction } from "./icon-action";
 import { backgroundWorkKind, BackgroundWorkKindIcon } from "./kind";
 import { BackgroundWorkOutputView } from "./output-view";
+import { backgroundWorkSources } from "./sources";
+import { ScriptSection } from "./sources-view";
 import { useBackgroundWorkDetail } from "./use-detail";
 
 const ThemedChevronLeft = withUnistyles(ChevronLeft, mutedIconColorMapping);
@@ -192,18 +194,71 @@ export function BackgroundWorkDetail({
       </View>
       {item.command ? <CommandFence command={item.command} /> : null}
       {detail ? (
-        <BackgroundWorkOutputView
+        <DetailSources
           serverId={serverId}
           agentId={agentId}
           itemId={itemId}
-          outputAvailable={detail.outputAvailable}
-          providerLabel={providerDisplayLabel(detail.provider)}
+          detail={detail}
           height={variant === "popover" ? popoverOutput.height : undefined}
         />
       ) : (
         <Text style={styles.stateText}>{detailStateText(t, state)}</Text>
       )}
     </DetailFrame>
+  );
+}
+
+/**
+ * The script, then the output with one tab per source (ADR-0064): the provider's output and
+ * each file the command redirects into. The first tab is the one with the newest data; it stays
+ * put once something has been written, and the viewer's own pick always wins.
+ */
+function DetailSources({
+  serverId,
+  agentId,
+  itemId,
+  detail,
+  height,
+}: {
+  serverId: string;
+  agentId: string;
+  itemId: string;
+  detail: JAgentDeskAgentBackgroundWorkDetail;
+  height: number | undefined;
+}): ReactElement {
+  const { t } = useTranslation();
+  const sources = useMemo(() => backgroundWorkSources(detail), [detail]);
+  const [picked, setPicked] = useState<string | null>(null);
+  const [settled, setSettled] = useState<string | null>(null);
+  if (settled === null && !sources.empty) setSettled(sources.defaultTabId);
+  const wanted = picked ?? settled ?? sources.defaultTabId;
+  const tab = sources.tabs.find((candidate) => candidate.id === wanted) ?? sources.tabs[0];
+  const showTabs = sources.tabs.length > 1 || tab.kind === "redirect";
+  return (
+    <>
+      {sources.script ? <ScriptSection script={sources.script} /> : null}
+      <BackgroundWorkOutputView
+        key={tab.id}
+        serverId={serverId}
+        agentId={agentId}
+        itemId={itemId}
+        sourceId={tab.kind === "redirect" ? tab.id : undefined}
+        outputAvailable={tab.kind === "redirect" ? true : detail.outputAvailable}
+        providerLabel={providerDisplayLabel(detail.provider)}
+        height={height}
+        tabs={showTabs ? sources.tabs : undefined}
+        onSelectTab={setPicked}
+        lastRead={tab.kind === "redirect" ? tab.lastRead : null}
+        waitingText={
+          tab.kind === "redirect" && !tab.available
+            ? t("message.backgroundWork.detail.waitingForFile", { file: tab.label })
+            : undefined
+        }
+        emptyHint={
+          sources.script && sources.empty ? t("message.backgroundWork.detail.printsNothing") : null
+        }
+      />
+    </>
   );
 }
 

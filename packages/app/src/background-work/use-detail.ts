@@ -21,6 +21,11 @@ export type BackgroundWorkDetailState =
 
 /** Claude's end notice can trail the inventory change that drops the task. */
 const ENDED_REFRESH_DELAY_MS = 1500;
+/**
+ * ADR-0064: while a task with output files runs, its detail is read again this often, so a
+ * file that appears and the agent's latest read of it show up without reopening.
+ */
+const SOURCES_REFRESH_MS = 5000;
 
 /**
  * One background item's detail (ADR-0062). It is fetched again whenever the item joins or
@@ -44,6 +49,9 @@ export function useBackgroundWorkDetail(input: {
   const client = useHostRuntimeClient(serverId);
   const connected = useHostRuntimeIsConnected(serverId);
   const [state, setState] = useState<BackgroundWorkDetailState>({ status: "loading" });
+  const followsFiles =
+    state.status === "ready" &&
+    (state.detail.sources?.some((source) => source.kind === "redirect") ?? false);
 
   useEffect(() => {
     if (!client || !connected) return undefined;
@@ -67,11 +75,14 @@ export function useBackgroundWorkDetail(input: {
     };
     void load();
     const timer = isLive ? null : setTimeout(() => void load(), ENDED_REFRESH_DELAY_MS);
+    const refresh =
+      isLive && followsFiles ? setInterval(() => void load(), SOURCES_REFRESH_MS) : null;
     return () => {
       cancelled = true;
       if (timer) clearTimeout(timer);
+      if (refresh) clearInterval(refresh);
     };
-  }, [agentId, client, connected, isLive, itemId]);
+  }, [agentId, client, connected, followsFiles, isLive, itemId]);
 
   return { state, liveItem, model };
 }
@@ -92,6 +103,8 @@ export function useBackgroundWorkOutput(input: {
   serverId: string;
   agentId: string;
   itemId: string;
+  /** ADR-0064: a redirect file among the detail's sources; the provider's output when absent. */
+  sourceId?: string;
   enabled: boolean;
   onWrite: (write: BackgroundWorkOutputWrite) => void;
 }): {
@@ -100,7 +113,7 @@ export function useBackgroundWorkOutput(input: {
   hasOutput: boolean;
   getBuffer: () => BackgroundWorkOutputBuffer;
 } {
-  const { serverId, agentId, itemId, enabled } = input;
+  const { serverId, agentId, itemId, sourceId, enabled } = input;
   const { t } = useTranslation();
   const client = useHostRuntimeClient(serverId);
   const connected = useHostRuntimeIsConnected(serverId);
@@ -135,6 +148,7 @@ export function useBackgroundWorkOutput(input: {
         const unsubscribe = await client.subscribeAgentBackgroundWorkOutput({
           agentId,
           itemId,
+          ...(sourceId !== undefined ? { sourceId } : {}),
           onOutput: (push) => {
             if (cancelled) return;
             if (push.error) {
@@ -159,7 +173,7 @@ export function useBackgroundWorkOutput(input: {
       cancelled = true;
       release?.();
     };
-  }, [agentId, client, connected, enabled, itemId]);
+  }, [agentId, client, connected, enabled, itemId, sourceId]);
 
   const getBuffer = useCallback(() => bufferRef.current, []);
   return { status, hasOutput, getBuffer };

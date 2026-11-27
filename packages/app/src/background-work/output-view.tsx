@@ -15,6 +15,8 @@ import type { TerminalRendererReadyChange } from "@/utils/terminal-renderer-read
 import { toXtermTheme } from "@/utils/to-xterm-theme";
 import { DetailCopyAction } from "./icon-action";
 import { toTerminalText, type BackgroundWorkOutputWrite } from "./output-buffer";
+import type { LastRead, OutputTab } from "./sources";
+import { OutputSourceTabs, ReadByAgentStrip } from "./sources-view";
 import { useBackgroundWorkOutput } from "./use-detail";
 
 // The theme reaches xterm as a prop, so only this wrapper re-renders on a theme change. The
@@ -46,6 +48,17 @@ export interface BackgroundWorkOutputViewProps {
   providerLabel: string;
   /** Height of the output box; omitted, it fills its parent down to `MIN_FILL_HEIGHT`. */
   height?: number;
+  /** ADR-0064: the redirect file to follow; the provider's output when absent. */
+  sourceId?: string;
+  /** ADR-0064: the source tabs, in the place of the "Output" heading. */
+  tabs?: readonly OutputTab[];
+  onSelectTab?: (id: string) => void;
+  /** The agent's latest read of this file, as a strip above the box. */
+  lastRead?: LastRead | null;
+  /** What the empty box says; "Waiting for output…" by default. */
+  waitingText?: string;
+  /** A second line under the waiting text. */
+  emptyHint?: string | null;
 }
 
 /** The least a filling output box shrinks to before its page scrolls instead. */
@@ -62,6 +75,12 @@ export function BackgroundWorkOutputView({
   outputAvailable,
   providerLabel,
   height,
+  sourceId,
+  tabs,
+  onSelectTab,
+  lastRead,
+  waitingText,
+  emptyHint,
 }: BackgroundWorkOutputViewProps): ReactElement {
   const { t } = useTranslation();
   const terminalRef = useRef<TerminalEmulatorHandle>(null);
@@ -85,6 +104,7 @@ export function BackgroundWorkOutputView({
     serverId,
     agentId,
     itemId,
+    sourceId,
     enabled: outputAvailable,
     onWrite: handleWrite,
   });
@@ -113,7 +133,7 @@ export function BackgroundWorkOutputView({
   if (!outputAvailable) {
     return (
       <View style={styles.section}>
-        <Text style={styles.heading}>{t("message.backgroundWork.detail.output")}</Text>
+        <OutputHeading tabs={tabs} selected={sourceId} onSelect={onSelectTab} />
         <View style={styles.unavailable} testID="background-work-output-unavailable">
           <Text style={styles.placeholder}>
             {t("message.backgroundWork.detail.outputUnavailable", { provider: providerLabel })}
@@ -124,14 +144,16 @@ export function BackgroundWorkOutputView({
   }
 
   const statusText = outputStatusText(t, status);
-  // Until something arrives the box says why it is empty instead of showing a blank surface.
-  const placeholder = hasOutput
-    ? null
-    : (statusText ?? t("message.backgroundWork.detail.waitingForOutput"));
+  const { placeholder, hint } = emptyBoxText({
+    hasOutput,
+    statusText,
+    waitingText: waitingText ?? t("message.backgroundWork.detail.waitingForOutput"),
+    emptyHint,
+  });
   return (
     <View style={height === undefined ? styles.sectionFill : styles.section}>
       <View style={styles.header}>
-        <Text style={styles.heading}>{t("message.backgroundWork.detail.output")}</Text>
+        <OutputHeading tabs={tabs} selected={sourceId} onSelect={onSelectTab} />
         {hasOutput && statusText ? (
           <Text style={styles.headerStatus} numberOfLines={1}>
             {statusText}
@@ -145,11 +167,12 @@ export function BackgroundWorkOutputView({
           />
         </View>
       </View>
+      {lastRead ? <ReadByAgentStrip lastRead={lastRead} /> : null}
       <View style={frameStyle} testID="background-work-output">
         <ThemedTerminalEmulator
           ref={terminalRef}
           dom={TERMINAL_EMULATOR_DOM_PROPS}
-          streamKey={`background-work:${serverId}:${agentId}:${itemId}`}
+          streamKey={`background-work:${serverId}:${agentId}:${itemId}:${sourceId ?? "provider"}`}
           // Output is replayed as plain writes; there is no input mode to restore.
           supportsTerminalInputModeReplay
           characterWidths={characterWidths}
@@ -166,6 +189,11 @@ export function BackgroundWorkOutputView({
             <Text style={styles.placeholder} testID="background-work-output-placeholder">
               {placeholder}
             </Text>
+            {hint ? (
+              <Text style={styles.placeholderHint} testID="background-work-output-hint">
+                {hint}
+              </Text>
+            ) : null}
           </View>
         ) : null}
         {scrolled ? (
@@ -185,6 +213,35 @@ export function BackgroundWorkOutputView({
       </View>
     </View>
   );
+}
+
+/** The source tabs when there are several sources, else the "Output" heading. */
+function OutputHeading({
+  tabs,
+  selected,
+  onSelect,
+}: {
+  tabs: readonly OutputTab[] | undefined;
+  selected: string | undefined;
+  onSelect: ((id: string) => void) | undefined;
+}): ReactElement {
+  const { t } = useTranslation();
+  if (tabs && onSelect) {
+    return <OutputSourceTabs tabs={tabs} selected={selected ?? "provider"} onSelect={onSelect} />;
+  }
+  return <Text style={styles.heading}>{t("message.backgroundWork.detail.output")}</Text>;
+}
+
+/** Until something arrives the box says why it is empty instead of showing a blank surface. */
+function emptyBoxText(input: {
+  hasOutput: boolean;
+  statusText: string | null;
+  waitingText: string;
+  emptyHint: string | null | undefined;
+}): { placeholder: string | null; hint: string | null } {
+  if (input.hasOutput) return { placeholder: null, hint: null };
+  if (input.statusText) return { placeholder: input.statusText, hint: null };
+  return { placeholder: input.waitingText, hint: input.emptyHint ?? null };
 }
 
 function jumpPillStyle({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) {
@@ -256,6 +313,12 @@ const styles = StyleSheet.create((theme) => {
     },
     placeholder: {
       fontSize: 13,
+      color: theme.colors.foregroundMuted,
+      textAlign: "center",
+    },
+    placeholderHint: {
+      marginTop: theme.spacing[1],
+      fontSize: theme.fontSize.xs,
       color: theme.colors.foregroundMuted,
       textAlign: "center",
     },

@@ -475,6 +475,16 @@ export const fr: TranslationResources = {
         loading: "Chargement des détails…",
         notFound: "L'hôte ne connaît plus cette tâche en arrière-plan",
         tabTitle: "Tâche en arrière-plan",
+        waitingForFile: "En attente de {{file}}…",
+        scriptSummary: "Script · {{file}} · {{lines}} lignes",
+        showingFirst64Kb: "Affichage des 64 premiers Ko",
+        copyScript: "Copier le script",
+        readByAgent: "Lu par l'agent {{time}}",
+        showWhatItRead: "Afficher ce qu'il a lu",
+        hideWhatItRead: "Masquer ce qu'il a lu",
+        copyWhatItRead: "Copier ce qu'il a lu",
+        printsNothing:
+          "Cette commande n'affiche rien ; voyez le script ci-dessus pour savoir ce qu'elle attend.",
       },
     },
     todo: {
