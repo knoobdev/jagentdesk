@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import { generateFingerprintProfile } from "@jagentdesk/protocol/browser-automation/fingerprint-profile";
 
@@ -8,10 +9,12 @@ vi.mock("electron", () => ({
     getPreferredSystemLanguages: () => ["en-US", "vi-VN"],
   },
 }));
-vi.mock("electron-log", () => ({ default: { info: vi.fn(), warn: vi.fn() } }));
+vi.mock("electron-log", () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
 const {
   acceptLanguageList,
+  applyStealthToWebContents,
+  setActiveFingerprintProfile,
   alignProfileWithEngine,
   browserUserAgentFromElectron,
   hostUserAgentMetadata,
@@ -87,5 +90,153 @@ describe("alignProfileWithHost", () => {
     });
     const windows = generateFingerprintProfile({ id: "bfp_win", os: "windows", nowMs: 1 });
     expect(alignProfileWithHost(windows, "darwin").webglRenderer).toBe(windows.webglRenderer);
+  });
+});
+
+/** Electron's debugger as the stealth code sees it, with commands that can be held. */
+class FakeGuestDebugger extends EventEmitter {
+  public readonly commands: string[] = [];
+  public readonly held = new Set<string>();
+  public readonly failing = new Map<string, string>();
+  private attached = false;
+  private closed = false;
+  private pending: Array<{ resolve: () => void; reject: (error: Error) => void }> = [];
+
+  public isAttached(): boolean {
+    return this.attached;
+  }
+
+  public attach(): void {
+    this.attached = true;
+  }
+
+  public async sendCommand(method: string): Promise<Record<string, unknown>> {
+    if (this.closed) {
+      throw new Error("No target available");
+    }
+    this.commands.push(method);
+    const failure = this.failing.get(method);
+    if (failure) {
+      throw new Error(failure);
+    }
+    if (this.held.has(method)) {
+      await new Promise<void>((resolve, reject) => this.pending.push({ resolve, reject }));
+    }
+    return method === "Page.addScriptToEvaluateOnNewDocument" ? { identifier: "1" } : {};
+  }
+
+  /** What Electron does when the guest's target goes away. */
+  public closeTarget(): void {
+    this.closed = true;
+    this.attached = false;
+    this.rejectPending("target closed while handling command");
+    this.emit("detach", {}, "target closed");
+  }
+
+  public rejectPending(message: string): void {
+    const pending = this.pending;
+    this.pending = [];
+    for (const command of pending) command.reject(new Error(message));
+  }
+}
+
+class FakeGuestContents extends EventEmitter {
+  public readonly id = 2;
+  public readonly debugger = new FakeGuestDebugger();
+  public readonly loads: string[] = [];
+  public readonly webRtcPolicies: string[] = [];
+  public crashed = false;
+
+  public isDestroyed(): boolean {
+    return false;
+  }
+
+  public isCrashed(): boolean {
+    return this.crashed;
+  }
+
+  public getURL(): string {
+    return this.loads.at(-1) ?? "";
+  }
+
+  public async loadURL(url: string): Promise<void> {
+    this.loads.push(url);
+    if (this.crashed) {
+      // A new renderer: commands sent to the dead one fail.
+      this.crashed = false;
+      this.debugger.held.clear();
+      this.debugger.rejectPending("Target crashed");
+    }
+  }
+
+  public setWebRTCIPHandlingPolicy(policy: string): void {
+    this.webRtcPolicies.push(policy);
+  }
+
+  public exitRenderer(): void {
+    this.crashed = true;
+    this.emit("render-process-gone", {}, { reason: "killed", exitCode: 15 });
+  }
+}
+
+const nextMacrotask = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+function applyTo(guest: FakeGuestContents) {
+  setActiveFingerprintProfile(null);
+  return applyStealthToWebContents(guest as unknown as Electron.WebContents);
+}
+
+describe("applyStealthToWebContents", () => {
+  it("applies the identity before resolving", async () => {
+    const guest = new FakeGuestContents();
+    await expect(applyTo(guest)).resolves.toBe("applied");
+    expect(guest.debugger.commands.slice(0, 2)).toEqual([
+      "Network.enable",
+      "Network.setUserAgentOverride",
+    ]);
+    expect(guest.debugger.commands).toContain("Target.setAutoAttach");
+    expect(guest.webRtcPolicies).toEqual(["default"]);
+  });
+
+  it("stops touching a guest whose target closes while a command is pending", async () => {
+    const guest = new FakeGuestContents();
+    guest.debugger.held.add("Network.enable");
+    const outcome = applyTo(guest);
+    await nextMacrotask();
+    expect(guest.debugger.commands).toEqual(["Network.enable"]);
+
+    guest.debugger.closeTarget();
+
+    await expect(outcome).resolves.toBe("closed");
+    expect(guest.debugger.commands).toEqual(["Network.enable"]);
+    expect(guest.webRtcPolicies).toEqual([]);
+    expect(guest.loads).toEqual([]);
+  });
+
+  it("starts a renderer for a held guest whose renderer exits mid-apply, then applies again", async () => {
+    const guest = new FakeGuestContents();
+    guest.debugger.held.add("Network.enable");
+    const outcome = applyTo(guest);
+    await nextMacrotask();
+
+    guest.exitRenderer();
+    await nextMacrotask();
+
+    expect(guest.loads).toEqual(["about:blank"]);
+    await expect(outcome).resolves.toBe("applied");
+    // The interrupted attempt never reached the UA override; the retry sends everything.
+    expect(guest.debugger.commands.slice(0, 3)).toEqual([
+      "Network.enable",
+      "Network.enable",
+      "Network.setUserAgentOverride",
+    ]);
+  });
+
+  it("reports the identity unavailable when the renderer keeps exiting", async () => {
+    const guest = new FakeGuestContents();
+    guest.debugger.failing.set("Network.enable", "Target crashed");
+    await expect(applyTo(guest)).resolves.toBe("unavailable");
+    expect(guest.debugger.commands).toEqual(["Network.enable", "Network.enable", "Network.enable"]);
+    expect(guest.webRtcPolicies).toEqual([]);
   });
 });

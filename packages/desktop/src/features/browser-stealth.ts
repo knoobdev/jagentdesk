@@ -2,6 +2,14 @@ import { app, type Session, type WebContents } from "electron";
 import log from "electron-log";
 import type { BrowserFingerprintProfile } from "@jagentdesk/protocol/browser-automation/fingerprint-profile";
 import { buildFingerprintInitScript, CHROME_SHIM_SOURCE } from "./browser-fingerprint-script.js";
+import {
+  GuestGoneError,
+  isGuestGone,
+  isTargetClosedError,
+  isTargetCrashedError,
+  runWhenGuestSettled,
+  watchGuestTeardown,
+} from "./guest-teardown.js";
 
 /**
  * Anti-detection ("stealth") for the agentic browser. Every new browser guest gets
@@ -380,11 +388,33 @@ type SendCommand = (
   params?: Record<string, unknown>,
 ) => Promise<Record<string, unknown> | undefined>;
 
+/** Sends through the guest's debugger; refuses once the guest is being torn down. */
 function commandSender(contents: WebContents, sessionId?: string): SendCommand {
-  return async (method, params) =>
-    (await contents.debugger.sendCommand(method, params, sessionId)) as
+  return async (method, params) => {
+    if (isGuestGone(contents)) {
+      throw new GuestGoneError();
+    }
+    return (await contents.debugger.sendCommand(method, params, sessionId)) as
       | Record<string, unknown>
       | undefined;
+  };
+}
+
+/**
+ * The guest is gone or its renderer died mid-command: the rest of the apply is pointless
+ * (and must not touch the guest), so these end it instead of being logged and skipped.
+ */
+function isFatalTargetError(error: unknown): boolean {
+  return (
+    error instanceof GuestGoneError || isTargetClosedError(error) || isTargetCrashedError(error)
+  );
+}
+
+function rethrowFatal(error: unknown): undefined {
+  if (isFatalTargetError(error)) {
+    throw error;
+  }
+  return undefined;
 }
 
 /**
@@ -421,11 +451,13 @@ async function applyIdentityOverrides(
           },
     );
   } catch (error) {
+    rethrowFatal(error);
     onError("ua-override failed", error);
   }
   try {
     await send("Emulation.setTimezoneOverride", { timezoneId: profile?.timezone ?? "" });
   } catch (error) {
+    rethrowFatal(error);
     onError("timezone-override failed", error);
   }
   if (!options.locale) {
@@ -434,6 +466,7 @@ async function applyIdentityOverrides(
   try {
     await send("Emulation.setLocaleOverride", profile ? { locale: profile.locale } : {});
   } catch (error) {
+    rethrowFatal(error);
     onError("locale-override failed", error);
   }
 }
@@ -496,16 +529,70 @@ function navigatorPlatform(profile: BrowserFingerprintProfile): string {
   }
 }
 
+/**
+ * How a guest's identity application ended. `closed`: the guest went away, nothing may
+ * touch it any more. `unavailable`: its renderer kept exiting before the identity was in
+ * place. `failed`: a CDP step failed for another reason (logged).
+ */
+export type IdentityOutcome = "applied" | "failed" | "closed" | "unavailable";
+
 interface GuestIdentityState {
   /** Identity this guest has (or is getting): profile JSON, "legacy" or "off". */
   key: string;
-  ready: Promise<void>;
+  ready: Promise<IdentityOutcome>;
   /** Page.addScriptToEvaluateOnNewDocument identifiers, removed on the next change. */
   scriptIds: string[];
-  autoAttach: boolean;
+}
+
+interface GuestLifecycle {
+  /** Times the guest's renderer exited; an apply that saw one starts over. */
+  rendererExits: number;
+  /** Applies in flight. */
+  applying: number;
+  childTargetListener: boolean;
 }
 
 const guestStates = new WeakMap<WebContents, GuestIdentityState>();
+const guestLifecycles = new WeakMap<WebContents, GuestLifecycle>();
+
+/**
+ * A CDP command waits for the guest's renderer. If the renderer exits mid-apply, the
+ * command waits for the next renderer and then fails with "Target crashed", and a guest
+ * whose first URL is held for the identity (main.ts) never gets a next renderer: the tab
+ * stayed blank with the apply pending for hours, until closing it crashed the app (see
+ * guest-teardown.ts). Attempts after a renderer exit start over; three is plenty.
+ */
+const MAX_IDENTITY_ATTEMPTS = 3;
+
+function watchGuest(contents: WebContents): GuestLifecycle {
+  const existing = guestLifecycles.get(contents);
+  if (existing) {
+    return existing;
+  }
+  const lifecycle: GuestLifecycle = { rendererExits: 0, applying: 0, childTargetListener: false };
+  guestLifecycles.set(contents, lifecycle);
+  watchGuestTeardown(contents);
+  contents.on("render-process-gone", () => {
+    lifecycle.rendererExits += 1;
+    if (lifecycle.applying > 0) {
+      startRendererForHeldGuest(contents);
+    }
+  });
+  return lifecycle;
+}
+
+/**
+ * A guest with nothing committed has its first URL held until the identity is applied, so
+ * no navigation will start a new renderer after one exits. A blank page does, without any
+ * request leaving the tab.
+ */
+function startRendererForHeldGuest(contents: WebContents): void {
+  runWhenGuestSettled(contents, () => {
+    if (contents.getURL() === "" && contents.isCrashed()) {
+      contents.loadURL("about:blank").catch(() => undefined);
+    }
+  });
+}
 
 function identityKey(): string {
   const profile = effectiveProfile();
@@ -516,14 +603,24 @@ function identityKey(): string {
 }
 
 /**
+ * True when the identity in effect is more than the plain Chrome UA the session already
+ * sends. A guest whose identity cannot be applied then stays unloaded (ADR-0026: the
+ * identity is complete or the page does not see the tab).
+ */
+export function isIdentityProtected(): boolean {
+  return identityKey() !== "off";
+}
+
+/**
  * Apply the current identity to a guest (webview or popup) and resolve once it is in
  * place. Idempotent per identity: concurrent callers share one application, and a later
- * profile change replaces the previous overrides and init scripts.
+ * profile change replaces the previous overrides and init scripts. Never rejects.
  */
-export function applyStealthToWebContents(contents: WebContents): Promise<void> {
-  if (contents.isDestroyed()) {
-    return Promise.resolve();
+export function applyStealthToWebContents(contents: WebContents): Promise<IdentityOutcome> {
+  if (isGuestGone(contents)) {
+    return Promise.resolve("closed");
   }
+  watchGuest(contents);
   if (!identityResolved) {
     return waitForIdentity().then(() => {
       identityResolved = true;
@@ -537,25 +634,64 @@ export function applyStealthToWebContents(contents: WebContents): Promise<void> 
   }
   const state: GuestIdentityState = {
     key,
-    ready: Promise.resolve(),
+    ready: Promise.resolve("applied"),
     scriptIds: [],
-    autoAttach: previous?.autoAttach ?? false,
   };
   const previousScriptIds = previous?.scriptIds ?? [];
   state.ready = (previous?.ready ?? Promise.resolve())
     .catch(() => undefined)
-    .then(() => applyGuestIdentity(contents, state, previousScriptIds));
+    .then(() => applyGuestIdentityWithRetry(contents, state, previousScriptIds))
+    .catch((error: unknown) => {
+      logWarn("injection failed", contents, error);
+      return "failed" as const;
+    });
   guestStates.set(contents, state);
   return state.ready;
+}
+
+async function applyGuestIdentityWithRetry(
+  contents: WebContents,
+  state: GuestIdentityState,
+  previousScriptIds: string[],
+): Promise<IdentityOutcome> {
+  const lifecycle = watchGuest(contents);
+  lifecycle.applying += 1;
+  try {
+    const staleScriptIds = [...previousScriptIds];
+    for (let attempt = 1; attempt <= MAX_IDENTITY_ATTEMPTS; attempt += 1) {
+      const outcome = await applyGuestIdentity(contents, state, lifecycle, staleScriptIds);
+      if (outcome !== "retry") {
+        return outcome;
+      }
+      // Scripts the interrupted attempt added may or may not exist; remove them too.
+      staleScriptIds.push(...state.scriptIds);
+      state.scriptIds = [];
+      log.warn("[browser-stealth] renderer exited while applying identity; applying again", {
+        webContentsId: contents.id,
+        attempt,
+      });
+    }
+    log.error("[browser-stealth] identity not applied: the tab's renderer kept exiting", {
+      webContentsId: contents.id,
+    });
+    return "unavailable";
+  } finally {
+    lifecycle.applying -= 1;
+  }
 }
 
 async function applyGuestIdentity(
   contents: WebContents,
   state: GuestIdentityState,
+  lifecycle: GuestLifecycle,
   previousScriptIds: string[],
-): Promise<void> {
-  if (contents.isDestroyed()) {
-    return;
+): Promise<IdentityOutcome | "retry"> {
+  if (isGuestGone(contents)) {
+    return "closed";
+  }
+  const rendererExitsAtStart = lifecycle.rendererExits;
+  if (contents.isCrashed()) {
+    startRendererForHeldGuest(contents);
   }
   const profile = effectiveProfile();
   const legacy = !profile && stealthEnabled;
@@ -569,7 +705,7 @@ async function applyGuestIdentity(
     await applyIdentityOverrides(send, profile, onError);
     await send("Page.enable");
     for (const identifier of previousScriptIds) {
-      await send("Page.removeScriptToEvaluateOnNewDocument", { identifier }).catch(() => undefined);
+      await send("Page.removeScriptToEvaluateOnNewDocument", { identifier }).catch(rethrowFatal);
     }
     for (const source of initScriptSources(profile, legacy)) {
       const result = await send("Page.addScriptToEvaluateOnNewDocument", { source });
@@ -577,19 +713,30 @@ async function applyGuestIdentity(
         state.scriptIds.push(result.identifier);
       }
     }
+    if (isGuestGone(contents)) {
+      return "closed";
+    }
     applyWebRtcPolicy(contents, profile);
     // Always: cross-site iframes and workers run in their own renderer, which would
     // otherwise send Electron's default UA ("JAgentDesk/…", "Electron/…").
-    if (!state.autoAttach) {
-      state.autoAttach = true;
-      await installChildTargetIdentity(contents);
+    await installChildTargetIdentity(contents, lifecycle, send);
+    if (lifecycle.rendererExits !== rendererExitsAtStart) {
+      return "retry";
     }
     log.info("[browser-stealth] applied identity", {
       webContentsId: contents.id,
       identity: profile ? `profile:${profile.id}` : state.key,
     });
+    return "applied";
   } catch (error) {
+    if (error instanceof GuestGoneError || isTargetClosedError(error) || isGuestGone(contents)) {
+      return "closed";
+    }
+    if (isTargetCrashedError(error) || lifecycle.rendererExits !== rendererExitsAtStart) {
+      return "retry";
+    }
     logWarn("injection failed", contents, error);
+    return "failed";
   }
 }
 
@@ -600,27 +747,40 @@ const AUTO_ATTACH = { autoAttach: true, waitForDebuggerOnStart: true, flatten: t
  * the page's overrides. Auto-attach pauses each one before it runs, applies the current
  * identity through its session, then resumes it.
  */
-async function installChildTargetIdentity(contents: WebContents): Promise<void> {
-  contents.debugger.on("message", (_event, method, params, parentSessionId) => {
-    if (method !== "Target.attachedToTarget") {
-      return;
-    }
-    const attached = params as { sessionId?: string; targetInfo?: { type?: string } };
-    const childSessionId = attached.sessionId;
-    if (!childSessionId || contents.isDestroyed()) {
-      return;
-    }
-    void prepareChildTarget(contents, childSessionId, attached.targetInfo?.type).finally(() => {
-      if (contents.isDestroyed()) {
+async function installChildTargetIdentity(
+  contents: WebContents,
+  lifecycle: GuestLifecycle,
+  send: SendCommand,
+): Promise<void> {
+  if (!lifecycle.childTargetListener) {
+    lifecycle.childTargetListener = true;
+    const guestDebugger = contents.debugger;
+    const onMessage = (_event: unknown, method: string, params: unknown) => {
+      if (method !== "Target.attachedToTarget" || isGuestGone(contents)) {
         return;
       }
-      void contents.debugger
-        .sendCommand("Runtime.runIfWaitingForDebugger", undefined, childSessionId)
-        .catch(() => undefined);
+      const attached = params as { sessionId?: string; targetInfo?: { type?: string } };
+      const childSessionId = attached.sessionId;
+      if (!childSessionId) {
+        return;
+      }
+      void prepareChildTarget(contents, childSessionId, attached.targetInfo?.type).finally(() => {
+        if (isGuestGone(contents)) {
+          return;
+        }
+        void guestDebugger
+          .sendCommand("Runtime.runIfWaitingForDebugger", undefined, childSessionId)
+          .catch(() => undefined);
+      });
+    };
+    guestDebugger.on("message", onMessage);
+    guestDebugger.once("detach", () => {
+      guestDebugger.removeListener("message", onMessage);
+      lifecycle.childTargetListener = false;
     });
-    void parentSessionId;
-  });
-  await contents.debugger.sendCommand("Target.setAutoAttach", AUTO_ATTACH);
+  }
+  // Every attempt: an interrupted one may not have reached the renderer.
+  await send("Target.setAutoAttach", AUTO_ATTACH);
 }
 
 async function prepareChildTarget(
@@ -648,6 +808,10 @@ async function prepareChildTarget(
     }
     await send("Target.setAutoAttach", AUTO_ATTACH);
   } catch (error) {
+    // The child (or the whole guest) went away; nothing to report.
+    if (isFatalTargetError(error)) {
+      return;
+    }
     onError("child target identity failed", error);
   }
 }

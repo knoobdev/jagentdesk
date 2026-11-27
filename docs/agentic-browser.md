@@ -67,7 +67,16 @@ identity.
 
 - **Before the first request.** Electron starts loading a `<webview>`'s `src` before
   `did-attach-webview`, so the first URL is held until the identity (User-Agent, Client Hints,
-  platform, timezone, locale and init scripts) is applied, then loaded.
+  platform, timezone, locale and init scripts) is applied, then loaded. CDP commands wait for the
+  tab's renderer; if it exits mid-apply, the tab gets a new one from `about:blank` and the apply
+  starts over. With a profile, a tab whose identity cannot be applied, or is still pending after
+  20 s, stays unloaded until it lands; without one the session's plain Chrome UA is the whole
+  identity, so the tab loads.
+- **Teardown.** When a tab is destroyed, the debugger's pending commands reject while
+  `isDestroyed()` still returns false, and calling into the tab from those continuations kills the
+  main process. Check `isGuestGone` (`packages/desktop/src/features/guest-teardown.ts`) after every
+  await on a tab. For the same reason the window reloads a dead renderer on the next macrotask, not
+  inside `render-process-gone`.
 - **Everywhere.** Open tabs and popups get a new profile when it changes; cross-site iframes,
   dedicated workers and service workers get it through `Target.setAutoAttach`, including
   `navigator.platform` in workers. Shared workers are not CDP children of the page and take the
