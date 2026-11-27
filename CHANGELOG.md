@@ -1,9 +1,36 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.11.0`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.11.1`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.11.1 — 2026-11-27
+
+Phones connect after pairing again; long agents stop redoing old work; agents never open the system browser; bot permission
+cards answer; Paseo 0.17.4–0.17.5 ported. Full notes: [docs/releases/v0.11.1.md](docs/releases/v0.11.1.md).
+
+### Changes
+
+- OpenCode agents get JAgentDesk tools through the OpenCode plugin and run their own MCP servers on a shared server
+  (per-session path on OpenCode ≥ 2.0.29, `mcp.add` fallback on older servers).
+- Settings → Diagnostics → Connection log with Copy logs.
+- From Paseo 0.17.4–0.17.5: redesigned host picker, multi-select archiving in the sidebar, agent profiles settings and drawer,
+  Add project sheet, Import Session provider errors, plugin worktree managers and sandbox launcher, Claude MCP over stdin,
+  parent notifications while a child has background work, Git watcher and Push/Pull improvements, performance fixes.
+
+### Fixes
+
+- iPhone/Android: the phone validator lacked the envelope and per-message validators, so every daemon message was rejected
+  after pairing ("challenge timed out").
+- The per-turn goal reminder no longer recites the oldest user message; handoffs list user messages newest first; agents know
+  their own id.
+- `open`, `xdg-open`, `$BROWSER` and dev servers' auto-open (Vite `server.open`) open in the app, never the system browser.
+- Bot permission cards: requests OpenCode forgot are dropped, failed answers stop the spinner, cards sit under Needs you, cards
+  show the request; closing a bot's tab no longer archives the bot.
+- Closing an agent tab no longer opens several blank New Agent tabs.
+- Failover/child-provider Add provider form; sidebar Usage summary; desktop uses the local route to its own daemon; Codex no
+  longer asks twice before JAgentDesk tools.
 
 ## v0.11.0 — 2026-11-26
 
