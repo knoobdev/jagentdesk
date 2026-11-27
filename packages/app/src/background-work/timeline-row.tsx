@@ -1,5 +1,5 @@
 import { memo, type ReactElement } from "react";
-import { Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { CircleCheck, SquareTerminal } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -17,8 +17,11 @@ const foregroundMutedColorMapping = (theme: Theme) => ({ color: theme.colors.for
  */
 export const BackgroundTaskTimelineRow = memo(function BackgroundTaskTimelineRow({
   event,
+  onOpen,
 }: {
   event: BackgroundTimelineEvent;
+  /** Opens the agent's background work panel, where each task has its detail (spec 04 §27c). */
+  onOpen?: () => void;
 }): ReactElement {
   const { t } = useTranslation();
   const parts: string[] = [];
@@ -31,7 +34,7 @@ export const BackgroundTaskTimelineRow = memo(function BackgroundTaskTimelineRow
     if (event.exitCode !== null)
       parts.push(t("message.backgroundWork.exitCode", { code: event.exitCode }));
   }
-  return (
+  const content = (
     <View
       style={styles.row}
       testID={event.kind === "started" ? "background-task-started" : "background-task-finished"}
@@ -45,6 +48,16 @@ export const BackgroundTaskTimelineRow = memo(function BackgroundTaskTimelineRow
         {parts.join(" · ")}
       </Text>
     </View>
+  );
+  if (!onOpen || event.kind !== "started") return content;
+  return (
+    <Pressable
+      onPress={onOpen}
+      accessibilityRole="button"
+      accessibilityLabel={t("message.backgroundWork.openTrack", { label: event.label })}
+    >
+      {content}
+    </Pressable>
   );
 });
 

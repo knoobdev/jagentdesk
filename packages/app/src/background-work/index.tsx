@@ -8,13 +8,17 @@ import {
 } from "react";
 import { Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
-import { Activity, CircleDashed, SquareTerminal } from "lucide-react-native";
+import { Activity, ChevronLeft, CircleDashed, SquareTerminal } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { ComposerTrackPill, ComposerTrackRow } from "@/composer/tracks";
 import { LiveElapsed } from "@/components/message";
 import { Button } from "@/components/ui/button";
+import { useMenuContext, type MenuPageDefinition } from "@/components/ui/menu";
+import { useIsCompactFormFactor } from "@/constants/layout";
+import { CODE_SURFACE_DATASET } from "@/styles/code-surface";
 import type { Theme } from "@/styles/theme";
 import type { JAgentDeskAgentBackgroundWorkItem } from "@jagentdesk/client";
+import { BackgroundWorkDetail } from "./detail";
 import { backgroundWorkText } from "./presentation";
 import {
   consumeBackgroundWorkTrackOpen,
@@ -27,6 +31,7 @@ export { createHostBackgroundWorkModel } from "./host";
 const ThemedSquareTerminal = withUnistyles(SquareTerminal);
 const ThemedActivity = withUnistyles(Activity);
 const ThemedCircleDashed = withUnistyles(CircleDashed);
+const ThemedChevronLeft = withUnistyles(ChevronLeft);
 const foregroundMutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 
 type BackgroundWorkKind = "shell" | "monitor" | "heartbeat" | "other";
@@ -76,6 +81,20 @@ export interface BackgroundWorkTrackProps {
   agentId: string;
   /** Running tasks from the directory summary; shown until the live list arrives. */
   count: number;
+  /** Desktop: opens a task's detail as a read-only workspace tab (ADR-0062). */
+  onOpenInTab?: (itemId: string) => void;
+}
+
+/** Height of the output in a popover or sheet; the tab lets it fill the pane. */
+const PANEL_OUTPUT_HEIGHT = 220;
+const SHEET_OUTPUT_HEIGHT = 300;
+/** The popover holds a terminal, which needs a definite width. */
+const POPOVER_DETAIL_WIDTH = 560;
+/** Room for the facts and the output; the surface still clamps to the viewport. */
+const POPOVER_DETAIL_MAX_HEIGHT = 720;
+
+function detailPageId(itemId: string): string {
+  return `background-work-detail:${itemId}`;
 }
 
 /**
@@ -87,18 +106,41 @@ export function BackgroundWorkTrack({
   serverId,
   agentId,
   count,
+  onOpenInTab,
 }: BackgroundWorkTrackProps): ReactElement | null {
   const { t } = useTranslation();
   const model = getBackgroundWorkModel(serverId, agentId);
   const { snapshot, rows, runningCount } = useTrackRows(model);
-  const [open, setOpen] = useState(false);
+  const [open, setOpenState] = useState(false);
+  // Desktop shows one task's detail in place of the list; phones push a sheet page instead.
+  const [selected, setSelected] = useState<string | null>(null);
+  const isCompact = useIsCompactFormFactor();
+  const setOpen = useCallback((next: boolean) => {
+    setOpenState(next);
+    if (!next) setSelected(null);
+  }, []);
+  const pages = useMemo<MenuPageDefinition[] | undefined>(() => {
+    if (!isCompact) return undefined;
+    return rows.map((row) => ({
+      id: detailPageId(row.item.id),
+      title: t("message.backgroundWork.detail.title"),
+      hoverIntent: false,
+      content: <SheetDetailPage serverId={serverId} agentId={agentId} item={row.item} />,
+    }));
+  }, [agentId, isCompact, rows, serverId, t]);
   // A sidebar line asks for the track to open when it navigates here.
   const openRequest = useBackgroundWorkTrackOpenRequest(serverId, agentId);
   useEffect(() => {
     if (openRequest === 0) return;
     setOpen(true);
     consumeBackgroundWorkTrackOpen(serverId, agentId);
-  }, [agentId, openRequest, serverId]);
+  }, [agentId, openRequest, serverId, setOpen]);
+  const closeDetail = useCallback(() => setSelected(null), []);
+  const openSelectedInTab = useCallback(() => {
+    if (!selected || !onOpenInTab) return;
+    setOpen(false);
+    onOpenInTab(selected);
+  }, [onOpenInTab, selected, setOpen]);
 
   const running = runningCount ?? count;
   if (running === 0 && rows.length === 0) return null;
@@ -107,6 +149,7 @@ export function BackgroundWorkTrack({
   if (running === 1) label = t("message.backgroundWork.pillOne");
   else if (running > 1) label = t("message.backgroundWork.pillMany", { count: running });
 
+  const selectedRow = selected ? rows.find((row) => row.item.id === selected) : undefined;
   return (
     <ComposerTrackPill
       testID="background-work"
@@ -114,9 +157,95 @@ export function BackgroundWorkTrack({
       segments={[{ bucket: running > 0 ? "running" : "done", text: label }]}
       open={open}
       onOpenChange={setOpen}
+      pages={pages}
+      panelMaxHeight={!isCompact && selected ? POPOVER_DETAIL_MAX_HEIGHT : undefined}
     >
-      <BackgroundWorkRows model={model} rows={rows} status={snapshot.status} />
+      {!isCompact && selected ? (
+        <PopoverDetail
+          serverId={serverId}
+          agentId={agentId}
+          itemId={selected}
+          fallbackItem={selectedRow?.item ?? null}
+          onBack={closeDetail}
+          onOpenInTab={onOpenInTab ? openSelectedInTab : undefined}
+        />
+      ) : (
+        <BackgroundWorkRows
+          model={model}
+          rows={rows}
+          status={snapshot.status}
+          onSelect={isCompact ? undefined : setSelected}
+          opensPages={isCompact}
+        />
+      )}
     </ComposerTrackPill>
+  );
+}
+
+function PopoverDetail({
+  serverId,
+  agentId,
+  itemId,
+  fallbackItem,
+  onBack,
+  onOpenInTab,
+}: {
+  serverId: string;
+  agentId: string;
+  itemId: string;
+  fallbackItem: JAgentDeskAgentBackgroundWorkItem | null;
+  onBack: () => void;
+  onOpenInTab?: () => void;
+}): ReactElement {
+  const { t } = useTranslation();
+  return (
+    <View style={styles.popoverDetail}>
+      <ComposerTrackRow
+        onPress={onBack}
+        closeOnSelect={false}
+        accessibilityLabel={t("message.backgroundWork.detail.back")}
+        testID="background-work-detail-back"
+      >
+        <ThemedChevronLeft size={16} uniProps={foregroundMutedColorMapping} />
+        <Text style={styles.label}>{t("message.backgroundWork.title")}</Text>
+      </ComposerTrackRow>
+      <BackgroundWorkDetail
+        serverId={serverId}
+        agentId={agentId}
+        itemId={itemId}
+        fallbackItem={fallbackItem}
+        variant="panel"
+        outputHeight={PANEL_OUTPUT_HEIGHT}
+        onOpenInTab={onOpenInTab}
+        onDismissed={onBack}
+      />
+    </View>
+  );
+}
+
+function SheetDetailPage({
+  serverId,
+  agentId,
+  item,
+}: {
+  serverId: string;
+  agentId: string;
+  item: JAgentDeskAgentBackgroundWorkItem;
+}): ReactElement {
+  const { goBack } = useMenuContext("BackgroundWorkDetailPage");
+  const back = useCallback(() => {
+    goBack();
+  }, [goBack]);
+  return (
+    <BackgroundWorkDetail
+      serverId={serverId}
+      agentId={agentId}
+      itemId={item.id}
+      fallbackItem={item}
+      variant="panel"
+      outputHeight={SHEET_OUTPUT_HEIGHT}
+      onDismissed={back}
+    />
   );
 }
 
@@ -124,10 +253,16 @@ function BackgroundWorkRows({
   model,
   rows,
   status,
+  onSelect,
+  opensPages,
 }: {
   model: BackgroundWorkModel;
   rows: TrackRow[];
   status: ReturnType<BackgroundWorkModel["getSnapshot"]>["status"];
+  /** Desktop: show a task's detail in place of the list. */
+  onSelect?: (itemId: string) => void;
+  /** Phones: each row opens its sheet page. */
+  opensPages: boolean;
 }): ReactElement {
   const { t } = useTranslation();
   return (
@@ -152,16 +287,49 @@ function BackgroundWorkRows({
         </>
       ) : null}
       {rows.map((row) => (
-        <ComposerTrackRow
+        <BackgroundWorkRow
           key={`${row.state}:${row.item.stopToken ?? row.item.id}`}
-          testID="background-work-row"
-        >
-          <View style={styles.row}>
-            <BackgroundWorkRowContent row={row} model={model} ready={status === "ready"} />
-          </View>
-        </ComposerTrackRow>
+          row={row}
+          model={model}
+          ready={status === "ready"}
+          onSelect={onSelect}
+          opensPage={opensPages}
+        />
       ))}
     </>
+  );
+}
+
+function BackgroundWorkRow({
+  row,
+  model,
+  ready,
+  onSelect,
+  opensPage,
+}: {
+  row: TrackRow;
+  model: BackgroundWorkModel;
+  ready: boolean;
+  onSelect?: (itemId: string) => void;
+  opensPage: boolean;
+}): ReactElement {
+  const { t } = useTranslation();
+  const itemId = row.item.id;
+  const select = useCallback(() => onSelect?.(itemId), [itemId, onSelect]);
+  return (
+    <ComposerTrackRow
+      testID="background-work-row"
+      opensPage={opensPage ? detailPageId(itemId) : undefined}
+      onPress={onSelect ? select : undefined}
+      closeOnSelect={false}
+      accessibilityLabel={t("message.backgroundWork.detail.open", {
+        label: row.item.command ?? row.item.description ?? row.item.kind,
+      })}
+    >
+      <View style={styles.row}>
+        <BackgroundWorkRowContent row={row} model={model} ready={ready} />
+      </View>
+    </ComposerTrackRow>
   );
 }
 
@@ -197,6 +365,7 @@ function BackgroundWorkRowContent({
         style={labelIsCommand ? styles.commandLabel : styles.label}
         numberOfLines={1}
         accessibilityLabel={title}
+        dataSet={labelIsCommand ? CODE_SURFACE_DATASET : undefined}
       >
         {label}
       </Text>
@@ -263,4 +432,8 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foreground,
   },
   facts: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
+  popoverDetail: {
+    width: POPOVER_DETAIL_WIDTH,
+    maxWidth: "100%",
+  },
 }));

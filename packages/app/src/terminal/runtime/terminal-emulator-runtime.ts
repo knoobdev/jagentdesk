@@ -86,6 +86,8 @@ export interface TerminalEmulatorRuntimeCallbacks {
   onInputModeChange?: (state: TerminalInputModeState) => Promise<void> | void;
   /** A paste gesture that can carry a file; resolves to null when it carried none. */
   onFilePaste?: (file: Promise<TerminalFile | null>) => void;
+  /** The viewport left, or came back to, the newest line. */
+  onScrolledChange?: (scrolled: boolean) => void;
 }
 
 export interface TerminalResizeEvent {
@@ -614,6 +616,7 @@ export class TerminalEmulatorRuntime {
     });
     terminal.onScroll(() => {
       if (this.findQuery) this.emitFindResult();
+      this.emitScrolledChange();
     });
     terminal.loadAddon(new ClipboardAddon());
     try {
@@ -622,6 +625,8 @@ export class TerminalEmulatorRuntime {
       // Ligatures require Font Access API or compatible environment
     }
     terminal.open(input.host);
+    this.lastScrolled = false;
+    this.applyReadOnly();
     this.themeBackgroundElements = this.collectThemeBackgroundElements(input);
     this.applyThemeBackground(input.theme);
 
@@ -1053,9 +1058,43 @@ export class TerminalEmulatorRuntime {
     this.refreshVisibleRows();
   }
 
+  /**
+   * A read-only viewer (a background task's output) takes no keystrokes and shows no cursor.
+   * Reapplied on every mount.
+   */
+  setReadOnly(input: { readOnly: boolean }): void {
+    this.readOnly = input.readOnly;
+    this.applyReadOnly();
+  }
+
+  scrollToBottom(): void {
+    this.terminal?.scrollToBottom();
+    this.emitScrolledChange();
+  }
+
+  private readOnly = false;
+  private lastScrolled = false;
+
+  private applyReadOnly(): void {
+    const terminal = this.terminal;
+    if (!terminal) return;
+    terminal.options.disableStdin = this.readOnly;
+    terminal.options.cursorBlink = !this.readOnly;
+    terminal.options.cursorInactiveStyle = this.readOnly ? "none" : "outline";
+  }
+
+  private emitScrolledChange(): void {
+    const buffer = this.terminal?.buffer.active;
+    if (!buffer) return;
+    const scrolled = buffer.viewportY < buffer.baseY;
+    if (scrolled === this.lastScrolled) return;
+    this.lastScrolled = scrolled;
+    this.callbacks.onScrolledChange?.(scrolled);
+  }
+
   focus(input?: { forceRefocus?: boolean }): void {
     const terminal = this.terminal;
-    if (!terminal) {
+    if (!terminal || this.readOnly) {
       return;
     }
     terminal.textarea?.removeAttribute("virtualkeyboardpolicy");

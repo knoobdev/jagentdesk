@@ -26,6 +26,11 @@ export function normalizeWorkspaceTabTarget(
       ? { kind: "provider_subagent", parentAgentId, subagentId }
       : null;
   }
+  if (value.kind === "background_work") {
+    const agentId = trimNonEmpty(value.agentId);
+    const itemId = trimNonEmpty(value.itemId);
+    return agentId && itemId ? { kind: "background_work", agentId, itemId } : null;
+  }
   if (value.kind === "file") {
     return normalizeFileTabTarget(value);
   }
@@ -183,6 +188,9 @@ function pluginWorkspaceTabTargetsEqual(
   if (left.kind === "builtin_inspector" && right.kind === "builtin_inspector") {
     return left.tabId === right.tabId;
   }
+  if (left.kind === "background_work" && right.kind === "background_work") {
+    return left.agentId === right.agentId && left.itemId === right.itemId;
+  }
   return false;
 }
 
@@ -231,6 +239,9 @@ export function buildDeterministicWorkspaceTabId(target: WorkspaceTabTarget): st
   }
   if (target.kind === "terminal") {
     return `terminal_${target.terminalId}`;
+  }
+  if (target.kind === "background_work") {
+    return `background_work_${target.agentId.length}_${target.agentId}_${target.itemId}`;
   }
   if (target.kind === "browser") {
     return `browser_${target.browserId}`;

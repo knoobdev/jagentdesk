@@ -17,6 +17,7 @@ import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { indexBackgroundStarts, readBackgroundTimelineEvent } from "@/background-work/timeline";
 import { BackgroundTaskTimelineRow } from "@/background-work/timeline-row";
+import { requestBackgroundWorkTrackOpen } from "@/background-work/shared";
 import React, {
   forwardRef,
   memo,
@@ -861,6 +862,9 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       [effectiveStreamItems, effectiveStreamHead],
     );
     const lookupBackgroundStart = useStableEvent((callId: string) => backgroundStarts.get(callId));
+    const openBackgroundWork = useStableEvent(() => {
+      if (resolvedServerId) requestBackgroundWorkTrackOpen(resolvedServerId, agentId);
+    });
     const renderSingleToolCallItem = useCallback(
       (
         item: Extract<StreamItem, { kind: "tool_call" }>,
@@ -873,7 +877,13 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
           const data = payload.data;
 
           const backgroundEvent = readBackgroundTimelineEvent(item, lookupBackgroundStart);
-          if (backgroundEvent) return <BackgroundTaskTimelineRow event={backgroundEvent} />;
+          if (backgroundEvent)
+            return (
+              <BackgroundTaskTimelineRow
+                event={backgroundEvent}
+                onOpen={readOnly ? undefined : openBackgroundWork}
+              />
+            );
 
           if (
             data.name === "speak" &&
@@ -949,6 +959,8 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         handleToolCallOpenFile,
         handleOpenMessageSender,
         lookupBackgroundStart,
+        openBackgroundWork,
+        readOnly,
       ],
     );
 

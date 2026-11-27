@@ -26,6 +26,8 @@ export interface TerminalEmulatorHandle {
   claimSize: () => void;
   showKeyboard: () => void;
   blur: () => void;
+  /** Moves the viewport to the newest line. */
+  scrollToBottom?: () => void;
 }
 
 export interface TerminalEmulatorProps {
@@ -75,4 +77,8 @@ export interface TerminalEmulatorProps {
   focusRequestToken?: number;
   resizeRequestToken?: number;
   onFilePaste?: (file: Promise<TerminalFile | null>) => void;
+  /** No input, no cursor, no keyboard: a viewer for output something else produced. */
+  readOnly?: boolean;
+  /** The viewport left, or came back to, the newest line. */
+  onScrolledChange?: (scrolled: boolean) => void;
 }

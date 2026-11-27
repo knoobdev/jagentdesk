@@ -108,6 +108,8 @@ export interface ComposerTrackPillProps {
   /** Controlled panel state, for a track something else can open (a sidebar line). */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /** A panel showing more than rows (a background task's output) can ask for more height. */
+  panelMaxHeight?: number;
 }
 
 /**
@@ -135,6 +137,7 @@ export function ComposerTrackPill({
   pages,
   open,
   onOpenChange,
+  panelMaxHeight = PANEL_MAX_HEIGHT,
 }: ComposerTrackPillProps): ReactElement {
   return (
     <MenuRoot compactMode="sheet" open={open} onOpenChange={onOpenChange}>
@@ -151,7 +154,7 @@ export function ComposerTrackPill({
         pages={pages}
         minWidth={PANEL_MIN_WIDTH}
         maxWidth={PANEL_MAX_WIDTH}
-        maxHeight={PANEL_MAX_HEIGHT}
+        maxHeight={panelMaxHeight}
         scrollable
         testID={`${testID}-panel`}
       >
