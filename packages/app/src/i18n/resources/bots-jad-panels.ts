@@ -1,5 +1,11 @@
 // JAgentDesk-only bots strings for the panels surfaces (spec 37), under `bots.jad.panels`.
 export const botsJadPanelsStrings = {
+  // Spec 37.4.2 "Workspace của worker trên điện thoại": the header button and its sheet.
+  workspaceAgents: {
+    button: "Workspace agents",
+    title: "Workspace agents",
+    subtitle: "Human → Supervisor → Lead → Peer",
+  },
   chats: {
     // Spec 37.4.6: Orca's kinds plus GitLab and Telegram, and its empty line with JAgentDesk's sources.
     kindGitlab: "GitLab thread",

@@ -2,8 +2,10 @@ import { useCallback, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { ChevronDown, ChevronRight } from "lucide-react-native";
-import { type Agent, useSessionStore } from "@/stores/session-store";
+import { useSessionStore } from "@/stores/session-store";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
+import { BOT_ID_LABEL, BOT_ROLE_LABEL } from "@/bots/envelope";
+import { openBot } from "@/bots/navigation";
 import { MIN_EXPLORER_SIDEBAR_WIDTH } from "@/stores/panel-store";
 import { MAX_CONTENT_WIDTH } from "@/constants/layout";
 import type { Theme } from "@/styles/theme";
@@ -11,12 +13,14 @@ import {
   ORCHESTRATION_ROLE_LABEL,
   ORCHESTRATION_ROUTE_LABEL,
 } from "@jagentdesk/protocol/orchestration";
+import {
+  buildWorkspaceAgentsRoster,
+  type WorkspaceAgentsRosterEntry,
+} from "./workspace-agents-roster";
 
 const ThemedChevronDown = withUnistyles(ChevronDown);
 const ThemedChevronRight = withUnistyles(ChevronRight);
 const mutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
-
-const ROLE_ORDER: Record<string, number> = { supervisor: 0, lead: 1, peer: 2 };
 
 function roleLabel(role: string | undefined, route: string | undefined): string {
   if (role === "supervisor") return "Supervisor";
@@ -66,27 +70,7 @@ export function OrchestrationAgentsColumn({
   workspaceId,
   compact = false,
 }: OrchestrationAgentsColumnProps) {
-  const sessionAgents = useSessionStore((state) => state.sessions[serverId]?.agents);
-
-  const agents = useMemo(
-    () =>
-      sessionAgents
-        ? Array.from(sessionAgents.values()).filter(
-            (agent) => agent.workspaceId === workspaceId && agent.labels[ORCHESTRATION_ROLE_LABEL],
-          )
-        : [],
-    [sessionAgents, workspaceId],
-  );
-
-  const roster = useMemo(
-    () =>
-      [...agents].sort(
-        (a, b) =>
-          (ROLE_ORDER[a.labels[ORCHESTRATION_ROLE_LABEL]] ?? 9) -
-          (ROLE_ORDER[b.labels[ORCHESTRATION_ROLE_LABEL]] ?? 9),
-      ),
-    [agents],
-  );
+  const roster = useWorkspaceAgentsRoster(serverId, workspaceId);
 
   if (roster.length === 0) {
     return null;
@@ -102,34 +86,94 @@ export function OrchestrationAgentsColumn({
         <Text style={styles.headerSubtitle}>Human → Supervisor → Lead → Peer</Text>
       </View>
       <ScrollView contentContainerStyle={styles.scroll}>
-        {roster.map((agent) => (
-          <OrchestrationAgentRow
-            key={agent.id}
-            serverId={serverId}
-            workspaceId={workspaceId}
-            agent={agent}
-          />
-        ))}
+        <WorkspaceAgentsList serverId={serverId} workspaceId={workspaceId} roster={roster} />
       </ScrollView>
     </View>
+  );
+}
+
+/** The workspace's ORC roster, with the bot chat that started its Lead (`workspace-agents-roster.ts`). */
+export function useWorkspaceAgentsRoster(
+  serverId: string,
+  workspaceId: string,
+): WorkspaceAgentsRosterEntry[] {
+  const sessionAgents = useSessionStore((state) => state.sessions[serverId]?.agents);
+  const agentDetails = useSessionStore((state) => state.sessions[serverId]?.agentDetails);
+  return useMemo(
+    () =>
+      sessionAgents
+        ? buildWorkspaceAgentsRoster({
+            agents: sessionAgents.values(),
+            workspaceId,
+            lookup: (agentId) => sessionAgents.get(agentId) ?? agentDetails?.get(agentId),
+          })
+        : [],
+    [agentDetails, sessionAgents, workspaceId],
+  );
+}
+
+/** The roster rows, shared by the desktop column and the phone's Workspace agents sheet. */
+export function WorkspaceAgentsList({
+  serverId,
+  workspaceId,
+  roster,
+  onOpen,
+}: {
+  serverId: string;
+  workspaceId: string;
+  roster: readonly WorkspaceAgentsRosterEntry[];
+  /** Runs before the row's chat opens, e.g. to close the sheet holding the list. */
+  onOpen?: () => void;
+}) {
+  return (
+    <>
+      {roster.map((entry) => (
+        <OrchestrationAgentRow
+          key={entry.agent.id}
+          serverId={serverId}
+          workspaceId={workspaceId}
+          entry={entry}
+          onOpen={onOpen}
+        />
+      ))}
+    </>
   );
 }
 
 interface OrchestrationAgentRowProps {
   serverId: string;
   workspaceId: string;
-  agent: Agent;
+  entry: WorkspaceAgentsRosterEntry;
+  onOpen?: () => void;
 }
 
-function OrchestrationAgentRow({ serverId, workspaceId, agent }: OrchestrationAgentRowProps) {
-  const role = agent.labels[ORCHESTRATION_ROLE_LABEL];
+function OrchestrationAgentRow({
+  serverId,
+  workspaceId,
+  entry,
+  onOpen,
+}: OrchestrationAgentRowProps) {
+  const { agent, role, external } = entry;
   const route = agent.labels[ORCHESTRATION_ROUTE_LABEL];
-  // Reveal the role's tab in the mounted workspace; pushing a route would stack another copy.
   const openThread = useCallback(() => {
-    navigateToAgent({ serverId, agentId: agent.id, workspaceId, pin: true });
-  }, [agent.id, serverId, workspaceId]);
+    onOpen?.();
+    const botId = agent.labels[BOT_ID_LABEL];
+    // A bot's Home Chat opens on the bot's page, as its row in the Bots section does.
+    if (external && botId && agent.labels[BOT_ROLE_LABEL] === "home") openBot(serverId, botId);
+    // Any other chat that started the worker opens where it lives.
+    else if (external) navigateToAgent({ serverId, agentId: agent.id });
+    // Reveal the role's tab in the mounted workspace; pushing a route would stack another copy.
+    else navigateToAgent({ serverId, agentId: agent.id, workspaceId, pin: true });
+  }, [agent.id, agent.labels, external, onOpen, serverId, workspaceId]);
+  const label =
+    external && agent.title ? `${roleLabel(role, route)} · ${agent.title}` : roleLabel(role, route);
   return (
-    <Pressable style={styles.agentRow} onPress={openThread} testID="orchestration-agent-row">
+    <Pressable
+      style={styles.agentRow}
+      onPress={openThread}
+      accessibilityRole="button"
+      testID={external ? "orchestration-agent-row-supervisor" : "orchestration-agent-row"}
+    >
       <View
         style={[
           styles.statusDot,
@@ -138,7 +182,7 @@ function OrchestrationAgentRow({ serverId, workspaceId, agent }: OrchestrationAg
       />
       <View style={styles.agentRowText}>
         <Text style={styles.agentRole} numberOfLines={1}>
-          {roleLabel(role, route)}
+          {label}
         </Text>
         <Text style={styles.agentMeta} numberOfLines={1}>
           {agent.provider}/{agent.model ?? "default"} · {agent.status}
