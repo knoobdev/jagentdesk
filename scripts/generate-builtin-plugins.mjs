@@ -40,7 +40,66 @@ const fields = [
 const data = manifests.map((m) =>
   Object.fromEntries(fields.filter((k) => k in m).map((k) => [k, m[k]])),
 );
+// Each bundled usage source's own SVG, keyed by the source ID it registers. The app draws it when
+// a host's report carries no icon, so a bundled source never falls back to the generic gauge.
+// A registration is an object literal with `input` and `fetch` and string-literal `id` and `icon`.
+function usageSourceRegistrations(file) {
+  const sourceFile = ts.createSourceFile(
+    file,
+    fs.readFileSync(file, "utf8"),
+    ts.ScriptTarget.Latest,
+  );
+  const found = [];
+  const visit = (node) => {
+    if (ts.isObjectLiteralExpression(node)) {
+      const props = new Map(
+        node.properties.flatMap((p) =>
+          p.name && (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name))
+            ? [[p.name.text, p]]
+            : [],
+        ),
+      );
+      const literal = (key) => {
+        const p = props.get(key);
+        return p && ts.isPropertyAssignment(p) && ts.isStringLiteral(p.initializer)
+          ? p.initializer.text
+          : undefined;
+      };
+      const id = literal("id");
+      const icon = literal("icon");
+      if (id && icon && props.has("input") && props.has("fetch")) found.push({ id, icon });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return found;
+}
+function pluginSourceFiles(directory) {
+  return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const file = path.join(directory, entry.name);
+    if (entry.isDirectory()) return entry.name === "node_modules" ? [] : pluginSourceFiles(file);
+    return /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [file] : [];
+  });
+}
+const usageSourceIcons = Object.fromEntries(
+  bundled
+    .flatMap((m) => {
+      const directory = path.join(root, "plugins", m.id);
+      return pluginSourceFiles(directory).flatMap((file) =>
+        usageSourceRegistrations(file).map(({ id, icon }) => [
+          id,
+          fs.readFileSync(path.join(directory, icon), "utf8").trim(),
+        ]),
+      );
+    })
+    .sort(([a], [b]) => a.localeCompare(b)),
+);
 const outputs = new Map([
+  [
+    "packages/app/src/usage/bundled-source-icons.generated.ts",
+    banner +
+      `export const BUNDLED_USAGE_SOURCE_ICONS: Readonly<Record<string, string>> = ${JSON.stringify(usageSourceIcons, null, 2)};\n`,
+  ],
   [
     "packages/protocol/src/builtin-plugins.generated.ts",
     banner +

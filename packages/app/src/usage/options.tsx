@@ -29,6 +29,7 @@ import { useUsageInSidebar } from "./in-sidebar";
 import { hasHostChoice, type UsageHostSelection } from "./hosts";
 import type { UsageDisplayAs } from "./preferences";
 import { UsageSourceIcon } from "./source-icon";
+import { usageSourceIconSvg } from "./source-icon-svg";
 import type { UsageReportEntry } from "./types";
 
 const ThemedSettings = withUnistyles(Settings);
@@ -230,8 +231,8 @@ function UsageSourceMenuItem({
 }) {
   const handleSelect = useCallback(() => onToggle(entry.id, !on), [entry.id, on, onToggle]);
   const leading = useMemo(
-    () => <UsageSourceIcon svg={entry.icon ?? null} size={14} />,
-    [entry.icon],
+    () => <UsageSourceIcon svg={usageSourceIconSvg(entry)} size={14} />,
+    [entry],
   );
   const description =
     [entry.account.label, !on && entry.defaultEnabled === false ? inactiveLabel : null]
