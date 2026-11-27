@@ -252,6 +252,7 @@ describe("GitHub webhook connector (spec 37.10)", () => {
       { id: 4, guid: "retried-ok", delivered_at: at(5000), status_code: 503 },
       { id: 5, guid: "retried-ok", delivered_at: at(4000), status_code: 200 },
       { id: 6, guid: "too-old", delivered_at: at(73 * 3_600_000), status_code: 503 },
+      { id: 7, guid: "refused", delivered_at: at(2000), status_code: 401 },
     ]);
     t.github.closed();
     t.connect();

@@ -84,6 +84,10 @@ export function verifyGitHubSignature(secret: string, body: Buffer, header: stri
   const digest = createHmac("sha256", secret).update(body).digest();
   return timingSafeEqual(digest, Buffer.from(header.slice(7), "hex"));
 }
+/** The Worker's 503 (daemon offline or late), its 429, or GitHub's own timeout (status 0). */
+function isUnreachable(status: number): boolean {
+  return status === 0 || status === 429 || status >= 500;
+}
 function hash(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
@@ -488,6 +492,8 @@ export class BotsGitHub extends HookConnector {
         }
         for (const [guid, attempts] of byGuid) {
           if (attempts.some((a) => a.status_code >= 200 && a.status_code < 300)) continue;
+          // Only what failed because the daemon was unreachable; a 401/400/404 was a deliberate refusal.
+          if (!attempts.some((a) => isUnreachable(a.status_code))) continue;
           if (this.seen(bot.id, guid) || this.redelivering.has(guid)) continue;
           this.redelivering.add(guid);
           const latest = attempts.toSorted(
