@@ -16,7 +16,7 @@ import { toXtermTheme } from "@/utils/to-xterm-theme";
 import { DetailCopyAction } from "./icon-action";
 import { toTerminalText, type BackgroundWorkOutputWrite } from "./output-buffer";
 import type { LastRead, OutputTab } from "./sources";
-import { OutputSourceTabs, ReadByAgentStrip } from "./sources-view";
+import { LastReadLayer, OutputSourceTabs, ReadByAgentStrip } from "./sources-view";
 import { useBackgroundWorkOutput } from "./use-detail";
 
 // The theme reaches xterm as a prop, so only this wrapper re-renders on a theme change. The
@@ -86,6 +86,9 @@ export function BackgroundWorkOutputView({
   const terminalRef = useRef<TerminalEmulatorHandle>(null);
   const readyRef = useRef(false);
   const [scrolled, setScrolled] = useState(false);
+  const [readOpen, setReadOpen] = useState(false);
+  const toggleRead = useCallback(() => setReadOpen((value) => !value), []);
+  const showRead = readOpen && lastRead !== null && lastRead !== undefined;
   const { settings } = useAppSettings();
   const characterWidths: TerminalCharacterWidths = useSessionStore((state) =>
     state.sessions[serverId]?.serverInfo?.features?.["terminal-grapheme-widths"] === true
@@ -167,7 +170,9 @@ export function BackgroundWorkOutputView({
           />
         </View>
       </View>
-      {lastRead ? <ReadByAgentStrip lastRead={lastRead} /> : null}
+      {lastRead ? (
+        <ReadByAgentStrip lastRead={lastRead} open={showRead} onToggle={toggleRead} />
+      ) : null}
       <View style={frameStyle} testID="background-work-output">
         <ThemedTerminalEmulator
           ref={terminalRef}
@@ -184,7 +189,8 @@ export function BackgroundWorkOutputView({
           onScrolledChange={setScrolled}
           onRendererReadyChange={handleRendererReadyChange}
         />
-        {placeholder ? (
+        {lastRead && showRead ? <LastReadLayer lastRead={lastRead} /> : null}
+        {placeholder && !showRead ? (
           <View style={styles.placeholderLayer} pointerEvents="none">
             <Text style={styles.placeholder} testID="background-work-output-placeholder">
               {placeholder}
@@ -196,7 +202,7 @@ export function BackgroundWorkOutputView({
             ) : null}
           </View>
         ) : null}
-        {scrolled ? (
+        {scrolled && !showRead ? (
           <Pressable
             onPress={jumpToLatest}
             accessibilityRole="button"

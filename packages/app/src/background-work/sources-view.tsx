@@ -17,9 +17,8 @@ const ThemedChevronRight = withUnistyles(ChevronRight, mutedIconColorMapping);
 const ThemedChevronDown = withUnistyles(ChevronDown, mutedIconColorMapping);
 const ThemedEye = withUnistyles(Eye, mutedIconColorMapping);
 
-/** The script and a read stay short in the popover; the page scrolls in the sheet. */
+/** The script stays short in the popover; the page scrolls in the sheet. */
 const SCRIPT_MAX_HEIGHT = 240;
-const LAST_READ_MAX_HEIGHT = 200;
 
 /**
  * "Output · t.log · err.log": the provider's output and each redirect file (ADR-0064), in the
@@ -86,52 +85,64 @@ function SourceTab({
   );
 }
 
-/** "Read by the agent 2 minutes ago" with "Show what it read" (ADR-0064 §3). */
-export function ReadByAgentStrip({ lastRead }: { lastRead: LastRead }): ReactElement {
+/**
+ * "Read by the agent 2 minutes ago" with "Show what it read" (ADR-0064 §3). What it read opens
+ * as {@link LastReadLayer} over the output box, so the box keeps its height in the popover.
+ */
+export function ReadByAgentStrip({
+  lastRead,
+  open,
+  onToggle,
+}: {
+  lastRead: LastRead;
+  open: boolean;
+  onToggle: () => void;
+}): ReactElement {
   const { t, i18n } = useTranslation();
-  const [open, setOpen] = useState(false);
-  const toggle = useCallback(() => setOpen((value) => !value), []);
-  const copy = useCallback(() => Clipboard.setStringAsync(lastRead.content), [lastRead.content]);
   const time = formatReadTime(new Date(lastRead.at), i18n.language);
   const state = useMemo(() => ({ expanded: open }), [open]);
   return (
-    <View style={styles.readSection} testID="background-work-read-by-agent">
-      <View style={styles.readStrip}>
-        <ThemedEye size={ICON_SIZE.xs} />
-        <Text style={styles.readText} numberOfLines={1}>
-          {t("message.backgroundWork.detail.readByAgent", { time })}
+    <View style={styles.readStrip} testID="background-work-read-by-agent">
+      <ThemedEye size={ICON_SIZE.xs} />
+      <Text style={styles.readText} numberOfLines={1}>
+        {t("message.backgroundWork.detail.readByAgent", { time })}
+      </Text>
+      <Pressable
+        onPress={onToggle}
+        accessibilityRole="button"
+        accessibilityState={state}
+        style={linkStyle}
+        testID="background-work-read-by-agent-toggle"
+      >
+        <Text style={styles.link}>
+          {open
+            ? t("message.backgroundWork.detail.hideWhatItRead")
+            : t("message.backgroundWork.detail.showWhatItRead")}
         </Text>
-        <Pressable
-          onPress={toggle}
-          accessibilityRole="button"
-          accessibilityState={state}
-          style={linkStyle}
-          testID="background-work-read-by-agent-toggle"
-        >
-          <Text style={styles.link}>
-            {open
-              ? t("message.backgroundWork.detail.hideWhatItRead")
-              : t("message.backgroundWork.detail.showWhatItRead")}
-          </Text>
-        </Pressable>
-      </View>
-      {open ? (
-        <View style={styles.fence} testID="background-work-read-by-agent-content">
-          <ScrollView style={styles.readScroll} nestedScrollEnabled>
-            <Text style={styles.mono} selectable dataSet={CODE_SURFACE_DATASET}>
-              {lastRead.content || " "}
-            </Text>
-            {lastRead.truncated ? (
-              <Text style={styles.note}>{t("message.backgroundWork.detail.showingFirst64Kb")}</Text>
-            ) : null}
-          </ScrollView>
-          <BlockCopyButton
-            onCopy={copy}
-            visible
-            label={t("message.backgroundWork.detail.copyWhatItRead")}
-          />
-        </View>
-      ) : null}
+      </Pressable>
+    </View>
+  );
+}
+
+/** What the agent read, filling the output box above the live output. */
+export function LastReadLayer({ lastRead }: { lastRead: LastRead }): ReactElement {
+  const { t } = useTranslation();
+  const copy = useCallback(() => Clipboard.setStringAsync(lastRead.content), [lastRead.content]);
+  return (
+    <View style={styles.readLayer} testID="background-work-read-by-agent-content">
+      <ScrollView style={styles.fill} contentContainerStyle={styles.readLayerContent}>
+        <Text style={styles.mono} selectable dataSet={CODE_SURFACE_DATASET}>
+          {lastRead.content || " "}
+        </Text>
+        {lastRead.truncated ? (
+          <Text style={styles.note}>{t("message.backgroundWork.detail.showingFirst64Kb")}</Text>
+        ) : null}
+      </ScrollView>
+      <BlockCopyButton
+        onCopy={copy}
+        visible
+        label={t("message.backgroundWork.detail.copyWhatItRead")}
+      />
     </View>
   );
 }
@@ -290,7 +301,6 @@ const styles = StyleSheet.create((theme) => {
       fontWeight: theme.fontWeight.medium,
       color: theme.colors.foreground,
     },
-    readSection: { gap: theme.spacing[2] },
     readStrip: {
       flexDirection: "row",
       alignItems: "center",
@@ -318,7 +328,17 @@ const styles = StyleSheet.create((theme) => {
       borderColor: theme.colors.border,
       backgroundColor: theme.colors.surface2,
     },
-    readScroll: { maxHeight: LAST_READ_MAX_HEIGHT },
+    // Over the output box's padding, on the box's own surface.
+    readLayer: {
+      position: "absolute",
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      backgroundColor: theme.colors.surface2,
+    },
+    readLayerContent: { padding: theme.spacing[2], paddingRight: theme.spacing[8] },
+    fill: { flex: 1 },
     scriptScroll: { maxHeight: SCRIPT_MAX_HEIGHT },
     mono: {
       fontFamily: theme.fontFamily.mono,
