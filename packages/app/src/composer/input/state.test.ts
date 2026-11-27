@@ -15,6 +15,7 @@ import {
   resolveMessageInputEnterAction,
   resolveAlternateSendAction,
   resolvePresentedActionKind,
+  resolvePrimaryActionKind,
 } from "./state";
 
 const connected = { isConnected: true } as never;
@@ -614,49 +615,91 @@ describe("fullscreen glyph rail", () => {
   });
 });
 
-describe("resolvePresentedActionKind", () => {
-  const idle = { primaryActionKind: "none" as const, isFullscreen: false };
+describe("resolvePrimaryActionKind", () => {
+  const empty = {
+    hasSendableContent: false,
+    allowEmptySubmit: false,
+    isAgentRunning: false,
+    isSubmitLoading: false,
+  };
 
-  it("keeps a disabled Send in the trailing slot when Gumloop has voice mode and nothing to send", () => {
-    expect(
-      resolvePresentedActionKind({ ...idle, hasVoiceModeContent: true, sendAlwaysPresent: true }),
-    ).toEqual({ kind: "send", sendStandsIn: true });
+  it("offers voice mode in the trailing slot while the composer is empty", () => {
+    expect(resolvePrimaryActionKind({ ...empty, offersVoiceMode: true })).toBe("voiceMode");
   });
 
-  it("lets voice mode take the trailing slot in classic themes, as Paseo does", () => {
+  it("leaves the slot empty without voice mode", () => {
+    expect(resolvePrimaryActionKind({ ...empty, offersVoiceMode: false })).toBe("none");
+  });
+
+  it("shows Send once there is something to send, in place of voice mode", () => {
     expect(
-      resolvePresentedActionKind({ ...idle, hasVoiceModeContent: true, sendAlwaysPresent: false }),
+      resolvePrimaryActionKind({ ...empty, hasSendableContent: true, offersVoiceMode: true }),
+    ).toBe("send");
+  });
+
+  it("shows Send for a labeled submit that allows an empty composer", () => {
+    expect(
+      resolvePrimaryActionKind({ ...empty, allowEmptySubmit: true, offersVoiceMode: true }),
+    ).toBe("send");
+  });
+
+  it("shows Stop while the agent runs with an empty composer", () => {
+    expect(
+      resolvePrimaryActionKind({ ...empty, isAgentRunning: true, offersVoiceMode: false }),
+    ).toBe("active");
+  });
+
+  it("keeps Send for queueing or steering while the agent runs with content", () => {
+    expect(
+      resolvePrimaryActionKind({
+        ...empty,
+        hasSendableContent: true,
+        isAgentRunning: true,
+        offersVoiceMode: false,
+      }),
+    ).toBe("send");
+  });
+
+  it("keeps the loading Send while a submit is in flight", () => {
+    expect(
+      resolvePrimaryActionKind({ ...empty, isSubmitLoading: true, offersVoiceMode: true }),
+    ).toBe("send");
+  });
+});
+
+describe("resolvePresentedActionKind", () => {
+  it("shows nothing in Gumloop when the composer is empty and there is no voice mode", () => {
+    expect(
+      resolvePresentedActionKind({
+        primaryActionKind: "none",
+        isFullscreen: false,
+        emptySlotStandsIn: false,
+      }),
     ).toEqual({ kind: "none", sendStandsIn: false });
   });
 
-  it("stands Send in when there is no voice mode in either theme", () => {
-    for (const sendAlwaysPresent of [true, false]) {
-      expect(
-        resolvePresentedActionKind({ ...idle, hasVoiceModeContent: false, sendAlwaysPresent }),
-      ).toEqual({ kind: "send", sendStandsIn: true });
+  it("stands a disabled Send in for classic themes, as Paseo does", () => {
+    expect(
+      resolvePresentedActionKind({
+        primaryActionKind: "none",
+        isFullscreen: false,
+        emptySlotStandsIn: true,
+      }),
+    ).toEqual({ kind: "send", sendStandsIn: true });
+  });
+
+  it("keeps voice mode, Stop and Send as resolved outside fullscreen", () => {
+    for (const kind of ["voiceMode", "active", "send"] as const) {
+      for (const emptySlotStandsIn of [true, false]) {
+        expect(
+          resolvePresentedActionKind({
+            primaryActionKind: kind,
+            isFullscreen: false,
+            emptySlotStandsIn,
+          }),
+        ).toEqual({ kind, sendStandsIn: false });
+      }
     }
-  });
-
-  it("shows the stop disc while the agent runs with an empty composer", () => {
-    expect(
-      resolvePresentedActionKind({
-        primaryActionKind: "active",
-        isFullscreen: false,
-        hasVoiceModeContent: true,
-        sendAlwaysPresent: true,
-      }),
-    ).toEqual({ kind: "active", sendStandsIn: false });
-  });
-
-  it("presents an enabled Send once there is content", () => {
-    expect(
-      resolvePresentedActionKind({
-        primaryActionKind: "send",
-        isFullscreen: false,
-        hasVoiceModeContent: true,
-        sendAlwaysPresent: true,
-      }),
-    ).toEqual({ kind: "send", sendStandsIn: false });
   });
 
   it("always stands Send in when fullscreen", () => {
@@ -664,8 +707,7 @@ describe("resolvePresentedActionKind", () => {
       resolvePresentedActionKind({
         primaryActionKind: "active",
         isFullscreen: true,
-        hasVoiceModeContent: true,
-        sendAlwaysPresent: false,
+        emptySlotStandsIn: false,
       }),
     ).toEqual({ kind: "send", sendStandsIn: true });
   });
