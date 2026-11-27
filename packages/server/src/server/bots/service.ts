@@ -1886,7 +1886,8 @@ export class BotsService {
   // ── Read models (spec 37.4) ──────────────────────────────────────────────
 
   needsYou(botId: string): BotNeedsYouRow[] {
-    const bot = this.storage.bot(botId);
+    // Connector rows read `needsFix` from the summaries, which the stored record never has.
+    const bot = this.withSummaries(this.storage.bot(botId));
     return needsYouRows(bot, this.runtime.agents(bot), this.storage.items(botId), this.now());
   }
 

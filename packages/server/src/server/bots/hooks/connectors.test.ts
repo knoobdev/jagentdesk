@@ -97,6 +97,19 @@ describe("connectors on the bot record (bots contract)", () => {
     expect(paused).toMatchObject({ github: { connected: true }, share: { shared: true } });
   });
 
+  it("Needs you shows a GitHub row while a hook target is not connected", async () => {
+    const t = await setup();
+    await t.request("bots.github.add_repo.request", { target: "octo/test-repo" });
+    const { rows } = await t.request("bots.needs_you.list.request");
+    expect(rows).toContainEqual(
+      expect.objectContaining({
+        kind: "connector",
+        connector: "github",
+        title: "GitHub needs you to sign in again or fix it.",
+      }),
+    );
+  });
+
   it("bots.allowed.list carries the GitHub Who can ask people", async () => {
     const t = await setup();
     await t.request("bots.github.add_repo.request", { target: "octo/test-repo" });
