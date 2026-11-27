@@ -1,6 +1,7 @@
 import { BotsResponseSchemas, type BotsRequest } from "@jagentdesk/protocol/bots/rpc-schemas";
 import type { SessionInboundMessage, SessionOutboundMessage } from "../messages.js";
 import type { BotsService } from "./service.js";
+import { BotsError } from "./home.js";
 const responses = new Map(BotsResponseSchemas.map((s) => [s.shape.type.value as string, s]));
 export class BotsSession {
   private readonly unsubscribe: () => void;
@@ -33,7 +34,7 @@ export class BotsSession {
         type: "rpc_error",
         payload: {
           requestId: message.requestId,
-          code: "bots_error",
+          code: error instanceof BotsError ? error.code : "bots_error",
           requestType: message.type,
           error: error instanceof Error ? error.message : String(error),
         },

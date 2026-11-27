@@ -5,25 +5,22 @@ import { createHmac } from "node:crypto";
 import pino from "pino";
 import { afterEach, expect, it } from "vitest";
 import type { Bot } from "@jagentdesk/protocol/bots/types";
-import type { BotRuntime, BotRuntimeEvent, BotExternalMessage } from "./runtime.js";
+import type { BotExternalMessage } from "./runtime.js";
+import { FakeBotRuntime } from "./test-utils/fake-runtime.js";
 import { BotStorage } from "./storage.js";
 import { BotsService } from "./service.js";
 import { BotsSlack } from "./slack.js";
 import { MemorySecretStore } from "../database/secret-store.js";
 import { LocalSlackApi } from "./test-utils/slack-api.js";
-class Runtime implements BotRuntime {
-  readonly sent: { text: string; source?: BotExternalMessage }[] = [];
-  private readonly listeners = new Set<(event: BotRuntimeEvent) => void>();
+/** The Slack path's runtime: sends start a turn until the test finishes it. */
+class Runtime extends FakeBotRuntime {
+  readonly external: { text: string; source?: BotExternalMessage }[] = [];
   running = false;
-  async configure(): Promise<void> {}
-  async ensureSupervisor(bot: Bot): Promise<string> {
-    return `supervisor:${bot.id}`;
-  }
-  busy(): boolean {
+  override busy(): boolean {
     return this.running;
   }
-  async send(
-    _id: string,
+  override async send(
+    id: string,
     text: string,
     _messageId?: string,
     _sourceId?: string,
@@ -31,32 +28,16 @@ class Runtime implements BotRuntime {
   ): Promise<void> {
     source?.beforeDispatch();
     this.running = true;
-    this.sent.push({ text, source });
+    this.external.push({ text, source });
+    this.sent.push({ id, text });
   }
-  async startWorker(): Promise<string> {
-    throw new Error("No workers in this test");
-  }
-  async review(): Promise<never> {
-    throw new Error("No reviews in this test");
-  }
-  async diff(): Promise<string> {
-    return "";
-  }
-  async cancel(): Promise<void> {
+  override async cancel(): Promise<void> {
     this.running = false;
-  }
-  onEvent(listener: (event: BotRuntimeEvent) => void): () => void {
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
   }
   finish(bot: Bot, key: string, text: string): void {
     this.running = false;
-    for (const listener of this.listeners)
-      listener({ agentId: `supervisor:${bot.id}`, key, text, kind: "done" });
+    this.emit({ agentId: `supervisor:${bot.id}`, key, text, kind: "done" });
   }
-  dispose(): void {}
 }
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -85,14 +66,17 @@ async function setup() {
     await api.close();
     rmSync(home, { recursive: true, force: true });
   });
-  const bot = await bots.create({
-    slug: "local",
-    name: "Local",
-    identity: "Test",
-    provider: "codex",
-    model: "local",
-    modeId: "default",
-  });
+  const bot = await bots.create(
+    {
+      slug: "local",
+      name: "Local",
+      identity: "Test",
+      provider: "codex",
+      model: "local",
+      modeId: "default",
+    },
+    { kickoff: null },
+  );
   slack.start();
   bots.start();
   await slack.handle({
@@ -167,7 +151,7 @@ it("denies unlinked senders once per event, links a DM code, queues with provena
   expect(api.posts.map((p) => p.text)).toEqual([
     "I only take requests from people my owner allowed.",
   ]);
-  expect(runtime.sent).toEqual([]);
+  expect(runtime.external).toEqual([]);
   await link();
   expect(slack.status(bot.id).allowedUsers).toEqual([{ id: "U_OWNER", name: "Name U_OWNER" }]);
   await receive("work", {
@@ -178,8 +162,8 @@ it("denies unlinked senders once per event, links a DM code, queues with provena
     text: "hello",
     user: "U_OWNER",
   });
-  expect(runtime.sent).toHaveLength(1);
-  expect(runtime.sent[0].source).toMatchObject({
+  expect(runtime.external).toHaveLength(1);
+  expect(runtime.external[0].source).toMatchObject({
     senderId: "slack:U_OWNER",
     title: "Slack: Name U_OWNER in #C_LOCAL",
   });
@@ -197,8 +181,8 @@ it("denies unlinked senders once per event, links a DM code, queues with provena
   });
   await bots.tick();
   await bots.settled();
-  expect(runtime.sent).toHaveLength(2);
-  expect(runtime.sent[1].text).toContain("Slack reaction :thumbsup: by Name U_OWNER");
+  expect(runtime.external).toHaveLength(2);
+  expect(runtime.external[1].text).toContain("Slack reaction :thumbsup: by Name U_OWNER");
   runtime.finish(bot, "turn2", "Thanks");
   await bots.settled();
   await slack.settled();
@@ -210,7 +194,7 @@ it("denies unlinked senders once per event, links a DM code, queues with provena
     reaction: "thumbsup",
     item: { type: "message", channel: "C_LOCAL", ts: "30.1" },
   });
-  expect(runtime.sent).toHaveLength(2);
+  expect(runtime.external).toHaveLength(2);
 });
 it("expires codes, removes users, and deletes credentials on disconnect", async () => {
   const { slack, secrets, bot, runtime, receive, dm, advance, link } = await setup();
@@ -222,7 +206,7 @@ it("expires codes, removes users, and deletes credentials on disconnect", async 
   advance(600_001);
   await receive("expired", dm(String(code.code)));
   expect(slack.status(bot.id).allowedUsers).toEqual([]);
-  expect(runtime.sent).toEqual([]);
+  expect(runtime.external).toEqual([]);
   await link();
   await slack.handle({
     type: "bots.slack.allowed.remove.request",
@@ -254,13 +238,13 @@ it("keeps retries deduplicated for 24 hours, emits a needs-you note and gates in
   runtime.finish(bot, "turn1", "Done");
   await bots.settled();
   await slack.settled();
-  expect(runtime.sent).toHaveLength(1);
+  expect(runtime.external).toHaveLength(1);
   advance(86_400_001);
   await receive("work", dm("later"));
   await bots.tick();
   await bots.settled();
   // The bot message id remains idempotent even after the Slack receipt expires.
-  expect(runtime.sent).toHaveLength(1);
+  expect(runtime.external).toHaveLength(1);
   slack.stop();
   expect((await receive("disabled", dm("ignored"))).status).toBe(503);
 });

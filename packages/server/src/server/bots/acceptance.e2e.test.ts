@@ -44,7 +44,7 @@ async function setup() {
   await client.connect();
   return provider;
 }
-async function create(unattended = true): Promise<Bot> {
+async function create(unattended = true, reviewBeforeDone = false): Promise<Bot> {
   return (
     await client!.botsRequest("bots.create.request", {
       bot: {
@@ -56,19 +56,27 @@ async function create(unattended = true): Promise<Bot> {
         modeId: "default",
         unattended,
         defaultRepo: repo,
+        reviewBeforeDone,
       },
     })
   ).bot;
+}
+async function assistantReplies(botId: string): Promise<number> {
+  return (await client!.botsRequest("bots.chat.history.request", { botId })).messages.filter(
+    (m) => m.role === "assistant",
+  ).length;
 }
 async function items(botId: string): Promise<BotItem[]> {
   return (await client!.botsRequest("bots.items.list.request", { botId, includeClosed: true }))
     .items;
 }
 
-test("37.7 #2/#3: dispatches a worker in a new ORC worktree, answers concurrent chat, and fixes security findings before done", async () => {
+test("A37.7.6/A37.7.33/A37.7.34: dispatches a worker in a new ORC worktree, answers concurrent chat, and with Review before done fixes security findings before done", async () => {
   const provider = await setup();
   provider.setUnsafe(true);
-  const bot = await create();
+  const bot = await create(true, true);
+  // The kickoff turn of a new bot answers first.
+  await expect.poll(() => assistantReplies(bot.id), { timeout: 10000 }).toBe(1);
   await client!.botsRequest("bots.chat.send.request", { botId: bot.id, text: "fix sum" });
   await expect
     .poll(async () => (await items(bot.id))[0]?.status, { timeout: 15000 })
@@ -84,15 +92,7 @@ test("37.7 #2/#3: dispatches a worker in a new ORC worktree, answers concurrent 
     botId: bot.id,
     text: "Are you available?",
   });
-  await expect
-    .poll(
-      async () =>
-        (await client!.botsRequest("bots.chat.history.request", { botId: bot.id })).messages.filter(
-          (m) => m.role === "assistant",
-        ).length,
-      { timeout: 10000 },
-    )
-    .toBe(2);
+  await expect.poll(() => assistantReplies(bot.id), { timeout: 10000 }).toBe(3);
   for (const release of provider.workerGates.values()) release();
   await expect.poll(async () => (await items(bot.id))[0]?.status, { timeout: 20000 }).toBe("done");
   const done = (await items(bot.id))[0];
@@ -114,9 +114,10 @@ test("37.7 #2/#3: dispatches a worker in a new ORC worktree, answers concurrent 
   expect(provider.created.filter((c) => c.config.title?.startsWith("Bot review"))).toHaveLength(6);
 }, 60000);
 
-test("37.7 #7: default bots raise host permission cards; unattended is explicit; plugin off rejects RPC", async () => {
+test("A37.7.27: attended bots raise a card for starting a worker, item bookkeeping needs none; plugin off rejects RPC", async () => {
   const provider = await setup();
   const bot = await create(false);
+  await expect.poll(() => assistantReplies(bot.id), { timeout: 10000 }).toBe(1);
   await client!.botsRequest("bots.chat.send.request", { botId: bot.id, text: "fix sum" });
   await expect
     .poll(
@@ -130,12 +131,12 @@ test("37.7 #7: default bots raise host permission cards; unattended is explicit;
     .listAgents()
     .find((a) => a.labels["jagentdesk.bot.id"] === bot.id)!;
   const request = [...supervisor.pendingPermissions.values()][0];
-  expect(request.name).toBe("bot_item_add");
+  expect(request.name).toBe("bot_worker_start");
   const originalCatalog = provider.created[0].launch!.jagentdeskTools!;
   expect(originalCatalog.getTool("bot_item_add")?.name).toBe("bot_item_add");
   expect(originalCatalog.getTool("update_agent")).toBeUndefined();
   expect(originalCatalog.getTool("respond_to_permission")).toBeUndefined();
-  expect(await items(bot.id)).toEqual([]);
+  expect((await items(bot.id)).map((i) => i.status)).toEqual(["planned"]);
   await client!.setBuiltinPlugin("bots", false);
   await daemon!.daemon.agentManager.createAgent(
     { provider: "claude", cwd: supervisor.cwd, model: "haiku", modeId: "default" },
@@ -155,9 +156,10 @@ test("37.7 #7: default bots raise host permission cards; unattended is explicit;
   ]);
 }, 30000);
 
-test("37.7 #5: a real minute cron queues nothing while paused and runs once on resume", async () => {
+test("A37.7.17: a real minute cron queues nothing while paused and runs once on resume", async () => {
   const provider = await setup();
   const bot = await create();
+  await expect.poll(() => assistantReplies(bot.id), { timeout: 10000 }).toBe(1);
   const { schedule } = await client!.botsRequest("bots.schedules.save.request", {
     botId: bot.id,
     schedule: {
@@ -171,7 +173,9 @@ test("37.7 #5: a real minute cron queues nothing while paused and runs once on r
   const wait = Math.max(0, schedule.nextRunAt_ms - Date.now() + 1200);
   await new Promise((resolve) => setTimeout(resolve, wait));
   expect(
-    (await client!.botsRequest("bots.chat.history.request", { botId: bot.id })).messages,
+    (await client!.botsRequest("bots.chat.history.request", { botId: bot.id })).messages.filter(
+      (m) => m.source === "schedule",
+    ),
   ).toEqual([]);
   await client!.botsRequest("bots.pause.request", { botId: bot.id, paused: false });
   await expect

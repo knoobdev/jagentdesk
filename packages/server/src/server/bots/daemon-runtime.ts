@@ -22,7 +22,20 @@ import type { ProviderSnapshotManager } from "../agent/provider-snapshot-manager
 import type { OrchestrationRuntime } from "../orchestration/runtime.js";
 import type { CreateJAgentDeskWorktreeWorkflowFn } from "../worktree-session.js";
 import { runGitCommand } from "../../utils/run-git-command.js";
-import type { BotRuntime, BotRuntimeEvent, BotReviewRole, BotExternalMessage } from "./runtime.js";
+import type { BotFirstScreen } from "@jagentdesk/protocol/bots/views";
+import {
+  BOT_CHAT_LABEL,
+  BOT_ID_LABEL,
+  BOT_ROLE_LABEL,
+  type BotAgentSnapshot,
+  type BotBackgroundRun,
+  type BotRuntime,
+  type BotRuntimeEvent,
+  type BotReviewRole,
+  type BotExternalMessage,
+} from "./runtime.js";
+import { backgroundToolDecision } from "./look-around.js";
+import { SAME_AS_CHATS } from "./storage.js";
 import { BotStorage } from "./storage.js";
 import { planBotContext, type ContextReceipt } from "./context.js";
 import { validateAgentConfigurationAgainstProvider } from "../agent/agent-configuration-validator.js";
@@ -35,6 +48,36 @@ const ReviewOutputSchema = z.object({
     .max(100),
   coverage: z.string().min(1),
 });
+function snapshotOf(
+  manager: AgentManager,
+  agent: ReturnType<AgentManager["listAgents"]>[number],
+): BotAgentSnapshot {
+  const snapshot: BotAgentSnapshot = {
+    id: agent.id,
+    title: agent.config.title ?? agent.id,
+    labels: agent.labels,
+    busy: manager.hasInFlightRun(agent.id) || agent.lifecycle === "running",
+    lifecycle: agent.lifecycle,
+    pendingPermissions: [],
+    createdAt_ms: agent.createdAt.getTime(),
+    updatedAt_ms: agent.updatedAt.getTime(),
+    cwd: agent.cwd,
+  };
+  for (const request of agent.pendingPermissions.values()) {
+    const pending: BotAgentSnapshot["pendingPermissions"][number] = {
+      id: request.id,
+      name: request.name,
+      kind: request.kind,
+    };
+    if (request.title) pending.title = request.title;
+    snapshot.pendingPermissions.push(pending);
+  }
+  if (agent.workspaceId) snapshot.workspaceId = agent.workspaceId;
+  const parent = agent.labels["jagentdesk.parent-agent-id"];
+  if (parent) snapshot.parentId = parent;
+  return snapshot;
+}
+
 export class DaemonBotRuntime implements BotRuntime {
   private readonly listeners = new Set<(event: BotRuntimeEvent) => void>();
   private readonly unsubscribe: () => void;
@@ -44,6 +87,15 @@ export class DaemonBotRuntime implements BotRuntime {
     { resolve: (text: string) => void; reject: (error: Error) => void }
   >();
   private readonly reviewerIds = new Set<string>();
+  /** Background runs (Look around, Tidy memory) by agent id, with the gate that holds them. */
+  private readonly background = new Map<
+    string,
+    {
+      policy: BotBackgroundRun["policy"];
+      resolve: (text: string) => void;
+      reject: (error: Error) => void;
+    }
+  >();
   constructor(
     private readonly deps: {
       agentManager: AgentManager;
@@ -53,6 +105,14 @@ export class DaemonBotRuntime implements BotRuntime {
       orchestration: OrchestrationRuntime;
       storage: BotStorage;
       logger: Logger;
+      /** Projects, workspaces and MCP servers for the first-run screen (spec 37.4.2). */
+      describeHost?: () => Promise<{
+        projects: string[];
+        workspaces: { workspaceId: string; title: string }[];
+        mcpServers?: string[];
+      }>;
+      /** `gh` open PRs authored by the owner; null when `gh` is not signed in. */
+      openPullRequests?: () => Promise<number | null>;
     },
   ) {
     const manager = deps.agentManager;
@@ -82,11 +142,43 @@ export class DaemonBotRuntime implements BotRuntime {
         const done = stream.type === "turn_completed";
         const error = stream.type === "turn_failed" || stream.type === "turn_canceled";
         const ask = stream.type === "permission_requested";
-        if (!done && !error && !ask) return;
+        const resolved = stream.type === "permission_resolved";
+        if (!done && !error && !ask && !resolved) return;
         const id = event.agentId;
+        const run = this.background.get(id);
+        if (run) {
+          if (ask) {
+            // ADR-0046: the daemon answers a background run's tools; nobody sees a card.
+            const decision = backgroundToolDecision(
+              run.policy,
+              stream.request.name,
+              stream.request.input,
+            );
+            if (decision.behavior === "deny")
+              deps.logger.info(
+                { agentId: id, tool: stream.request.name, policy: run.policy },
+                "Bot background run: tool refused by the read-only gate",
+              );
+            void manager
+              .respondToPermission(id, stream.request.id, decision)
+              .catch((err) => deps.logger.warn({ err, agentId: id }, "Gate answer failed"));
+          } else if (done) {
+            void manager
+              .getLastAssistantMessage(id)
+              .then((text) => run.resolve(text ?? ""), run.reject);
+          } else if (error) {
+            run.reject(new Error(stream.type === "turn_failed" ? stream.error : "Turn canceled"));
+          }
+          return;
+        }
         void (async () => {
           let text = "";
           let kind: BotRuntimeEvent["kind"] = "done";
+          if (resolved) {
+            for (const listener of this.listeners)
+              listener({ agentId: id, kind: "resolved", key: stream.requestId, text: "" });
+            return;
+          }
           if (ask) {
             text = JSON.stringify(stream.request);
             kind = "ask";
@@ -114,31 +206,60 @@ export class DaemonBotRuntime implements BotRuntime {
       { replayState: false },
     );
   }
-  async configure(bot: Bot): Promise<void> {
+  /**
+   * Validates the bot's provider and model and resolves its permission mode (spec 37.3.3):
+   * "same-as-chats" is the provider's default for a new agent; any other value is a provider mode.
+   * The service stores the result as the round-1 `modeId` and `unattended`.
+   */
+  async configure(bot: Bot): Promise<{ modeId: string; unattended: boolean }> {
     const cwd = this.deps.storage.botHome(bot);
     const provider = await this.deps.providerSnapshotManager.getProvider({
       provider: bot.provider,
       cwd,
       wait: true,
     });
-    const issues = validateAgentConfigurationAgainstProvider({ input: bot, provider });
+    const requested = bot.permissionMode ?? SAME_AS_CHATS;
+    const issues = validateAgentConfigurationAgainstProvider({
+      input: { ...bot, modeId: requested === SAME_AS_CHATS ? undefined : requested },
+      provider,
+    });
     if (issues.length) throw new Error(issues.map((issue) => issue.message).join("; "));
     const modes = await this.deps.providerSnapshotManager.listModes({
       provider: bot.provider,
       cwd,
       wait: true,
     });
-    const mode = modes.find((m) => m.id === bot.modeId);
-    if (
-      !bot.unattended &&
-      (await this.deps.providerSnapshotManager.isUnattendedCreateMode(
+    let modeId: string;
+    let unattended: boolean;
+    if (requested === SAME_AS_CHATS) {
+      // "Same as chats" with the resolved create config; never a bypass mode.
+      const resolved = await this.deps.providerSnapshotManager.resolveCreateConfig({
+        provider: bot.provider,
+        cwd,
+        unattended: false,
+        requestedMode: undefined,
+        providerOptions: undefined,
+        parent: null,
+      });
+      modeId = resolved.modeId ?? modes[0]?.id ?? "default";
+      // JAgentDesk never picks a mode that skips permission prompts for a bot (spec 37.3.3).
+      if (await this.isBypass(bot, cwd, modeId)) {
+        const attended = [];
+        for (const mode of modes)
+          if (!(await this.isBypass(bot, cwd, mode.id))) attended.push(mode.id);
+        modeId = attended.includes("default") ? "default" : (attended[0] ?? modeId);
+      }
+      unattended = false;
+    } else {
+      if (modes.length > 0 && !modes.some((m) => m.id === requested))
+        throw new Error(`Unknown bot mode: ${requested}`);
+      modeId = requested;
+      unattended = await this.deps.providerSnapshotManager.isUnattendedCreateMode(
         bot.provider,
         cwd,
-        bot.modeId,
-      ))
-    )
-      throw new Error("Set unattended explicitly to use an unattended mode");
-    if (!mode && modes.length > 0) throw new Error(`Unknown bot mode: ${bot.modeId}`);
+        requested,
+      );
+    }
     if (bot.agentId) {
       await ensureAgentLoaded(bot.agentId, {
         agentManager: this.deps.agentManager,
@@ -146,22 +267,33 @@ export class DaemonBotRuntime implements BotRuntime {
         logger: this.deps.logger,
       });
       const agent = this.deps.agentManager.getAgent(bot.agentId);
-      if (agent?.provider !== bot.provider)
-        await this.deps.agentManager.switchAgentProvider(bot.agentId, bot.provider, bot.model);
-      const resolved = await this.deps.providerSnapshotManager.resolveCreateConfig({
-        provider: bot.provider,
-        cwd,
-        unattended: bot.unattended,
-        requestedMode: bot.unattended ? undefined : bot.modeId,
-        providerOptions: undefined,
-        parent: null,
-      });
-      await this.deps.agentManager.setAgentModel(bot.agentId, bot.model);
-      if (bot.thinkingOptionId)
-        await this.deps.agentManager.setAgentThinkingOption(bot.agentId, bot.thinkingOptionId);
-      if (resolved.modeId) await this.deps.agentManager.setAgentMode(bot.agentId, resolved.modeId);
+      if (agent && agent.provider === bot.provider) {
+        // A new model applies to new conversations; the Home Chat keeps its current one.
+        if (bot.thinkingOptionId)
+          await this.deps.agentManager.setAgentThinkingOption(bot.agentId, bot.thinkingOptionId);
+        await this.deps.agentManager.setAgentMode(bot.agentId, modeId);
+      }
       this.receipts.delete(bot.agentId);
     }
+    return { modeId, unattended };
+  }
+  private isBypass(bot: Bot, cwd: string, modeId: string): Promise<boolean> {
+    return this.deps.providerSnapshotManager.isUnattendedCreateMode(bot.provider, cwd, modeId);
+  }
+  async bypassModeId(bot: Bot): Promise<string | undefined> {
+    const cwd = this.deps.storage.botHome(bot);
+    const modes = await this.deps.providerSnapshotManager.listModes({
+      provider: bot.provider,
+      cwd,
+      wait: true,
+    });
+    for (const mode of modes) {
+      if (
+        await this.deps.providerSnapshotManager.isUnattendedCreateMode(bot.provider, cwd, mode.id)
+      )
+        return mode.id;
+    }
+    return undefined;
   }
   async ensureSupervisor(bot: Bot, home: string): Promise<string> {
     if (bot.agentId) {
@@ -185,7 +317,8 @@ export class DaemonBotRuntime implements BotRuntime {
       background: true,
       notifyOnFinish: false,
       labels: {
-        "jagentdesk.bot.id": bot.id,
+        [BOT_ID_LABEL]: bot.id,
+        [BOT_ROLE_LABEL]: "home",
         [ORCHESTRATION_ROLE_LABEL]: "supervisor",
         [ORCHESTRATION_WORKSPACE_LABEL]: workspaceId,
         [ORCHESTRATION_BRIEF_LABEL]: `bot:${bot.id}`,
@@ -361,6 +494,140 @@ export class DaemonBotRuntime implements BotRuntime {
       await this.cancel(child.id);
     if (manager.getAgent(agentId)) await manager.cancelAgentRun(agentId);
   }
+  /** A visible conversation in the bot's home, held by the background gate (spec 37.2.6). */
+  async runBackground(
+    bot: Bot,
+    home: string,
+    run: BotBackgroundRun,
+  ): Promise<{ agentId: string; done: Promise<string> }> {
+    const modes = await this.deps.providerSnapshotManager.listModes({
+      provider: bot.provider,
+      cwd: home,
+      wait: true,
+    });
+    // An attended mode, so every write or command reaches the gate as a permission request.
+    const attended: string[] = [];
+    for (const mode of modes) {
+      if (
+        !(await this.deps.providerSnapshotManager.isUnattendedCreateMode(
+          bot.provider,
+          home,
+          mode.id,
+        ))
+      )
+        attended.push(mode.id);
+    }
+    const mode = ["read-only", "default"].find((id) => attended.includes(id)) ?? attended[0];
+    const workspaceId = await this.deps.create.ensureWorkspaceForCreate!(home);
+    let agentId = "";
+    let settle: { resolve: (text: string) => void; reject: (error: Error) => void } | undefined;
+    const done = new Promise<string>((resolve, reject) => {
+      settle = { resolve, reject };
+    });
+    const register = (id: string) => {
+      agentId = id;
+      if (settle) this.background.set(id, { policy: run.policy, ...settle });
+    };
+    const timer = setTimeout(() => {
+      settle?.reject(new Error(`${run.title} timed out`));
+      if (agentId) void this.cancel(agentId).catch(() => {});
+    }, run.timeoutMs);
+    timer.unref();
+    void done
+      .finally(() => {
+        clearTimeout(timer);
+        if (agentId) this.background.delete(agentId);
+      })
+      .catch(() => {});
+    const result = await createAgentCommand(this.deps.create, {
+      kind: "mcp",
+      provider: `${bot.provider}/${bot.model}`,
+      cwd: home,
+      workspaceId,
+      title: run.title,
+      thinking: bot.thinkingOptionId,
+      mode,
+      unattended: false,
+      background: true,
+      notifyOnFinish: false,
+      initialPrompt: run.prompt,
+      labels: {
+        [BOT_ID_LABEL]: bot.id,
+        [BOT_ROLE_LABEL]: run.kind,
+      },
+      onCreated: ({ agentId: id }) => register(id),
+    });
+    if (!agentId) register(result.snapshot.id);
+    return { agentId: result.snapshot.id, done };
+  }
+  async resetHome(bot: Bot): Promise<void> {
+    if (!bot.agentId) return;
+    const agent = this.deps.agentManager.getAgent(bot.agentId);
+    if (agent) {
+      await this.cancel(bot.agentId).catch(() => {});
+      await this.deps.agentManager.archiveAgent(bot.agentId);
+    }
+    this.receipts.delete(bot.agentId);
+  }
+  agents(bot: Bot): BotAgentSnapshot[] {
+    const manager = this.deps.agentManager;
+    const all = manager.listAgents();
+    const owned = new Set(
+      all
+        .filter((agent) => agent.labels[BOT_ID_LABEL] === bot.id || agent.id === bot.agentId)
+        .map((agent) => agent.id),
+    );
+    // Workers and their sub-agents: children of an owned agent, any depth.
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const agent of all) {
+        const parent = agent.labels["jagentdesk.parent-agent-id"];
+        if (parent && owned.has(parent) && !owned.has(agent.id)) {
+          owned.add(agent.id);
+          grew = true;
+        }
+      }
+    }
+    return all.filter((agent) => owned.has(agent.id)).map((agent) => snapshotOf(manager, agent));
+  }
+  async handOver(bot: Bot, workspaceId: string): Promise<{ title: string; agentIds: string[] }> {
+    const manager = this.deps.agentManager;
+    const workspaces = (await this.deps.describeHost?.())?.workspaces ?? [];
+    const workspace = workspaces.find((entry) => entry.workspaceId === workspaceId);
+    if (!workspace) throw new Error("Workspace not found");
+    const agentIds: string[] = [];
+    for (const agent of manager.listAgents()) {
+      if (agent.workspaceId !== workspaceId || agent.labels[BOT_ID_LABEL] === bot.id) continue;
+      // It keeps running; it now works for the bot and lists under its Home Chat.
+      await manager.setLabels(agent.id, {
+        [BOT_ID_LABEL]: bot.id,
+        [BOT_ROLE_LABEL]: "worker",
+        ...(bot.agentId ? { [BOT_CHAT_LABEL]: bot.agentId } : {}),
+      });
+      agentIds.push(agent.id);
+    }
+    return { title: workspace.title, agentIds };
+  }
+  async firstScreen(): Promise<BotFirstScreen> {
+    const host = (await this.deps.describeHost?.()) ?? { projects: [], workspaces: [] };
+    const withAgent = new Set(
+      this.deps.agentManager
+        .listAgents()
+        .filter((agent) => !agent.labels[BOT_ID_LABEL] && agent.workspaceId)
+        .map((agent) => agent.workspaceId as string),
+    );
+    const openPrs = (await this.deps.openPullRequests?.()) ?? null;
+    return {
+      projects: { count: host.projects.length, names: host.projects.slice(0, 5) },
+      ...(openPrs !== null ? { github: { openPrs } } : {}),
+      workspaces: {
+        count: host.workspaces.filter((entry) => withAgent.has(entry.workspaceId)).length,
+      },
+      ...(host.mcpServers
+        ? { mcp: { count: host.mcpServers.length, names: host.mcpServers.slice(0, 5) } }
+        : {}),
+    };
+  }
   onEvent(listener: (event: BotRuntimeEvent) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -370,6 +637,8 @@ export class DaemonBotRuntime implements BotRuntime {
     this.deps.orchestration.setBotEscalationHandler(undefined);
     this.deps.agentManager.setTurnContextProvider(undefined);
     for (const pending of this.waiting.values()) pending.reject(new Error("Daemon stopped"));
+    for (const run of this.background.values()) run.reject(new Error("Daemon stopped"));
+    this.background.clear();
     this.waiting.clear();
   }
 }
