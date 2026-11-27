@@ -3,6 +3,7 @@ import type { BrowserWebviewElementInfo } from "@/desktop/browser/resident-webvi
 import type { BrowserRecord, BrowserTabOpener } from "@/desktop/browser/store/state";
 import { collectAllTabs, type WorkspaceLayout } from "@/stores/workspace-layout-actions";
 import type { WorkspaceTab } from "@/workspace-tabs/model";
+import type { SidebarStateBucket } from "@/utils/sidebar-agent-state";
 
 export type BrowserTabStatus = DesktopLiveBrowserTab["status"];
 
@@ -229,6 +230,29 @@ export function summarizeBrowserTabRows(rows: readonly BrowserTabRow[]): Browser
     notResponding,
     crashed,
   };
+}
+
+export interface BrowserTabsPillSegment {
+  bucket: SidebarStateBucket | null;
+  text: string;
+}
+
+/**
+ * The composer pill's segments: the count, then one segment per abnormal state like the subagents
+ * pill. Not responding takes the amber dot (`needs_input`; `attention` is green), Crashed the red.
+ */
+export function buildBrowserTabsPillSegments(
+  summary: BrowserTabsSummary,
+  labels: { notResponding(count: number): string; crashed(count: number): string },
+): BrowserTabsPillSegment[] {
+  const segments: BrowserTabsPillSegment[] = [{ bucket: null, text: String(summary.count) }];
+  if (summary.notResponding > 0) {
+    segments.push({ bucket: "needs_input", text: labels.notResponding(summary.notResponding) });
+  }
+  if (summary.crashed > 0) {
+    segments.push({ bucket: "failed", text: labels.crashed(summary.crashed) });
+  }
+  return segments;
 }
 
 /** Row line 2: host · workspace · agent; the agent part is left out where the list is one agent's. */

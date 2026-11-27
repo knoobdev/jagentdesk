@@ -9,6 +9,7 @@ import {
 import {
   browserTabRowDetailParts,
   buildBrowserTabRows,
+  buildBrowserTabsPillSegments,
   filterBrowserTabRowsForAgent,
   findBrowserTabPlacement,
   summarizeBrowserTabRows,
@@ -308,6 +309,29 @@ describe("browserTabRowDetailParts", () => {
     const entry = makeRow("tab-1", { workspaceName: null, host: "" });
     expect(browserTabRowDetailParts(entry, { ...options, includeAgent: true })).toEqual([
       "Not in a workspace",
+    ]);
+  });
+});
+
+describe("buildBrowserTabsPillSegments", () => {
+  const labels = {
+    notResponding: (count: number) => `${count} not responding`,
+    crashed: (count: number) => `${count} crashed`,
+  };
+
+  it("is the bare count when every tab is fine", () => {
+    const summary = summarizeBrowserTabRows(rowsWithStatuses(["ready", "loading"]));
+    expect(buildBrowserTabsPillSegments(summary, labels)).toEqual([{ bucket: null, text: "2" }]);
+  });
+
+  it("adds an amber not-responding segment and a red crashed segment", () => {
+    const summary = summarizeBrowserTabRows(
+      rowsWithStatuses(["notResponding", "crashed", "ready"]),
+    );
+    expect(buildBrowserTabsPillSegments(summary, labels)).toEqual([
+      { bucket: null, text: "3" },
+      { bucket: "needs_input", text: "1 not responding" },
+      { bucket: "failed", text: "1 crashed" },
     ]);
   });
 });

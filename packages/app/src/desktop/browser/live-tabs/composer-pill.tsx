@@ -2,10 +2,14 @@ import { memo, useMemo, type ReactElement } from "react";
 import { Globe } from "lucide-react-native";
 import { withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
-import { ComposerTrackPill, type ComposerTrackPillSegment } from "@/composer/tracks";
+import { ComposerTrackPill } from "@/composer/tracks";
 import { getIsElectron } from "@/constants/platform";
 import type { Theme } from "@/styles/theme";
-import { filterBrowserTabRowsForAgent, summarizeBrowserTabRows } from "./model";
+import {
+  buildBrowserTabsPillSegments,
+  filterBrowserTabRowsForAgent,
+  summarizeBrowserTabRows,
+} from "./model";
 import {
   BROWSER_TABS_POPOVER_MAX_HEIGHT,
   BROWSER_TABS_POPOVER_WIDTH,
@@ -47,23 +51,15 @@ function AgentBrowserTabsPillContent({
     () => filterBrowserTabRowsForAgent(allRows, serverId, agentId),
     [agentId, allRows, serverId],
   );
-  const summary = summarizeBrowserTabRows(rows);
-  const segments = useMemo(() => {
-    const result: ComposerTrackPillSegment[] = [{ bucket: null, text: String(summary.count) }];
-    if (summary.notResponding > 0) {
-      result.push({
-        bucket: "attention",
-        text: t("browserTabs.pill.notResponding", { count: summary.notResponding }),
-      });
-    }
-    if (summary.crashed > 0) {
-      result.push({
-        bucket: "failed",
-        text: t("browserTabs.pill.crashed", { count: summary.crashed }),
-      });
-    }
-    return result;
-  }, [summary.count, summary.crashed, summary.notResponding, t]);
+  const summary = useMemo(() => summarizeBrowserTabRows(rows), [rows]);
+  const segments = useMemo(
+    () =>
+      buildBrowserTabsPillSegments(summary, {
+        notResponding: (count) => t("browserTabs.pill.notResponding", { count }),
+        crashed: (count) => t("browserTabs.pill.crashed", { count }),
+      }),
+    [summary, t],
+  );
   if (summary.count === 0) return null;
   const tooltip = t("browserTabs.pill.tooltip");
   return (
