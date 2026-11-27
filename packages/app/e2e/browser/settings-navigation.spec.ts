@@ -37,6 +37,7 @@ import {
   seedSavedSettingsHosts,
   selectSettingsHost,
   expectSettingsHostPickerLabel,
+  openSettingsHost,
   openSettingsHostSection,
   removeCurrentHostFromSettings,
   openSidebarHostPicker,
@@ -57,14 +58,14 @@ async function openWorkspace(
 }
 
 test.describe("Settings sidebar navigation", () => {
-  test("the sidebar host gear opens Overview in one click", async ({ page, withWorkspace }) => {
+  test("the sidebar host gear opens Daemon in one click", async ({ page, withWorkspace }) => {
     const workspace = await withWorkspace({ prefix: "sidebar-host-settings-" });
     await openWorkspace(page, workspace);
     await openSidebarHostPicker(page);
     await expectStandaloneSidebarHostSettingsButton(page);
     await sidebarHostSettingsButton(page).click();
 
-    await expectAppRoute(page, buildSettingsHostSectionRoute(getServerId(), "host"));
+    await expectAppRoute(page, buildSettingsHostSectionRoute(getServerId(), "daemon"));
   });
 
   test("Enter opens the focused sidebar host gear", async ({ page, withWorkspace }) => {
@@ -74,7 +75,7 @@ test.describe("Settings sidebar navigation", () => {
     await openSidebarHostPicker(page);
     await activateSidebarHostSettingsWithKeyboard(page);
 
-    await expectAppRoute(page, buildSettingsHostSectionRoute(getServerId(), "host"));
+    await expectAppRoute(page, buildSettingsHostSectionRoute(getServerId(), "daemon"));
   });
 
   test("clicking a sidebar section updates the URL and renders the section", async ({ page }) => {
@@ -172,7 +173,7 @@ test.describe("Settings — compact master-detail", () => {
     await expectSettingsBackButton(page);
   });
 
-  test("tapping a host section row pushes /settings/hosts/[serverId]/connections", async ({
+  test("tapping a saved host under Hosts pushes /settings/device-hosts/[serverId]", async ({
     page,
   }) => {
     await gotoAppShell(page);
@@ -183,14 +184,13 @@ test.describe("Settings — compact master-detail", () => {
     await expectSettingsSidebarHidden(page);
   });
 
-  test("back from a host detail returns to the /settings list", async ({ page }) => {
+  test("back from a saved host returns to the Hosts list", async ({ page }) => {
     await gotoAppShell(page);
     await openCompactSettings(page, buildOpenProjectRoute());
 
     await openCompactSettingsHost(page);
     await goBackInSettings(page);
-    await expectAppRoute(page, buildSettingsRoute());
-    await expectSettingsSidebarVisible(page);
+    await expectAppRoute(page, buildSettingsSectionRoute("hosts"));
   });
 
   test("switching the host picker on the settings list scopes host rows without navigating", async ({
@@ -214,7 +214,7 @@ test.describe("Settings — compact master-detail", () => {
     await expectSettingsSidebarVisible(page);
     await expectSettingsHostPickerLabel(page, secondaryHostLabel);
 
-    await openSettingsHostSection(page, secondaryServerId, "connections");
+    await openSettingsHostSection(page, secondaryServerId, "daemon");
   });
 
   test("removing the last active host returns to welcome after settings closes", async ({
@@ -225,7 +225,7 @@ test.describe("Settings — compact master-detail", () => {
 
     await openWorkspace(page, workspace);
     await openCompactSettings(page, buildHostWorkspaceRoute(getServerId(), workspace.workspaceId));
-    await openSettingsHostSection(page, getServerId(), "host");
+    await openSettingsHost(page, getServerId());
     await removeCurrentHostFromSettings(page);
     await closeCompactSettings(page);
 

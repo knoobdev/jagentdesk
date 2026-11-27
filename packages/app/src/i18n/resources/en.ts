@@ -2116,7 +2116,7 @@ export const en = {
     title: "Settings",
     loading: "Loading settings...",
     groups: {
-      app: "App",
+      app: "This device",
       host: "Host",
     },
     hostPicker: {
@@ -2133,6 +2133,10 @@ export const en = {
     },
     groupInfo: "About {{title}}",
     sections: {
+      hosts: "Hosts",
+      sidebar: "Sidebar",
+      chatAndPanes: "Chat & panes",
+      notifications: "Notifications",
       general: "General",
       connection: "Connection",
       appearance: "Appearance",
@@ -2142,6 +2146,14 @@ export const en = {
       permissions: "Permissions",
       diagnostics: "Diagnostics",
     },
+    clientHosts: {
+      title: "Saved hosts",
+      info: "Hosts this device connects to. Names, icons, badges, and routes here only affect this device.",
+      offline: "Offline",
+    },
+    chat: {
+      sendingTitle: "Sending",
+    },
     editor: {
       title: "Editor",
       vimKeybindings: "Vim keybindings",
@@ -2149,7 +2161,8 @@ export const en = {
     },
     plugins: pluginSettings.en,
     hostSections: {
-      tools: "Tools",
+      daemon: "Daemon",
+      tools: "Tools & prompts",
       plugins: "Plugins",
       projects: "Projects",
       connections: "Connections",
@@ -2735,7 +2748,12 @@ export const en = {
         save: "Save",
         emptyState: "No profiles yet. Add one to launch terminals with a specific command.",
       },
+      tools: {
+        instructionsTitle: "Instructions",
+        toolsTitle: "Agent tools",
+      },
       daemon: {
+        runtimeTitle: "Agent runtime",
         rename: {
           editLabel: "Edit label",
           title: "Rename host",

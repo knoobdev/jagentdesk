@@ -57,7 +57,7 @@ import {
 } from "@/runtime/host-runtime";
 import { ProvidersSection } from "@/screens/settings/providers-section";
 import { HostUsageSection } from "@/usage/host-usage-section";
-import { HostAppearanceSection } from "@/screens/settings/host-appearance-section";
+import { HostToolsPage } from "@/screens/settings/host-tools-page";
 import type { HostAppearance } from "@/hosts/appearance";
 import { SettingsSection } from "@/screens/settings/settings-section";
 import { PairedDevicesSection } from "@/screens/settings/paired-devices-section";
@@ -214,34 +214,13 @@ function HostStatusBadges({ serverId }: { serverId: string }) {
   );
 }
 
-function HostConnectionError({ serverId }: { serverId: string }) {
+export function HostConnectionError({ serverId }: { serverId: string }) {
   const snapshot = useHostRuntimeSnapshot(serverId);
   const lastError = snapshot?.lastError ?? null;
   const connectionError =
     typeof lastError === "string" && lastError.trim().length > 0 ? lastError.trim() : null;
   if (!connectionError) return null;
   return <Text style={styles.errorText}>{connectionError}</Text>;
-}
-
-export function HostConnectionsPage({
-  serverId,
-  onAddConnection,
-}: {
-  serverId: string;
-  onAddConnection?: () => void;
-}) {
-  const host = useHostProfile(serverId);
-
-  if (!host) {
-    return <HostNotFound />;
-  }
-
-  return (
-    <View>
-      <HostConnectionError serverId={serverId} />
-      <ConnectionsSection host={host} onAddConnection={onAddConnection} />
-    </View>
-  );
 }
 
 export function HostPairDevicePage({ serverId }: { serverId: string }) {
@@ -262,6 +241,7 @@ export function HostPairDevicePage({ serverId }: { serverId: string }) {
   );
 }
 
+/** Cross-provider continuity: which providers agents fail over to and start children on. */
 export function HostAgentsPage({ serverId }: { serverId: string }) {
   const { t } = useTranslation();
   const host = useHostProfile(serverId);
@@ -275,19 +255,49 @@ export function HostAgentsPage({ serverId }: { serverId: string }) {
     <View>
       {isConnected ? (
         <SettingsSection title={t("settings.hostSections.agents")}>
-          <InjectJAgentDeskToolsCard serverId={serverId} />
-          <BuiltinAgentSettingsCards serverId={serverId} />
-          <AppendSystemPromptCard serverId={serverId} />
-          <OperatorContextCard serverId={serverId} />
-          <RestartRecoveryCard serverId={serverId} />
           <ContinuitySettingsCards serverId={serverId} />
-          <IdleRuntimeCleanupCard serverId={serverId} />
         </SettingsSection>
       ) : (
         <View style={[settingsStyles.card, styles.emptyCard]}>
           <Text style={styles.emptyText}>{t("settings.host.agents.unavailable")}</Text>
         </View>
       )}
+    </View>
+  );
+}
+
+/**
+ * Tools & prompts: the instructions every agent gets, the tools agents can call, and the
+ * command-line tools this host can run.
+ */
+export function HostToolsAndPromptsPage({ serverId }: { serverId: string }) {
+  const { t } = useTranslation();
+  const host = useHostProfile(serverId);
+  const isConnected = useHostRuntimeIsConnected(serverId);
+
+  if (!host) {
+    return <HostNotFound />;
+  }
+
+  return (
+    <View>
+      {isConnected ? (
+        <>
+          <SettingsSection title={t("settings.host.tools.instructionsTitle")}>
+            <AppendSystemPromptCard serverId={serverId} />
+            <OperatorContextCard serverId={serverId} />
+          </SettingsSection>
+          <SettingsSection title={t("settings.host.tools.toolsTitle")}>
+            <InjectJAgentDeskToolsCard serverId={serverId} />
+            <BuiltinAgentSettingsCards serverId={serverId} />
+          </SettingsSection>
+        </>
+      ) : (
+        <View style={[settingsStyles.card, styles.emptyCard]}>
+          <Text style={styles.emptyText}>{t("settings.host.agents.unavailable")}</Text>
+        </View>
+      )}
+      <HostToolsPage serverId={serverId} />
     </View>
   );
 }
@@ -381,15 +391,12 @@ export function HostUsagePage({ serverId }: { serverId: string }) {
   );
 }
 
-export function HostSettingsPage({
-  serverId,
-  onHostRemoved,
-}: {
-  serverId: string;
-  onHostRemoved?: () => void;
-}) {
+/** The host's daemon: status, updates, how agents run across restarts, data, and restart. */
+export function HostDaemonPage({ serverId }: { serverId: string }) {
+  const { t } = useTranslation();
   const host = useHostProfile(serverId);
   const isLocalDaemon = useIsLocalDaemon(serverId);
+  const isConnected = useHostRuntimeIsConnected(serverId);
 
   if (!host) {
     return <HostNotFound />;
@@ -404,21 +411,29 @@ export function HostSettingsPage({
       </View>
 
       <HostStatusBadges serverId={serverId} />
-
-      <HostAppearanceSection host={host} />
+      <HostConnectionError serverId={serverId} />
 
       {isLocalDaemon ? <LocalDaemonSection serverId={serverId} /> : null}
 
       {!isLocalDaemon ? <UpdateDaemonCard key={host.serverId} host={host} /> : null}
 
+      {isConnected ? (
+        <SettingsSection title={t("settings.host.daemon.runtimeTitle")}>
+          <RestartRecoveryCard serverId={serverId} />
+          <IdleRuntimeCleanupCard serverId={serverId} />
+        </SettingsSection>
+      ) : null}
+
       <MigrateHostDataSection host={host} />
 
-      <RemoveHostSection host={host} isLocalDaemon={isLocalDaemon} onRemoved={onHostRemoved} />
+      <SettingsSection title={t("settings.host.daemon.dangerZone")}>
+        <RestartDaemonCard host={host} />
+      </SettingsSection>
     </View>
   );
 }
 
-function ConnectionsSection({
+export function ConnectionsSection({
   host,
   onAddConnection,
 }: {
@@ -1607,7 +1622,7 @@ function MigrateHostDataSection({ host }: { host: HostProfile }) {
   );
 }
 
-function RemoveHostSection({
+export function RemoveHostSection({
   host,
   isLocalDaemon,
   onRemoved,
@@ -1722,8 +1737,6 @@ function RemoveHostSection({
       title={t("settings.host.daemon.dangerZone")}
       testID="host-page-remove-host-card"
     >
-      <RestartDaemonCard host={host} />
-
       <View style={settingsStyles.card}>
         <View style={settingsStyles.row}>
           <View style={settingsStyles.rowContent}>

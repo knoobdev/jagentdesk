@@ -8,29 +8,29 @@ import {
 } from "./page-description";
 
 const SECTIONS = [
-  "sidebar",
   "general",
+  "hosts",
   "appearance",
-  "editor",
+  "sidebar",
+  "chat",
   "shortcuts",
-  "integrations",
-  "permissions",
+  "notifications",
   "diagnostics",
 ];
 const HOST_SECTIONS = [
-  "host",
-  "projects",
-  "connections",
-  "pair-device",
+  "providers",
+  "agent-profiles",
+  "tools",
   "agents",
   "orchestration",
-  "voice",
+  "projects",
   "workspaces",
-  "providers",
+  "voice",
   "usage",
   "terminals",
   "plugins",
-  "tools",
+  "pair-device",
+  "daemon",
 ];
 
 describe("settingsPageDescription", () => {
@@ -43,7 +43,7 @@ describe("settingsPageDescription", () => {
     expect(settingsPageDescription({ kind: "host", section: "providers" })).toBe(
       "Agent CLIs on this host: install, turn on and pick their models.",
     );
-    expect(settingsPageDescription({ kind: "host", section: "connections" })).toBe(
+    expect(settingsPageDescription({ kind: "clientHost" })).toBe(
       "How your devices reach this host.",
     );
     expect(settingsPageDescription({ kind: "host", section: "pair-device" })).toBe(
@@ -62,6 +62,7 @@ describe("settingsPageDescription", () => {
     const lines = [
       ...SECTIONS.map((section) => settingsPageDescription({ kind: "section", section })),
       ...HOST_SECTIONS.map((section) => settingsPageDescription({ kind: "host", section })),
+      settingsPageDescription({ kind: "clientHost" }),
       settingsPageDescription({ kind: "project" }),
     ];
     for (const line of lines) expect(line).not.toBe(SETTINGS_DESCRIPTION);

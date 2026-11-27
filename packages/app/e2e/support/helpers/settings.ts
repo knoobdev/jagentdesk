@@ -3,6 +3,7 @@ import { buildCreateAgentPreferences, buildSeededHost, TEST_HOST_LABEL } from ".
 import { getServerId } from "./server-id";
 import { expectAppRoute } from "./route-assertions";
 import {
+  buildClientHostSettingsRoute,
   buildSettingsHostSectionRoute,
   buildSettingsRoute,
   buildSettingsSectionRoute,
@@ -57,27 +58,31 @@ interface SavedSettingsHostInput {
 
 const SECTION_LABELS = {
   general: "General",
+  hosts: "Hosts",
   appearance: "Appearance",
-  editor: "Editor",
+  sidebar: "Sidebar",
+  chat: "Chat & panes",
   shortcuts: "Shortcuts",
-  integrations: "Integrations",
-  permissions: "Permissions",
+  notifications: "Notifications",
   diagnostics: "Diagnostics",
 } as const;
 
 export type SettingsSection = keyof typeof SECTION_LABELS;
 
 type HostSection =
-  | "voice"
-  | "projects"
-  | "connections"
-  | "pair-device"
+  | "providers"
+  | "agent-profiles"
+  | "tools"
   | "agents"
   | "orchestration"
+  | "projects"
   | "workspaces"
-  | "providers"
+  | "voice"
   | "usage"
-  | "host";
+  | "terminals"
+  | "plugins"
+  | "pair-device"
+  | "daemon";
 
 export async function openSettingsSection(page: Page, section: SettingsSection): Promise<void> {
   const sidebar = page.getByTestId("settings-sidebar");
@@ -87,11 +92,11 @@ export async function openSettingsSection(page: Page, section: SettingsSection):
   await expectAppRoute(page, buildSettingsSectionRoute(section));
 }
 
+/** Opens this device's page for a saved host: Settings -> Hosts -> the host's row. */
 export async function openSettingsHost(page: Page, serverId: string): Promise<void> {
-  // Host sections are now flat top-level rows under the Host group. Navigate by
-  // clicking the Connections section row; the picker only matters when >1 host.
-  await page.getByTestId("settings-host-section-connections").click();
-  await expectHostSettingsUrl(page, serverId);
+  await openSettingsSection(page, "hosts");
+  await page.getByTestId(`client-host-row-${serverId}`).click();
+  await expectAppRoute(page, buildClientHostSettingsRoute(serverId));
   await expect(page.getByTestId("host-page-connections-card")).toBeVisible();
 }
 
@@ -248,7 +253,7 @@ export async function clickSettingsBackToWorkspace(page: Page): Promise<void> {
 }
 
 export async function expectHostSettingsUrl(page: Page, serverId: string): Promise<void> {
-  await expectAppRoute(page, buildSettingsHostSectionRoute(serverId, "connections"));
+  await expectAppRoute(page, buildSettingsHostSectionRoute(serverId, "daemon"));
 }
 
 export async function verifyLegacyHostSettingsRedirect(page: Page): Promise<void> {
@@ -258,9 +263,7 @@ export async function verifyLegacyHostSettingsRedirect(page: Page): Promise<void
 }
 
 export async function openCompactSettingsHost(page: Page): Promise<void> {
-  const serverId = getServerId();
-  await openSettingsHost(page, serverId);
-  await expectHostSettingsUrl(page, serverId);
+  await openSettingsHost(page, getServerId());
 }
 
 export async function expectAddHostMethodOptions(page: Page): Promise<void> {
@@ -349,11 +352,12 @@ export async function openHostSection(
 }
 
 export async function expectHostActionCards(page: Page, serverId: string): Promise<void> {
-  // Restart + remove cards live on the Host section; providers moved to its
-  // own Providers section (asserted via expectHostProvidersCard).
-  await openSettingsHostSection(page, serverId, "host");
+  // Restart lives on the host's Daemon section; removing the host from this device lives on
+  // the device's Hosts page.
+  await openSettingsHostSection(page, serverId, "daemon");
   await expect(page.getByTestId("host-page-restart-card")).toBeVisible();
   await expect(page.getByTestId("host-page-restart-button")).toBeVisible();
+  await openSettingsHost(page, serverId);
   await expect(page.getByTestId("host-page-remove-host-card")).toBeVisible();
   await expect(page.getByTestId("host-page-remove-host-button")).toBeVisible();
 }
@@ -405,20 +409,22 @@ export async function expectRetiredSidebarSectionsAbsent(page: Page): Promise<vo
   const sidebar = page.getByTestId("settings-sidebar");
   await expect(sidebar).toBeVisible();
 
-  // App group rows remain top-level.
+  // "This device" rows.
   await expect(sidebar.getByRole("button", { name: "General", exact: true })).toBeVisible();
+  await expect(sidebar.getByRole("button", { name: "Hosts", exact: true })).toBeVisible();
+  await expect(sidebar.getByRole("button", { name: "Chat & panes", exact: true })).toBeVisible();
   await expect(sidebar.getByRole("button", { name: "Diagnostics", exact: true })).toBeVisible();
-  await expect(sidebar.getByRole("button", { name: "About", exact: true })).toBeVisible();
-  await expect(sidebar.getByRole("button", { name: "Daemon", exact: true })).toHaveCount(0);
+  await expect(sidebar.getByRole("button", { name: "Editor", exact: true })).toHaveCount(0);
 
-  // Host group rows are now flat top-level sections (no drill-in).
-  await expect(sidebar.getByTestId("settings-host-section-connections")).toBeVisible();
-  await expect(sidebar.getByTestId("settings-host-section-projects")).toBeVisible();
-  await expect(sidebar.getByTestId("settings-host-section-agents")).toBeVisible();
-  await expect(sidebar.getByTestId("settings-host-section-workspaces")).toBeVisible();
+  // Host rows: the daemon's own settings. A saved host's connections live under Hosts.
+  await expect(sidebar.getByTestId("settings-host-section-connections")).toHaveCount(0);
   await expect(sidebar.getByTestId("settings-host-section-providers")).toBeVisible();
+  await expect(sidebar.getByTestId("settings-host-section-tools")).toBeVisible();
+  await expect(sidebar.getByTestId("settings-host-section-agents")).toBeVisible();
+  await expect(sidebar.getByTestId("settings-host-section-projects")).toBeVisible();
+  await expect(sidebar.getByTestId("settings-host-section-workspaces")).toBeVisible();
   await expect(sidebar.getByTestId("settings-host-section-usage")).toBeVisible();
-  await expect(sidebar.getByTestId("settings-host-section-host")).toBeVisible();
+  await expect(sidebar.getByTestId("settings-host-section-daemon")).toBeVisible();
 
   // The old per-host entry rows are replaced by the host picker.
   await expect(sidebar.locator('[data-testid^="settings-host-entry-"]')).toHaveCount(0);

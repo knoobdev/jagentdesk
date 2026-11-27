@@ -614,45 +614,62 @@ export function resolveKnownHostRoute(input: {
   return { kind: "redirect", href: "/welcome" };
 }
 
+// Settings are split by ownership: these sections live on this device; host sections are the
+// daemon's own settings.
 export const SETTINGS_SECTION_SLUGS = [
-  "sidebar",
   "general",
-  "connection",
+  "hosts",
   "appearance",
-  "editor",
+  "sidebar",
+  "chat",
   "shortcuts",
-  "integrations",
-  "permissions",
+  "notifications",
   "diagnostics",
 ] as const;
 
 export type SettingsSectionSlug = (typeof SETTINGS_SECTION_SLUGS)[number];
 
+const LEGACY_SETTINGS_SECTION_SLUGS: Record<string, SettingsSectionSlug> = {
+  connection: "hosts",
+  editor: "chat",
+  integrations: "general",
+  permissions: "notifications",
+};
+
 export function isSettingsSectionSlug(value: string): value is SettingsSectionSlug {
   return (SETTINGS_SECTION_SLUGS as readonly string[]).includes(value);
 }
 
+export function normalizeSettingsSectionSlug(value: string): SettingsSectionSlug | null {
+  if (isSettingsSectionSlug(value)) {
+    return value;
+  }
+  return LEGACY_SETTINGS_SECTION_SLUGS[value] ?? null;
+}
+
 export const HOST_SECTION_SLUGS = [
-  "projects",
-  "connections",
-  "pair-device",
-  "agents",
-  "agent-profiles",
-  "orchestration",
-  "voice",
-  "workspaces",
   "providers",
+  "agent-profiles",
+  "tools",
+  "agents",
+  "orchestration",
+  "projects",
+  "workspaces",
+  "voice",
   "usage",
   "terminals",
   "plugins",
-  "tools",
-  "host",
+  "pair-device",
+  "daemon",
 ] as const;
 
 export type HostSectionSlug = (typeof HOST_SECTION_SLUGS)[number];
 
+// `connections` is not here: a saved host's routes moved to this device's Hosts page, so the
+// host section route redirects it to `buildClientHostSettingsRoute`.
 const LEGACY_HOST_SECTION_SLUGS: Record<string, HostSectionSlug> = {
-  daemon: "host",
+  host: "daemon",
+  devices: "pair-device",
 };
 
 export function isHostSectionSlug(value: string): value is HostSectionSlug {
@@ -675,7 +692,15 @@ export function buildSettingsSectionRoute(section: SettingsSectionSlug) {
 }
 
 export function buildSettingsAddHostRoute(intentId: string | number = "1") {
-  return `/settings/general?addHost=${encodeURIComponent(String(intentId))}` as const;
+  return `/settings/hosts?addHost=${encodeURIComponent(String(intentId))}` as const;
+}
+
+export function buildClientHostSettingsRoute(serverId: string) {
+  const normalized = trimNonEmpty(serverId);
+  if (!normalized) {
+    throw new Error("buildClientHostSettingsRoute requires a non-empty serverId");
+  }
+  return `/settings/device-hosts/${encodeSegment(normalized)}` as const;
 }
 
 export function buildSettingsHostRoute(serverId: string) {

@@ -2151,7 +2151,7 @@ export const ru: TranslationResources = {
     title: "Настройки",
     loading: "Загрузка настроек...",
     groups: {
-      app: "Приложение",
+      app: "Это устройство",
       host: "Host",
     },
     hostPicker: {
@@ -2168,6 +2168,10 @@ export const ru: TranslationResources = {
     },
     groupInfo: "О{{title}}",
     sections: {
+      hosts: "Хосты",
+      sidebar: "Боковая панель",
+      chatAndPanes: "Чат и панели",
+      notifications: "Уведомления",
       general: "Общий",
       connection: "Подключение",
       appearance: "Появление",
@@ -2177,6 +2181,14 @@ export const ru: TranslationResources = {
       permissions: "Разрешения",
       diagnostics: "Диагностика",
     },
+    clientHosts: {
+      title: "Сохранённые хосты",
+      info: "Хосты, к которым подключается это устройство. Имена, значки, бейджи и маршруты здесь влияют только на это устройство.",
+      offline: "Оффлайн",
+    },
+    chat: {
+      sendingTitle: "Отправка",
+    },
     editor: {
       title: "Редактор",
       vimKeybindings: "Клавиши Vim",
@@ -2184,7 +2196,8 @@ export const ru: TranslationResources = {
     },
     plugins: pluginSettings.ru,
     hostSections: {
-      tools: "Tools",
+      daemon: "Демон",
+      tools: "Инструменты и промпты",
       plugins: "Плагины",
       projects: "Проекты",
       connections: "Соединения",
@@ -2779,7 +2792,12 @@ export const ru: TranslationResources = {
         save: "Save",
         emptyState: "No profiles yet. Add one to launch terminals with a specific command.",
       },
+      tools: {
+        instructionsTitle: "Инструкции",
+        toolsTitle: "Инструменты агентов",
+      },
       daemon: {
+        runtimeTitle: "Среда выполнения агентов",
         rename: {
           editLabel: "Изменить ярлык",
           title: "Переименовать хост",

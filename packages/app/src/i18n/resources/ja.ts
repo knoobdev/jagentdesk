@@ -2096,7 +2096,7 @@ export const ja: TranslationResources = {
     title: "設定",
     loading: "設定を読み込み中...",
     groups: {
-      app: "アプリ",
+      app: "このデバイス",
       host: "ホスト",
     },
     hostPicker: {
@@ -2113,6 +2113,10 @@ export const ja: TranslationResources = {
     },
     groupInfo: "{{title}}について",
     sections: {
+      hosts: "ホスト",
+      sidebar: "サイドバー",
+      chatAndPanes: "チャットとペイン",
+      notifications: "通知",
       general: "一般",
       connection: "接続",
       appearance: "外観",
@@ -2122,6 +2126,14 @@ export const ja: TranslationResources = {
       permissions: "権限",
       diagnostics: "診断",
     },
+    clientHosts: {
+      title: "保存済みホスト",
+      info: "このデバイスが接続するホストです。ここでの名前、アイコン、バッジ、経路はこのデバイスにのみ反映されます。",
+      offline: "オフライン",
+    },
+    chat: {
+      sendingTitle: "送信",
+    },
     editor: {
       title: "エディター",
       vimKeybindings: "Vim キーバインド",
@@ -2129,7 +2141,8 @@ export const ja: TranslationResources = {
     },
     plugins: pluginSettings.ja,
     hostSections: {
-      tools: "Tools",
+      daemon: "デーモン",
+      tools: "ツールとプロンプト",
       plugins: "プラグイン",
       projects: "プロジェクト",
       connections: "接続",
@@ -2719,7 +2732,12 @@ export const ja: TranslationResources = {
         emptyState:
           "プロファイルがまだありません。特定のコマンドでターミナルを起動するために追加してください。",
       },
+      tools: {
+        instructionsTitle: "指示",
+        toolsTitle: "エージェントツール",
+      },
       daemon: {
+        runtimeTitle: "エージェントランタイム",
         rename: {
           editLabel: "ラベルを編集",
           title: "ホストの名前を変更",

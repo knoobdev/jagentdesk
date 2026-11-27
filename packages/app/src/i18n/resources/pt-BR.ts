@@ -2087,7 +2087,7 @@ export const ptBR: TranslationResources = {
     title: "Configurações",
     loading: "Carregando configurações...",
     groups: {
-      app: "App",
+      app: "Este dispositivo",
       host: "Host",
     },
     hostPicker: {
@@ -2104,6 +2104,10 @@ export const ptBR: TranslationResources = {
     },
     groupInfo: "Sobre {{title}}",
     sections: {
+      hosts: "Hosts",
+      sidebar: "Barra lateral",
+      chatAndPanes: "Chat e painéis",
+      notifications: "Notificações",
       general: "Geral",
       connection: "Conexão",
       appearance: "Aparência",
@@ -2113,6 +2117,14 @@ export const ptBR: TranslationResources = {
       permissions: "Permissões",
       diagnostics: "Diagnósticos",
     },
+    clientHosts: {
+      title: "Hosts salvos",
+      info: "Hosts aos quais este dispositivo se conecta. Nomes, ícones, selos e rotas aqui afetam apenas este dispositivo.",
+      offline: "Offline",
+    },
+    chat: {
+      sendingTitle: "Envio",
+    },
     editor: {
       title: "Editor",
       vimKeybindings: "Atalhos do Vim",
@@ -2120,7 +2132,8 @@ export const ptBR: TranslationResources = {
     },
     plugins: pluginSettings["pt-BR"],
     hostSections: {
-      tools: "Tools",
+      daemon: "Daemon",
+      tools: "Ferramentas e instruções",
       plugins: "Plugins",
       projects: "Projetos",
       connections: "Conexões",
@@ -2713,7 +2726,12 @@ export const ptBR: TranslationResources = {
         emptyState:
           "Nenhum perfil ainda. Adicione um para abrir terminais com um comando específico.",
       },
+      tools: {
+        instructionsTitle: "Instruções",
+        toolsTitle: "Ferramentas de agentes",
+      },
       daemon: {
+        runtimeTitle: "Execução de agentes",
         rename: {
           editLabel: "Editar rótulo",
           title: "Renomear host",
