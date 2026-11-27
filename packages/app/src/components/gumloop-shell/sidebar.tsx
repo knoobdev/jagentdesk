@@ -244,8 +244,12 @@ function ConnectionFooter({ serverId, onNavigate }: { serverId: string; onNaviga
   const transportLabel = t(hostTransportLabelKey(snapshot?.activeConnection?.type ?? "directTcp"));
   return (
     <View style={styles.footer} testID="gumloop-sidebar-footer">
-      <BrowserTabsSidebarRow />
-      <UsageSidebarItem sources={sources} onNavigate={onNavigate} />
+<BrowserTabsSidebarRow />
+      {sources.length > 0 ? (
+        <View style={styles.usage} testID="gumloop-sidebar-usage">
+          <UsageSidebarItem sources={sources} onNavigate={onNavigate} />
+        </View>
+      ) : null}
       <Pressable
         onPress={connections}
         style={styles.connection}
@@ -772,6 +776,10 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderTopWidth: 1,
     borderTopColor: theme.colors.border,
   },
+  // The Usage row sits on the bordered Connection card, so it gets the same 12 px below as the
+  // footer's top padding gives it above; flush against the card, the card's border read as
+  // cutting the row off (user 2026-11-27).
+  usage: { marginBottom: 12 },
   connection: {
     borderRadius: 10,
     borderWidth: 1,
