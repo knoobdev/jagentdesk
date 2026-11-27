@@ -25,9 +25,10 @@ interface RecoverableWindow {
 
 export function reloadWhenRendererExits(
   win: RecoverableWindow,
-  options: { now?: () => number } = {},
+  options: { now?: () => number; defer?: (task: () => void) => void } = {},
 ): void {
   const now = options.now ?? Date.now;
+  const defer = options.defer ?? ((task: () => void) => void setImmediate(task));
   let reloadTimes: number[] = [];
 
   win.webContents.on("render-process-gone", (_event, details) => {
@@ -51,6 +52,11 @@ export function reloadWhenRendererExits(
       `[renderer-recovery] Renderer exited (${details.reason}, code ${details.exitCode}); ` +
         `reloading the window (reload ${reloadTimes.length} in the last minute)`,
     );
-    win.webContents.reload();
+    // Never reload from inside render-process-gone: on Electron 41 that kills the main
+    // process (SIGTRAP on CrBrowserMain), with or without webview guests. On the next
+    // macrotask Chromium has finished handling the exit.
+    defer(() => {
+      if (!win.isDestroyed()) win.webContents.reload();
+    });
   });
 }
