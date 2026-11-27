@@ -17,6 +17,8 @@ import {
 } from "./agent/remote-finish-subscriptions/index.js";
 import { connectThroughProxy } from "./ssh/proxy/connect.js";
 import { BotsSlack } from "./bots/slack.js";
+import { BotsSharing } from "./bots/sharing/service.js";
+import { relayControlMux } from "./relay-control-mux.js";
 import { createIdleRuntimeCleanup } from "./agent/idle-runtime-cleanup/index.js";
 import { createChangeRequestRouter } from "../services/change-request-router.js";
 import { createForgeService } from "../services/forge-registry.js";
@@ -1927,19 +1929,29 @@ export async function createJAgentDeskDaemon(
       }),
     push: { send: (payload) => wsServer?.sendBotPush(payload) ?? Promise.resolve() },
   });
+  const botsRelay = () => ({
+    ...(relayRuntime?.getConfig() ?? {
+      enabled: config.relayEnabled ?? true,
+      endpoint: config.relayEndpoint ?? DEFAULT_RELAY_ENDPOINT,
+      useTls: config.relayUseTls ?? true,
+    }),
+    serverId,
+  });
+  // One store for every bots secret: each FileSecretStore serializes its own writes only.
+  const botsSecrets = new FileSecretStore(path.join(botStorage.home, "bots"));
   const botsSlack = new BotsSlack(botsService, {
     logger,
-    relay: () => ({
-      ...(relayRuntime?.getConfig() ?? {
-        enabled: config.relayEnabled ?? true,
-        endpoint: config.relayEndpoint ?? DEFAULT_RELAY_ENDPOINT,
-        useTls: config.relayUseTls ?? true,
-      }),
-      serverId,
-    }),
+    relay: botsRelay,
+    secrets: botsSecrets,
     apiBaseUrl: dependencies.slackApiBaseUrl,
   });
   botsService.slack = botsSlack;
+  const botsSharing = new BotsSharing(botsService, {
+    logger: logger.child({ module: "bots-sharing" }),
+    relay: botsRelay,
+    secrets: botsSecrets,
+  });
+  botsService.sharing = botsSharing;
   let botsRuntimeReady = false;
   await pluginRuntime.builtin.registerLifecycle("bots", {
     start: () => {
@@ -2480,7 +2492,7 @@ export async function createJAgentDeskDaemon(
             // Noise E2EE handshake before session admission.
             const relaySecurityLogger = logger.child({ module: "relay-security" });
             relayRuntime = createRelayRuntime({
-              controlHandler: botsSlack,
+              controlHandler: relayControlMux([botsSlack, botsSharing]),
               config: {
                 enabled: config.relayEnabled ?? true,
                 endpoint: config.relayEndpoint ?? DEFAULT_RELAY_ENDPOINT,

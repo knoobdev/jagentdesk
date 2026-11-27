@@ -1,4 +1,5 @@
 import type { BotsSlack } from "./slack.js";
+import type { BotsSharing } from "./sharing/service.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Logger } from "pino";
@@ -33,6 +34,7 @@ export interface BotTriggerSource {
 }
 export class BotsService {
   slack?: BotsSlack;
+  sharing?: BotsSharing;
   private readonly replyListeners = new Set<(request: BotMessage, reply: BotMessage) => void>();
   onReply(listener: (request: BotMessage, reply: BotMessage) => void): () => void {
     this.replyListeners.add(listener);
@@ -133,6 +135,7 @@ export class BotsService {
     const bot = this.storage.bot(id);
     const rooms = this.storage.rooms().filter((room) => room.memberBotIds.includes(id));
     await this.slack?.disconnect(id);
+    await this.sharing?.botDeleted(id);
     this.storage.saveBot({ ...bot, paused: true });
     for (const item of this.storage.items(id)) await this.cancel(id, item.id, "Bot deleted");
     if (bot.agentId) await this.runtime.cancel(bot.agentId);
@@ -712,11 +715,20 @@ export class BotsService {
     if (!this.slack) throw new Error("Slack is unavailable");
     return this.slack.handle(msg);
   }
+  /** Slack and sharing requests go to their own handlers; undefined for the rest. */
+  private delegated(msg: BotsRequest): Promise<Record<string, unknown>> | undefined {
+    if (msg.type.startsWith("bots.share.")) {
+      if (!this.sharing) throw new Error("Bot sharing is not available");
+      return this.sharing.handle(msg as Extract<BotsRequest, { type: `bots.share.${string}` }>);
+    }
+    if (msg.type.startsWith("bots.slack."))
+      return this.handleSlack(msg as Extract<BotsRequest, { type: `bots.slack.${string}` }>);
+    return undefined;
+  }
   // Successful results are parsed by the matching protocol schema at the session boundary.
   async handle(msg: BotsRequest): Promise<Record<string, unknown>> {
-    if (msg.type.startsWith("bots.slack.")) {
-      return this.handleSlack(msg as Extract<BotsRequest, { type: `bots.slack.${string}` }>);
-    }
+    const delegated = this.delegated(msg);
+    if (delegated) return delegated;
     switch (msg.type) {
       case "bots.list.request":
         return { bots: this.storage.listBots() };

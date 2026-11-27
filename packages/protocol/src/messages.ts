@@ -5298,6 +5298,8 @@ export const ServerInfoStatusPayloadSchema = z
         bots: z.boolean().optional(),
         // COMPAT(botsOptionalIdentity): added in v0.10.1; remove gate after 2027-05-26.
         botsOptionalIdentity: z.boolean().optional(),
+        // Bot sharing by link (spec 37.13): `bots.share.*`.
+        botsSharing: z.boolean().optional(),
         binaryChunkingV1: z.boolean().optional(),
         backgroundAgents: z.boolean().optional(),
         // COMPAT(agentRequestReceipts): added in v0.8.0; remove gate after 2027-03-05.

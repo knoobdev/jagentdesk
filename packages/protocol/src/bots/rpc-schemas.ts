@@ -9,6 +9,7 @@ import {
   BotScheduleSchema,
   BotScheduleInputSchema,
 } from "./types.js";
+import { BotsShareRequestSchemas, BotsShareResponseSchemas } from "./share-schemas.js";
 
 const request = <T extends string, S extends z.ZodRawShape>(type: T, shape: S) =>
   z.object({ type: z.literal(type), requestId: z.string(), ...shape });
@@ -86,6 +87,7 @@ export const BotsRequestSchemas = [
     schedule: BotScheduleInputSchema,
   }),
   request("bots.schedules.delete.request", { ...botId, scheduleId: z.string() }),
+  ...BotsShareRequestSchemas,
 ] as const;
 export const BotsResponseSchemas = [
   response("bots.slack.manifest.response", { manifest: z.string(), requestUrl: z.string() }),
@@ -111,6 +113,7 @@ export const BotsResponseSchemas = [
   response("bots.schedules.list.response", { schedules: z.array(BotScheduleSchema) }),
   response("bots.schedules.save.response", { schedule: BotScheduleSchema }),
   response("bots.schedules.delete.response", {}),
+  ...BotsShareResponseSchemas,
 ] as const;
 export const BotsPushSchemas = [
   z.object({
