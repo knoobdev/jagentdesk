@@ -1,4 +1,12 @@
-export const botsStrings = {
+import { botsOrcaStrings } from "./bots-orca";
+import { botsJadDialogsStrings } from "./bots-jad-dialogs";
+import { botsJadItemsStrings } from "./bots-jad-items";
+import { botsJadPanelsStrings } from "./bots-jad-panels";
+import { botsJadSettingsStrings } from "./bots-jad-settings";
+
+// Strings JAgentDesk owns (round-1 surfaces still in use, and the lines spec 37 adds to Orca's:
+// GitLab and Telegram rows, Review before done, the Look around / Tidy memory result lines).
+const botsJadStrings = {
   slack: {
     title: "Slack",
     createApp: "Create Slack app",
@@ -168,3 +176,15 @@ export const botsStrings = {
     mode: "Pick a mode.",
   },
 } as const;
+
+/** `bots.*`: Orca's strings verbatim (`bots-orca.ts`), and JAgentDesk's under `bots.jad`. */
+export const botsStrings = {
+  ...botsOrcaStrings,
+  jad: {
+    ...botsJadStrings,
+    items: botsJadItemsStrings,
+    settings: botsJadSettingsStrings,
+    dialogs: botsJadDialogsStrings,
+    panels: botsJadPanelsStrings,
+  },
+};

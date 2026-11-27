@@ -48,7 +48,7 @@ describe("Bots presentation", () => {
     expect(buildBotsRoute("host/one", { botId: "bot id" })).toBe("/h/host%2Fone/bots?botId=bot+id");
     expect(buildBotsRoute("host", { roomId: "r&1" })).toBe("/h/host/bots?roomId=r%261");
     expect(buildBotsRoute("host", { botId: "bot", itemId: "item" })).toBe(
-      "/h/host/bots?botId=bot&tab=items&itemId=item",
+      "/h/host/bots?botId=bot&itemId=item",
     );
   });
 });

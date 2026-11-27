@@ -31,10 +31,7 @@ export function buildBotsRoute(
   const params = new URLSearchParams();
   if (target?.botId) params.set("botId", target.botId);
   if (target?.roomId) params.set("roomId", target.roomId);
-  if (target?.itemId) {
-    params.set("tab", "items");
-    params.set("itemId", target.itemId);
-  }
+  if (target?.itemId) params.set("itemId", target.itemId);
   const query = params.toString();
   return `/h/${encodeURIComponent(serverId)}/bots${query ? `?${query}` : ""}`;
 }

@@ -42,7 +42,7 @@ function AllowedUser({
         loading={remove.isPending}
         disabled={remove.isPending}
       >
-        {t("bots.slack.removeUser")}
+        {t("bots.jad.slack.removeUser")}
       </Button>
       <SlackErrorNotice error={remove.error} />
     </View>
@@ -52,14 +52,14 @@ function ManifestDialog({ manifest, onClose }: { manifest: string; onClose: () =
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<Error | null>(null);
-  const header = useMemo(() => ({ title: t("bots.slack.createApp") }), [t]);
+  const header = useMemo(() => ({ title: t("bots.jad.slack.createApp") }), [t]);
   const copy = useCallback(async () => {
     try {
       await Clipboard.setStringAsync(manifest);
       setCopied(true);
       setError(null);
     } catch {
-      setError(new Error(t("bots.slack.copyFailed")));
+      setError(new Error(t("bots.jad.slack.copyFailed")));
     }
   }, [manifest, t]);
   const openSlack = useCallback(async () => {
@@ -67,7 +67,7 @@ function ManifestDialog({ manifest, onClose }: { manifest: string; onClose: () =
       await Linking.openURL("https://api.slack.com/apps?new_app=1");
       setError(null);
     } catch {
-      setError(new Error(t("bots.slack.openFailed")));
+      setError(new Error(t("bots.jad.slack.openFailed")));
     }
   }, [t]);
   return (
@@ -78,14 +78,14 @@ function ManifestDialog({ manifest, onClose }: { manifest: string; onClose: () =
             {manifest}
           </Text>
           <Button onPress={copy}>
-            {t(copied ? "bots.slack.copied" : "bots.slack.copyManifest")}
+            {t(copied ? "bots.jad.slack.copied" : "bots.jad.slack.copyManifest")}
           </Button>
           <Button variant="outline" onPress={openSlack}>
-            {t("bots.slack.openSlack")}
+            {t("bots.jad.slack.openSlack")}
           </Button>
           <SlackErrorNotice error={error} />
           <Button variant="ghost" onPress={onClose}>
-            {t("bots.close")}
+            {t("bots.jad.close")}
           </Button>
         </View>
       </ScrollView>
@@ -144,17 +144,17 @@ export function BotSlackSettings({ serverId, botId }: { serverId: string; botId:
   const busy = connect.isPending || disconnect.isPending;
   const data = status.data;
   return (
-    <Section title={t("bots.slack.title")}>
+    <Section title={t("bots.jad.slack.title")}>
       <QueryNotice query={status} />
       {data ? (
         <>
           <Text style={styles.text} testID="slack-status">
             {data.connected
-              ? t("bots.slack.connected", { workspace: data.workspace, bot: data.botName })
-              : t("bots.slack.disconnected")}
+              ? t("bots.jad.slack.connected", { workspace: data.workspace, bot: data.botName })
+              : t("bots.jad.slack.disconnected")}
           </Text>
           {!data.relayConnected ? (
-            <Text style={styles.muted}>{t("bots.slack.relayOffline")}</Text>
+            <Text style={styles.muted}>{t("bots.jad.slack.relayOffline")}</Text>
           ) : null}
           <Button
             variant="outline"
@@ -163,10 +163,10 @@ export function BotSlackSettings({ serverId, botId }: { serverId: string; botId:
             loading={create.isPending}
             testID="slack-create-app"
           >
-            {t("bots.slack.createApp")}
+            {t("bots.jad.slack.createApp")}
           </Button>
           <SlackErrorNotice error={create.error} />
-          <Field label={t("bots.slack.token")}>
+          <Field label={t("bots.jad.slack.token")}>
             <FormTextInput
               value={draft.botToken}
               initialValue={draft.botToken}
@@ -177,12 +177,12 @@ export function BotSlackSettings({ serverId, botId }: { serverId: string; botId:
               autoCapitalize="none"
               autoCorrect={false}
               size={compact ? "md" : "sm"}
-              accessibilityLabel={t("bots.slack.token")}
+              accessibilityLabel={t("bots.jad.slack.token")}
               testID="slack-token"
               editable={!busy}
             />
           </Field>
-          <Field label={t("bots.slack.secret")}>
+          <Field label={t("bots.jad.slack.secret")}>
             <FormTextInput
               value={draft.signingSecret}
               initialValue={draft.signingSecret}
@@ -193,7 +193,7 @@ export function BotSlackSettings({ serverId, botId }: { serverId: string; botId:
               autoCapitalize="none"
               autoCorrect={false}
               size={compact ? "md" : "sm"}
-              accessibilityLabel={t("bots.slack.secret")}
+              accessibilityLabel={t("bots.jad.slack.secret")}
               testID="slack-secret"
               editable={!busy}
             />
@@ -204,7 +204,7 @@ export function BotSlackSettings({ serverId, botId }: { serverId: string; botId:
             loading={connect.isPending}
             testID="slack-connect"
           >
-            {t("bots.slack.connect")}
+            {t("bots.jad.slack.connect")}
           </Button>
           <SlackErrorNotice error={connect.error} />
           {data.connected ? (
@@ -216,20 +216,20 @@ export function BotSlackSettings({ serverId, botId }: { serverId: string; botId:
                 disabled={!enabled || link.isPending || busy}
                 testID="slack-link"
               >
-                {t("bots.slack.linkAccount")}
+                {t("bots.jad.slack.linkAccount")}
               </Button>
               <SlackErrorNotice error={link.error} />
               {code && code.expiresAt_ms > Date.now() ? (
                 <Text selectable style={styles.text} testID="slack-link-code">
-                  {t("bots.slack.linkCode", {
+                  {t("bots.jad.slack.linkCode", {
                     code: code.code,
                     time: new Date(code.expiresAt_ms).toLocaleTimeString(),
                   })}
                 </Text>
               ) : null}
-              <Text style={styles.title}>{t("bots.slack.allowedUsers")}</Text>
+              <Text style={styles.title}>{t("bots.jad.slack.allowedUsers")}</Text>
               {data.allowedUsers.length === 0 ? (
-                <Text style={styles.muted}>{t("bots.slack.noUsers")}</Text>
+                <Text style={styles.muted}>{t("bots.jad.slack.noUsers")}</Text>
               ) : null}
               {data.allowedUsers.map((user) => (
                 <AllowedUser key={user.id} serverId={serverId} botId={botId} user={user} />
@@ -241,7 +241,7 @@ export function BotSlackSettings({ serverId, botId }: { serverId: string; botId:
                 disabled={!enabled || busy}
                 testID="slack-disconnect"
               >
-                {t("bots.slack.disconnect")}
+                {t("bots.jad.slack.disconnect")}
               </Button>
               <SlackErrorNotice error={disconnect.error} />
             </>
