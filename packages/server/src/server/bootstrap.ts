@@ -27,8 +27,9 @@ import { BotStorage } from "./bots/storage.js";
 import { BotsService } from "./bots/service.js";
 import type { BotTriggerSource } from "./bots/service.js";
 import { DaemonBotRuntime } from "./bots/daemon-runtime.js";
-import { LocalBotTriggers } from "./bots/triggers.js";
+import { LocalBotTriggers, countOwnOpenPullRequests } from "./bots/triggers.js";
 import { createBotAgentTools } from "./bots/agent-tools.js";
+import { isBotBackgroundRun } from "./bots/runtime.js";
 import { createRestartRecovery } from "./agent/restart-recovery/index.js";
 import { PROVIDER_BACKGROUND_REFRESH_INTERVAL_MS } from "./agent/provider-refresh-schedule.js";
 import { resolveJAgentDeskToolPolicy } from "./agent/jagentdesk-tool-policy.js";
@@ -1906,6 +1907,26 @@ export async function createJAgentDeskDaemon(
     storage: botStorage,
     createWorktree: createJAgentDeskWorktreeForTools,
     logger,
+    describeHost: async () => {
+      const [projects, workspaces] = await Promise.all([
+        projectRegistry.list(),
+        workspaceRegistry?.list() ?? Promise.resolve([]),
+      ]);
+      return {
+        projects: projects
+          .filter(
+            (project) => !project.archivedAt && !project.rootPath.startsWith(botStorage.botsRoot),
+          )
+          .map((project) => project.customName ?? project.displayName),
+        workspaces: workspaces
+          .filter((workspace) => !workspace.archivedAt)
+          .map((workspace) => ({
+            workspaceId: workspace.workspaceId,
+            title: workspace.title ?? workspace.displayName,
+          })),
+      };
+    },
+    openPullRequests: () => countOwnOpenPullRequests(),
     create: {
       agentManager,
       agentStorage,
@@ -1975,11 +1996,16 @@ export async function createJAgentDeskDaemon(
     builtinPlugins: pluginRuntime.builtin.forAgent(runtime.callerAgentId),
     builtinDaemon,
     callerAgentLabels: runtime.callerAgentLabels,
-    jagentdeskToolPolicy:
-      runtime.jagentdeskToolPolicy ??
-      (runtime.callerAgentId
-        ? agentManager.getJAgentDeskToolPolicy(runtime.callerAgentId)
-        : undefined),
+    jagentdeskToolPolicy: isBotBackgroundRun(
+      runtime.callerAgentId ? agentManager.getAgent(runtime.callerAgentId)?.labels : undefined,
+      runtime.callerAgentLabels,
+    )
+      ? // Look around and Tidy memory get no JAgentDesk tools at all (spec 37.2.6, ADR-0046).
+        { enabled: false }
+      : (runtime.jagentdeskToolPolicy ??
+        (runtime.callerAgentId
+          ? agentManager.getJAgentDeskToolPolicy(runtime.callerAgentId)
+          : undefined)),
     serverId,
     remoteFinishSubscriptions: () => {
       if (!remoteFinishSubscriptions) throw new Error("Remote finish observation unavailable");
