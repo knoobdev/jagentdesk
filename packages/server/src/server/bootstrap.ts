@@ -1989,6 +1989,9 @@ export async function createJAgentDeskDaemon(
     secrets: botsSecrets,
   });
   botsService.sharing = botsSharing;
+  // A bot's automations are core schedules (spec 37.2.6): the bots service runs them.
+  botsService.schedules = scheduleService;
+  scheduleService.setBotLauncher(botsService.scheduleLauncher());
   let botsRuntimeReady = false;
   await pluginRuntime.builtin.registerLifecycle("bots", {
     start: () => {

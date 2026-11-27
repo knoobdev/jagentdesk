@@ -44,11 +44,15 @@ export interface BotAgentSnapshot {
 }
 
 export interface BotBackgroundRun {
-  kind: "look_around" | "tidy_up";
+  kind: "look_around" | "tidy_up" | "automation";
   title: string;
   prompt: string;
-  /** `look-around`: reads only; `reply-only`: no tool at all (spec 37.2.6, ADR-0046). */
-  policy: "look-around" | "reply-only";
+  /**
+   * `look-around`: reads only; `reply-only`: no tool at all (spec 37.2.6, ADR-0046); `owner`: an
+   * automation run in the bot's permission mode, its permission cards go to the owner.
+   */
+  policy: "look-around" | "reply-only" | "owner";
+  /** 0: no limit; the run ends with its turn. */
   timeoutMs: number;
 }
 

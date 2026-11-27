@@ -70,6 +70,19 @@ export const ScheduleRunSchema = z.object({
 
 export type ScheduleRun = z.infer<typeof ScheduleRunSchema>;
 
+/**
+ * A bot's automation (spec 37.2.6): a core schedule owned by a bot. Each run goes through the bot
+ * launch path, into `runsIn`: "home" (the Home Chat), "chat" (the bot's chat `chatId`, else the Home
+ * Chat), or "new" (a new conversation in the bot's home). Strings, so a newer daemon's places parse.
+ */
+export const ScheduleBotSchema = z.object({
+  botId: z.string(),
+  runsIn: z.string(),
+  chatId: z.string().optional(),
+});
+
+export type ScheduleBot = z.infer<typeof ScheduleBotSchema>;
+
 export const StoredScheduleSchema = z.object({
   id: z.string(),
   name: z.string().nullable(),
@@ -85,6 +98,8 @@ export const StoredScheduleSchema = z.object({
   expiresAt: z.string().nullable(),
   maxRuns: z.number().int().positive().nullable(),
   runs: z.array(ScheduleRunSchema),
+  /** Absent for plain schedules and from daemons before v0.12.2. */
+  bot: ScheduleBotSchema.optional(),
 });
 
 export type StoredSchedule = z.infer<typeof StoredScheduleSchema>;
@@ -103,6 +118,8 @@ export interface CreateScheduleInput {
   maxRuns?: number | null;
   expiresAt?: string | null;
   runOnCreate?: boolean | null;
+  /** A bot's automation (spec 37.2.6). */
+  bot?: ScheduleBot;
 }
 
 export interface UpdateScheduleNewAgentConfig {

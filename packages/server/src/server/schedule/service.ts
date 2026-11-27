@@ -16,6 +16,8 @@ import { ScheduleStore } from "./store.js";
 import { computeNextRunAt, validateScheduleCadence } from "./cron.js";
 import {
   type CreateScheduleInput,
+  type ScheduleBot,
+  type ScheduleCadence,
   type ScheduleExecutionResult,
   type ScheduleRun,
   type ScheduleTarget,
@@ -50,6 +52,43 @@ export class ScheduleStateConflictError extends Error {
     super(message);
     this.name = "ScheduleStateConflictError";
   }
+}
+
+type NewAgentScheduleTarget = Extract<ScheduleTarget, { type: "new-agent" }>;
+
+/**
+ * Runs bot automations (spec 37.2.6) through the bot launch path, not as a plain agent run. The bots
+ * service sets it once it exists; until then, and while a bot is paused, its schedules wait.
+ */
+export interface ScheduleBotLauncher {
+  /** The target a bot schedule carries for clients that don't read `bot`: its provider in its home. */
+  target(botId: string): NewAgentScheduleTarget;
+  /** Why the bot's automations can't run now (paused, bots off), or null. */
+  blocked(botId: string): string | null;
+  run(schedule: StoredSchedule, runId: string): Promise<ScheduleExecutionResult>;
+  /** A bot schedule was written or deleted. */
+  changed(botId: string): void;
+}
+
+export interface BotScheduleInput {
+  bot: ScheduleBot;
+  name: string;
+  prompt: string;
+  cadence: ScheduleCadence;
+  enabled: boolean;
+  /** Keeps an id given elsewhere (a round-1 bot schedule); an existing schedule with it wins. */
+  id?: string;
+  /** The next run to keep (migration); computed from the cadence when absent. */
+  nextRunAt?: string | null;
+}
+
+export interface BotSchedulePatch {
+  name?: string;
+  prompt?: string;
+  cadence?: ScheduleCadence;
+  enabled?: boolean;
+  runsIn?: string;
+  chatId?: string | null;
 }
 
 function advanceNextRunAtPast(
@@ -318,6 +357,8 @@ export class ScheduleService {
 
   private recovering = false;
 
+  private botLauncher: ScheduleBotLauncher | null = null;
+
   private tickTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(options: ScheduleServiceOptions) {
@@ -326,7 +367,12 @@ export class ScheduleService {
     this.store = new ScheduleStore(
       join(options.jagentdeskHome, "schedules"),
       this.logger,
-      (schedule, change) => this.syncHeartbeat(schedule, change),
+      (schedule, change) => {
+        this.syncHeartbeat(schedule, change);
+        if (schedule.bot) {
+          this.botLauncher?.changed(schedule.bot.botId);
+        }
+      },
     );
     this.agentStorage = options.agentStorage;
     this.createAgent = options.createAgent;
@@ -364,6 +410,113 @@ export class ScheduleService {
     if (this.tickTimer) {
       clearInterval(this.tickTimer);
       this.tickTimer = null;
+    }
+  }
+
+  setBotLauncher(launcher: ScheduleBotLauncher): void {
+    this.botLauncher = launcher;
+  }
+
+  private requireBotLauncher(): ScheduleBotLauncher {
+    if (!this.botLauncher) {
+      throw new ScheduleStateConflictError("Bots are not running on this host");
+    }
+    return this.botLauncher;
+  }
+
+  /** Why a bot schedule can't run now; null for plain schedules and runnable bots. */
+  botBlocked(schedule: StoredSchedule): string | null {
+    if (!schedule.bot) {
+      return null;
+    }
+    if (!this.botLauncher) {
+      return "Bots are not running on this host";
+    }
+    return this.botLauncher.blocked(schedule.bot.botId);
+  }
+
+  /** A bot's automation (spec 37.2.6); disabled ones are stored paused. */
+  async createForBot(input: BotScheduleInput): Promise<StoredSchedule> {
+    const prompt = normalizePrompt(input.prompt);
+    validateScheduleCadence(input.cadence);
+    const now = this.now();
+    const nextRunAt = input.enabled
+      ? (input.nextRunAt ?? computeNextRunAt(input.cadence, now).toISOString())
+      : null;
+    const record: Omit<StoredSchedule, "id"> = {
+      name: trimOptionalName(input.name),
+      prompt,
+      cadence: input.cadence,
+      target: this.requireBotLauncher().target(input.bot.botId),
+      status: input.enabled ? "active" : "paused",
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+      nextRunAt,
+      lastRunAt: null,
+      pausedAt: input.enabled ? null : now.toISOString(),
+      expiresAt: null,
+      maxRuns: null,
+      runs: [],
+      bot: input.bot,
+    };
+    return input.id ? this.store.insert({ ...record, id: input.id }) : this.store.create(record);
+  }
+
+  async listForBot(botId: string): Promise<StoredSchedule[]> {
+    return (await this.store.list()).filter((schedule) => schedule.bot?.botId === botId);
+  }
+
+  /** The bot's schedule, or not found when it belongs to someone else. */
+  async inspectForBot(botId: string, id: string): Promise<StoredSchedule> {
+    const schedule = await this.inspect(id);
+    if (schedule.bot?.botId !== botId) {
+      throw new ScheduleNotFoundError(id);
+    }
+    return schedule;
+  }
+
+  async updateForBot(botId: string, id: string, patch: BotSchedulePatch): Promise<StoredSchedule> {
+    await this.inspectForBot(botId, id);
+    let next = await this.update({
+      id,
+      ...(patch.name !== undefined ? { name: patch.name } : {}),
+      ...(patch.prompt !== undefined ? { prompt: patch.prompt } : {}),
+      ...(patch.cadence !== undefined ? { cadence: patch.cadence } : {}),
+    });
+    if (patch.runsIn !== undefined || patch.chatId !== undefined) {
+      const updated = await this.store.update(id, (schedule) => {
+        const bot = schedule.bot ?? { botId, runsIn: "home" };
+        const runsIn = patch.runsIn ?? bot.runsIn;
+        const chatId = patch.chatId === undefined ? bot.chatId : (patch.chatId ?? undefined);
+        return {
+          ...schedule,
+          bot: { botId: bot.botId, runsIn, ...(chatId ? { chatId } : {}) },
+          updatedAt: this.now().toISOString(),
+        };
+      });
+      next = requireSchedule(updated, id);
+    }
+    if (patch.enabled === true && next.status === "paused") {
+      next = await this.resume(id);
+    } else if (patch.enabled === false && next.status === "active") {
+      next = await this.pause(id);
+    }
+    return next;
+  }
+
+  async deleteForBot(botId: string): Promise<number> {
+    const schedules = await this.listForBot(botId);
+    for (const schedule of schedules) {
+      await this.store.delete(schedule.id);
+    }
+    return schedules.length;
+  }
+
+  /** The bot's provider or home changed: its schedules carry the new target. */
+  async retargetBot(botId: string): Promise<void> {
+    const target = this.requireBotLauncher().target(botId);
+    for (const schedule of await this.listForBot(botId)) {
+      await this.store.update(schedule.id, (current) => ({ ...current, target }));
     }
   }
 
@@ -644,6 +797,27 @@ export class ScheduleService {
   }
 
   async runOnce(id: string): Promise<StoredSchedule> {
+    const schedule = await this.assertRunnableNow(id);
+    await this.runSchedule(schedule, this.now(), { manual: true });
+    return this.inspect(id);
+  }
+
+  /** Run now without waiting for the run to end (a bot's "Run now"); resolves once it is recorded. */
+  async startRunOnce(id: string): Promise<void> {
+    const schedule = await this.assertRunnableNow(id);
+    let recorded: () => void = () => {};
+    const started = new Promise<void>((resolve) => {
+      recorded = resolve;
+    });
+    void this.runSchedule(schedule, this.now(), { manual: true, onRecorded: recorded })
+      .catch((error) => {
+        this.logger.error({ err: error, scheduleId: id }, "Manual schedule run failed");
+      })
+      .finally(recorded);
+    await started;
+  }
+
+  private async assertRunnableNow(id: string): Promise<StoredSchedule> {
     const schedule = await this.inspect(id);
     if (schedule.status === "completed") {
       throw new ScheduleStateConflictError(`Schedule ${id} is already completed`);
@@ -651,8 +825,11 @@ export class ScheduleService {
     if (this.runningScheduleIds.has(id)) {
       throw new ScheduleStateConflictError(`Schedule ${id} is already running`);
     }
-    await this.runSchedule(schedule, this.now(), { manual: true });
-    return this.inspect(id);
+    const blocked = this.botBlocked(schedule);
+    if (blocked) {
+      throw new ScheduleStateConflictError(blocked);
+    }
+    return schedule;
   }
 
   async tick(): Promise<void> {
@@ -663,6 +840,10 @@ export class ScheduleService {
         continue;
       }
       if (this.runningScheduleIds.has(schedule.id)) {
+        continue;
+      }
+      // A paused bot runs nothing (spec 37.3.4); its due slot waits and runs once on resume.
+      if (this.botBlocked(schedule)) {
         continue;
       }
       if (shouldCompleteSchedule(schedule, now)) {
@@ -805,7 +986,7 @@ export class ScheduleService {
   private async runSchedule(
     schedule: StoredSchedule,
     now: Date,
-    options?: { manual?: boolean },
+    options?: { manual?: boolean; onRecorded?: () => void },
   ): Promise<void> {
     const manual = options?.manual === true;
     // Reserve before store I/O; persisted history cannot prove a run is still alive.
@@ -826,6 +1007,7 @@ export class ScheduleService {
           error: null,
         };
         scheduleWithRun = await this.appendRunningRun(schedule.id, runningRun);
+        options?.onRecorded?.();
       } else {
         const claimed = await this.claimDueRun(schedule.id, now);
         if (!claimed) {
@@ -1018,6 +1200,9 @@ export class ScheduleService {
     schedule: StoredSchedule,
     runId: string,
   ): Promise<ScheduleExecutionResult> {
+    if (schedule.bot) {
+      return this.requireBotLauncher().run(schedule, runId);
+    }
     if (schedule.target.type === "agent") {
       const wrappedPrompt = formatSystemNotificationPrompt(buildScheduleFireBody(schedule, runId));
       const record = await this.agentStorage.get(schedule.target.agentId);

@@ -7,7 +7,7 @@ import { lstat, open, readdir, readFile, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { parseDocument } from "yaml";
 import { z } from "zod";
-import type { Bot } from "@jagentdesk/protocol/bots/types";
+import type { Bot, BotSchedule } from "@jagentdesk/protocol/bots/types";
 import type { BotShareLeftOut } from "@jagentdesk/protocol/bots/share-schemas";
 import {
   BOT_PACKAGE_AVATAR_PATH,
@@ -245,6 +245,8 @@ export async function readBotShareable(input: {
   bot: Bot;
   home: string;
   connectors: readonly BotPackageConnector[];
+  /** The bot's automations: its core schedules (spec 37.2.6). */
+  schedules: readonly BotSchedule[];
 }): Promise<BotShareable> {
   const leftOut: BotShareLeftOut[] = [];
   const home: Home = { path: input.home, real: await realpath(input.home) };
@@ -262,7 +264,7 @@ export async function readBotShareable(input: {
     purpose: landingLine(soulDescription(soul), BOT_PACKAGE_PURPOSE_MAX),
     ...avatar,
     skills,
-    schedules: input.bot.schedules.map((schedule, index) => ({
+    schedules: input.schedules.map((schedule, index) => ({
       scheduleId: schedule.id,
       id: `s${index + 1}`,
       name: schedule.name,

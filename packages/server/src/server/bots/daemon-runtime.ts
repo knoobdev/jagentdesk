@@ -146,8 +146,10 @@ export class DaemonBotRuntime implements BotRuntime {
         if (!done && !error && !ask && !resolved) return;
         const id = event.agentId;
         const run = this.background.get(id);
-        if (run) {
-          if (ask) {
+        // An automation run asks its owner like any chat of the bot (spec 37.3.3).
+        const owned = run?.policy === "owner" && (ask || resolved);
+        if (run && !owned) {
+          if (ask && run.policy !== "owner") {
             // ADR-0046: the daemon answers a background run's tools; nobody sees a card.
             const decision = backgroundToolDecision(
               run.policy,
@@ -496,12 +498,16 @@ export class DaemonBotRuntime implements BotRuntime {
       await this.cancel(child.id);
     if (manager.getAgent(agentId)) await manager.cancelAgentRun(agentId);
   }
-  /** A visible conversation in the bot's home, held by the background gate (spec 37.2.6). */
+  /**
+   * A visible conversation in the bot's home (spec 37.2.6): Look around and Tidy memory held by the
+   * background gate, an automation run in the bot's own permission mode.
+   */
   async runBackground(
     bot: Bot,
     home: string,
     run: BotBackgroundRun,
   ): Promise<{ agentId: string; done: Promise<string> }> {
+    const own = run.policy === "owner";
     const modes = await this.deps.providerSnapshotManager.listModes({
       provider: bot.provider,
       cwd: home,
@@ -519,7 +525,10 @@ export class DaemonBotRuntime implements BotRuntime {
       )
         attended.push(mode.id);
     }
-    const mode = ["read-only", "default"].find((id) => attended.includes(id)) ?? attended[0];
+    const gateMode = ["read-only", "default"].find((id) => attended.includes(id)) ?? attended[0];
+    // An automation run takes the bot's mode (its Home Chat's); a gated run the attended one.
+    let mode: string | undefined = gateMode;
+    if (own) mode = bot.unattended ? undefined : bot.modeId;
     const workspaceId = await this.deps.create.ensureWorkspaceForCreate!(home);
     let agentId = "";
     let settle: { resolve: (text: string) => void; reject: (error: Error) => void } | undefined;
@@ -530,14 +539,17 @@ export class DaemonBotRuntime implements BotRuntime {
       agentId = id;
       if (settle) this.background.set(id, { policy: run.policy, ...settle });
     };
-    const timer = setTimeout(() => {
-      settle?.reject(new Error(`${run.title} timed out`));
-      if (agentId) void this.cancel(agentId).catch(() => {});
-    }, run.timeoutMs);
-    timer.unref();
+    const timer =
+      run.timeoutMs > 0
+        ? setTimeout(() => {
+            settle?.reject(new Error(`${run.title} timed out`));
+            if (agentId) void this.cancel(agentId).catch(() => {});
+          }, run.timeoutMs)
+        : undefined;
+    timer?.unref();
     void done
       .finally(() => {
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
         if (agentId) this.background.delete(agentId);
       })
       .catch(() => {});
@@ -549,7 +561,7 @@ export class DaemonBotRuntime implements BotRuntime {
       title: run.title,
       thinking: bot.thinkingOptionId,
       mode,
-      unattended: false,
+      unattended: own ? bot.unattended : false,
       background: true,
       notifyOnFinish: false,
       initialPrompt: run.prompt,

@@ -22,6 +22,7 @@ import {
   type BotItem,
   type BotItemPatch,
   type BotMessage,
+  type BotSchedule,
   type BotScheduleInput,
 } from "@jagentdesk/protocol/bots/types";
 import type {
@@ -44,10 +45,24 @@ import {
   botLookAround,
   lookAroundSupported,
 } from "@jagentdesk/protocol/bots/rules";
-import { computeNextRunAt, validateScheduleCadence } from "../schedule/cron.js";
+import type { ScheduleExecutionResult, StoredSchedule } from "@jagentdesk/protocol/schedule/types";
+import {
+  ScheduleNotFoundError,
+  ScheduleStateConflictError,
+  ScheduleTargetGoneError,
+  type ScheduleBotLauncher,
+} from "../schedule/service.js";
+import {
+  botRunsIn,
+  parseBotRunsIn,
+  runAgentId,
+  scheduleAutomationRow,
+  toBotSchedule,
+  type BotScheduleService,
+} from "./schedules.js";
 import type { PushNotificationSender } from "../push/notifications.js";
 import { BotStorage, SAME_AS_CHATS, botIdentity } from "./storage.js";
-import { type BotRuntime, type BotRuntimeEvent } from "./runtime.js";
+import { BOT_ROLE_LABEL, type BotRuntime, type BotRuntimeEvent } from "./runtime.js";
 import {
   assertReviewAllowsDone,
   assertSnooze,
@@ -221,6 +236,18 @@ export class BotsService {
   hooks?: BotsHookConnectors;
   /** Share by link (spec 37.13). */
   sharing?: BotsSharing;
+  /** Core JAgentDesk schedules, where the bot's automations live (spec 37.2.6). */
+  schedules?: BotScheduleService;
+  /** Automation runs in the Home Chat, by the wake message that carries the prompt. */
+  private readonly homeRuns = new Map<
+    string,
+    { botId: string; resolve: (text: string) => void; reject: (error: Error) => void }
+  >();
+  /** Automation runs in one of the bot's chats, by that chat's agent id. */
+  private readonly chatRuns = new Map<
+    string,
+    { botId: string; resolve: (text: string) => void; reject: (error: Error) => void }
+  >();
   readonly memory: BotMemory;
   readonly allowedSources: BotAllowedSource[] = [];
   private readonly replyListeners = new Set<(request: BotMessage, reply: BotMessage) => void>();
@@ -370,6 +397,8 @@ export class BotsService {
     }
     const saved = this.storage.saveBot(next);
     this.changed(id);
+    if (rest.provider !== undefined || rest.model !== undefined)
+      await this.schedules?.retargetBot(id);
     return saved;
   }
 
@@ -395,6 +424,8 @@ export class BotsService {
     for (const item of this.storage.items(id)) await this.cancel(id, item.id, "Bot deleted");
     if (bot.agentId) await this.runtime.cancel(bot.agentId);
     forgetEventAutomations(this.storage, id);
+    await this.schedules?.deleteForBot(id);
+    this.endRuns(id, new Error(`${bot.name} was deleted`));
     this.storage.deleteBot(id);
     for (const room of rooms)
       this.emit({ type: "bots.room.changed", payload: { roomId: room.id } });
@@ -418,6 +449,44 @@ export class BotsService {
     this.changed(id);
     this.activity(id, ["chats"]);
     return saved;
+  }
+
+  /**
+   * Round-1 schedules (spec 37.2.3) → the bot's automations as core schedules with the same id,
+   * cron, prompt, on/off and next run. Idempotent: a schedule already there by id is kept, and the
+   * record's list is cleared only after every one is in.
+   */
+  private async migrateSchedules(bot: Bot): Promise<void> {
+    if (bot.schedules.length === 0 || !this.schedules) return;
+    try {
+      for (const schedule of bot.schedules)
+        await this.schedules.createForBot({
+          id: schedule.id,
+          bot: { botId: bot.id, runsIn: "home" },
+          name: schedule.name,
+          prompt: schedule.prompt,
+          cadence: {
+            type: "cron",
+            expression: schedule.cron,
+            ...(schedule.timezone ? { timezone: schedule.timezone } : {}),
+          },
+          enabled: schedule.enabled,
+          nextRunAt: new Date(schedule.nextRunAt_ms).toISOString(),
+        });
+    } catch (err) {
+      this.options.logger.error(
+        { err, botId: bot.id },
+        "Moving the bot's schedules to core schedules failed; they stay on its record",
+      );
+      return;
+    }
+    this.storage.saveBot({ ...this.storage.bot(bot.id), schedules: [] });
+    this.options.logger.info(
+      { botId: bot.id, count: bot.schedules.length },
+      "Moved the bot's schedules to core schedules",
+    );
+    this.changed(bot.id);
+    this.activity(bot.id, ["automations"]);
   }
 
   /**
@@ -960,41 +1029,284 @@ export class BotsService {
     return updated;
   }
 
-  // ── Round-1 schedules, kept as the bot's automations ─────────────────
+  // ── Automations: core schedules carrying the bot (spec 37.2.6) ─────────
 
-  saveSchedule(botId: string, raw: BotScheduleInput, scheduleId?: string) {
-    const input = BotScheduleInputSchema.parse(raw);
-    const bot = this.storage.bot(botId);
-    if (scheduleId && !bot.schedules.some((s) => s.id === scheduleId))
-      throw new BotsError("not_found", "Schedule not found");
-    const cadence = { type: "cron" as const, expression: input.cron, timezone: input.timezone };
-    validateScheduleCadence(cadence);
-    const schedule = {
-      ...input,
-      id: scheduleId ?? randomUUID(),
-      nextRunAt_ms: computeNextRunAt(cadence, new Date(this.now())).getTime(),
-    };
-    this.storage.saveBot({
-      ...bot,
-      schedules: [...bot.schedules.filter((s) => s.id !== schedule.id), schedule],
-    });
-    this.changed(botId);
-    this.activity(botId, ["automations"]);
-    return schedule;
+  private requireSchedules(): BotScheduleService {
+    if (!this.schedules)
+      throw new BotsError("unavailable", "Schedules are not running on this host");
+    return this.schedules;
   }
-  deleteSchedule(botId: string, scheduleId: string): void {
+
+  /** Created or changed only through the bot's chat (its tools); `bots.schedules.save` for round-1 apps. */
+  async saveSchedule(
+    botId: string,
+    raw: BotScheduleInput,
+    scheduleId?: string,
+  ): Promise<BotSchedule> {
+    const input = BotScheduleInputSchema.parse(raw);
+    this.storage.bot(botId);
+    const schedules = this.requireSchedules();
+    const place = parseBotRunsIn(input.runsIn, input.chatId);
+    const cadence = {
+      type: "cron" as const,
+      expression: input.cron,
+      ...(input.timezone ? { timezone: input.timezone } : {}),
+    };
+    try {
+      const saved = scheduleId
+        ? await schedules.updateForBot(botId, scheduleId, {
+            name: input.name,
+            prompt: input.prompt,
+            cadence,
+            enabled: input.enabled,
+            ...(place ? { runsIn: place.runsIn, chatId: place.chatId ?? null } : {}),
+          })
+        : await schedules.createForBot({
+            bot: { botId, ...(place ?? { runsIn: "home" }) },
+            name: input.name,
+            prompt: input.prompt,
+            cadence,
+            enabled: input.enabled,
+          });
+      return toBotSchedule(saved);
+    } catch (err) {
+      if (err instanceof ScheduleNotFoundError)
+        throw new BotsError("not_found", "Schedule not found");
+      throw err;
+    }
+  }
+  async schedulesOf(botId: string): Promise<BotSchedule[]> {
+    this.storage.bot(botId);
+    if (!this.schedules) return [];
+    return (await this.schedules.listForBot(botId)).map(toBotSchedule);
+  }
+  async deleteSchedule(botId: string, scheduleId: string): Promise<void> {
     if (isEventAutomationId(scheduleId)) {
       this.storage.bot(botId);
       deleteEventAutomation(this.storage, botId, scheduleId);
       this.activity(botId, ["automations"]);
       return;
     }
-    const bot = this.storage.bot(botId);
-    if (!bot.schedules.some((s) => s.id === scheduleId))
-      throw new BotsError("not_found", "Schedule not found");
-    this.storage.saveBot({ ...bot, schedules: bot.schedules.filter((s) => s.id !== scheduleId) });
-    this.changed(botId);
-    this.activity(botId, ["automations"]);
+    this.storage.bot(botId);
+    const schedules = this.requireSchedules();
+    try {
+      await schedules.inspectForBot(botId, scheduleId);
+    } catch (err) {
+      if (err instanceof ScheduleNotFoundError)
+        throw new BotsError("not_found", "Schedule not found");
+      throw err;
+    }
+    await schedules.delete(scheduleId);
+  }
+
+  /** What the schedule service needs to run the bot's automations. */
+  scheduleLauncher(): ScheduleBotLauncher {
+    return {
+      target: (botId) => {
+        const bot = this.storage.bot(botId);
+        return {
+          type: "new-agent",
+          config: {
+            provider: bot.provider,
+            model: bot.model,
+            cwd: this.storage.botHome(bot),
+            title: bot.name,
+            archiveOnFinish: false,
+          },
+        };
+      },
+      blocked: (botId) => {
+        const bot = this.storage.listBots().find((entry) => entry.id === botId);
+        if (!bot) return null;
+        if (!this.enabled) return "Bots are turned off";
+        return bot.paused ? `${bot.name} is paused` : null;
+      },
+      run: (schedule, runId) => this.runScheduledAutomation(schedule, runId),
+      changed: (botId) => {
+        if (this.storage.listBots().some((entry) => entry.id === botId))
+          this.activity(botId, ["automations"]);
+      },
+    };
+  }
+
+  /**
+   * One automation run through the bot launch path (`main/automations/bot-automation-launch.ts:163-221`):
+   * a Home Chat note while it runs, the prompt in the Home Chat, the chosen chat or a new
+   * conversation in the home, and a reply ending with BOT_QUIET_MARKER posts nothing.
+   */
+  private async runScheduledAutomation(
+    schedule: StoredSchedule,
+    runId: string,
+  ): Promise<ScheduleExecutionResult> {
+    const botId = schedule.bot!.botId;
+    const bot = this.storage.listBots().find((entry) => entry.id === botId);
+    if (!bot) throw new ScheduleTargetGoneError(`Bot ${botId} no longer exists`);
+    if (bot.paused) throw new Error(`${bot.name} is paused`);
+    const name = schedule.name ?? schedule.prompt.slice(0, 100);
+    const runsIn = botRunsIn(schedule.bot?.runsIn);
+    const chatId = schedule.bot?.chatId;
+    if (runsIn === "new") return this.runInNewConversation(bot, name, schedule.prompt, runId);
+    if (runsIn === "chat" && chatId && this.isOpenChat(bot, chatId))
+      return this.runInChat(bot, name, schedule.prompt, chatId, runId);
+    // The chosen chat is gone: the Home Chat takes it (Orca `homeIfGone`).
+    return this.runInHome(bot, name, schedule.prompt, `schedule:${schedule.id}:${runId}`);
+  }
+
+  private isOpenChat(bot: Bot, chatId: string): boolean {
+    return this.runtime
+      .agents(bot)
+      .some(
+        (agent) =>
+          agent.id === chatId &&
+          agent.id !== bot.agentId &&
+          agent.labels[BOT_ROLE_LABEL] === "side",
+      );
+  }
+
+  /** Runs `prompt` as a Home Chat turn and settles with its reply. */
+  private async runInHome(
+    bot: Bot,
+    name: string,
+    prompt: string,
+    key: string,
+    source = "schedule",
+  ): Promise<ScheduleExecutionResult> {
+    const noteId = `automation:${key}`;
+    const reply = new Promise<string>((resolve, reject) => {
+      this.homeRuns.set(`${bot.id}:${key}`, { botId: bot.id, resolve, reject });
+    });
+    if (!this.wake(bot.id, prompt, source, key)) {
+      this.homeRuns.delete(`${bot.id}:${key}`);
+      throw new Error("This run was already queued");
+    }
+    this.note(bot.id, name, { kind: "automation", state: "running" }, noteId);
+    try {
+      const text = await reply;
+      const agentId = this.storage.bot(bot.id).agentId;
+      this.note(
+        bot.id,
+        name,
+        { kind: "automation", state: "done", ...(agentId ? { runAgentId: agentId } : {}) },
+        noteId,
+      );
+      return { agentId: runAgentId(agentId), output: quiet(text) ? null : text };
+    } catch (err) {
+      this.automationFailed(bot, name, noteId, this.storage.bot(bot.id).agentId);
+      throw err;
+    }
+  }
+
+  /** A new conversation in the bot's home: a Chats row "Automation run" (spec 37.4.6). */
+  private async runInNewConversation(
+    bot: Bot,
+    name: string,
+    prompt: string,
+    runId: string,
+  ): Promise<ScheduleExecutionResult> {
+    const noteId = `automation:${runId}`;
+    this.note(bot.id, name, { kind: "automation", state: "running" }, noteId);
+    let agentId: string | undefined;
+    try {
+      const run = await this.runtime.runBackground(bot, this.storage.botHome(bot), {
+        kind: "automation",
+        title: name,
+        prompt,
+        policy: "owner",
+        timeoutMs: 0,
+      });
+      agentId = run.agentId;
+      this.note(
+        bot.id,
+        name,
+        { kind: "automation", state: "running", runAgentId: agentId },
+        noteId,
+      );
+      this.activity(bot.id, ["chats"]);
+      const text = await run.done;
+      // `bot-run-results.ts:194-202`: the result comes back to the Home Chat unless it is quiet.
+      if (!quiet(text) && text.trim()) {
+        const message: BotMessage = {
+          id: `automation-result:${bot.id}:${runId}`,
+          botId: bot.id,
+          role: "assistant",
+          text: `Result of "${name}":\n\n${text.trim()}`,
+          source: "automation",
+          createdAt_ms: this.now(),
+        };
+        if (this.storage.append(message))
+          this.emit({ type: "bots.chat.message", payload: { message } });
+      }
+      this.note(bot.id, name, { kind: "automation", state: "done", runAgentId: agentId }, noteId);
+      this.activity(bot.id, ["chats"]);
+      return { agentId: runAgentId(agentId), output: quiet(text) ? null : text };
+    } catch (err) {
+      this.automationFailed(bot, name, noteId, agentId);
+      this.activity(bot.id, ["chats"]);
+      throw err;
+    }
+  }
+
+  /** One of the bot's chats takes the prompt; its reply stays in that chat. */
+  private async runInChat(
+    bot: Bot,
+    name: string,
+    prompt: string,
+    chatId: string,
+    runId: string,
+  ): Promise<ScheduleExecutionResult> {
+    const noteId = `automation:${runId}`;
+    this.note(bot.id, name, { kind: "automation", state: "running", runAgentId: chatId }, noteId);
+    try {
+      if (this.chatRuns.has(chatId)) throw new Error("That chat is already running an automation");
+      const reply = new Promise<string>((resolve, reject) => {
+        this.chatRuns.set(chatId, { botId: bot.id, resolve, reject });
+      });
+      try {
+        await this.runtime.send(chatId, `[schedule]\n${prompt}`);
+      } catch (err) {
+        this.chatRuns.delete(chatId);
+        throw err;
+      }
+      const text = await reply;
+      this.note(bot.id, name, { kind: "automation", state: "done", runAgentId: chatId }, noteId);
+      return { agentId: runAgentId(chatId), output: quiet(text) ? null : text };
+    } catch (err) {
+      this.automationFailed(bot, name, noteId, chatId);
+      throw err;
+    }
+  }
+
+  private automationFailed(
+    bot: Bot,
+    name: string,
+    noteId: string,
+    agentId: string | undefined,
+  ): void {
+    this.note(
+      bot.id,
+      name,
+      { kind: "automation", state: "failed", ...(agentId ? { runAgentId: agentId } : {}) },
+      noteId,
+    );
+    this.sendPush(
+      this.storage.listBots().find((entry) => entry.id === bot.id) ?? bot,
+      "couldNotFinish",
+      {
+        title: `${bot.name} couldn't finish`,
+        body: name,
+        data: { type: "bot_automation_failed", botId: bot.id },
+      },
+    );
+  }
+
+  /** Runs waiting on a bot's turn end now (bot deleted, bots stopped). */
+  private endRuns(botId: string | null, error: Error): void {
+    for (const runs of [this.homeRuns, this.chatRuns])
+      for (const [key, run] of runs) {
+        if (botId !== null && run.botId !== botId) continue;
+        runs.delete(key);
+        run.reject(error);
+      }
   }
 
   // ── Event automations (spec 37.2.6): GitHub, GitLab and Telegram events ──
@@ -1025,13 +1337,19 @@ export class BotsService {
     const bot = this.storage.listBots().find((entry) => entry.id === event.botId);
     if (!bot || bot.paused) return;
     for (const automation of matchingEventAutomations(this.storage, event)) {
-      const queued = this.wake(
-        bot.id,
+      // The same launch path as a scheduled automation: a Home Chat note while it runs.
+      const key = `event-automation:${automation.id}:${event.key}`;
+      if (this.storage.message(`${bot.id}:${key}`)) continue;
+      // Not one of `jobs`: it lasts as long as the bot's turn, which `settled()` doesn't wait for.
+      void this.runInHome(
+        bot,
+        automation.name,
         eventAutomationTurn(automation, event),
+        key,
         "automation",
-        `event-automation:${automation.id}:${event.key}`,
+      ).catch((err) =>
+        this.options.logger.warn({ err, botId: bot.id }, "Event automation run failed"),
       );
-      if (queued) this.note(bot.id, automation.name, { kind: "automation", state: "done" });
     }
   }
 
@@ -1139,6 +1457,12 @@ export class BotsService {
       if (owner) this.activity(owner.id, ["needs_you"]);
       return;
     }
+    const chatRun = this.chatRuns.get(event.agentId);
+    if (chatRun && (event.kind === "done" || event.kind === "error")) {
+      this.chatRuns.delete(event.agentId);
+      if (event.kind === "error") chatRun.reject(new Error(event.text || "The chat's turn failed"));
+      else chatRun.resolve(event.text);
+    }
     const bot = bots.find((b) => b.agentId === event.agentId);
     if (bot) {
       if (event.kind === "ask") this.activity(bot.id, ["needs_you"]);
@@ -1168,6 +1492,12 @@ export class BotsService {
   private async homeTurnEnded(bot: Bot, event: BotRuntimeEvent): Promise<void> {
     const active = this.storage.state(`active:${bot.id}`, BotMessageSchema.nullable());
     if (!quiet(event.text)) this.postReply(bot, event, active);
+    const run = active ? this.homeRuns.get(active.id) : undefined;
+    if (run && active) {
+      this.homeRuns.delete(active.id);
+      if (event.kind === "error") run.reject(new Error(event.text || "The bot's turn failed"));
+      else run.resolve(event.text);
+    }
     // First run ends with the owner's first turn (spec 37.4.2).
     if (bot.firstRun && active?.source === "chat") {
       this.storage.saveBot({ ...this.storage.bot(bot.id), firstRun: false });
@@ -1907,24 +2237,19 @@ export class BotsService {
     });
   }
 
-  automations(botId: string): { automations: BotAutomation[]; total: number } {
+  async automations(botId: string): Promise<{ automations: BotAutomation[]; total: number }> {
     const bot = this.storage.bot(botId);
     const setting = botLookAround(bot);
-    const running = new Set(
-      bot.schedules
-        .filter((s) => this.storage.state(`schedule-running:${s.id}`, z.boolean()))
-        .map((s) => s.id),
-    );
+    const schedules = (await this.schedules?.listForBot(botId)) ?? [];
     const automations = automationRows({
       bot,
       items: this.storage.items(botId),
       runs: { look: this.lookState(botId), tidy: this.tidyState(botId) },
       nextLookAt: nextLookAt(setting, this.now()),
       nextTidyAt: nextTidyAt(this.now()),
-      runningSchedules: running,
+      schedules: schedules.map(scheduleAutomationRow),
     });
-    const events = listEventAutomations(this.storage, botId);
-    for (const entry of events)
+    for (const entry of listEventAutomations(this.storage, botId))
       automations.push({
         id: entry.id,
         kind: "schedule",
@@ -1933,7 +2258,8 @@ export class BotsService {
         enabled: entry.enabled,
         event: { source: entry.source, event: entry.event },
       });
-    return { automations, total: bot.schedules.length + events.length };
+    // "All {{count}} automations" opens Schedules filtered by the bot: its core schedules.
+    return { automations, total: schedules.length };
   }
 
   async runAutomationNow(botId: string, automationId: string): Promise<boolean> {
@@ -1943,9 +2269,17 @@ export class BotsService {
       throw new BotsError("invalid_argument", "An event automation runs when its event happens.");
     const bot = this.storage.bot(botId);
     if (bot.paused) throw new BotsError("paused", "Turn the bot on to run its automations.");
-    const schedule = bot.schedules.find((s) => s.id === automationId);
-    if (!schedule) throw new BotsError("not_found", "Automation not found");
-    this.runSchedule(bot, schedule, `manual:${this.now()}`);
+    const schedules = this.requireSchedules();
+    try {
+      await schedules.inspectForBot(botId, automationId);
+      await schedules.startRunOnce(automationId);
+    } catch (err) {
+      if (err instanceof ScheduleNotFoundError)
+        throw new BotsError("not_found", "Automation not found");
+      if (err instanceof ScheduleStateConflictError)
+        throw new BotsError("already_running", err.message);
+      throw err;
+    }
     return true;
   }
 
@@ -2041,7 +2375,7 @@ export class BotsService {
       if (text) await writeHomeFile(home, join("skills", skill, "SKILL.md"), text);
     }
     for (const schedule of template.schedules) {
-      this.saveSchedule(bot.id, {
+      await this.saveSchedule(bot.id, {
         name: `${template.name}: ${schedule.what}`,
         cron: schedule.rrule,
         prompt: schedule.prompt,
@@ -2152,32 +2486,6 @@ export class BotsService {
 
   // ── Timers ───────────────────────────────────────────────────────────────
 
-  private runSchedule(entry: Bot, schedule: Bot["schedules"][number], key: string): void {
-    this.wake(entry.id, schedule.prompt, "schedule", `schedule:${schedule.id}:${key}`);
-    this.note(entry.id, schedule.name, { kind: "automation", state: "done" });
-  }
-
-  private processSchedules(entry: Bot, now: number): void {
-    for (const schedule of entry.schedules) {
-      if (!schedule.enabled || schedule.nextRunAt_ms > now) continue;
-      this.storage.transaction(() => {
-        this.runSchedule(entry, schedule, String(schedule.nextRunAt_ms));
-        const current = this.storage.bot(entry.id);
-        const nextRunAt_ms = computeNextRunAt(
-          { type: "cron", expression: schedule.cron, timezone: schedule.timezone },
-          new Date(now),
-        ).getTime();
-        this.storage.saveBot({
-          ...current,
-          schedules: current.schedules.map((s) =>
-            s.id === schedule.id ? Object.assign({}, s, { nextRunAt_ms }) : s,
-          ),
-        });
-      });
-      this.activity(entry.id, ["automations"]);
-    }
-  }
-
   private processBackground(entry: Bot, now: number): void {
     if (!lookAroundSupported(entry.provider) || now - this.awakeSince < LOOK_AROUND_LIMITS.awakeMs)
       return;
@@ -2275,7 +2583,6 @@ export class BotsService {
           if (last) this.storage.setState(`first-chat:${entry.id}`, last);
         }
         this.launch(this.watchHomeFiles(entry));
-        this.processSchedules(entry, now);
         this.processWaits(entry, now);
         this.processBackground(entry, now);
         this.launch(this.drain(entry.id));
@@ -2294,7 +2601,10 @@ export class BotsService {
     this.awakeSince = this.now();
     if (firstStart) {
       for (const bot of this.storage.listBots()) {
-        this.launch(this.migrateRound1(bot));
+        // In turn: the round-1 migration saves the record it read, schedules included.
+        this.launch(
+          this.migrateRound1(bot).then(() => this.migrateSchedules(this.storage.bot(bot.id))),
+        );
         // Runs cut by a restart are not failures; they are not running any more.
         const look = this.lookState(bot.id);
         if (look.running)
@@ -2322,6 +2632,7 @@ export class BotsService {
   }
   stop(): void {
     this.enabled = false;
+    this.endRuns(null, new Error("Bots stopped"));
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
   }
@@ -2509,7 +2820,7 @@ export class BotsService {
       return this.handOver(msg);
     },
     "bots.automations.list.request": async (msg) => {
-      return this.automations(msg.botId);
+      return await this.automations(msg.botId);
     },
     "bots.automations.run_now.request": async (msg) => {
       return { started: await this.runAutomationNow(msg.botId, msg.automationId) };
@@ -2546,13 +2857,13 @@ export class BotsService {
       return { message: this.sendRoom(msg.roomId, msg.text, msg.messageId) };
     },
     "bots.schedules.list.request": async (msg) => {
-      return { schedules: this.storage.bot(msg.botId).schedules };
+      return { schedules: await this.schedulesOf(msg.botId) };
     },
     "bots.schedules.save.request": async (msg) => {
-      return { schedule: this.saveSchedule(msg.botId, msg.schedule, msg.scheduleId) };
+      return { schedule: await this.saveSchedule(msg.botId, msg.schedule, msg.scheduleId) };
     },
     "bots.schedules.delete.request": async (msg) => {
-      this.deleteSchedule(msg.botId, msg.scheduleId);
+      await this.deleteSchedule(msg.botId, msg.scheduleId);
       return {};
     },
   };

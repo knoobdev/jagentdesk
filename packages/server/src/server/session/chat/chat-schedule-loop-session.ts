@@ -436,7 +436,13 @@ export class ChatScheduleLoopSession {
     request: Extract<SessionInboundMessage, { type: "schedule/run-once" }>,
   ): Promise<void> {
     try {
-      const schedule = await this.scheduleService.runOnce(request.scheduleId);
+      const current = await this.scheduleService.inspect(request.scheduleId);
+      // A bot's run ends with its chat turn: it starts here and its row shows Running.
+      const schedule = current.bot
+        ? await this.scheduleService
+            .startRunOnce(request.scheduleId)
+            .then(() => this.scheduleService.inspect(request.scheduleId))
+        : await this.scheduleService.runOnce(request.scheduleId);
       this.host.emit({
         type: "schedule/run-once/response",
         payload: {
@@ -454,6 +460,10 @@ export class ChatScheduleLoopSession {
     request: Extract<SessionInboundMessage, { type: "schedule/update" }>,
   ): Promise<void> {
     try {
+      // A bot's automation is created and changed only through its chat (spec 37.2.6).
+      if ((await this.scheduleService.inspect(request.scheduleId)).bot) {
+        throw new Error("This is a bot's automation. Change it in the bot's chat.");
+      }
       const schedule = await this.scheduleService.update({
         id: request.scheduleId,
         ...(request.name !== undefined ? { name: request.name } : {}),

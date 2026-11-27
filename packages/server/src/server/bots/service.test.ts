@@ -9,6 +9,7 @@ import type { Bot } from "@jagentdesk/protocol/bots/types";
 import { BotStorage, DEFAULT_BOT_IDENTITY } from "./storage.js";
 import { BotsService, RESTART_CONTINUATION_PROMPT } from "./service.js";
 import { FakeBotRuntime } from "./test-utils/fake-runtime.js";
+import { attachBotSchedules } from "./test-utils/schedules.js";
 
 class Runtime extends FakeBotRuntime {}
 const homes: string[] = [];
@@ -27,9 +28,12 @@ function setup(now = Date.UTC(2026, 0, 1)) {
     now: () => clock,
   });
   services.push(service);
+  const schedules = attachBotSchedules({ service, home, now: () => new Date(clock) });
   return {
     service,
     runtime,
+    schedules,
+    home,
     setTime: (v: number) => {
       clock = v;
     },
@@ -137,22 +141,44 @@ it("security finding blocks until the fix is clean; then records summary and dif
   });
   expect(runtime.reviews).toEqual(["ba", "tester", "pentester", "ba", "tester", "pentester"]);
 });
-it("cron respects pause and deduplicates repeated ticks, while waits wake once", async () => {
+it("a bot automation is a core schedule: nothing while paused, one Home Chat run on resume, waits wake once", async () => {
   const start = Date.UTC(2026, 0, 1);
-  const { service, runtime, setTime } = setup(start);
+  const { service, runtime, schedules, setTime } = setup(start);
   const b = await createBot(service);
-  service.saveSchedule(b.id, { name: "Minute", cron: "* * * * *", prompt: "Check", enabled: true });
+  const saved = await service.saveSchedule(b.id, {
+    name: "Minute",
+    cron: "* * * * *",
+    prompt: "Check",
+    enabled: true,
+  });
+  expect((await schedules.inspect(saved.id)).bot).toEqual({ botId: b.id, runsIn: "home" });
   service.start();
+  await service.settled();
+  // The kickoff turn ends before the clock moves.
+  runtime.emit({ agentId: `supervisor:${b.id}`, kind: "done", key: "kickoff", text: "Hi" });
   await service.settled();
   setTime(start + 60000);
   service.pause(b.id, true);
-  await service.tick();
-  expect(runtime.sent).toEqual([]);
+  await schedules.tick();
+  expect(runtime.sent.filter((s) => s.text.includes("Check"))).toEqual([]);
+  expect((await schedules.inspect(saved.id)).runs).toEqual([]);
   service.pause(b.id, false);
-  await service.tick();
+  const ticked = schedules.tick();
+  await expect.poll(() => runtime.sent.filter((s) => s.text.includes("Check")).length).toBe(1);
+  expect(runtime.sent.at(-1)!.text).toBe("[schedule]\nCheck");
+  const running = service.storage.history(b.id).find((m) => m.note?.kind === "automation");
+  expect(running).toMatchObject({ text: "Minute", note: { state: "running" } });
+  expect(
+    (await service.automations(b.id)).automations.find((a) => a.id === saved.id),
+  ).toMatchObject({ state: "running", enabled: true });
+  runtime.emit({ agentId: `supervisor:${b.id}`, kind: "done", key: "t2", text: "All green" });
+  await ticked;
   await service.settled();
-  await service.tick();
-  await service.settled();
+  const run = (await schedules.inspect(saved.id)).runs[0];
+  expect(run).toMatchObject({ status: "succeeded", output: "All green" });
+  expect(service.storage.message(running!.id)?.note?.state).toBe("done");
+  // A second tick in the same minute starts nothing.
+  await schedules.tick();
   expect(runtime.sent.filter((s) => s.text.includes("Check"))).toHaveLength(1);
   const i = service.addItem(b.id, "CI", "Green");
   service.setItem(b.id, i.id, {
@@ -166,6 +192,136 @@ it("cron respects pause and deduplicates repeated ticks, while waits wake once",
   await service.settled();
   expect(service.storage.items(b.id)[0].status).toBe("working");
   expect(service.storage.history(b.id).filter((m) => m.source === "wait")).toHaveLength(1);
+});
+it("a quiet automation reply posts nothing; a new-conversation run reports its result in the Home Chat", async () => {
+  const { service, runtime, schedules } = setup();
+  const b = await createBot(service);
+  service.start();
+  runtime.emit({ agentId: `supervisor:${b.id}`, kind: "done", key: "kickoff", text: "Hi" });
+  await service.settled();
+  const quietRun = await service.saveSchedule(b.id, {
+    name: "Quiet check",
+    cron: "0 9 * * *",
+    prompt: "Look",
+    enabled: true,
+  });
+  await expect(service.runAutomationNow(b.id, quietRun.id)).resolves.toBe(true);
+  await expect.poll(() => runtime.sent.filter((s) => s.text.includes("Look")).length).toBe(1);
+  runtime.emit({
+    agentId: `supervisor:${b.id}`,
+    kind: "done",
+    key: "q",
+    text: "Nothing [[quiet]]",
+  });
+  await expect
+    .poll(async () => (await schedules.inspect(quietRun.id)).runs[0]?.status)
+    .toBe("succeeded");
+  expect((await schedules.inspect(quietRun.id)).runs[0].output).toBeNull();
+  expect(service.storage.history(b.id).some((m) => m.text.includes("Nothing"))).toBe(false);
+
+  runtime.backgroundReply = async () => "Two PRs wait on you";
+  const fresh = await service.saveSchedule(b.id, {
+    name: "PR digest",
+    cron: "0 9 * * *",
+    prompt: "List my PRs",
+    enabled: true,
+    runsIn: "new",
+  });
+  await service.runAutomationNow(b.id, fresh.id);
+  await expect
+    .poll(async () => (await schedules.inspect(fresh.id)).runs[0]?.status)
+    .toBe("succeeded");
+  expect(runtime.background.at(-1)).toMatchObject({
+    kind: "automation",
+    policy: "owner",
+    title: "PR digest",
+    prompt: "List my PRs",
+  });
+  expect(service.storage.history(b.id).map((m) => m.text)).toContain(
+    'Result of "PR digest":\n\nTwo PRs wait on you',
+  );
+  await expect(
+    service.saveSchedule(b.id, {
+      name: "x",
+      cron: "* * * * *",
+      prompt: "x",
+      enabled: true,
+      runsIn: "chat",
+    }),
+  ).rejects.toMatchObject({ code: "invalid_argument" });
+});
+it("moves round-1 schedules to core schedules once, keeping id, cron, prompt, on/off and next run", async () => {
+  const start = Date.UTC(2026, 0, 1);
+  const { service, schedules } = setup(start);
+  const b = await createBot(service);
+  const next = start + 3 * 60_000;
+  service.storage.saveBot({
+    ...service.storage.bot(b.id),
+    schedules: [
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "Morning",
+        cron: "0 8 * * *",
+        prompt: "Plan",
+        enabled: true,
+        nextRunAt_ms: next,
+      },
+      {
+        id: "22222222-2222-4222-8222-222222222222",
+        name: "Friday",
+        cron: "0 17 * * 5",
+        timezone: "UTC",
+        prompt: "Wrap up",
+        enabled: false,
+        nextRunAt_ms: next,
+      },
+    ],
+  });
+  service.start();
+  await service.settled();
+  const moved = await schedules.listForBot(b.id);
+  expect(moved.map((s) => [s.id, s.name, s.prompt, s.status, s.nextRunAt, s.cadence])).toEqual([
+    [
+      "11111111-1111-4111-8111-111111111111",
+      "Morning",
+      "Plan",
+      "active",
+      new Date(next).toISOString(),
+      { type: "cron", expression: "0 8 * * *" },
+    ],
+    [
+      "22222222-2222-4222-8222-222222222222",
+      "Friday",
+      "Wrap up",
+      "paused",
+      null,
+      { type: "cron", expression: "0 17 * * 5", timezone: "UTC" },
+    ],
+  ]);
+  expect(service.storage.bot(b.id).schedules).toEqual([]);
+  // A crash before the record was cleared: the next start makes no duplicates.
+  service.stop();
+  service.storage.saveBot({
+    ...service.storage.bot(b.id),
+    schedules: [
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "Morning",
+        cron: "0 8 * * *",
+        prompt: "Plan",
+        enabled: true,
+        nextRunAt_ms: next,
+      },
+    ],
+  });
+  await (service as unknown as { migrateSchedules(bot: Bot): Promise<void> }).migrateSchedules(
+    service.storage.bot(b.id),
+  );
+  expect((await schedules.listForBot(b.id)).length).toBe(2);
+  expect(service.storage.bot(b.id).schedules).toEqual([]);
+  expect((await service.schedulesOf(b.id)).map((s) => s.enabled)).toEqual([true, false]);
+  await service.delete(b.id);
+  expect(await schedules.list()).toEqual([]);
 });
 it("answers each question once and wakes only when all questions are answered", async () => {
   const { service } = setup();

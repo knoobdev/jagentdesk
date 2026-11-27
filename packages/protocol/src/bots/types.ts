@@ -12,6 +12,10 @@ export const BotScheduleInputSchema = z.object({
   timezone: z.string().optional(),
   prompt: z.string().trim().min(1).max(20000),
   enabled: z.boolean(),
+  /** Where each run goes (`ScheduleBot.runsIn`): "home" (default), "chat" or "new". v0.12.2+. */
+  runsIn: z.string().optional(),
+  /** The bot's chat (its agent id) a "chat" run goes to. */
+  chatId: z.string().optional(),
 });
 export const BotScheduleSchema = BotScheduleInputSchema.extend({
   id: z.string(),
