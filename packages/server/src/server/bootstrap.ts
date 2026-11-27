@@ -272,7 +272,7 @@ import {
   type NonceChallengeManager,
 } from "./pairing/nonce-challenge.js";
 import { createPairingCodeManager, type PairingCodeManager } from "./pairing/pairing-code.js";
-import type { PushNotificationSender } from "./push/notifications.js";
+import type { PushNotificationSender } from "./push/index.js";
 import { getOrCreateServerId } from "./server-id.js";
 import { resolveDaemonVersion } from "./daemon-version.js";
 import type { AgentClient, AgentProvider } from "./agent/agent-sdk-types.js";

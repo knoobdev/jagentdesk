@@ -5367,6 +5367,8 @@ export const ServerInfoStatusPayloadSchema = z
         forgeSearch: z.boolean().optional(),
         // COMPAT(daemonStatusRpc): added in v0.1.76, remove gate after 2026-11-18.
         daemonStatusRpc: z.boolean().optional(),
+        // COMPAT(pushTokenRevocation): added in v0.12.2, remove gate after 2027-05-27.
+        pushTokenRevocation: z.boolean().optional(),
         // COMPAT(restartRecovery): added in v0.9.59, remove after 2027-05-24.
         resumeOnStartupSetting: z.boolean().optional(),
         speechSettings: z.boolean().optional(),

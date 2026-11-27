@@ -107,6 +107,7 @@ import { resolveComposerAttachmentSubmitFormat } from "@/composer/attachments/su
 import { encodeImages } from "@/utils/encode-images";
 import { DirectorySync, type RefreshAgentDirectoryResult } from "@/runtime/directory-sync";
 import { ReplicaCache } from "@/runtime/replica-cache";
+import { revokePushNotifications } from "@/push-notifications";
 import { DEFAULT_JAGENTDESK_DAEMON_PORT } from "@jagentdesk/protocol/defaults";
 import type { ReplicaRowStore } from "@/runtime/replica-cache/row-store";
 import { createReplicaRowStore } from "@/runtime/replica-cache/row-store-factory";
@@ -1818,15 +1819,18 @@ export class HostRuntimeStore {
   // Listeners notified when a host transitions online, so the app layer can run
   // reverse migration if that host previously had data migrated away from it.
   private sourceHostReconnectListeners = new Set<(serverId: string) => void>();
+  private readonly revokePushNotifications: typeof revokePushNotifications;
 
   constructor(input?: {
     deps?: HostRuntimeControllerDeps;
     storage?: HostRuntimeStorage;
     replicaRowStore?: ReplicaRowStore;
+    revokePushNotifications?: typeof revokePushNotifications;
   }) {
     this.deps = input?.deps ?? createDefaultDeps((serverId) => this.getClient(serverId));
     this.storage = input?.storage ?? AsyncStorage;
     this.replicaCache = new ReplicaCache(input?.replicaRowStore ?? createReplicaRowStore());
+    this.revokePushNotifications = input?.revokePushNotifications ?? revokePushNotifications;
   }
 
   // --- Host registry ---
@@ -2510,6 +2514,7 @@ export class HostRuntimeStore {
   }
 
   async removeHost(serverId: string): Promise<void> {
+    await this.revokePushNotifications({ client: this.getClient(serverId), serverId });
     this.unreadableHosts = forgetUnreadableHost(this.unreadableHosts, serverId);
     const removed = this.hosts.find((daemon) => daemon.serverId === serverId);
     if (removed) {
@@ -2521,6 +2526,11 @@ export class HostRuntimeStore {
   }
 
   async removeConnection(serverId: string, connectionId: string): Promise<void> {
+    const host = this.hosts.find((candidate) => candidate.serverId === serverId);
+    if (host?.connections.length === 1 && host.connections[0]?.id === connectionId) {
+      await this.removeHost(serverId);
+      return;
+    }
     const now = new Date().toISOString();
     const next = this.hosts
       .map((daemon) => {

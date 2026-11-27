@@ -45,7 +45,7 @@ import {
   lookAroundSupported,
 } from "@jagentdesk/protocol/bots/rules";
 import { computeNextRunAt, validateScheduleCadence } from "../schedule/cron.js";
-import type { PushNotificationSender } from "../push/notifications.js";
+import type { PushNotificationSender } from "../push/index.js";
 import { BotStorage, SAME_AS_CHATS, botIdentity } from "./storage.js";
 import { type BotRuntime, type BotRuntimeEvent } from "./runtime.js";
 import {
