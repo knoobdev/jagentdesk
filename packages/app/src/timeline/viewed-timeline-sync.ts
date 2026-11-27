@@ -1,6 +1,7 @@
 import { replaceWithCanonicalStream } from "@/types/stream";
 import {
   planTimelineCatchUpAfter,
+  planTimelineCatchUpPastApplied,
   planTimelineTailFetch,
   planTimelineResumeFetch,
   type ProjectedTimelineForwardFetchPlan,
@@ -400,6 +401,11 @@ export interface ViewedTimelineSyncPorts {
     agentId: string,
     request: ProjectedTimelineForwardFetchPlan,
   ): Promise<TimelinePageResult>;
+  /**
+   * Installs the daemon's latest bounded tail in place of the chat's history. A resume whose
+   * first page reports more newer history lands here instead of replaying every missed page.
+   */
+  fetchLatestTail(agentId: string): Promise<TimelinePageResult>;
   reportError(error: unknown): void;
   schedule(task: () => void, delayMs: number): () => void;
 }
@@ -586,6 +592,8 @@ interface CatchUpState {
   generation: number;
   status: CatchUpStatus;
   request?: ProjectedTimelineForwardFetchPlan;
+  /** A resume: one page from the cursor, then the latest tail if more is newer. */
+  bounded?: boolean;
   cancelRetry?: () => void;
 }
 
@@ -670,6 +678,12 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
 
   const isAcknowledged = (agentId: string) => acknowledged.includes(agentId);
   const isDesired = (agentId: string) => desired.includes(agentId);
+  const ownsCatchUp = (agentId: string, generation: number) =>
+    !disposed &&
+    connected &&
+    isDesired(agentId) &&
+    isAcknowledged(agentId) &&
+    catchUps.get(agentId)?.generation === generation;
 
   const notifyListeners = () => {
     for (const listener of listeners) listener();
@@ -732,57 +746,62 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
     pendingCatchUps.delete(agentId);
   };
 
+  const finishCatchUp = (agentId: string, generation: number) => {
+    catchUps.set(agentId, { generation, status: "complete" });
+    const pendingCatchUp = pendingCatchUps.get(agentId);
+    if (pendingCatchUp) {
+      startCatchUp(agentId, { request: pendingCatchUp, supersede: true });
+      return;
+    }
+    setVisibilityCatchUpReady(agentId);
+  };
+
+  // A resume is bounded: one page from the cursor, then the latest tail when more is newer. A
+  // long absence would otherwise replay every missed page, which over a slow link keeps the chat
+  // short of its end for as long as the backlog takes, and lands it as one huge append. History
+  // the tail skips stays reachable by scrolling up. Live gap recovery pages until current.
   const fetchUntilCurrent = async (
     agentId: string,
     generation: number,
     request: ProjectedTimelineForwardFetchPlan,
+    fallbackToLatestTailOnOverflow: boolean,
   ): Promise<void> => {
-    if (
-      disposed ||
-      !connected ||
-      !isDesired(agentId) ||
-      !isAcknowledged(agentId) ||
-      catchUps.get(agentId)?.generation !== generation
-    ) {
-      return;
-    }
+    if (!ownsCatchUp(agentId, generation)) return;
 
     try {
       const page = await ports.fetchPage(agentId, request);
-      if (
-        disposed ||
-        !connected ||
-        !isDesired(agentId) ||
-        !isAcknowledged(agentId) ||
-        catchUps.get(agentId)?.generation !== generation
-      ) {
-        return;
-      }
+      if (!ownsCatchUp(agentId, generation)) return;
       if (page.hasNewer && page.endCursor) {
-        await fetchUntilCurrent(agentId, generation, planTimelineCatchUpAfter(page.endCursor));
+        if (request.direction === "after" && fallbackToLatestTailOnOverflow) {
+          await ports.fetchLatestTail(agentId);
+          if (!ownsCatchUp(agentId, generation)) return;
+          finishCatchUp(agentId, generation);
+          return;
+        }
+        await fetchUntilCurrent(
+          agentId,
+          generation,
+          planTimelineCatchUpAfter(page.endCursor),
+          false,
+        );
         return;
       }
       if (page.hasNewer) {
         throw new Error(`Timeline page for ${agentId} hasNewer without an end cursor`);
       }
-      catchUps.set(agentId, { generation, status: "complete" });
-      const pendingCatchUp = pendingCatchUps.get(agentId);
-      if (pendingCatchUp) {
-        startCatchUp(agentId, { request: pendingCatchUp, supersede: true });
-        return;
-      }
-      setVisibilityCatchUpReady(agentId);
+      finishCatchUp(agentId, generation);
     } catch (error) {
       if (catchUps.get(agentId)?.generation === generation) {
         const cancelRetry = ports.schedule(() => {
           const current = catchUps.get(agentId);
           if (current?.generation !== generation || current.status !== "error") return;
-          startCatchUp(agentId);
+          startCatchUp(agentId, { bounded: current.bounded });
         }, RETRY_DELAY_MS);
         catchUps.set(agentId, {
           generation,
           status: "error",
           request,
+          bounded: fallbackToLatestTailOnOverflow,
           cancelRetry,
         });
         setVisibilityCatchUpError([agentId], error);
@@ -812,6 +831,8 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
     options: {
       request?: ProjectedTimelineForwardFetchPlan;
       supersede?: boolean;
+      /** Keeps a retried resume bounded. Without a request the catch-up is a resume. */
+      bounded?: boolean;
     } = {},
   ) => {
     const { request, supersede = false } = options;
@@ -828,7 +849,12 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       ensureCacheLoaded(agentId);
       return;
     }
-    const nextRequest = request ?? planTimelineResumeFetch(ports.readCursor(agentId));
+    const applied = ports.readCursor(agentId);
+    // A request parked behind another catch-up starts after the rows applied meanwhile.
+    const nextRequest = request
+      ? planTimelineCatchUpPastApplied(request, applied)
+      : planTimelineResumeFetch(applied);
+    const bounded = options.bounded ?? !request;
     const current = catchUps.get(agentId);
     const decision = decideCatchUp({ current, request: nextRequest, supersede });
     if (decision === "keep-and-park") {
@@ -841,9 +867,9 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
     current?.cancelRetry?.();
     const generation = (catchUpGenerations.get(agentId) ?? 0) + 1;
     catchUpGenerations.set(agentId, generation);
-    catchUps.set(agentId, { generation, status: "running", request: nextRequest });
+    catchUps.set(agentId, { generation, status: "running", request: nextRequest, bounded });
     pendingCatchUps.delete(agentId);
-    void fetchUntilCurrent(agentId, generation, nextRequest);
+    void fetchUntilCurrent(agentId, generation, nextRequest, bounded);
   };
 
   const startAcknowledgedCatchUps = () => {
@@ -986,7 +1012,8 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
 
   const retryFailedCatchUps = () => {
     for (const agentId of acknowledged) {
-      if (catchUps.get(agentId)?.status === "error") startCatchUp(agentId);
+      const failed = catchUps.get(agentId);
+      if (failed?.status === "error") startCatchUp(agentId, { bounded: failed.bounded });
     }
   };
 
@@ -1104,7 +1131,11 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
     notifyListeners();
     if (catchUp?.status === "error") {
       catchUp.cancelRetry?.();
-      startCatchUp(agentId, { request: catchUp.request, supersede: true });
+      startCatchUp(agentId, {
+        request: catchUp.request,
+        supersede: true,
+        bounded: catchUp.bounded,
+      });
       return;
     }
     cancelMembershipRetry?.();

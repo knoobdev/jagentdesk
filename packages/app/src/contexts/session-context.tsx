@@ -14,6 +14,7 @@ import {
   refreshAgentInitializationTimeout,
 } from "@/hooks/use-agent-initialization";
 import { deriveAgentStreamTurnLiveness } from "@/timeline/session-stream-reducers";
+import { planTimelineTailFetch } from "@/timeline/timeline-sync-plan";
 import {
   type TimelineDeliveryMode,
   type TimelineResponsePayload,
@@ -425,6 +426,19 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
             rejectInitDeferred(initKey, error instanceof Error ? error : new Error(String(error)));
           }
           throw error;
+        }
+      },
+      fetchLatestTail: async (agentId) => {
+        // The tail replaces the chat's history: applyTimelineResponse reads it as a reset.
+        forcedTimelineTailReplacements.current.add(agentId);
+        try {
+          return await getHostRuntimeStore().fetchAgentTimeline(
+            serverId,
+            agentId,
+            planTimelineTailFetch(),
+          );
+        } finally {
+          forcedTimelineTailReplacements.current.delete(agentId);
         }
       },
       reportError: (error) => {

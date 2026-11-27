@@ -78,8 +78,18 @@ pre-rewind history while the new epoch streams.
 
 Initialization timeouts guard lack of catch-up progress, not the full multi-page sync. A successful page that queues the next `after` page refreshes the watchdog.
 
-Opening or resuming an agent fetches one bounded latest tail page. Older history remains
-user-driven by scrolling upward.
+Opening or resuming an agent is bounded. A chat without a cursor fetches the latest tail page. A
+chat with one asks for one `after` page from it; if that page reports `hasNewer`, the app installs
+the latest tail as a replacement (`fetchLatestTail`, read as `reset`) instead of replaying every
+missed page. Older history, including what the replacement skipped, stays user-driven by scrolling
+upward. A retry of a failed resume keeps this bound; only live gap recovery pages until current.
+
+Do not page a resume to the head. After hours on another device the backlog is dozens of serial
+pages: over the relay the chat sits short of its end until the last one lands, and the native list
+takes all of it as one large append. The 0.7.2 merge dropped this bound once.
+
+A catch-up parked behind another (a gap found while a tail runs) starts after the rows applied
+meanwhile (`planTimelineCatchUpPastApplied`), so it does not page through rows the chat already holds.
 
 Reaching the history-start threshold loads one older page and preserves the visible content anchor.
 Cursor progress does not trigger another page. The user must leave and return to the threshold unless
@@ -111,8 +121,8 @@ the checkpoint is copied as still running.
 
 ## Resume behavior
 
-Opening, reconnecting, or revisiting after selective-delivery grace fetches the latest tail page.
-Focus alone does not mutate timeline state; the tail response is compared with the local
+Opening, reconnecting, or revisiting after selective-delivery grace catches up within the bound
+above. Focus alone does not mutate timeline state; the tail response is compared with the local
 authoritative range first.
 
 - The same epoch and `window.maxSeq` is an exact display no-op. The app advances synchronization
