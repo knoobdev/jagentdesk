@@ -144,13 +144,18 @@ export function useSidebarWorkspacesList(options?: {
   const showBackground = useSidebarViewStore((state) => state.showBackground);
   // A bot's handed workspaces and its workers' worktrees list under the bot, not here (spec 37.4.1).
   const botOwned = useBotOwnedWorkspaces((state) => state.byBot);
-  const hiddenWorkspaceKeys = useSessionStore(
-    useShallow((state) => {
-      const keys = botOwnedWorkspaceKeys(
+  const botOwnedKeys = useSessionStore(
+    useShallow((state) =>
+      botOwnedWorkspaceKeys(
         botOwned,
         (serverId, agentId) => state.sessions[serverId]?.agents.get(agentId)?.workspaceId,
         (serverId) => state.sessions[serverId]?.workspaces.values() ?? [],
-      );
+      ),
+    ),
+  );
+  const hiddenWorkspaceKeys = useSessionStore(
+    useShallow((state) => {
+      const keys = new Set(botOwnedKeys);
       if (showBackground) return keys;
       for (const serverId of hydratedServerIds) {
         for (const workspace of state.sessions[serverId]?.workspaces.values() ?? []) {
@@ -180,8 +185,9 @@ export function useSidebarWorkspacesList(options?: {
       buildSidebarWorkspacePlacementModel({
         projects: listedProjects,
         hiddenWorkspaceKeys,
+        botOwnedWorkspaceKeys: botOwnedKeys,
       }),
-    [listedProjects, hiddenWorkspaceKeys],
+    [listedProjects, hiddenWorkspaceKeys, botOwnedKeys],
   );
 
   const projects = sidebarModel.projects.length > 0 ? sidebarModel.projects : EMPTY_PROJECTS;
