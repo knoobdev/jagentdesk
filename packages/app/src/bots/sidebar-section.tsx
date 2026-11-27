@@ -340,7 +340,13 @@ function BotsNewMenu({
         </TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="start" width={240} pages={pages} testID="sidebar-bots-new-menu">
-        <DropdownMenuSubTrigger id="new-bot" leading={BOT_ICON}>
+        {/* New bot opens its dialog on press or Enter; hover shows the other ways to add one. */}
+        <DropdownMenuSubTrigger
+          id="new-bot"
+          leading={BOT_ICON}
+          onPress={onNewBot}
+          testID="bots-menu-new-bot"
+        >
           {t("bots.section.newBot")}
         </DropdownMenuSubTrigger>
         {/* A group needs two bots to talk to each other. */}

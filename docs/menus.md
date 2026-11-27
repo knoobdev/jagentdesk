@@ -73,6 +73,10 @@ Pages are data rather than nested children because the popover renders them as _
 root surface — a flyout nested inside the root's box would be clipped by its `overflow: hidden`.
 Declaring them separately is what lets one model drive both presentations.
 
+A trigger whose own action is the common case takes `onPress`: in the popover a press or Enter runs
+it and closes the menu, and hover opens the page with the other choices (Bots' "New bot"). The sheet
+has no hover, so there a press still opens the page.
+
 `menu-navigation.ts` holds that model, and it is pure: the open flyout chain and the mobile push
 stack are the same path, so the popover renders every entry in it and the sheet renders only the
 last. Nothing else differs between the two.
