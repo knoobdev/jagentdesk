@@ -7,26 +7,22 @@ import pino from "pino";
 import type { Bot } from "@jagentdesk/protocol/bots/types";
 import type { HookDelivery, HookKind } from "@jagentdesk/relay/hooks";
 import { MemorySecretStore } from "../../database/secret-store.js";
-import type { BotExternalMessage, BotRuntime, BotRuntimeEvent } from "../runtime.js";
+import type { BotExternalMessage } from "../runtime.js";
+import { FakeBotRuntime } from "./fake-runtime.js";
 import { BotsService } from "../service.js";
 import { BotStorage } from "../storage.js";
 import { ForgeCliError, type ForgeCli } from "../hooks/cli.js";
 import { BotConnectorEvents, type BotConnectorEvent } from "../hooks/events.js";
 
-/** A supervisor that records each turn and finishes it when the test says so. */
-export class RecordingRuntime implements BotRuntime {
-  readonly sent: { text: string; source?: BotExternalMessage }[] = [];
-  private readonly listeners = new Set<(event: BotRuntimeEvent) => void>();
+/** A supervisor that records each turn and finishes it when the test says so (bt1's runtime otherwise). */
+export class RecordingRuntime extends FakeBotRuntime {
+  override sent: { id: string; text: string; source?: BotExternalMessage }[] = [];
   running = false;
-  async configure(): Promise<void> {}
-  async ensureSupervisor(bot: Bot): Promise<string> {
-    return `supervisor:${bot.id}`;
-  }
-  busy(): boolean {
+  override busy(): boolean {
     return this.running;
   }
-  async send(
-    _id: string,
+  override async send(
+    id: string,
     text: string,
     _messageId?: string,
     _sourceId?: string,
@@ -34,32 +30,15 @@ export class RecordingRuntime implements BotRuntime {
   ): Promise<void> {
     source?.beforeDispatch();
     this.running = true;
-    this.sent.push({ text, source });
+    this.sent.push({ id, text, source });
   }
-  async startWorker(): Promise<string> {
-    throw new Error("No workers in this test");
-  }
-  async review(): Promise<never> {
-    throw new Error("No reviews in this test");
-  }
-  async diff(): Promise<string> {
-    return "";
-  }
-  async cancel(): Promise<void> {
+  override async cancel(): Promise<void> {
     this.running = false;
-  }
-  onEvent(listener: (event: BotRuntimeEvent) => void): () => void {
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
   }
   finish(bot: Bot, key: string, text: string): void {
     this.running = false;
-    for (const listener of this.listeners)
-      listener({ agentId: `supervisor:${bot.id}`, key, text, kind: "done" });
+    this.emit({ agentId: `supervisor:${bot.id}`, key, text, kind: "done" });
   }
-  dispose(): void {}
 }
 
 export interface ForgeCall {
@@ -205,6 +184,13 @@ export async function hookHarness(): Promise<HookHarness> {
     modeId: "default",
   });
   bots.start();
+  // bt1 opens every new bot with its first-run kickoff turn; end it so each test starts idle.
+  await bots.settled();
+  if (runtime.sent.length) {
+    runtime.finish(bot, "kickoff", "Ready.");
+    await bots.settled();
+    runtime.sent.length = 0;
+  }
   return {
     bots,
     runtime,
