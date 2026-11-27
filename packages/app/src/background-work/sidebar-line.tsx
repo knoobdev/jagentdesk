@@ -93,7 +93,11 @@ export const BackgroundWorkLine = memo(function BackgroundWorkLine({
 });
 
 const styles = StyleSheet.create((theme) => ({
+  // As wide as its text, not the row: the line opens the background track, and a press on the
+  // empty rest of the row's second line has to open the agent like the rest of the row does.
   line: {
+    alignSelf: "flex-start",
+    maxWidth: "100%",
     height: 16,
     flexDirection: "row",
     alignItems: "center",
