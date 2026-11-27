@@ -100,10 +100,8 @@ runs every matching automation whoever caused it (Who can ask gates only asking 
 per automation and event key, and nothing while the bot is paused. Slack and Jira events do not
 reach them yet.
 
-A bot without a GitHub webhook still polls with the installed `gh` every five minutes, after
-`gh auth status` succeeds. Set `githubLogin` when it differs from the slug. Open PRs with review
-requests and open issues labelled `bot:<slug>` wake the bot once per URL/update time. A bot with a
-webhook target hears GitHub through the webhook only (ADR-0061 §2).
+GitHub reaches a bot only through its webhook (spec 37.10); the round-1 five-minute `gh` poll is
+gone (spec 37.2.6, ADR-0061 §2). The only `gh` call left is the first-run screen's open-PR count.
 
 Jira uses existing daemon connections, never a separate credential store.
 

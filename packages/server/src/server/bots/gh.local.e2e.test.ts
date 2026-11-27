@@ -1,19 +1,14 @@
 import { expect, test } from "vitest";
-import { runGh } from "./triggers.js";
+import { countOwnOpenPullRequests, runGh } from "./triggers.js";
 const authenticated = await runGh(["auth", "status"]).then(
   () => true,
   () => false,
 );
-test.skipIf(!authenticated)("queries real gh when authenticated", async () => {
-  const rows: unknown = JSON.parse(
-    await runGh([
-      "search",
-      "prs",
-      "--review-requested=@me",
-      "--state=open",
-      "--json=url,title,updatedAt",
-      "--limit=1",
-    ]),
-  );
-  expect(Array.isArray(rows)).toBe(true);
-});
+// The first-run screen's "GitHub: {{count}} open PRs of yours" is the bots' only `gh` call left.
+test.skipIf(!authenticated)(
+  "counts the owner's open PRs with real gh when authenticated",
+  async () => {
+    const count = await countOwnOpenPullRequests();
+    expect(count).toBeGreaterThanOrEqual(0);
+  },
+);
