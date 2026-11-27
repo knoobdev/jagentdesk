@@ -18,24 +18,115 @@ async function launchAgent(source: string) {
   await writeFile(executable, source);
   return {
     directory,
+    executable,
     launch: {
       command: process.execPath,
-      args: [executable, "acp", "--disable-telemetry"],
+      args: [executable, "acp"],
       env: { CAPTURE: path.join(directory, "requests.ndjson") },
     },
   };
 }
 
-it("reports a CLI without the acp subcommand as unavailable", async () => {
+it("uses clean agy acp command without --disable-telemetry and on_demand catalog refresh", () => {
+  const provider = createAntigravityProvider();
+  expect(provider.command).toEqual(["agy", "acp"]);
+  expect(provider.catalogRefresh).toBe("on_demand");
+});
+
+it("rejects agy versions older than 1.5.1 without spawning agy acp", async () => {
   const { launch } = await launchAgent(`
-    process.stderr.write("Unknown command: acp");
-    process.exitCode = 1;
+    const { appendFileSync } = require("node:fs");
+    appendFileSync(process.env.CAPTURE, JSON.stringify(process.argv.slice(2)) + "\\n");
+    if (process.argv.includes("acp")) process.exit(1);
+    if (process.argv.includes("--version")) console.log("1.5.0");
   `);
   const provider = createAntigravityProvider();
-  expect(provider.command?.slice(0, 2)).toEqual(["agy", "acp"]);
+  expect(await provider.status!({ launch })).toEqual({
+    available: false,
+    diagnostic: [
+      "Antigravity CLI 1.5.0 is older than 1.5.1. Update Antigravity CLI to 1.5.1 or later (earlier versions restrict model access for ACP clients).",
+      "SSH session: no",
+      "Sign-in: can differ from agy over SSH",
+    ].join("\n"),
+  });
+  const invocations = (await readFile(launch.env.CAPTURE, "utf8"))
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as string[]);
+  expect(invocations).toHaveLength(1);
+  expect(invocations[0]).toContain("--version");
+  expect(invocations[0]).not.toContain("acp");
+});
+
+it("memoizes agy --version by binary stat across repeated status() checks", async () => {
+  const { executable, launch } = await launchAgent(`
+    const { appendFileSync } = require("node:fs");
+    appendFileSync(process.env.CAPTURE, JSON.stringify(process.argv.slice(2)) + "\\n");
+    if (process.argv.includes("--version")) console.log("1.5.18");
+  `);
+  const provider = createAntigravityProvider();
+  expect(await provider.status!({ launch })).toMatchObject({ available: true });
+  expect(await provider.status!({ launch })).toMatchObject({ available: true });
+  const beforeModify = (await readFile(launch.env.CAPTURE, "utf8")).trim().split("\n");
+  expect(beforeModify).toHaveLength(1);
+
+  // Modifying the binary invalidates the stat-keyed memoization.
+  await writeFile(
+    executable,
+    `
+    const { appendFileSync } = require("node:fs");
+    appendFileSync(process.env.CAPTURE, JSON.stringify(process.argv.slice(2)) + "\\n");
+    if (process.argv.includes("--version")) console.log("1.5.0");
+  `,
+  );
   expect(await provider.status!({ launch })).toMatchObject({
     available: false,
-    diagnostic: expect.stringContaining("1.5.0"),
+    diagnostic: expect.stringContaining("1.5.0 is older than 1.5.1"),
+  });
+  const afterModify = (await readFile(launch.env.CAPTURE, "utf8")).trim().split("\n");
+  expect(afterModify).toHaveLength(2);
+});
+
+const versionedCliAgent = `
+  if (process.argv.includes("--version")) {
+    console.log("1.5.18");
+    process.exit(0);
+  }
+  process.exit(1);
+`;
+
+describe("diagnostic", () => {
+  it("says agy runs outside an SSH session when the daemon has no SSH variables", async () => {
+    const { launch } = await launchAgent(versionedCliAgent);
+    expect(await createAntigravityProvider().status!({ launch })).toEqual({
+      available: true,
+      diagnostic: "SSH session: no\nSign-in: can differ from agy over SSH",
+    });
+  });
+
+  it.each(["SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"])(
+    "says agy runs in an SSH session when the daemon has %s",
+    async (variable) => {
+      const { launch } = await launchAgent(versionedCliAgent);
+      const env = { ...launch.env, [variable]: "set" };
+      expect(await createAntigravityProvider().status!({ launch: { ...launch, env } })).toEqual({
+        available: true,
+        diagnostic: `SSH session: yes (${variable})\nSign-in: can differ from agy outside SSH`,
+      });
+    },
+  );
+
+  it("says whether agy runs in an SSH session when --version fails", async () => {
+    const { launch } = await launchAgent(`process.exit(1);`);
+    const env = { ...launch.env, SSH_CONNECTION: "set" };
+    expect(await createAntigravityProvider().status!({ launch: { ...launch, env } })).toEqual({
+      available: false,
+      diagnostic: [
+        "Antigravity CLI did not report its version. Install Antigravity 1.5.1 or later.",
+        "SSH session: yes (SSH_CONNECTION)",
+        "Sign-in: can differ from agy outside SSH",
+      ].join("\n"),
+    });
   });
 });
 
@@ -112,6 +203,10 @@ it.each([true, false])(
   "loads a saved stream-JSON session with ACP system prompt support %s",
   async (supportsSystemPrompt) => {
     const { directory, launch } = await launchAgent(`
+      if (process.argv.includes("--version")) {
+        console.log("1.5.18");
+        process.exit(0);
+      }
       const { appendFileSync } = require("node:fs");
       const { createInterface } = require("node:readline");
       const configOptions = [
@@ -154,9 +249,10 @@ it.each([true, false])(
       });
     `);
     const provider = createAntigravityProvider();
-    expect(await provider.status!({ launch })).toEqual({ available: true });
+    expect(await provider.status!({ launch })).toMatchObject({ available: true });
     const connection = await provider.connect({
       launch,
+      clientInfo: { name: "jagentdesk", title: "JAgentDesk", version: "0.17.5" },
       versions: [1],
       capabilities: ["session.configure", "session.persistence"],
     });
@@ -241,11 +337,17 @@ it.each([true, false])(
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line));
+      const initialize = requests.find((request) => request.method === "initialize");
+      expect(initialize.params.clientInfo).toEqual({
+        name: "jagentdesk",
+        title: "JAgentDesk",
+        version: "0.17.5",
+      });
       const load = requests.find((request) => request.method === "session/load");
       expect(load.params.sessionId).toBe("saved-conversation");
-      expect(load.params._meta.antigravity).toEqual(
+      expect(load.params._meta).toEqual(
         supportsSystemPrompt
-          ? { systemPrompt: { append: "A test system instruction" } }
+          ? { antigravity: { systemPrompt: { append: "A test system instruction" } } }
           : undefined,
       );
     } finally {
@@ -531,6 +633,7 @@ it("offers each model its own thinking options and opens Orchestrator with its d
       .toMatchObject({ type: "catalog" });
     const catalog = events.find((event) => event.type === "catalog");
     if (catalog?.type !== "catalog") throw new Error("Expected a catalog");
+    expect(catalog.catalog.defaultMode).toBe("full-access");
     const thinkingByModel = Object.fromEntries(
       catalog.catalog.models.map((model) => [
         model.id,
@@ -579,27 +682,32 @@ it("offers each model its own thinking options and opens Orchestrator with its d
   }
 });
 
-describe("availability", () => {
-  it("explains that Antigravity must be installed when no launch resolves", async () => {
-    await expect(createAntigravityProvider().status!({ launch: undefined })).resolves.toEqual({
-      available: false,
-      diagnostic: "Install Antigravity 1.5.0 or later.",
+describe("installation", () => {
+  const signal = new AbortController().signal;
+
+  it("reports the version agy prints and links its install docs", async () => {
+    // A real `agy acp --version` starts the ACP server, so the fake refuses it.
+    const { launch } = await launchAgent(`
+      const args = process.argv.slice(2);
+      if (args.includes("acp")) process.exit(1);
+      if (args[0] === "--version") console.log("Antigravity CLI 1.6.2");
+    `);
+    const installation = createAntigravityProvider().installation!;
+    expect(installation.installUrl).toBe("https://antigravity.google/docs/getting-started?tab=cli");
+    expect(installation.update).toBeUndefined();
+    await expect(
+      installation.inspect!({ launch: { ...launch, resolved: true }, signal }),
+    ).resolves.toEqual({
+      status: "installed",
+      version: "1.6.2",
     });
   });
 
-  it("accepts an executable that starts the ACP protocol", async () => {
-    const { launch } = await launchAgent(`
-      const { createInterface } = require("node:readline");
-      createInterface({ input: process.stdin }).on("line", (line) => {
-        const { id, method } = JSON.parse(line);
-        if (method === "initialize") process.stdout.write(JSON.stringify({
-          jsonrpc: "2.0", id, result: { protocolVersion: 1 }
-        }) + "\\n");
-      });
-    `);
-    await expect(createAntigravityProvider().status!({ launch })).resolves.toEqual({
-      available: true,
-    });
+  it("is not installed when the executable does not resolve", async () => {
+    const launch = { command: "agy", args: ["acp"], env: {}, resolved: false };
+    await expect(
+      createAntigravityProvider().installation!.inspect!({ launch, signal }),
+    ).resolves.toEqual({ status: "not_installed" });
   });
 });
 
@@ -838,7 +946,7 @@ it("keeps a turn open for backgrounded run_command calls but not IsDaemon comman
   }
 });
 
-it("runs a wrapped session as [...wrap, agy, acp, --disable-telemetry] with the session env", async () => {
+it("runs a wrapped session as [...wrap, agy, acp] with the session env", async () => {
   const { directory, launch: fixture } = await launchAgent(`
     const { createInterface } = require("node:readline");
     const send = (message) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", ...message }) + "\\n");
@@ -902,7 +1010,7 @@ child.on("exit", (code) => process.exit(code ?? 1));
       .toMatchObject({ type: "session.ready" });
     const launched = JSON.parse(await readFile(record, "utf8"));
     expect(launched).toEqual({
-      argv: [record, process.execPath, agentScript, "acp", "--disable-telemetry"],
+      argv: [record, process.execPath, agentScript, "acp"],
       hook: "final",
     });
   } finally {

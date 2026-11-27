@@ -1,6 +1,9 @@
+import { createHash } from "node:crypto";
 import type { JsonValue } from "@jagentdesk/protocol/agent-types";
 import type {
   ProviderCatalog,
+  ProviderCatalogOptions,
+  ProviderCatalogRefreshMode,
   ProviderCommand,
   ProviderConfigState,
   ProviderMode,
@@ -17,6 +20,7 @@ interface RunAcpProviderBaseOptions {
   label: string;
   description?: string;
   icon?: string;
+  catalogRefresh?: ProviderCatalogRefreshMode;
   acpOptions?: AcpOptions;
   transformers?: readonly AcpTransformer[];
 }
@@ -51,6 +55,7 @@ export interface AcpOptions {
     keepsTurnOpen?: (toolCall: AcpToolCallSnapshot) => boolean;
   };
 
+  /** Global discovery returns an empty catalog without spawning a process or opening a session. */
   workspaceOnlyCatalog?: boolean;
   /**
    * For an agent that lists thinking options only for the selected model: discovery selects each
@@ -154,6 +159,14 @@ export interface AcpTransformer {
   ): AcpToolCallSnapshot;
 }
 
+function buildDefaultAcpCatalogCacheKey(options: ProviderCatalogOptions): string {
+  if (!options.launch) return "acp:connector";
+  const env = Object.entries(options.launch.env).sort(([a], [b]) => a.localeCompare(b));
+  return createHash("sha256")
+    .update(JSON.stringify(["acp:global/1", options.launch.command, options.launch.args, env]))
+    .digest("hex");
+}
+
 export function runAcpProvider(options: RunAcpProviderOptions): ProviderRegistration {
   const hasCommand = options.command !== undefined;
   const hasConnector = options.connector !== undefined;
@@ -163,12 +176,21 @@ export function runAcpProvider(options: RunAcpProviderOptions): ProviderRegistra
   if (options.command && (options.command.length === 0 || options.command[0].trim().length === 0)) {
     throw new Error("ACP provider command must contain an executable");
   }
+  const workspaceOnlyCatalog = options.acpOptions?.workspaceOnlyCatalog === true;
   return {
     id: options.id,
     label: options.label,
     description: options.description,
     icon: options.icon,
     command: options.command,
+    catalogRefresh: options.catalogRefresh ?? "on_demand",
+    ...(workspaceOnlyCatalog
+      ? {}
+      : {
+          async getCatalogCacheKey(catalogOptions) {
+            return buildDefaultAcpCatalogCacheKey(catalogOptions);
+          },
+        }),
     // Each command-based session spawns its own process, so it can run behind that session's wrap.
     ...(hasCommand ? { launchWrap: true } : {}),
     connect(request) {

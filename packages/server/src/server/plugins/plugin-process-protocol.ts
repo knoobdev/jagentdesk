@@ -3,11 +3,14 @@ import { type PluginHookAgent } from "@jagentdesk/plugin/server";
 import {
   type ProviderConnectRequest,
   type ProviderCatalogOptions,
+  type ProviderCatalogRefreshMode,
   type ProviderEvent,
   type ProviderInput,
   type ProviderInstallationLaunch,
   type ProviderStatusRequest,
   type ProviderUpdateReport,
+  ProviderCatalogRefreshModeSchema,
+  ProviderClientInfoSchema,
   ProviderUpdateReportSchema,
   ProviderEventSchema,
   ProviderInputSchema,
@@ -18,6 +21,7 @@ import { type JsonValue } from "@jagentdesk/protocol/agent-types";
 
 export interface PluginProviderMetadata {
   requiresConfiguration?: boolean;
+  catalogRefresh?: ProviderCatalogRefreshMode;
   hasCatalogCacheKey?: boolean;
   hasStatus?: boolean;
   installation?: PluginProviderInstallationMetadata;
@@ -180,6 +184,7 @@ const providerMetadataSchema = z
     iconPath: z.string().optional(),
     docsUrl: z.string().optional(),
     requiresConfiguration: z.boolean().optional(),
+    catalogRefresh: ProviderCatalogRefreshModeSchema.optional(),
     hasCatalogCacheKey: z.boolean().optional(),
     hasStatus: z.boolean().optional(),
     installation: z
@@ -215,6 +220,7 @@ const usageSourceMetadataSchema = z
 const providerConnectRequestSchema = z
   .object({
     launch: ProviderLaunchSchema.optional(),
+    clientInfo: ProviderClientInfoSchema.optional(),
     versions: z.array(z.number().int().positive()),
     capabilities: z.array(z.string()),
   })
