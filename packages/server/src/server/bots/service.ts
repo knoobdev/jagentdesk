@@ -80,6 +80,22 @@ import { BOT_TEMPLATES } from "./templates/catalog.js";
 import { BOT_TEMPLATE_SKILL_TEXT } from "./templates/skills.js";
 import { BOT_SETUP_FILE, BOT_TEMPLATE_CATEGORY_LABELS } from "./templates/types.js";
 
+/** The chat an item was made in: the Slack/GitHub/GitLab/Telegram thread that asked, or Home Chat. */
+function itemChat(active: BotMessage | null | undefined): NonNullable<BotItem["chat"]> {
+  if (active?.slack)
+    return {
+      id: `slack:${active.slack.channel}:${active.slack.threadTs}`,
+      kind: "thread",
+      title: active.source,
+    };
+  if (active?.connector)
+    return {
+      id: `${active.connector.kind}:${active.connector.thread}`,
+      kind: "thread",
+      title: active.source,
+    };
+  return { id: "home", kind: "home", title: null };
+}
 /** Who sent a message from outside JAgentDesk (Slack, GitHub, GitLab, Telegram). */
 function externalSenderId(message: BotMessage): string | undefined {
   if (message.slack) return `slack:${message.slack.userId}`;
@@ -554,19 +570,7 @@ export class BotsService {
       doneMeans,
       description: options.description,
       madeBy: actor === "daemon" ? "jagentdesk" : actor,
-      chat: active?.slack
-        ? {
-            id: `slack:${active.slack.channel}:${active.slack.threadTs}`,
-            kind: "thread",
-            title: active.source,
-          }
-        : active?.connector
-          ? {
-              id: `${active.connector.kind}:${active.connector.thread}`,
-              kind: "thread",
-              title: active.source,
-            }
-          : { id: "home", kind: "home", title: null },
+      chat: itemChat(active),
     });
     if (active?.slack) this.storage.setState(`slack:item:${item.id}`, active.slack);
     if (active?.connector) this.storage.setState(`connector:item:${item.id}`, active.connector);
@@ -2495,14 +2499,35 @@ export class BotsService {
     return this.hooks.handle(msg);
   }
 
+  /**
+   * `Bot.slack | github | gitlab | telegram | share` (bots contract): read from the connector and
+   * sharing state on every read, never stored on the record, so they can't go stale.
+   */
+  withSummaries(bot: Bot): Bot {
+    const slack = this.slack?.summary(bot.id);
+    const hooks = this.hooks?.summaries(bot.id);
+    const share = this.sharing?.summary(bot.id);
+    return { ...bot, ...(slack ? { slack } : {}), ...hooks, ...(share ? { share } : {}) };
+  }
+
+  /** Every `bot` / `bots` in a result carries the summaries. */
+  private withRecordSummaries(result: Record<string, unknown>): Record<string, unknown> {
+    const { bot, bots } = result as { bot?: Bot; bots?: Bot[] };
+    return {
+      ...result,
+      ...(bot ? { bot: this.withSummaries(bot) } : {}),
+      ...(bots ? { bots: bots.map((entry) => this.withSummaries(entry)) } : {}),
+    };
+  }
+
   // Successful results are parsed by the matching protocol schema at the session boundary.
   async handle(msg: BotsRequest): Promise<Record<string, unknown>> {
     const connector = this.routeConnector(msg);
-    if (connector) return connector;
+    if (connector) return this.withRecordSummaries(await connector);
     const handler = this.handlers[msg.type] as
       | ((msg: BotsRequest) => Promise<Record<string, unknown>>)
       | undefined;
     if (!handler) throw new Error("Unknown bots method");
-    return handler(msg);
+    return this.withRecordSummaries(await handler(msg));
   }
 }

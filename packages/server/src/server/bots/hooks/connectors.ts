@@ -53,6 +53,10 @@ export class BotsHookConnectors {
     this.github = new BotsGitHub(bots, { ...shared, gh: options.gh });
     this.gitlab = new BotsGitLab(bots, { ...shared, glab: options.glab });
     this.telegram = new BotsTelegram(bots, { ...shared, apiBaseUrl: options.telegramApiBaseUrl });
+    // `bots.allowed.list` merges these with Slack's (bots contract).
+    bots.allowedSources.push(async (bot) =>
+      this.allowedPeople(bot.id).map(({ source, id, name }) => ({ source, id, name })),
+    );
   }
   private get all() {
     return [this.github, this.gitlab, this.telegram];
@@ -85,16 +89,14 @@ export class BotsHookConnectors {
       ...this.gitlab
         .allowed(botId)
         .map((user): BotAllowedPerson => ({ source: "gitlab", id: user.id, name: user.name })),
-      ...this.telegram
-        .allowed(botId)
-        .map(
-          (user): BotAllowedPerson => ({
-            source: "telegram",
-            id: user.id,
-            name: user.name,
-            username: user.username,
-          }),
-        ),
+      ...this.telegram.allowed(botId).map(
+        (user): BotAllowedPerson => ({
+          source: "telegram",
+          id: user.id,
+          name: user.name,
+          username: user.username,
+        }),
+      ),
     ];
   }
   /** What `bots.list` puts on `Bot.github`, `Bot.gitlab` and `Bot.telegram` (bt1 contract). */

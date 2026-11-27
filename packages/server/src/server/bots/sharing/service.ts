@@ -188,6 +188,10 @@ export class BotsSharing implements RelayControlHandler {
       kinds.add("slack");
     if (bot.jiraAccounts?.length) kinds.add("jira");
     if (bot.githubLogin) kinds.add("github");
+    const hooks = this.bots.hooks?.summaries(bot.id);
+    if (hooks?.github.connected) kinds.add("github");
+    if (hooks?.gitlab.connected) kinds.add("gitlab");
+    if (hooks?.telegram.connected) kinds.add("telegram");
     return [...kinds];
   }
   private async build(bot: Bot, selection: BotShareSelection): Promise<Candidate> {
@@ -200,6 +204,12 @@ export class BotsSharing implements RelayControlHandler {
   }
   private link(botId: string): LinkState | undefined {
     return this.bots.storage.state(linkKey(botId), LinkState);
+  }
+
+  /** `Bot.share` on the bot record (bots contract), from the stored link; no network. */
+  summary(botId: string): { shared: boolean; updatedAt_ms?: number } {
+    const link = this.link(botId);
+    return link ? { shared: true, updatedAt_ms: link.updatedAt_ms } : { shared: false };
   }
 
   async status(botId: string): Promise<BotShareStatus> {
