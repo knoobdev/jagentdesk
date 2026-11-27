@@ -2,6 +2,10 @@
 
 Chat replies and Markdown file previews render through one engine, `react-native-enriched-markdown`. Pacing and the streaming split are covered in [agent-stream-performance.md](agent-stream-performance.md).
 
+## Source adaptation
+
+Every surface passes its Markdown through `prepareMarkdownSource` (`packages/app/src/components/markdown/source.ts`) before the engine sees it. It parses with mdast and GFM tables, so GFM decides what the source means, then edits the source where MD4C reads it differently. MD4C opens a table only when the header row starts a paragraph; models often write a table directly under a line of prose, which GitHub renders as a table. The adapter inserts a blank line, keeping quote markers, list indentation and line endings, before every table that directly follows a paragraph. A source edit ships with the JavaScript bundle; the same fix in `cpp/md4c` would need a WASM rebuild and a native client rebuild.
+
 ## The fork
 
 The library is a private workspace, `packages/react-native-enriched-markdown`. It is upstream [enriched-markdown](https://github.com/software-mansion/enriched-markdown) at npm `1.2.0-nightly-20261014-766fc0e67` (upstream commit `766fc0e67`) plus JAgentDesk's changes, which lived in a `patch-package` patch until the package moved into the repository. It is never published. Keep the name `react-native-enriched-markdown`: autolinking, the Gradle project `:react-native-enriched-markdown`, the CocoaPods spec and app imports all use it.

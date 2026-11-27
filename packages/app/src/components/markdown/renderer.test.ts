@@ -1,5 +1,7 @@
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { toNativeLinkRecognition } from "react-native-enriched-markdown/src/utils/regexParser";
+import { parseMarkdown } from "react-native-enriched-markdown/src/web/parseMarkdown";
+import type { ASTNode } from "react-native-enriched-markdown/src/web/types";
 import { QueryClient } from "@tanstack/react-query";
 import { decodeMarkdownImage, getMarkdownImageStatus } from "./image-decoding";
 import { describe, expect, it } from "vitest";
@@ -7,6 +9,7 @@ import { darkTheme, lightTheme } from "@/styles/theme";
 import { createMarkdownStyles } from "./styles";
 import { prepareMarkdownSource, PENDING_MARKDOWN_IMAGE } from "./source";
 import { normalizeMarkdownHtml } from "./html";
+import { splitStreamingMarkdown } from "./streaming";
 
 describe("shared Markdown source adaptation", () => {
   it("keeps paragraphs, fences and quotes together for the library", () => {
@@ -49,6 +52,264 @@ it("preserves empty table cells while escaping spoilers in cell text", () => {
   expect(prepareMarkdownSource(source).render()).toBe(
     "| A | | B |\n| --- | --- | --- |\n| x | | z |",
   );
+});
+
+it("renders a table directly after a paragraph through the library parser", async () => {
+  const source = "**Notes**\n| Item | Detail |\n| --- | --- |\n| A | one |\n| B | two |";
+  const separated = "**Notes**\n\n| Item | Detail |\n| --- | --- |\n| A | one |\n| B | two |";
+  const flags = { hardSoftBreaks: true, latexMath: false };
+  const expected = await parseMarkdown(separated, flags);
+  expect(expected.children?.map((node) => node.type)).toEqual(["Paragraph", "Table"]);
+  expect(await parseMarkdown(prepareMarkdownSource(source).render(), flags)).toEqual(expected);
+});
+
+it.each([
+  [
+    "a quote",
+    "> Notes\n> | Item |\n> | --- |\n> | A |",
+    "> Notes\n>\n> | Item |\n> | --- |\n> | A |",
+    ["Document", ["Blockquote", "Paragraph", "Table"]],
+  ],
+  [
+    "a list item",
+    "- Notes\n  | Item |\n  | --- |\n  | A |\n- Next",
+    "- Notes\n\n  | Item |\n  | --- |\n  | A |\n- Next",
+    ["Document", ["UnorderedList", ["ListItem", "Paragraph", "Table"], ["ListItem", "Paragraph"]]],
+  ],
+  [
+    "a quoted list item",
+    "> - Notes\n>   | Item |\n>   | --- |\n>   | A |",
+    "> - Notes\n>\n>   | Item |\n>   | --- |\n>   | A |",
+    ["Document", ["Blockquote", ["UnorderedList", ["ListItem", "Paragraph", "Table"]]]],
+  ],
+  [
+    "a quote inside a list item",
+    "- > Notes\n  > | Item |\n  > | --- |\n  > | A |",
+    "- > Notes\n  >\n  > | Item |\n  > | --- |\n  > | A |",
+    ["Document", ["UnorderedList", ["ListItem", ["Blockquote", "Paragraph", "Table"]]]],
+  ],
+  [
+    "aligned columns without outer pipes",
+    "Notes\nItem | Detail\n:--- | ---:\nA | one",
+    "Notes\n\nItem | Detail\n:--- | ---:\nA | one",
+    ["Document", "Paragraph", "Table"],
+  ],
+  [
+    "an entity at the start of a header without outer pipes",
+    "Notes\nAT&amp;T | Detail\n--- | ---\nA | one",
+    "Notes\n\nAT\\&T | Detail\n--- | ---\nA | one",
+    ["Document", "Paragraph", "Table"],
+  ],
+  [
+    "a local image at the start of a header without outer pipes",
+    "Notes\n![Local](assets/a.png) | Detail\n--- | ---\nA | one",
+    "Notes\n\nLocal | Detail\n--- | ---\nA | one",
+    ["Document", "Paragraph", "Table"],
+  ],
+  [
+    "CRLF lines",
+    "Notes\r\n| Item |\r\n| --- |\r\n| A |",
+    "Notes\r\n\r\n| Item |\r\n| --- |\r\n| A |",
+    ["Document", "Paragraph", "Table"],
+  ],
+  [
+    "CR lines",
+    "Notes\r| Item |\r| --- |\r| A |",
+    "Notes\r\r| Item |\r| --- |\r| A |",
+    ["Document", "Paragraph", "Table"],
+  ],
+  [
+    "a quote with CRLF lines",
+    "> Notes\r\n> | Item |\r\n> | --- |\r\n> | A |",
+    "> Notes\r\n>\r\n> | Item |\r\n> | --- |\r\n> | A |",
+    ["Document", ["Blockquote", "Paragraph", "Table"]],
+  ],
+  [
+    "a list item with CRLF lines",
+    "- Notes\r\n  | Item |\r\n  | --- |\r\n  | A |\r\n- Next",
+    "- Notes\r\n\r\n  | Item |\r\n  | --- |\r\n  | A |\r\n- Next",
+    ["Document", ["UnorderedList", ["ListItem", "Paragraph", "Table"], ["ListItem", "Paragraph"]]],
+  ],
+  [
+    "a quote with CR lines",
+    "> Notes\r> | Item |\r> | --- |\r> | A |",
+    "> Notes\r>\r> | Item |\r> | --- |\r> | A |",
+    ["Document", ["Blockquote", "Paragraph", "Table"]],
+  ],
+  [
+    "a list item with CR lines",
+    "- Notes\r  | Item |\r  | --- |\r  | A |\r- Next",
+    "- Notes\r\r  | Item |\r  | --- |\r  | A |\r- Next",
+    ["Document", ["UnorderedList", ["ListItem", "Paragraph", "Table"], ["ListItem", "Paragraph"]]],
+  ],
+  [
+    "a non-interrupting ordered marker with tildes",
+    "Intro\n2. ~~~\n   Notes\n   | A |\n   | --- |\n   | x |",
+    "Intro\n2. ~~~\n   Notes\n\n   | A |\n   | --- |\n   | x |",
+    ["Document", "Paragraph", "Table"],
+  ],
+  [
+    "a non-interrupting ordered marker with backticks",
+    "Notes\n2. ```\n   | Item |\n   | --- |\n   | A |",
+    "Notes\n2. ```\n\n   | Item |\n   | --- |\n   | A |",
+    ["Document", "Paragraph", "Table"],
+  ],
+])("preserves tables after paragraphs in %s", async (_name, source, separated, expected) => {
+  const rendered = prepareMarkdownSource(source).render();
+  expect(rendered).toEqual(separated);
+  const flags = { hardSoftBreaks: true, latexMath: false };
+  function blocks(node: ASTNode): unknown {
+    if (node.type === "Paragraph" || node.type === "Table") return node.type;
+    return [node.type, ...(node.children ?? []).map(blocks)];
+  }
+  expect(blocks(await parseMarkdown(rendered, flags))).toEqual(expected);
+});
+
+it.each([
+  [
+    "a literal backslash",
+    "Notes\\\n| Item |\n| --- |\n| A |",
+    "Notes\\\n\n| Item |\n| --- |\n| A |",
+    "Notes\\",
+  ],
+  [
+    "an entity and literal backslash with LF lines",
+    "AT&amp;T\\\n| Item |\n| --- |\n| A |",
+    "AT\\&T\\\n\n| Item |\n| --- |\n| A |",
+    "AT&T\\",
+  ],
+  [
+    "an entity and literal backslash with CRLF lines",
+    "AT&amp;T\\\r\n| Item |\r\n| --- |\r\n| A |",
+    "AT\\&T\\\r\n\r\n| Item |\r\n| --- |\r\n| A |",
+    "AT&T\\",
+  ],
+  [
+    "an entity and literal backslash with CR lines",
+    "AT&amp;T\\\r| Item |\r| --- |\r| A |",
+    "AT\\&T\\\r\r| Item |\r| --- |\r| A |",
+    "AT&T\\",
+  ],
+])(
+  "preserves paragraph text before an interrupting table in %s",
+  async (_name, source, separated, text) => {
+    const rendered = prepareMarkdownSource(source).render();
+    expect(rendered).toEqual(separated);
+    const tree = await parseMarkdown(rendered, { hardSoftBreaks: true, latexMath: false });
+    expect(tree.children?.map((node) => node.type)).toEqual(["Paragraph", "Table"]);
+    expect(tree.children?.[0]?.children?.map((node) => node.content).join("")).toEqual(text);
+  },
+);
+
+it.each([
+  "```yaml\n---\nkey: value\n---\n```\n",
+  "~~~md\n| Item |\n| --- |\n| A |\n~~~\n",
+  "````md\n```\n| Item |\n| --- |\n```\n`````\n",
+  "> ```md\n> | Item |\n> | --- |\n> ```\n",
+  "> ```md\n> Code\n",
+  "- ```md\n  Code\n",
+  "    ```\n\n",
+  "```not`a-fence\n",
+])("renders a table after a fence without changing its code: %s", async (prefix) => {
+  const table = "| Item |\n| --- |\n| A |";
+  const rendered = prepareMarkdownSource(`${prefix}Notes\n${table}`).render();
+  expect(rendered).toEqual(`${prefix}Notes\n\n${table}`);
+  const tree = await parseMarkdown(rendered, { hardSoftBreaks: true, latexMath: false });
+  expect(tree.children?.slice(-2).map((node) => node.type)).toEqual(["Paragraph", "Table"]);
+});
+
+it.each([
+  "| Item | Detail |\n| --- | --- |\n" + "| A | one |\n".repeat(100),
+  "Notes\n\n| Item | Detail |\n| --- | --- |\n" + "| A | one |\n".repeat(100),
+  "Notes\n\n| Item |\n| --- |\n| A |",
+  "| Item |\n| --- |\n| A |",
+  "```md\nNotes\n| Item |\n| --- |\n| A |\n```",
+  "```yaml\n---\nkey: value\n---\n```",
+  "```yaml\n---\nkey: value",
+  "~~~md\n| Item |\n| --- |\n| A |\n~~~",
+  "````md\n```\n| Item |\n| --- |\n```\n````",
+  "    Notes\n    | Item |\n    | --- |\n    | A |",
+  "Notes\n| Item | Detail |\n| --- |\n| A |",
+])("leaves separated tables and table-like text unchanged: %s", (source) => {
+  expect(prepareMarkdownSource(source).render()).toEqual(source);
+});
+
+// The user's reply: a bold line directly above a table (2026-11-28 report).
+const USER_TABLE_REPLY = [
+  "**Câu chữ mới cần anh duyệt:**",
+  "| Chỗ | Chữ |",
+  "|---|---|",
+  "| Pill khoá của workflow chạy tay | Activated — choose Deactivate in the ··· menu to edit. |",
+  "| Run test khi còn việc chưa xong | Finish the items in the attention card first, then Run test. |",
+  "| Deactivate workflow chạy tay | This stops the workflow and unlocks it for editing. |",
+  "| Cột phụ trong Audit log | Ran an earlier version · A newer run exists |",
+  "",
+  "**Cần sửa phía backend (FE không làm được):**",
+].join("\n");
+
+it("renders the reported bold line and table as a paragraph and a table", async () => {
+  const flags = { hardSoftBreaks: true, latexMath: false, admonitions: true };
+  // MD4C alone keeps the header in the bold line's paragraph and prints the pipes.
+  const raw = await parseMarkdown(USER_TABLE_REPLY, flags);
+  expect(raw.children?.map((node) => node.type)).toEqual(["Paragraph", "Paragraph"]);
+  const rendered = prepareMarkdownSource(USER_TABLE_REPLY).render();
+  expect(rendered).toEqual(USER_TABLE_REPLY.replace("duyệt:**\n| Chỗ", "duyệt:**\n\n| Chỗ"));
+  const tree = await parseMarkdown(rendered, flags);
+  expect(tree.children?.map((node) => node.type)).toEqual(["Paragraph", "Table", "Paragraph"]);
+  const table = tree.children?.[1];
+  expect(table?.children?.flatMap((section) => section.children ?? []).length).toBe(5);
+});
+
+it.each([
+  // Prose that merely contains pipes.
+  "Use a | b to pipe\nand c | d too\nthen stop",
+  "Notes\na | b\n---",
+  "Notes\n| a | b | c |\n|---|---|\n| 1 | 2 | 3 |",
+  "Notes\n| Item | Detail |\nnot a delimiter | row",
+  // A table inside a fence stays code.
+  "```md\n**Notes**\n| Item | Detail |\n|---|---|\n| A | one |\n```",
+  // A partial table mid-stream: no delimiter row yet, or one too short for the header.
+  "**Notes**\n| Item | Detail |",
+  "**Notes**\n| Item | Detail |\n",
+  "**Notes**\n| Item | Detail |\n|--",
+  "**Notes**\n| Item | Detail |\n|---|",
+])("leaves text without a complete GFM table after prose unchanged: %s", (source) => {
+  expect(prepareMarkdownSource(source).render()).toEqual(source);
+});
+
+it("renders every streamed prefix of the reported reply without literal delimiter rows", async () => {
+  const flags = { hardSoftBreaks: true, latexMath: false, admonitions: true };
+  // As on GitHub, `|---|-` is the first prefix whose delimiter row has both columns.
+  const delimiterEnd = USER_TABLE_REPLY.indexOf("|---|---|") + "|---|-".length;
+  function text(node: ASTNode): string {
+    return (node.content ?? "") + (node.children ?? []).map(text).join("");
+  }
+  for (let length = 1; length <= USER_TABLE_REPLY.length; length++) {
+    const prefix = USER_TABLE_REPLY.slice(0, length);
+    // Native streaming renders closed blocks and the mutable tail separately.
+    const { head, tail } = splitStreamingMarkdown(prefix, true);
+    const parts = await Promise.all(
+      [head, tail]
+        .filter(Boolean)
+        .map((part) => parseMarkdown(prepareMarkdownSource(part).render(), flags)),
+    );
+    const blocks = parts.flatMap((tree) => tree.children ?? []);
+    const tables = blocks.filter((node) => node.type === "Table");
+    if (length < delimiterEnd) expect(tables, prefix).toEqual([]);
+    if (length >= delimiterEnd) {
+      expect(tables, prefix).toHaveLength(1);
+      expect(blocks[0]?.type, prefix).toBe("Paragraph");
+      expect(text(blocks[0]!), prefix).toBe("Câu chữ mới cần anh duyệt:");
+    }
+  }
+});
+
+it("separates a streaming table once its delimiter row matches the header", async () => {
+  const source = "**Notes**\n| Item | Detail |\n|---|---|\n| A";
+  const rendered = prepareMarkdownSource(source).render();
+  expect(rendered).toEqual("**Notes**\n\n| Item | Detail |\n|---|---|\n| A");
+  const tree = await parseMarkdown(rendered, { hardSoftBreaks: true, latexMath: false });
+  expect(tree.children?.map((node) => node.type)).toEqual(["Paragraph", "Table"]);
 });
 
 it.each([
