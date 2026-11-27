@@ -1,7 +1,6 @@
 import { useCallback, useState, type ReactElement, type ReactNode } from "react";
 import { Pressable, ScrollView, Text, View, type LayoutChangeEvent } from "react-native";
 import { useTranslation } from "react-i18next";
-import * as Clipboard from "expo-clipboard";
 import { Check, ChevronLeft, Maximize2, Square, X } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -11,17 +10,16 @@ import type {
 } from "@jagentdesk/client";
 import { providerDisplayLabel } from "@/continuity/provider-model-choices";
 import { LiveElapsed } from "@/components/message";
-import { BlockCopyButton } from "@/components/markdown/block-copy-button";
 import { StatusRing } from "@/components/status-ring";
 import { STATUS_RING_HALO_INSET } from "@/components/status-ring/geometry";
 import { Button } from "@/components/ui/button";
 import { mutedIconColorMapping } from "@/components/ui/icon-color";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useSessionStore } from "@/stores/session-store";
-import { CODE_SURFACE_DATASET } from "@/styles/code-surface";
 import { ICON_SIZE, type Theme } from "@/styles/theme";
 import { formatDuration } from "@/utils/time";
 import { shortenPath } from "@/utils/shorten-path";
+import { CommandFence } from "./command-fence";
 import { truncatePathMiddle } from "./format";
 import { DetailIconAction } from "./icon-action";
 import { backgroundWorkKind, BackgroundWorkKindIcon } from "./kind";
@@ -66,9 +64,6 @@ const POPOVER_OUTPUT_HEIGHT = 280;
 const POPOVER_OUTPUT_MIN_HEIGHT = 160;
 /** Width of the popover column; the surface still fits it inside the chat area. */
 export const POPOVER_DETAIL_WIDTH = 560;
-/** The command fence collapses past this many lines, behind "Show more". */
-const COMMAND_COLLAPSED_LINES = 6;
-const COMMAND_LINE_HEIGHT = 17;
 /** Average advance of the 13 px UI font, for fitting the folder onto its line. */
 const META_CHAR_WIDTH = 6.5;
 
@@ -433,59 +428,6 @@ function OwnerLine({
   );
 }
 
-/**
- * The full command in a markdown fence with the fence's own copy button (A4.27c.2). Past six lines
- * it collapses behind "Show more"; the clipped text is still the whole command for selection.
- */
-function CommandFence({ command }: { command: string }): ReactElement {
-  const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(false);
-  const [overflows, setOverflows] = useState(false);
-  const onTextLayout = useCallback((event: LayoutChangeEvent) => {
-    const height = event.nativeEvent.layout.height;
-    setOverflows(height > COMMAND_COLLAPSED_LINES * COMMAND_LINE_HEIGHT + 1);
-  }, []);
-  const toggle = useCallback(() => setExpanded((value) => !value), []);
-  const copy = useCallback(() => Clipboard.setStringAsync(command), [command]);
-  return (
-    <View style={styles.fence}>
-      <View style={overflows && !expanded ? styles.commandClip : null}>
-        <Text
-          style={styles.command}
-          selectable
-          dataSet={CODE_SURFACE_DATASET}
-          onLayout={onTextLayout}
-          testID="background-work-detail-command"
-        >
-          {command}
-        </Text>
-      </View>
-      {overflows ? (
-        <Pressable
-          onPress={toggle}
-          accessibilityRole="button"
-          style={styles.moreButton}
-          testID="background-work-detail-command-toggle"
-        >
-          {({ hovered }) => (
-            <Text style={hovered ? styles.moreLabelHovered : styles.moreLabel}>
-              {expanded
-                ? t("message.backgroundWork.detail.showLess")
-                : t("message.backgroundWork.detail.showMore")}
-            </Text>
-          )}
-        </Pressable>
-      ) : null}
-      <BlockCopyButton
-        onCopy={copy}
-        visible
-        label={t("message.backgroundWork.detail.copyCommand")}
-        testID="background-work-detail-copy"
-      />
-    </View>
-  );
-}
-
 function detailStateText(
   t: ReturnType<typeof useTranslation>["t"],
   state: ReturnType<typeof useBackgroundWorkDetail>["state"],
@@ -497,11 +439,6 @@ function detailStateText(
 
 const styles = StyleSheet.create((theme) => {
   const meta = { fontSize: 13, lineHeight: 18, color: theme.colors.foregroundMuted } as const;
-  const moreLabel = {
-    fontSize: theme.fontSize.xs,
-    fontWeight: theme.fontWeight.medium,
-    color: theme.colors.foregroundMuted,
-  } as const;
   return {
     popover: {
       width: POPOVER_DETAIL_WIDTH,
@@ -566,31 +503,6 @@ const styles = StyleSheet.create((theme) => {
     meta: { ...meta, flexShrink: 1, minWidth: 0 },
     // Trims the ring's knockout halo, as the composer pill does, so the chip's mark is the ring.
     ring: { margin: -STATUS_RING_HALO_INSET },
-    // The markdown fence: surface2, 1 px border, radius 6, padding 12, mono 12 / 17.
-    fence: {
-      position: "relative",
-      gap: theme.spacing[2],
-      padding: theme.spacing[3],
-      borderRadius: theme.borderRadius.md,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      backgroundColor: theme.colors.surface2,
-    },
-    commandClip: {
-      maxHeight: COMMAND_COLLAPSED_LINES * COMMAND_LINE_HEIGHT,
-      overflow: "hidden",
-    },
-    command: {
-      // Clear of the copy button in the fence's top trailing corner.
-      paddingRight: theme.spacing[6],
-      fontFamily: theme.fontFamily.mono,
-      fontSize: theme.fontSize.code,
-      lineHeight: COMMAND_LINE_HEIGHT,
-      color: theme.colors.foreground,
-    },
-    moreButton: { alignSelf: "flex-start" },
-    moreLabel,
-    moreLabelHovered: { ...moreLabel, color: theme.colors.foreground },
     stateText: { ...meta },
   };
 });

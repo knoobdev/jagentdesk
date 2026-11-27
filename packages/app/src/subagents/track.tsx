@@ -24,6 +24,9 @@ import {
   buildSubagentPillPresentation,
   buildSubagentRowPresentationData,
   countFinishedSubagents,
+  orderSubagentRowsForTrack,
+  subagentRowOutcome,
+  type SubagentRowOutcome,
 } from "./track-presentation";
 
 const ThemedArchive = withUnistyles(Archive);
@@ -67,7 +70,7 @@ function buildRowPresentation(row: SubagentRow): WorkspaceTabPresentation {
  */
 export function SubagentsTrack({
   serverId,
-  rows,
+  rows: launchOrderRows,
   onOpenSubagent,
   onOpenProviderSubagent,
   sheetTabFor,
@@ -77,6 +80,7 @@ export function SubagentsTrack({
 }: SubagentsTrackProps): ReactElement | null {
   const { t } = useTranslation();
   const sheetPanePage = useSheetPanePage();
+  const rows = useMemo(() => orderSubagentRowsForTrack(launchOrderRows), [launchOrderRows]);
   // A child on another host has no tab in this workspace, so it never opens as a sheet here; a
   // pane outside any workspace (a plugin chat dock) has no sheets at all.
   const sheets = useMemo(
@@ -185,6 +189,7 @@ function SubagentsTrackRow({
   const rowServerId = row.kind === "jagentdesk" ? row.address.serverId : serverId;
   const hostLabel = useHosts().find((host) => host.serverId === rowServerId)?.label ?? rowServerId;
   const presentation = useMemo(() => buildRowPresentation(row), [row]);
+  const outcome = subagentRowOutcome(row);
   const displayLabel =
     presentation.titleState === "loading" ? t("common.states.loading") : presentation.label;
   const handlePress = useCallback(() => {
@@ -213,10 +218,10 @@ function SubagentsTrackRow({
           {row.kind === "jagentdesk" ? (
             <>
               <SubagentFacts rowId={row.id} text={rowServerId !== serverId ? hostLabel : ""} />
-              <JAgentDeskSubagentFacts serverId={rowServerId} agentId={row.id} />
+              <JAgentDeskSubagentFacts serverId={rowServerId} agentId={row.id} outcome={outcome} />
             </>
           ) : (
-            <SubagentFacts rowId={row.id} text={presentation.subtitle} />
+            <SubagentFacts rowId={row.id} text={presentation.subtitle} outcome={outcome} />
           )}
         </View>
         {row.kind === "jagentdesk" ? (
@@ -237,6 +242,7 @@ function SubagentsTrackRow({
       handleDetachPress,
       hostLabel,
       onDetachSubagent,
+      outcome,
       presentation,
       row.id,
       row.kind,
@@ -257,16 +263,45 @@ function SubagentsTrackRow({
   );
 }
 
-function JAgentDeskSubagentFacts({ serverId, agentId }: { serverId: string; agentId: string }) {
+function JAgentDeskSubagentFacts({
+  serverId,
+  agentId,
+  outcome,
+}: {
+  serverId: string;
+  agentId: string;
+  outcome: SubagentRowOutcome | null;
+}) {
   const text = useAgentFactsLine(serverId, agentId);
-  return <SubagentFacts rowId={agentId} text={text} />;
+  return <SubagentFacts rowId={agentId} text={text} outcome={outcome} />;
 }
-function SubagentFacts({ rowId, text }: { rowId: string; text: string | null }) {
-  return text ? (
+
+/** The row's facts, led by how it ended when that was not success ("Failed · general-purpose …"). */
+function SubagentFacts({
+  rowId,
+  text,
+  outcome = null,
+}: {
+  rowId: string;
+  text: string | null;
+  outcome?: SubagentRowOutcome | null;
+}) {
+  const { t } = useTranslation();
+  if (!text && !outcome) return null;
+  return (
     <Text style={styles.rowFacts} numberOfLines={1} testID={`subagents-track-row-facts-${rowId}`}>
+      {outcome ? (
+        <Text
+          style={outcome === "failed" ? styles.rowOutcomeFailed : styles.rowOutcome}
+          testID={`subagents-track-row-outcome-${rowId}`}
+        >
+          {outcome === "failed" ? t("subagents.rowFailed") : t("subagents.rowStopped")}
+        </Text>
+      ) : null}
+      {outcome && text ? " · " : null}
       {text}
     </Text>
-  ) : null;
+  );
 }
 
 function SubagentRowActions({
@@ -377,6 +412,8 @@ const styles = StyleSheet.create((theme) => ({
   rowText: { flexGrow: 1, flexShrink: 1, flexBasis: "auto", minWidth: 0 },
   rowTitle: { fontSize: theme.fontSize.base, color: theme.colors.foreground },
   rowFacts: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
+  rowOutcome: { color: theme.colors.foreground },
+  rowOutcomeFailed: { color: theme.colors.statusDanger, fontWeight: theme.fontWeight.medium },
   actionClusterVisible: {
     flexDirection: "row",
     alignItems: "center",

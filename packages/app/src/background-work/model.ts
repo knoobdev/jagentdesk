@@ -101,6 +101,13 @@ export function createBackgroundWorkModel(port: Port) {
       delete finished[id];
       publish({ ...state, finished });
     },
+    /** Clears every ended task and every stop that could not be confirmed ("Dismiss all"). */
+    dismissAllEnded: () => {
+      const stops = Object.fromEntries(
+        Object.entries(state.stops ?? {}).filter(([, entry]) => entry.status !== "error"),
+      );
+      publish({ ...state, finished: {}, stops });
+    },
     dismissStop: (token: string) => {
       const stops = { ...state.stops };
       delete stops[token];
