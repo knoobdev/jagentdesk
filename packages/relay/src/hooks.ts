@@ -3,13 +3,41 @@ import { fromByteArray, toByteArray } from "base64-js";
 export const MAX_HOOK_BODY_BYTES = 1024 * 1024;
 export const HOOK_RESPONSE_TIMEOUT_MS = 2500;
 export const HOOK_ID_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+export const HOOK_KINDS = ["slack", "github", "gitlab", "telegram"] as const;
+export type HookKind = (typeof HOOK_KINDS)[number];
+/** Spec 37.9: the only request headers the Worker forwards for each kind. */
+export const HOOK_FORWARDED_HEADERS: Record<HookKind, readonly string[]> = {
+  slack: ["x-slack-signature", "x-slack-request-timestamp", "x-slack-retry-num", "content-type"],
+  github: [
+    "x-hub-signature-256",
+    "x-github-event",
+    "x-github-delivery",
+    "x-github-hook-id",
+    "content-type",
+  ],
+  gitlab: [
+    "x-gitlab-token",
+    "x-gitlab-event",
+    "x-gitlab-event-uuid",
+    "x-gitlab-instance",
+    "content-type",
+  ],
+  telegram: ["x-telegram-bot-api-secret-token", "content-type"],
+};
+/** Slack's key predates the other kinds; keep it so registered Slack hooks survive the upgrade. */
 export const HOOK_STORAGE_KEY = "relay:slackHooks";
+export function hookStorageKey(kind: HookKind): string {
+  return kind === "slack" ? HOOK_STORAGE_KEY : `relay:${kind}Hooks`;
+}
+export function isHookKind(value: unknown): value is HookKind {
+  return typeof value === "string" && (HOOK_KINDS as readonly string[]).includes(value);
+}
 export interface HookDelivery {
   type: "hook_delivery";
   v: 1;
   deliveryId: string;
   hookId: string;
-  kind: "slack";
+  kind: HookKind;
   headers: Record<string, string>;
   bodyB64: string;
   receivedAt_ms: number;
@@ -27,9 +55,16 @@ export function encodeHookBody(body: Uint8Array): string {
 export function decodeHookBody(body: string): Uint8Array {
   return toByteArray(body);
 }
-export function slackHookPath(pathname: string): { serverId: string; hookId: string } | null {
-  const match = /^\/hooks\/slack\/([A-Za-z0-9_-]{1,200})\/([A-Za-z0-9_-]{43})$/.exec(pathname);
-  return match ? { serverId: match[1], hookId: match[2] } : null;
+export function hookPath(
+  pathname: string,
+): { kind: HookKind; serverId: string; hookId: string } | null {
+  const match =
+    /^\/hooks\/(slack|github|gitlab|telegram)\/([A-Za-z0-9_-]{1,200})\/([A-Za-z0-9_-]{43})$/.exec(
+      pathname,
+    );
+  return match && isHookKind(match[1])
+    ? { kind: match[1], serverId: match[2], hookId: match[3] }
+    : null;
 }
 export async function readHookBody(request: Request): Promise<Uint8Array | Response> {
   if (Number(request.headers.get("content-length")) > MAX_HOOK_BODY_BYTES)
@@ -125,19 +160,23 @@ export class RelayHooks {
       message.v !== 1 ||
       typeof message.hookId !== "string" ||
       !HOOK_ID_PATTERN.test(message.hookId) ||
-      (message.type === "hook_register" && message.kind !== "slack")
+      (message.type === "hook_register" && !isHookKind(message.kind))
     )
       return true;
     const hookId = message.hookId;
-    const register = message.type === "hook_register";
+    const register = message.type === "hook_register" ? (message.kind as HookKind) : null;
     const operation = this.registrations.then(async () => {
-      const ids = new Set((await this.storage.get<string[]>(HOOK_STORAGE_KEY)) ?? []);
-      if (register) ids.add(hookId);
-      else {
-        ids.delete(hookId);
-        this.rates.delete(hookId);
+      // One kind per hookId: registering moves it; unregistering (no kind on the frame) clears every kind.
+      for (const kind of HOOK_KINDS) {
+        const key = hookStorageKey(kind);
+        const stored = (await this.storage.get<string[]>(key)) ?? [];
+        const ids = new Set(stored);
+        if (kind === register) ids.add(hookId);
+        else ids.delete(hookId);
+        if (ids.size !== stored.length || stored.some((id) => !ids.has(id)))
+          await this.storage.put(key, [...ids]);
       }
-      await this.storage.put(HOOK_STORAGE_KEY, [...ids]);
+      if (!register) this.rates.delete(hookId);
       socket.send(
         JSON.stringify({ type: register ? "hook_registered" : "hook_unregistered", v: 1, hookId }),
       );
@@ -148,10 +187,11 @@ export class RelayHooks {
     return true;
   }
 
-  async fetch(request: Request, hookId: string): Promise<Response> {
+  async fetch(request: Request, hookId: string, kind: HookKind = "slack"): Promise<Response> {
     if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
     await this.registrations;
-    const ids = (await this.storage.get<string[]>(HOOK_STORAGE_KEY)) ?? [];
+    // A hookId registered for another kind is unknown on this route (spec 37.9).
+    const ids = (await this.storage.get<string[]>(hookStorageKey(kind))) ?? [];
     if (!ids.includes(hookId)) return new Response("Unknown hook", { status: 404 });
     const socket = this.control();
     if (!socket) return new Response("Daemon unavailable", { status: 503 });
@@ -171,12 +211,7 @@ export class RelayHooks {
     const body = await readHookBody(request);
     if (body instanceof Response) return body;
     const headers: Record<string, string> = {};
-    for (const name of [
-      "x-slack-signature",
-      "x-slack-request-timestamp",
-      "x-slack-retry-num",
-      "content-type",
-    ]) {
+    for (const name of HOOK_FORWARDED_HEADERS[kind]) {
       const value = request.headers.get(name);
       if (value !== null) headers[name] = value;
     }
@@ -186,7 +221,7 @@ export class RelayHooks {
       v: 1,
       deliveryId,
       hookId,
-      kind: "slack",
+      kind,
       headers,
       bodyB64: encodeHookBody(body),
       receivedAt_ms: now,

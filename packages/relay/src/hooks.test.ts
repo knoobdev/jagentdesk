@@ -4,7 +4,10 @@ import {
   HOOK_STORAGE_KEY,
   encodeHookBody,
   decodeHookBody,
+  hookPath,
+  hookStorageKey,
   type HookDelivery,
+  type HookKind,
 } from "./hooks.js";
 class Storage {
   readonly values = new Map<string, unknown>();
@@ -113,5 +116,104 @@ describe("Slack relay hooks", () => {
       ),
     );
     expect(await storage.get(HOOK_STORAGE_KEY)).toEqual([hookId, "b".repeat(43)]);
+  });
+});
+describe("Shared hook route (spec 37.9)", () => {
+  const kindRequest = (kind: string, headers: Record<string, string>, body = "{}") =>
+    new Request(`http://localhost/hooks/${kind}/server/${hookId}`, {
+      method: "POST",
+      body,
+      headers: { ...headers, "content-type": "application/json", cookie: "must-not-forward" },
+    });
+  it("parses every kind and rejects others", () => {
+    for (const kind of ["slack", "github", "gitlab", "telegram"])
+      expect(hookPath(`/hooks/${kind}/srv/${hookId}`)).toEqual({ kind, serverId: "srv", hookId });
+    expect(hookPath(`/hooks/linear/srv/${hookId}`)).toBeNull();
+    expect(hookPath(`/hooks/github/srv/${hookId}x`)).toBeNull();
+  });
+  it("forwards only the kind's headers", async () => {
+    const { hooks, socket, deliveries } = setup();
+    const cases: [string, Record<string, string>, Record<string, string>][] = [
+      [
+        "github",
+        {
+          "x-hub-signature-256": "sha256=ab",
+          "x-github-event": "issues",
+          "x-github-delivery": "d-1",
+          "x-github-hook-id": "7",
+          "x-gitlab-token": "leak",
+          "x-slack-signature": "leak",
+        },
+        {
+          "x-hub-signature-256": "sha256=ab",
+          "x-github-event": "issues",
+          "x-github-delivery": "d-1",
+          "x-github-hook-id": "7",
+        },
+      ],
+      [
+        "gitlab",
+        {
+          "x-gitlab-token": "t",
+          "x-gitlab-event": "Note Hook",
+          "x-gitlab-event-uuid": "u-1",
+          "x-gitlab-instance": "https://gitlab.com",
+          "x-hub-signature-256": "leak",
+        },
+        {
+          "x-gitlab-token": "t",
+          "x-gitlab-event": "Note Hook",
+          "x-gitlab-event-uuid": "u-1",
+          "x-gitlab-instance": "https://gitlab.com",
+        },
+      ],
+      [
+        "telegram",
+        { "x-telegram-bot-api-secret-token": "s", "x-gitlab-token": "leak" },
+        { "x-telegram-bot-api-secret-token": "s" },
+      ],
+    ];
+    for (const [kind, sent, forwarded] of cases) {
+      await hooks.controlMessage(socket, { type: "hook_register", v: 1, kind, hookId });
+      const response = await hooks.fetch(kindRequest(kind, sent), hookId, kind as HookKind);
+      expect(response.status).toBe(200);
+      const delivery = deliveries.at(-1)!;
+      expect(delivery.kind).toBe(kind);
+      expect(delivery.headers).toEqual({ ...forwarded, "content-type": "application/json" });
+    }
+  });
+  it("answers 404 when the hookId is registered for another kind, and moves it on re-register", async () => {
+    const { hooks, socket, storage } = setup();
+    await hooks.controlMessage(socket, { type: "hook_register", v: 1, kind: "github", hookId });
+    expect((await hooks.fetch(kindRequest("gitlab", {}), hookId, "gitlab")).status).toBe(404);
+    expect((await hooks.fetch(kindRequest("slack", {}), hookId, "slack")).status).toBe(404);
+    expect((await hooks.fetch(kindRequest("github", {}), hookId, "github")).status).toBe(200);
+    await hooks.controlMessage(socket, { type: "hook_register", v: 1, kind: "telegram", hookId });
+    expect((await hooks.fetch(kindRequest("github", {}), hookId, "github")).status).toBe(404);
+    expect(await storage.get(hookStorageKey("github"))).toEqual([]);
+    expect(await storage.get(hookStorageKey("telegram"))).toEqual([hookId]);
+    await hooks.controlMessage(socket, { type: "hook_unregister", v: 1, hookId });
+    expect((await hooks.fetch(kindRequest("telegram", {}), hookId, "telegram")).status).toBe(404);
+  });
+  it("ignores registrations of unknown kinds", async () => {
+    const { hooks, socket, storage } = setup();
+    await hooks.controlMessage(socket, { type: "hook_register", v: 1, kind: "linear", hookId });
+    expect(storage.values.size).toBe(0);
+  });
+  it("keeps the rate limit and body cap on every kind", async () => {
+    const { hooks, socket } = setup();
+    await hooks.controlMessage(socket, { type: "hook_register", v: 1, kind: "telegram", hookId });
+    expect(
+      (
+        await hooks.fetch(
+          kindRequest("telegram", {}, "a".repeat(1024 * 1024 + 1)),
+          hookId,
+          "telegram",
+        )
+      ).status,
+    ).toBe(413);
+    for (let i = 1; i < 120; i++)
+      expect((await hooks.fetch(kindRequest("telegram", {}), hookId, "telegram")).status).toBe(200);
+    expect((await hooks.fetch(kindRequest("telegram", {}), hookId, "telegram")).status).toBe(429);
   });
 });
