@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { botIdFromLabels, stripBotEnvelope } from "./envelope";
+import { botIdFromLabels, stripBotEnvelope, stripBotQuietMarker } from "./envelope";
 
 describe("stripBotEnvelope", () => {
   it("drops the source line the daemon prefixes", () => {
@@ -19,5 +19,13 @@ describe("botIdFromLabels", () => {
     expect(botIdFromLabels({ "jagentdesk.bot.id": "b1" })).toBe("b1");
     expect(botIdFromLabels({})).toBeNull();
     expect(botIdFromLabels(undefined)).toBeNull();
+  });
+});
+
+describe("stripBotQuietMarker", () => {
+  it("hides a reply that only says the quiet marker and trims a trailing one", () => {
+    expect(stripBotQuietMarker("[[quiet]]")).toBe("");
+    expect(stripBotQuietMarker("Done with #3.\n[[quiet]]  ")).toBe("Done with #3.");
+    expect(stripBotQuietMarker("Talk about [[quiet]] later.")).toBe("Talk about [[quiet]] later.");
   });
 });

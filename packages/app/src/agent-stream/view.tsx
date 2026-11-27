@@ -67,7 +67,7 @@ import type {
 } from "@jagentdesk/protocol/agent-types";
 import { type AgentScreenAgent } from "@/hooks/use-agent-screen-state-machine";
 import { useSessionStore } from "@/stores/session-store";
-import { stripBotEnvelope } from "@/bots/envelope";
+import { stripBotEnvelope, stripBotQuietMarker } from "@/bots/envelope";
 import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
 import { useLoadOlderAgentHistory } from "@/hooks/use-load-older-agent-history";
 import { useSettings, resolveContentMaxWidth } from "@/hooks/use-settings";
@@ -786,6 +786,9 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
 
     const renderAssistantMessageItem = useCallback(
       (layoutItem: StreamLayoutItem, item: Extract<StreamItem, { kind: "assistant_message" }>) => {
+        // A bot's quiet reply ("[[quiet]]") posts nothing (spec 37.2.6).
+        const text = context.botId ? stripBotQuietMarker(item.text) : item.text;
+        if (!text) return null;
         return (
           <AssistantFileLinkResolverProvider
             client={client}
@@ -796,7 +799,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
           >
             <AssistantMessage
               occurrenceKey={createAssistantImageOccurrenceKey({ agentId, itemId: item.id })}
-              message={item.text}
+              message={text}
               timestamp={item.timestamp.getTime()}
               workspaceRoot={workspaceRoot}
               serverId={resolvedServerId}
@@ -807,7 +810,15 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
           </AssistantFileLinkResolverProvider>
         );
       },
-      [agentId, client, handleInlinePathPress, resolvedServerId, toast, workspaceRoot],
+      [
+        agentId,
+        client,
+        context.botId,
+        handleInlinePathPress,
+        resolvedServerId,
+        toast,
+        workspaceRoot,
+      ],
     );
 
     const renderThoughtItem = useCallback(
