@@ -73,6 +73,13 @@ export class LocalBotTriggers implements BotTriggerSource {
     }
   }
   private async github(bot: Bot): Promise<BotTrigger[]> {
+    // ADR-0061 §2: a bot with a GitHub webhook hears GitHub there; this poll stays only for bots without one.
+    // TODO(bt1): delete the poll once event automations consume webhook events.
+    const hooked = this.deps.storage.state(
+      `github:connection:${bot.id}`,
+      z.object({ targets: z.array(z.unknown()) }).passthrough(),
+    );
+    if (hooked?.targets.length) return [];
     const now = this.deps.now?.() ?? Date.now();
     const key = `github-poll:${bot.id}`;
     const last = this.deps.storage.state(key, z.number());

@@ -17,6 +17,8 @@ import {
 } from "./agent/remote-finish-subscriptions/index.js";
 import { connectThroughProxy } from "./ssh/proxy/connect.js";
 import { BotsSlack } from "./bots/slack.js";
+import { BotsHookConnectors } from "./bots/hooks/connectors.js";
+import type { ForgeCli } from "./bots/hooks/cli.js";
 import { createIdleRuntimeCleanup } from "./agent/idle-runtime-cleanup/index.js";
 import { createChangeRequestRouter } from "../services/change-request-router.js";
 import { createForgeService } from "../services/forge-registry.js";
@@ -603,6 +605,10 @@ export interface JAgentDeskDaemonDependencies {
   hostCapabilities?: HostCapabilityService;
   botsTriggerSource?: BotTriggerSource;
   slackApiBaseUrl?: string;
+  /** Test seams for the bot connectors (spec 37.10–37.12); production runs `gh`, `glab` and api.telegram.org. */
+  telegramApiBaseUrl?: string;
+  botsGh?: ForgeCli;
+  botsGlab?: ForgeCli;
   sessionShareTunnelManager?: TunnelManager;
   builtinPlugins?: BuiltinPluginLoader;
   hubRelationshipRemote?: HubRelationshipRemote;
@@ -1940,17 +1946,34 @@ export async function createJAgentDeskDaemon(
     apiBaseUrl: dependencies.slackApiBaseUrl,
   });
   botsService.slack = botsSlack;
+  const botsHooks = new BotsHookConnectors(botsService, botsSlack, {
+    logger,
+    relay: () => ({
+      ...(relayRuntime?.getConfig() ?? {
+        enabled: config.relayEnabled ?? true,
+        endpoint: config.relayEndpoint ?? DEFAULT_RELAY_ENDPOINT,
+        useTls: config.relayUseTls ?? true,
+      }),
+      serverId,
+    }),
+    telegramApiBaseUrl: dependencies.telegramApiBaseUrl,
+    gh: dependencies.botsGh,
+    glab: dependencies.botsGlab,
+  });
+  botsService.hooks = botsHooks;
   let botsRuntimeReady = false;
   await pluginRuntime.builtin.registerLifecycle("bots", {
     start: () => {
       if (botsRuntimeReady) {
         botsService.start();
         botsSlack.start();
+        botsHooks.start();
       }
     },
     stop: () => {
       botsService.stop();
       botsSlack.stop();
+      botsHooks.stop();
     },
   });
 
@@ -2448,6 +2471,7 @@ export async function createJAgentDeskDaemon(
             if (pluginRuntime.builtin.isEnabled("bots")) {
               botsService.start();
               botsSlack.start();
+              botsHooks.start();
             }
             // Bind the plugin session host and start configured plugins before any
             // external ingress attaches, mirroring upstream's pre-accept ordering.
@@ -2480,7 +2504,7 @@ export async function createJAgentDeskDaemon(
             // Noise E2EE handshake before session admission.
             const relaySecurityLogger = logger.child({ module: "relay-security" });
             relayRuntime = createRelayRuntime({
-              controlHandler: botsSlack,
+              controlHandler: botsHooks.controlHandler(),
               config: {
                 enabled: config.relayEnabled ?? true,
                 endpoint: config.relayEndpoint ?? DEFAULT_RELAY_ENDPOINT,
@@ -2620,6 +2644,7 @@ export async function createJAgentDeskDaemon(
     await sshServerModules.dispose().catch(() => undefined);
     sshService.dispose();
     await botsSlack.dispose();
+    await botsHooks.dispose();
     await botsService.dispose();
     await speechService.stop();
     await scheduleService.stop().catch(() => undefined);

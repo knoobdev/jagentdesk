@@ -95,3 +95,35 @@ it("delivers GitHub triggers even when the configured Jira source fails", async 
     rmSync(home, { recursive: true, force: true });
   }
 });
+it("does not poll gh for a bot that has a GitHub webhook (ADR-0061 §2)", async () => {
+  const home = mkdtempSync(join(tmpdir(), "bots-trigger-"));
+  const storage = new BotStorage(home);
+  try {
+    const bot = storage.createBot({
+      slug: "hooked",
+      name: "Hooked",
+      identity: "Help",
+      provider: "claude",
+      model: "default",
+      modeId: "default",
+    });
+    storage.setState(`github:connection:${bot.id}`, {
+      hookId: "h",
+      targets: [{ target: "octo/repo", state: "connected" }],
+      allowedUsers: [],
+    });
+    const calls: string[][] = [];
+    const triggers = new LocalBotTriggers({
+      storage,
+      gh: async (args) => {
+        calls.push(args);
+        return "[]";
+      },
+    });
+    expect(await triggers.poll(bot)).toEqual([]);
+    expect(calls).toEqual([]);
+  } finally {
+    storage.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
