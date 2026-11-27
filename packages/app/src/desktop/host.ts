@@ -149,11 +149,23 @@ export interface DesktopAttachedBrowserRegistration {
   webContentsId: number;
 }
 
+/** One live browser webview of this window, as main sees it (spec 04 §27d.1). */
+export interface DesktopLiveBrowserTab {
+  webContentsId: number;
+  browserId: string | null;
+  workspaceId: string | null;
+  url: string;
+  title: string;
+  faviconUrl: string | null;
+  status: "ready" | "loading" | "notResponding" | "crashed";
+}
+
 export interface DesktopBrowserBridge {
   setShortcutPolicy?: (input: BrowserKeyboardPolicy) => Promise<void>;
   readonly profilePartition?: string;
   registerAttachedBrowser?: (input: DesktopAttachedBrowserRegistration) => Promise<void>;
   unregisterWorkspaceBrowser?: (browserId: string) => Promise<void>;
+  listLiveTabs?: () => Promise<DesktopLiveBrowserTab[]>;
   /** The tab's pending JavaScript dialog (ADR-0025); answered by the user or the agent. */
   getDialog?: (browserId: string) => Promise<BrowserAutomationPendingDialog | null>;
   answerDialog?: (

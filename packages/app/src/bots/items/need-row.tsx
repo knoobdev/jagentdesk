@@ -4,6 +4,7 @@
 // need kinds of BotNeedsYouSection.tsx:58-260. Approvals answer in place with the agent permission RPC
 // (`agent_permission_response` on `row.agentId` + `row.requestId`): the Home Chat card, the worker's card
 // and this row are the same pending request, so answering one closes all (contract §Approvals).
+import { getJAgentDeskToolLabel } from "@jagentdesk/protocol/jagentdesk-tool-presentation/index";
 import { useCallback, useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
@@ -114,7 +115,9 @@ function permissionLine(
   t: (key: string, values?: Record<string, unknown>) => string,
   tool?: string,
 ) {
-  return tool ? t("bots.needs.permissionTool", { tool }) : t("bots.needs.permission");
+  return tool
+    ? t("bots.needs.permissionTool", { tool: getJAgentDeskToolLabel(tool) ?? tool })
+    : t("bots.needs.permission");
 }
 
 function ApprovalNeedRow({

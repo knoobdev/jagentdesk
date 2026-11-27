@@ -4,6 +4,11 @@ import {
   type UsagePreferences,
 } from "@/usage/preferences";
 import { isSyntaxThemeId, type SyntaxThemeId } from "@jagentdesk/highlight";
+import {
+  DEFAULT_NOTIFICATION_PREFERENCES,
+  normalizeNotificationPreferences,
+  type NotificationPreferences,
+} from "@jagentdesk/protocol/notification-preferences";
 import type { QueryClient } from "@tanstack/react-query";
 import type { DesktopSettings } from "@/desktop/settings/desktop-settings";
 import { parseAppLanguage, type AppLanguage } from "@/i18n/locales";
@@ -85,6 +90,8 @@ export interface AppSettings {
   chatDisplay: ChatDisplay;
   chatOutlineEnabled: boolean;
   vimKeybindings: boolean;
+  /** Per-device OS and push notification preferences (Settings → This device → Notifications). */
+  notifications: NotificationPreferences;
 }
 
 export interface Settings extends AppSettings {
@@ -121,6 +128,7 @@ export const DEFAULT_CLIENT_SETTINGS: AppSettings = {
   chatDisplay: "collapseTurns",
   chatOutlineEnabled: true,
   vimKeybindings: false,
+  notifications: DEFAULT_NOTIFICATION_PREFERENCES,
 };
 
 export const DEFAULT_APP_SETTINGS: Settings = {
@@ -238,6 +246,7 @@ export function normalizeAppSettings(value: unknown): AppSettings {
   if (legacyTheme === "clickupDark") settings.theme = "gumloopDark";
   settings.usage = UsagePreferencesSchema.parse(stored.usage ?? DEFAULT_USAGE_PREFERENCES);
   settings.usageInSidebar = stored.usageInSidebar !== false;
+  settings.notifications = normalizeNotificationPreferences(stored.notifications);
 
   settings.chatDisplay = parseChatDisplay(stored);
   settings.defaultThemeVersion = DEFAULT_THEME_VERSION;

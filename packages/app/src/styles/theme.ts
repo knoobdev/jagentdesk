@@ -978,6 +978,9 @@ export const gumloopLightSyntax = {
   heading: "#0068B8",
   variable: "#000000",
   punctuation: "#4A4A4A",
+  // Not in spec 38 §3.1 (20 tokens); reuse the spec's ANSI green/red, same as diffStat*.
+  diffAddition: "#0A7F3F",
+  diffDeletion: "#BD0E13",
 };
 const gumloopLightColors = {
   ...lightSemanticColors,
@@ -1077,6 +1080,8 @@ export const gumloopDarkSyntax = {
   heading: "#7DCBFF",
   variable: "#F5F5F5",
   punctuation: "#C8C8C8",
+  diffAddition: "#5BD98A",
+  diffDeletion: "#FF6369",
 };
 const gumloopDarkColors = {
   ...jagentdeskDarkColors,

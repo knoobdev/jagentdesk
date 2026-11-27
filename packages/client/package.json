@@ -1,6 +1,6 @@
 {
   "name": "@jagentdesk/client",
-  "version": "0.12.1",
+  "version": "0.12.2",
   "description": "JAgentDesk client SDK package",
   "files": [
     "dist",
@@ -47,8 +47,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@jagentdesk/protocol": "0.12.1",
-    "@jagentdesk/relay": "0.12.1",
+    "@jagentdesk/protocol": "0.12.2",
+    "@jagentdesk/relay": "0.12.2",
     "ws": "^8.20.0",
     "zod": "^4.4.3"
   },

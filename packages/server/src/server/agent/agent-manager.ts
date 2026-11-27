@@ -52,6 +52,7 @@ import {
   type AgentMode,
   type AgentPermissionRequest,
   type AgentPermissionAction,
+  type ToolCallDetail,
   type AgentPermissionResponse,
   type AgentPermissionResult,
   type AgentPersistenceHandle,
@@ -5325,6 +5326,9 @@ export class AgentManager {
       title?: string;
       description?: string;
       input?: Record<string, unknown>;
+      /** What the card shows under its description, instead of the raw input. */
+      detail?: ToolCallDetail;
+      metadata?: Record<string, unknown>;
       actions?: AgentPermissionAction[];
       /** Host settings changes the user decides themselves, even in an unattended mode. */
       alwaysAsk?: boolean;
@@ -5350,6 +5354,8 @@ export class AgentManager {
       title: request.title,
       description: request.description,
       input: request.input as Record<string, unknown>,
+      ...(request.detail ? { detail: request.detail } : {}),
+      ...(request.metadata ? { metadata: request.metadata } : {}),
       ...(request.actions ? { actions: request.actions } : {}),
     };
 

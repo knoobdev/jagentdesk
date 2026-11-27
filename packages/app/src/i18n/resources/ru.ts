@@ -177,6 +177,7 @@ export const ru: TranslationResources = {
       interruptAgent: "Агент прерываний",
       queueMessage: "Сообщение в очереди",
       sendAndInterrupt: "Отправить и прервать",
+      sendAndSteer: "Отправить и направить",
       sendMessage: "Отправить сообщение",
       queue: "Очередь",
       send: "Отправлять",
@@ -446,6 +447,8 @@ export const ru: TranslationResources = {
       pillOne: "1 фоновая задача",
       pillMany: "Фоновые задачи: {{count}}",
       notRunning: "Больше не выполняется",
+      dismissAll: "Скрыть все",
+      ended: "Завершено",
       dismiss: "Закрыть",
       stop: "Остановить",
       stopping: "Остановка…",
@@ -2043,6 +2046,8 @@ export const ru: TranslationResources = {
     pillLabelNeedsInputOne: "1 ожидает ввода",
     pillLabelNeedsInputMany: "{{count}} ожидают ввода",
     pillLabelReadyToReview: "{{count}} на проверку",
+    rowFailed: "Ошибка",
+    rowStopped: "Остановлен",
     detachAction: "Отсоединить {{label}}",
     detachTooltip: "Отсоединить субагент",
     archiveAction: "Архив{{label}}",
@@ -2203,6 +2208,49 @@ export const ru: TranslationResources = {
       editProject: "Изменить{{projectName}}",
     },
     groupInfo: "О{{title}}",
+    notifications: {
+      title: "Уведомления",
+      enabled: {
+        label: "Включить уведомления",
+        description: "Получать уведомления от агентов, терминалов и плагинов на этом устройстве",
+        pausedDescription:
+          "Все уведомления, включая уведомления от плагинов, приостановлены на этом устройстве",
+      },
+      events: {
+        title: "События",
+        agentPermission: {
+          label: "Агенту требуется разрешение",
+          description: "Подтверждения, планы и вопросы",
+        },
+        agentError: {
+          label: "Ошибка агента",
+          description: "Когда агент останавливается из-за ошибки",
+        },
+        agentFinished: {
+          label: "Агент завершил работу",
+          description: "Когда агент завершает ход",
+        },
+        terminalNeedsInput: {
+          label: "Терминал ожидает ввода",
+          description: "Когда команда в терминале ждёт ввода",
+        },
+        terminalFinished: {
+          label: "Терминал завершил команду",
+          description: "Когда команда в терминале завершается",
+        },
+      },
+      plugins: {
+        title: "Плагины",
+        enabled: {
+          label: "Уведомления плагинов",
+          description: "Разрешить установленным плагинам отправлять уведомления",
+        },
+        empty: "Установленные плагины появятся здесь, чтобы вы могли отключать их по отдельности",
+      },
+      legacyHostTitle: "Обновите хост для настроек push-уведомлений",
+      legacyHostHint:
+        "Обновите подключённые хосты для синхронизации настроек push-уведомлений с этого устройства",
+    },
     sections: {
       hosts: "Хосты",
       sidebar: "Боковая панель",
@@ -2905,6 +2953,9 @@ export const ru: TranslationResources = {
       },
       agentProfiles: {
         featureCountOne: "{{count}} функция",
+        systemPromptLabel: "Системный промпт",
+        systemPromptPlaceholder: "Сосредоточься на вёрстке, доступности и дизайн-токенах.",
+        systemPromptHint: "Применяется только к новым агентам",
         featureCount: "Функции: {{count}}",
         editProfileTitle: "Изменить профиль агента",
         addProfileTitle: "Добавить профиль агента",
@@ -3204,6 +3255,26 @@ export const ru: TranslationResources = {
     search: "Поиск",
     newWorkspace: "Новый",
     workspaces: "Рабочие пространства",
+  },
+  browserTabs: {
+    openOne: "Открыта 1 вкладка браузера",
+    openMany: "Открыто вкладок браузера: {{count}}",
+    title: "Вкладки браузера",
+    closeAll: "Закрыть все",
+    show: "Показать",
+    close: "Закрыть",
+    notInWorkspace: "Вне рабочего пространства",
+    untitled: "Новая вкладка",
+    status: {
+      loading: "Загрузка",
+      notResponding: "Не отвечает",
+      crashed: "Сбой",
+    },
+    pill: {
+      tooltip: "Вкладки браузера, открытые этим агентом",
+      notResponding: "не отвечает: {{count}}",
+      crashed: "сбой: {{count}}",
+    },
   },
   marketplace: {
     title: "Plugin Marketplace",

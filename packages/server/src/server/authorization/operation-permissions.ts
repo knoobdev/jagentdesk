@@ -60,6 +60,7 @@ const INBOUND_PERMISSION = {
   "bots.templates.list.request": "daemon.read",
   "bots.automations.list.request": "daemon.read",
   "bots.first_screen.scan.request": "daemon.read",
+  "bots.kickoff.retry.request": "daemon.manage",
   "bots.items.snooze.request": "daemon.manage",
   "bots.items.cancel_many.request": "daemon.manage",
   "bots.items.set_status.request": "daemon.manage",
@@ -835,6 +836,7 @@ const OUTBOUND_PERMISSION = {
   "bots.templates.list.response": "daemon.read",
   "bots.automations.list.response": "daemon.read",
   "bots.first_screen.scan.response": "daemon.read",
+  "bots.kickoff.retry.response": "daemon.manage",
   "bots.items.snooze.response": "daemon.manage",
   "bots.items.cancel_many.response": "daemon.manage",
   "bots.items.set_status.response": "daemon.manage",
@@ -1173,6 +1175,7 @@ const OUTBOUND_PERMISSION = {
   providers_snapshot_update: "daemon.read",
   pull_request_timeline_response: "workspace.read",
   "push.unregister.response": "workspace.read",
+  "plugin.notification": "workspace.read",
   read_project_config_response: "workspace.read",
   refresh_providers_snapshot_response: "daemon.read",
   // Custom API providers (spec 34.7): responses mirror their request permission.

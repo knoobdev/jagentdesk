@@ -7,6 +7,8 @@ afterEach(async () => {
   for (const close of cleanup.splice(0).toReversed()) await close();
 });
 const TOKEN = "123456:local-token-for-tests-only-abcdef";
+const OWNER_HINT_REFUSAL =
+  "I only take requests from people my owner allowed.\nIf you own this bot, open its Telegram settings in JAgentDesk and tap Link my Telegram account.";
 
 async function setup() {
   const h = await hookHarness();
@@ -127,7 +129,7 @@ describe("Telegram connector (spec 37.12)", () => {
     const t = await setup();
     await t.request("bots.telegram.connect.request", { token: TOKEN });
     await t.linkDana();
-    expect(t.api.sent.map((m) => m.text)).toEqual(["Your Telegram account is linked."]);
+    expect(t.api.sent.map((m) => m.text)).toEqual(["Linked. You can ask me anything here."]);
     const message = t.dm("list open items");
     await t.post(message);
     expect(t.runtime.sent[0].text).toContain("list open items");
@@ -191,6 +193,8 @@ describe("Telegram connector (spec 37.12)", () => {
   it("A37.12.5: someone not allowed DMs twice in an hour → exactly one refusal, 0 turns", async () => {
     const t = await setup();
     await t.request("bots.telegram.connect.request", { token: TOKEN });
+    await t.linkDana();
+    t.api.sent.length = 0;
     const stranger = { id: 66, first_name: "Eve" };
     await t.post(t.dm("hi", stranger));
     t.advance(30 * 60_000);
@@ -231,5 +235,77 @@ describe("Telegram connector (spec 37.12)", () => {
     expect(status).not.toContain(TOKEN);
     expect(status).not.toContain("local-token");
     expect(t.logs.join("")).not.toContain("local-token");
+  });
+  it("37.12.1: Open in Telegram sends /start <code>; it links the sender, says so, and the status names who linked", async () => {
+    const t = await setup();
+    await t.request("bots.telegram.connect.request", { token: TOKEN });
+    const changed: string[] = [];
+    t.bots.onEvent((event) => {
+      if (event.type === "bots.changed") changed.push(event.payload.botId);
+    });
+    const { code } = (await t.request("bots.telegram.link_code.request")) as { code: string };
+    await t.post(t.dm(`/start ${code}`));
+    expect(t.api.sent.map((m) => m.text)).toEqual(["Linked. You can ask me anything here."]);
+    expect(t.runtime.sent).toHaveLength(0);
+    const status = (await t.request("bots.telegram.status.request")).status as {
+      allowedUsers: unknown[];
+      linked?: unknown;
+    };
+    expect(status.allowedUsers).toEqual([{ id: "42", name: "Dana", username: "dana" }]);
+    expect(status.linked).toEqual({
+      code,
+      user: { id: "42", name: "Dana", username: "dana" },
+    });
+    expect(changed).toContain(t.bot.id);
+    // The code is spent: sending it again is an ordinary question from a linked user.
+    await t.post(t.dm(code));
+    expect(t.runtime.sent).toHaveLength(1);
+  });
+  it("37.12.1: the plain code links too, with spaces around it", async () => {
+    const t = await setup();
+    await t.request("bots.telegram.connect.request", { token: TOKEN });
+    const { code } = (await t.request("bots.telegram.link_code.request")) as { code: string };
+    await t.post(t.dm(`  ${code}\n`));
+    const status = (await t.request("bots.telegram.status.request")).status as {
+      allowedUsers: { id: string }[];
+    };
+    expect(status.allowedUsers.map((u) => u.id)).toEqual(["42"]);
+    expect(t.api.sent.map((m) => m.text)).toEqual(["Linked. You can ask me anything here."]);
+  });
+  it("37.12.1: an expired code links no one; with no owner yet the refusal says how to link", async () => {
+    const t = await setup();
+    await t.request("bots.telegram.connect.request", { token: TOKEN });
+    const { code } = (await t.request("bots.telegram.link_code.request")) as { code: string };
+    t.advance(600_001);
+    await t.post(t.dm(`/start ${code}`));
+    const status = (await t.request("bots.telegram.status.request")).status as {
+      allowedUsers: unknown[];
+      linked?: unknown;
+    };
+    expect(status.allowedUsers).toEqual([]);
+    expect(status.linked).toBeUndefined();
+    expect(t.api.sent.map((m) => m.text)).toEqual([OWNER_HINT_REFUSAL]);
+  });
+  it("37.12.2: before anyone is linked every DM gets the owner hint, at most one a minute; after, one refusal a day", async () => {
+    const t = await setup();
+    await t.request("bots.telegram.connect.request", { token: TOKEN });
+    await t.post(t.dm("/start"));
+    t.advance(10_000);
+    await t.post(t.dm("chào"));
+    expect(t.api.sent.map((m) => m.text)).toEqual([OWNER_HINT_REFUSAL]);
+    t.advance(60_000);
+    await t.post(t.dm("ádad"));
+    expect(t.api.sent.map((m) => m.text)).toEqual([OWNER_HINT_REFUSAL, OWNER_HINT_REFUSAL]);
+    expect(t.runtime.sent).toHaveLength(0);
+    // Once an owner is linked, a stranger gets the plain refusal, once a day.
+    await t.linkDana();
+    t.api.sent.length = 0;
+    const stranger = { id: 66, first_name: "Eve" };
+    await t.post(t.dm("hi", stranger));
+    t.advance(120_000);
+    await t.post(t.dm("hi again", stranger));
+    expect(t.api.sent.map((m) => m.text)).toEqual([
+      "I only take requests from people my owner allowed.",
+    ]);
   });
 });

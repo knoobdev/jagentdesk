@@ -1,5 +1,6 @@
 // The read models the bot panels draw (spec 37.4.1, 37.4.4, 37.4.6), built from the daemon's state.
 // Pure: the service passes in the bot, its agents, items and run states.
+import { getJAgentDeskToolLabel } from "@jagentdesk/protocol/jagentdesk-tool-presentation/index";
 import type { Bot, BotItem } from "@jagentdesk/protocol/bots/types";
 import type {
   BotAutomation,
@@ -44,7 +45,10 @@ function approvalRow(
     tool: request.name,
     agentId: agent.id,
     requestId: request.id,
-    title: request.name ? `Permission · ${request.name}` : "Permission needed",
+    // A JAgentDesk tool by its label ("Start worker"), never its tool name.
+    title: request.name
+      ? `Permission · ${getJAgentDeskToolLabel(request.name) ?? request.name}`
+      : "Permission needed",
     at_ms: agent.updatedAt_ms,
   };
   const isWorker = agent.id !== bot.agentId && agent.labels[BOT_ROLE_LABEL] !== "side";
@@ -263,14 +267,15 @@ function stateOf(run: RunState, on: boolean): BotAutomation["state"] {
   return on ? "idle" : "stopped";
 }
 
-/** Automations (spec 37.4.4): Look around, Tidy memory (Claude/Codex only), schedules, open waits. */
+/** Automations (spec 37.4.4): Look around, Tidy memory (Claude/Codex only), core schedules, open waits. */
 export function automationRows(input: {
   bot: Bot;
   items: readonly BotItem[];
   runs: { look: RunState; tidy: RunState };
   nextLookAt?: number;
   nextTidyAt?: number;
-  runningSchedules: ReadonlySet<string>;
+  /** The bot's core schedules, as rows (`scheduleAutomationRow`). */
+  schedules: readonly BotAutomation[];
 }): BotAutomation[] {
   const { bot, runs } = input;
   const rows: BotAutomation[] = [];
@@ -298,18 +303,7 @@ export function automationRows(input: {
     if (tidySetting.on && input.nextTidyAt) tidy.nextAt_ms = input.nextTidyAt;
     rows.push(tidy);
   }
-  for (const schedule of bot.schedules) {
-    const row: BotAutomation = {
-      id: schedule.id,
-      kind: "schedule",
-      name: schedule.name,
-      when: schedule.cron,
-      state: stateOf({ running: input.runningSchedules.has(schedule.id) }, schedule.enabled),
-      enabled: schedule.enabled,
-    };
-    if (schedule.enabled) row.nextAt_ms = schedule.nextRunAt_ms;
-    rows.push(row);
-  }
+  rows.push(...input.schedules);
   for (const item of input.items) {
     if (item.status !== "waiting") continue;
     const row: BotAutomation = {

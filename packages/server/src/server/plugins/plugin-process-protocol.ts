@@ -1,13 +1,16 @@
 import { UsageScopeSchema, type UsageScope } from "@jagentdesk/plugin/server/usage";
-import { type PluginHookAgent } from "@jagentdesk/plugin/server";
+import { type PluginHookAgent, type PluginNotificationSendResult } from "@jagentdesk/plugin/server";
 import {
   type ProviderConnectRequest,
   type ProviderCatalogOptions,
+  type ProviderCatalogRefreshMode,
   type ProviderEvent,
   type ProviderInput,
   type ProviderInstallationLaunch,
   type ProviderStatusRequest,
   type ProviderUpdateReport,
+  ProviderCatalogRefreshModeSchema,
+  ProviderClientInfoSchema,
   ProviderUpdateReportSchema,
   ProviderEventSchema,
   ProviderInputSchema,
@@ -18,6 +21,7 @@ import { type JsonValue } from "@jagentdesk/protocol/agent-types";
 
 export interface PluginProviderMetadata {
   requiresConfiguration?: boolean;
+  catalogRefresh?: ProviderCatalogRefreshMode;
   hasCatalogCacheKey?: boolean;
   hasStatus?: boolean;
   installation?: PluginProviderInstallationMetadata;
@@ -119,6 +123,8 @@ export type PluginProcessRequest =
       input: ProviderInput;
     }
   | { type: "provider.close"; connectionId: string }
+  | { type: "notification.result"; requestId: string; result: PluginNotificationSendResult }
+  | { type: "notification.error"; requestId: string; error: string }
   | { type: "shutdown" }
   | { type: "jagentdesk_frame"; data: string | Uint8Array; isBinary: boolean }
   | { type: "jagentdesk_close" };
@@ -161,6 +167,7 @@ export type PluginProcessMessage =
     }
   | { type: "provider.event"; connectionId: string; event: ProviderEvent }
   | { type: "provider.closed"; connectionId: string; error?: string }
+  | { type: "notification.send"; requestId: string; input: unknown }
   | { type: "jagentdesk_frame"; data: string | Uint8Array; isBinary: boolean }
   | { type: "jagentdesk_close" };
 
@@ -180,6 +187,7 @@ const providerMetadataSchema = z
     iconPath: z.string().optional(),
     docsUrl: z.string().optional(),
     requiresConfiguration: z.boolean().optional(),
+    catalogRefresh: ProviderCatalogRefreshModeSchema.optional(),
     hasCatalogCacheKey: z.boolean().optional(),
     hasStatus: z.boolean().optional(),
     installation: z
@@ -215,6 +223,7 @@ const usageSourceMetadataSchema = z
 const providerConnectRequestSchema = z
   .object({
     launch: ProviderLaunchSchema.optional(),
+    clientInfo: ProviderClientInfoSchema.optional(),
     versions: z.array(z.number().int().positive()),
     capabilities: z.array(z.string()),
   })
@@ -382,6 +391,29 @@ export const PluginProcessRequestSchema: z.ZodType<PluginProcessRequest> = z.dis
       })
       .strict(),
     z.object({ type: z.literal("provider.close"), connectionId: z.string().min(1) }).strict(),
+    z
+      .object({
+        type: z.literal("notification.result"),
+        requestId: z.string().min(1),
+        result: z.discriminatedUnion("status", [
+          z
+            .object({
+              status: z.literal("sent"),
+              notificationId: z.string().min(1),
+            })
+            .strict(),
+          z.object({ status: z.literal("deduplicated") }).strict(),
+          z.object({ status: z.literal("rate_limited") }).strict(),
+        ]),
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("notification.error"),
+        requestId: z.string().min(1),
+        error: z.string(),
+      })
+      .strict(),
     z.object({ type: z.literal("shutdown") }).strict(),
     z.object({ type: z.literal("jagentdesk_frame"), ...frameFields }).strict(),
     z.object({ type: z.literal("jagentdesk_close") }).strict(),
@@ -480,6 +512,13 @@ export const PluginProcessMessageSchema: z.ZodType<PluginProcessMessage> = z.dis
         type: z.literal("provider.closed"),
         connectionId: z.string().min(1),
         error: z.string().optional(),
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("notification.send"),
+        requestId: z.string().min(1),
+        input: z.unknown(),
       })
       .strict(),
     z.object({ type: z.literal("jagentdesk_frame"), ...frameFields }).strict(),

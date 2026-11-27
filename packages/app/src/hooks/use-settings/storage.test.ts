@@ -1,6 +1,7 @@
 import { DEFAULT_CONTENT_MAX_WIDTH } from "@/styles/theme";
 import { describe, expect, it } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
+import { DEFAULT_NOTIFICATION_PREFERENCES } from "@jagentdesk/protocol/notification-preferences";
 import {
   APP_SETTINGS_KEY,
   APP_SETTINGS_QUERY_KEY,
@@ -688,4 +689,69 @@ it("falls back to Enter when the stored send shortcut is invalid", async () => {
   const result = await loadAppSettingsFromStorage(deps);
 
   expect(result.sendShortcut).toBe("enter");
+});
+
+describe("notification preferences storage", () => {
+  it("defaults notifications to DEFAULT_NOTIFICATION_PREFERENCES when storage is empty", async () => {
+    const deps = makeDeps();
+    const settings = await loadAppSettingsFromStorage(deps);
+    expect(settings.notifications).toEqual(DEFAULT_NOTIFICATION_PREFERENCES);
+  });
+
+  it("persists and reloads custom notification preferences", async () => {
+    const deps = makeDeps();
+    const queryClient = new QueryClient();
+    const notifications = {
+      enabled: true,
+      events: {
+        agentPermission: true,
+        agentError: false,
+        agentFinished: true,
+        terminalNeedsInput: false,
+        terminalFinished: true,
+      },
+      plugins: {
+        enabled: true,
+        muted: ["ci-bot", "deploy-bot"],
+      },
+    };
+
+    await saveAppSettings({ queryClient, deps, updates: { notifications } });
+    expect((await loadAppSettingsFromStorage(deps)).notifications).toEqual(notifications);
+  });
+
+  it("normalizes partial and malformed notification preferences on load", async () => {
+    const deps = makeDeps({
+      storage: createInMemoryKeyValueStorage({
+        [APP_SETTINGS_KEY]: JSON.stringify({
+          vimKeybindings: true,
+          notifications: {
+            enabled: "invalid",
+            events: {
+              agentFinished: true,
+              agentError: "nope",
+            },
+            plugins: {
+              enabled: true,
+              muted: ["  zeta ", "", 42, "alpha", "zeta"],
+            },
+          },
+        }),
+      }),
+    });
+
+    const settings = await loadAppSettingsFromStorage(deps);
+    expect(settings.vimKeybindings).toBe(true);
+    expect(settings.notifications).toEqual({
+      enabled: true,
+      events: {
+        ...DEFAULT_NOTIFICATION_PREFERENCES.events,
+        agentFinished: true,
+      },
+      plugins: {
+        enabled: true,
+        muted: ["alpha", "zeta"],
+      },
+    });
+  });
 });

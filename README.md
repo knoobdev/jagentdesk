@@ -56,6 +56,14 @@ Jira, Argo CD, forges and devices, Bots, and connected hosts.
 
 ---
 
+## ✨ New in v0.12.2
+
+The desktop app no longer quits when an in-app browser tab or the window's renderer dies under load, and every in-app browser
+tab running in the background shows up: a count next to the notifications bell and a pill above the agent's composer. Bot
+automations move onto the Schedules list; bot first-run, Telegram linking and bot cards are fixed; Paseo 0.18.0 adds
+per-device notification settings, diff highlighting and agent-profile system prompts. Details:
+**[docs/releases/v0.12.2.md](docs/releases/v0.12.2.md)**.
+
 ## ✨ New in v0.12.1
 
 Devices, Clusters, Data and Workbench open again. In v0.12.0 their embedded agent chat crashed the screen with "Something went
@@ -340,7 +348,7 @@ GitHub release. To cut one:
 ```bash
 # set "version" in the root package.json, then sync every workspace:
 npm run version:sync-internal
-git tag v0.12.1
+git tag v0.12.2
 git push origin main --tags
 ```
 

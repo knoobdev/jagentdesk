@@ -161,6 +161,7 @@ export const fr: TranslationResources = {
       interruptAgent: "Interrompre l\u2019agent",
       queueMessage: "Mettre le message en file d\u2019attente",
       sendAndInterrupt: "Envoyer et interrompre",
+      sendAndSteer: "Envoyer et réorienter",
       sendMessage: "Envoyer le message",
       queue: "Mettre en file d\u2019attente",
       send: "Envoyer",
@@ -431,6 +432,8 @@ export const fr: TranslationResources = {
       pillOne: "1 tâche en arrière-plan",
       pillMany: "{{count}} tâches en arrière-plan",
       notRunning: "N’est plus en cours",
+      dismissAll: "Tout ignorer",
+      ended: "Terminé",
       dismiss: "Fermer",
       stop: "Arrêter",
       stopping: "Arrêt…",
@@ -2028,6 +2031,8 @@ export const fr: TranslationResources = {
     pillLabelNeedsInputOne: "1 attend une réponse",
     pillLabelNeedsInputMany: "{{count}} attendent une réponse",
     pillLabelReadyToReview: "{{count}} à relire",
+    rowFailed: "Échec",
+    rowStopped: "Arrêté",
     detachAction: "Detacher {{label}}",
     detachTooltip: "Detacher le sous-agent",
     archiveAction: "Archiver{{label}}",
@@ -2184,6 +2189,50 @@ export const fr: TranslationResources = {
       editProject: "Modifier {{projectName}}",
     },
     groupInfo: "\u00C0 propos de {{title}}",
+    notifications: {
+      title: "Notifications",
+      enabled: {
+        label: "Activer les notifications",
+        description: "Recevoir les notifications des agents, terminaux et plugins sur cet appareil",
+        pausedDescription:
+          "Toutes les notifications, y compris celles des plugins, sont suspendues sur cet appareil",
+      },
+      events: {
+        title: "Événements",
+        agentPermission: {
+          label: "L’agent demande une autorisation",
+          description: "Approbations, plans et questions",
+        },
+        agentError: {
+          label: "Erreur de l’agent",
+          description: "Quand un agent s’arrête avec une erreur",
+        },
+        agentFinished: {
+          label: "L’agent a terminé",
+          description: "Quand un agent termine un tour",
+        },
+        terminalNeedsInput: {
+          label: "Le terminal attend une saisie",
+          description: "Quand une commande de terminal attend une saisie",
+        },
+        terminalFinished: {
+          label: "Le terminal a terminé",
+          description: "Quand une commande de terminal se termine",
+        },
+      },
+      plugins: {
+        title: "Plugins",
+        enabled: {
+          label: "Notifications des plugins",
+          description: "Autoriser les plugins installés à envoyer des notifications",
+        },
+        empty:
+          "Les plugins installés apparaissent ici pour les mettre en sourdine individuellement",
+      },
+      legacyHostTitle: "Mettez à jour l’hôte pour les préférences push",
+      legacyHostHint:
+        "Mettez à jour les hôtes connectés pour synchroniser les préférences de notifications push de cet appareil",
+    },
     sections: {
       hosts: "Hôtes",
       sidebar: "Barre latérale",
@@ -2898,6 +2947,10 @@ export const fr: TranslationResources = {
       },
       agentProfiles: {
         featureCountOne: "{{count}} fonctionnalité",
+        systemPromptLabel: "Prompt système",
+        systemPromptPlaceholder:
+          "Concentre-toi sur la mise en page, l’accessibilité et les jetons de design.",
+        systemPromptHint: "S’applique uniquement aux nouveaux agents",
         featureCount: "{{count}} fonctionnalités",
         editProfileTitle: "Modifier le profil d’agent",
         addProfileTitle: "Ajouter un profil d’agent",
@@ -3201,6 +3254,26 @@ export const fr: TranslationResources = {
     search: "Rechercher",
     newWorkspace: "Nouveau",
     workspaces: "Espaces de travail",
+  },
+  browserTabs: {
+    openOne: "1 onglet de navigateur ouvert",
+    openMany: "{{count}} onglets de navigateur ouverts",
+    title: "Onglets du navigateur",
+    closeAll: "Tout fermer",
+    show: "Afficher",
+    close: "Fermer",
+    notInWorkspace: "Hors espace de travail",
+    untitled: "Nouvel onglet",
+    status: {
+      loading: "Chargement",
+      notResponding: "Ne répond pas",
+      crashed: "Planté",
+    },
+    pill: {
+      tooltip: "Onglets du navigateur ouverts par cet agent",
+      notResponding: "{{count}} ne répond pas",
+      crashed: "{{count}} planté",
+    },
   },
   marketplace: {
     title: "Plugin Marketplace",

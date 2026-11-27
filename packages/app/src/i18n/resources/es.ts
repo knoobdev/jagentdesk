@@ -158,6 +158,7 @@ export const es: TranslationResources = {
       interruptAgent: "agente de interrupción",
       queueMessage: "mensaje de cola",
       sendAndInterrupt: "Enviar e interrumpir",
+      sendAndSteer: "Enviar y orientar",
       sendMessage: "enviar mensaje",
       queue: "Cola",
       send: "Enviar",
@@ -427,6 +428,8 @@ export const es: TranslationResources = {
       pillOne: "1 tarea en segundo plano",
       pillMany: "{{count}} tareas en segundo plano",
       notRunning: "Ya no está en ejecución",
+      dismissAll: "Descartar todo",
+      ended: "Terminado",
       dismiss: "Cerrar",
       stop: "Detener",
       stopping: "Deteniendo…",
@@ -2001,6 +2004,8 @@ export const es: TranslationResources = {
     pillLabelNeedsInputOne: "1 necesita datos",
     pillLabelNeedsInputMany: "{{count}} necesitan datos",
     pillLabelReadyToReview: "{{count}} para revisar",
+    rowFailed: "Falló",
+    rowStopped: "Detenido",
     detachAction: "Separar {{label}}",
     detachTooltip: "Separar subagente",
     archiveAction: "Archivo{{label}}",
@@ -2155,6 +2160,49 @@ export const es: TranslationResources = {
       editProject: "Editar{{projectName}}",
     },
     groupInfo: "Acerca de{{title}}",
+    notifications: {
+      title: "Notificaciones",
+      enabled: {
+        label: "Activar notificaciones",
+        description: "Recibe notificaciones de agentes, terminales y plugins en este dispositivo",
+        pausedDescription:
+          "Todas las notificaciones, incluidas las de plugins, están en pausa en este dispositivo",
+      },
+      events: {
+        title: "Eventos",
+        agentPermission: {
+          label: "El agente necesita permiso",
+          description: "Aprobaciones, planes y preguntas",
+        },
+        agentError: {
+          label: "Error del agente",
+          description: "Cuando un agente se detiene con un error",
+        },
+        agentFinished: {
+          label: "El agente terminó",
+          description: "Cuando un agente completa un turno",
+        },
+        terminalNeedsInput: {
+          label: "La terminal necesita entrada",
+          description: "Cuando un comando de terminal espera entrada",
+        },
+        terminalFinished: {
+          label: "La terminal terminó",
+          description: "Cuando finaliza un comando de terminal",
+        },
+      },
+      plugins: {
+        title: "Plugins",
+        enabled: {
+          label: "Notificaciones de plugins",
+          description: "Permitir que los plugins instalados envíen notificaciones",
+        },
+        empty: "Los plugins instalados aparecen aquí para que puedas silenciarlos individualmente",
+      },
+      legacyHostTitle: "Actualiza el host para preferencias push",
+      legacyHostHint:
+        "Actualiza los hosts conectados para sincronizar preferencias de notificaciones push desde este dispositivo",
+    },
     sections: {
       hosts: "Hosts",
       sidebar: "Barra lateral",
@@ -2857,6 +2905,9 @@ export const es: TranslationResources = {
       },
       agentProfiles: {
         featureCountOne: "{{count}} característica",
+        systemPromptLabel: "Aviso del sistema",
+        systemPromptPlaceholder: "Enfócate en el diseño, la accesibilidad y los tokens de diseño.",
+        systemPromptHint: "Solo se aplica a agentes nuevos",
         featureCount: "{{count}} características",
         editProfileTitle: "Editar perfil de agente",
         addProfileTitle: "Agregar perfil de agente",
@@ -3156,6 +3207,26 @@ export const es: TranslationResources = {
     search: "Buscar",
     newWorkspace: "Nuevo",
     workspaces: "Espacios de trabajo",
+  },
+  browserTabs: {
+    openOne: "1 pestaña del navegador abierta",
+    openMany: "{{count}} pestañas del navegador abiertas",
+    title: "Pestañas del navegador",
+    closeAll: "Cerrar todas",
+    show: "Mostrar",
+    close: "Cerrar",
+    notInWorkspace: "Fuera de un espacio de trabajo",
+    untitled: "Pestaña nueva",
+    status: {
+      loading: "Cargando",
+      notResponding: "No responde",
+      crashed: "Bloqueada",
+    },
+    pill: {
+      tooltip: "Pestañas del navegador que abrió este agente",
+      notResponding: "{{count}} no responde",
+      crashed: "{{count}} bloqueada",
+    },
   },
   marketplace: {
     title: "Plugin Marketplace",

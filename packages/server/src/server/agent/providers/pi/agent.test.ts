@@ -27,6 +27,9 @@ import { PiExtensionHost } from "./extensions/host.js";
 import type { PiModel, PiThinkingLevel } from "./rpc-types.js";
 import type { PiUsagePollScheduler } from "./usage-poller.js";
 
+// A run Pi starts by itself carries the id the session assigns to it.
+const AUTONOMOUS_TURN_ID = expect.stringMatching(/^autonomous-/);
+
 const ONE_BY_ONE_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 
@@ -1054,6 +1057,54 @@ describe("PiRpcAgentSession", () => {
     ]);
   });
 
+  test("settles an autonomous turn triggered by a Pi extension custom message", async () => {
+    const { pi, events } = await createSession();
+    const fakeSession = pi.latestSession();
+
+    fakeSession.emit({ type: "agent_start" });
+    fakeSession.emit({ type: "turn_start" });
+    fakeSession.emit({
+      type: "message_end",
+      message: {
+        role: "custom",
+        content: [{ type: "text", text: "Background process completed" }],
+      },
+    });
+    fakeSession.finishAgentRun({
+      message: {
+        role: "assistant",
+        stopReason: "stop",
+        content: [{ type: "text", text: "Continuation finished" }],
+      },
+      willRetry: false,
+    });
+
+    expect(events.timelineItems()).toEqual([
+      {
+        type: "tool_call",
+        callId: expect.stringMatching(/^pi-custom-/),
+        name: "custom-message",
+        status: "completed",
+        detail: {
+          type: "plain_text",
+          text: "Background process completed",
+        },
+        metadata: { synthetic: true, customType: "custom-message" },
+        error: null,
+      },
+    ]);
+    expect(events.turnLifecycleEvents()).toEqual([
+      { type: "turn_started", turnId: AUTONOMOUS_TURN_ID },
+    ]);
+
+    fakeSession.settleTurn();
+
+    expect(events.turnLifecycleEvents()).toEqual([
+      { type: "turn_started", turnId: AUTONOMOUS_TURN_ID },
+      { type: "turn_completed", turnId: AUTONOMOUS_TURN_ID },
+    ]);
+  });
+
   test("canceling a silent Pi extension command leaves the session usable", async () => {
     const { pi, session, events } = await createSession();
     const fakeSession = pi.latestSession();
@@ -1109,6 +1160,145 @@ describe("PiRpcAgentSession", () => {
       provider: "pi",
       reason: "interrupted",
       turnId,
+    });
+  });
+
+  test.each(["aborted", "error"])(
+    "canceling autonomous work with Pi stopReason=%s waits for abort and allows a follow-up",
+    async (stopReason) => {
+      const { pi, session, events } = await createSession();
+      const fakeSession = pi.latestSession();
+      const abortFinished = Promise.withResolvers<void>();
+      const turnFinished = Promise.withResolvers<void>();
+      fakeSession.abort = async () => {
+        fakeSession.finishTurn({
+          role: "assistant",
+          stopReason,
+          errorMessage: "This operation was aborted",
+          content: [],
+        });
+        turnFinished.resolve();
+        await abortFinished.promise;
+      };
+      fakeSession.emit({ type: "agent_start" });
+      fakeSession.emit({ type: "turn_start" });
+
+      const stopping = session.interrupt();
+      await turnFinished.promise;
+      expect(events.turnLifecycleEvents()).toEqual([
+        { type: "turn_started", turnId: AUTONOMOUS_TURN_ID },
+      ]);
+      abortFinished.resolve();
+      await stopping;
+      expect(events.turnLifecycleEvents()).toEqual([
+        { type: "turn_started", turnId: AUTONOMOUS_TURN_ID },
+        { type: "turn_canceled", turnId: AUTONOMOUS_TURN_ID },
+      ]);
+
+      const { turnId } = await session.startTurn("follow-up");
+      fakeSession.finishTurn({ role: "assistant", stopReason: "stop", content: [] });
+      expect(events.turnLifecycleEvents().at(-1)).toEqual({ type: "turn_completed", turnId });
+    },
+  );
+
+  test("a natural completion during Stop does not cancel the next autonomous run", async () => {
+    const { pi, session, events } = await createSession();
+    const fakeSession = pi.latestSession();
+    const abortFinished = Promise.withResolvers<void>();
+    const turnFinished = Promise.withResolvers<void>();
+    fakeSession.abort = async () => {
+      fakeSession.finishTurn({ role: "assistant", stopReason: "stop", content: [] });
+      turnFinished.resolve();
+      await abortFinished.promise;
+    };
+    fakeSession.emit({ type: "agent_start" });
+    fakeSession.emit({ type: "turn_start" });
+    const stopping = session.interrupt();
+    await turnFinished.promise;
+    fakeSession.emit({ type: "agent_start" });
+    fakeSession.emit({ type: "turn_start" });
+    abortFinished.resolve();
+    await stopping;
+    fakeSession.finishTurn({ role: "assistant", stopReason: "stop", content: [] });
+
+    expect(events.turnLifecycleEvents()).toEqual([
+      { type: "turn_started", turnId: AUTONOMOUS_TURN_ID },
+      { type: "turn_completed", turnId: AUTONOMOUS_TURN_ID },
+      { type: "turn_started", turnId: AUTONOMOUS_TURN_ID },
+      { type: "turn_completed", turnId: AUTONOMOUS_TURN_ID },
+    ]);
+  });
+
+  test("a completed foreground Stop does not suppress a later autonomous abort", async () => {
+    const { pi, session, events } = await createSession();
+    const fakeSession = pi.latestSession();
+    fakeSession.abort = async () => {
+      fakeSession.finishTurn({ role: "assistant", stopReason: "stop", content: [] });
+    };
+    const { turnId } = await session.startTurn("finish while stopping");
+    fakeSession.emit({ type: "agent_start" });
+    fakeSession.emit({ type: "turn_start" });
+    await session.interrupt();
+    fakeSession.emit({ type: "agent_start" });
+    fakeSession.emit({ type: "turn_start" });
+    fakeSession.finishTurn({
+      role: "assistant",
+      stopReason: "aborted",
+      errorMessage: "Autonomous run aborted",
+      content: [],
+    });
+
+    expect(events.turnLifecycleEvents()).toEqual([
+      { type: "turn_started", turnId },
+      { type: "turn_completed", turnId },
+      { type: "turn_started", turnId: AUTONOMOUS_TURN_ID },
+      { type: "turn_failed", turnId: AUTONOMOUS_TURN_ID },
+    ]);
+  });
+
+  test("Pi process exit during Stop emits one autonomous failure", async () => {
+    const { pi, session, events } = await createSession();
+    const fakeSession = pi.latestSession();
+    fakeSession.abort = async () => {
+      fakeSession.finishTurn({
+        role: "assistant",
+        stopReason: "error",
+        errorMessage: "This operation was aborted",
+        content: [],
+      });
+      fakeSession.emit({ type: "process_exit", error: "Pi process exited" });
+      throw new Error("Pi process exited");
+    };
+    fakeSession.emit({ type: "agent_start" });
+    fakeSession.emit({ type: "turn_start" });
+
+    await expect(session.interrupt()).rejects.toThrow("Pi process exited");
+    expect(events.turnLifecycleEvents()).toEqual([
+      { type: "turn_started", turnId: AUTONOMOUS_TURN_ID },
+      { type: "turn_failed", turnId: AUTONOMOUS_TURN_ID },
+    ]);
+    await expect(events.nextTurnFailure()).resolves.toMatchObject({ error: "Pi process exited" });
+  });
+
+  test("preserves the autonomous terminal error when abort rejects", async () => {
+    const { pi, session, events } = await createSession();
+    const fakeSession = pi.latestSession();
+    fakeSession.abort = async () => {
+      fakeSession.finishTurn({
+        role: "assistant",
+        stopReason: "error",
+        errorMessage: "Provider disconnected",
+        content: [],
+      });
+      throw new Error("Abort failed");
+    };
+    fakeSession.emit({ type: "agent_start" });
+    fakeSession.emit({ type: "turn_start" });
+
+    await expect(session.interrupt()).rejects.toThrow("Abort failed");
+    await expect(events.nextTurnFailure()).resolves.toMatchObject({
+      turnId: AUTONOMOUS_TURN_ID,
+      error: expect.stringContaining("Provider disconnected"),
     });
   });
 
@@ -1994,6 +2184,24 @@ describe("PiRpcAgentSession", () => {
     },
   );
 
+  test("fails an autonomous turn when the Pi process exits before settlement", async () => {
+    const { pi, events } = await createSession();
+    const fakeSession = pi.latestSession();
+
+    fakeSession.emit({ type: "agent_start" });
+    fakeSession.emit({ type: "turn_start" });
+    fakeSession.emit({ type: "process_exit", error: "Pi exited" });
+
+    await expect(events.nextTurnFailure()).resolves.toMatchObject({
+      error: "Pi exited",
+      turnId: AUTONOMOUS_TURN_ID,
+    });
+    expect(events.turnLifecycleEvents()).toEqual([
+      { type: "turn_started", turnId: AUTONOMOUS_TURN_ID },
+      { type: "turn_failed", turnId: AUTONOMOUS_TURN_ID },
+    ]);
+  });
+
   test("completes locally handled slash commands when agentInvoked is false", async () => {
     const { pi, session, events } = await createSession();
     const fakeSession = pi.latestSession();
@@ -2267,6 +2475,37 @@ describe("PiRpcAgentSession", () => {
 });
 
 describe("PiRpcAgentSession steering", () => {
+  test("steers a run Pi started by itself instead of refusing it", async () => {
+    const { pi, session, events } = await createSession();
+    const fakeSession = pi.latestSession();
+
+    fakeSession.emit({ type: "agent_start" });
+    fakeSession.emit({ type: "turn_start" });
+    const [started] = events.turnLifecycleEvents();
+    // The manager keeps a provider turn id and steers with it.
+    const result = await session.steerActiveTurn("join the running work", {
+      expectedTurnId: started?.turnId ?? "autonomous-assigned-by-manager",
+    });
+
+    expect(started?.turnId).toEqual(expect.any(String));
+    expect(result).toEqual({ status: "accepted" });
+    expect(fakeSession.steerCalls).toEqual([{ message: "join the running work", imageCount: 0 }]);
+
+    fakeSession.finishAgentRun({
+      message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "done" }] },
+      willRetry: false,
+    });
+    fakeSession.settleTurn();
+    await flushTurnScheduling();
+    expect(events.turnCompletedEvents()).toEqual([
+      expect.objectContaining({ turnId: started?.turnId }),
+    ]);
+    const idle = await session.steerActiveTurn("after the run", {
+      expectedTurnId: started?.turnId ?? "autonomous-assigned-by-manager",
+    });
+    expect(idle).toEqual({ status: "unavailable" });
+  });
+
   test("steers the active Pi turn and correlates the echoed user message", async () => {
     const { pi, session, events } = await createSession();
     const fakeSession = pi.latestSession();

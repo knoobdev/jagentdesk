@@ -838,6 +838,7 @@ export class PluginService {
           requiresConfiguration: this.builtinPluginIds.has(pluginId)
             ? false
             : provider.requiresConfiguration,
+          catalogRefresh: provider.catalogRefresh,
           status: provider.hasStatus
             ? (request) => {
                 if (!this.runtime.getProviderStatus)

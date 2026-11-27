@@ -136,6 +136,38 @@ function summarizeSubagentStatus(rows: readonly SubagentRow[]): SubagentStatusCo
   });
 }
 
+/** The panel's rank for each state: the sidebar's status order, with finished children last. */
+const TRACK_ROW_ORDER: readonly SidebarStateBucket[] = [...ACTIVE_STATUS_BUCKET_ORDER, "done"];
+
+/**
+ * The order the track's panel lists children: what wants the user first, in the sidebar's status
+ * order (needs input, failed, ready to review, working), then the finished ones, each state in
+ * launch order. The pill counts "1 failed" out of a long fan-out; listing by launch time alone
+ * left that child somewhere among sixty finished rows, so the count pointed at nothing visible.
+ */
+export function orderSubagentRowsForTrack(rows: readonly SubagentRow[]): SubagentRow[] {
+  const rank = (row: SubagentRow) => {
+    const bucket = buildSubagentRowPresentationData(row).statusBucket ?? "done";
+    return TRACK_ROW_ORDER.indexOf(bucket);
+  };
+  return rows
+    .map((row, index) => ({ row, index, rank: rank(row) }))
+    .sort((left, right) => left.rank - right.rank || left.index - right.index)
+    .map(({ row }) => row);
+}
+
+/**
+ * How a finished child ended, when that is not plain success: the word its facts line leads with.
+ * A child the user stopped is "stopped", never "failed" — only an error is a failure.
+ */
+export type SubagentRowOutcome = "failed" | "stopped";
+
+export function subagentRowOutcome(row: SubagentRow): SubagentRowOutcome | null {
+  if (buildSubagentRowPresentationData(row).statusBucket === "failed") return "failed";
+  if (row.kind === "provider" && row.status === "canceled") return "stopped";
+  return null;
+}
+
 export function countFinishedSubagents(rows: readonly SubagentRow[]): number {
   return rows.filter((row) => row.kind === "provider" && row.status !== "running").length;
 }

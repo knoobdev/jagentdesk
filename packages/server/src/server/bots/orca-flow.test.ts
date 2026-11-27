@@ -13,6 +13,8 @@ import { BotsError } from "./home.js";
 import { FakeBotRuntime } from "./test-utils/fake-runtime.js";
 import { backgroundToolDecision, lookAroundCommandAllowed } from "./look-around.js";
 import { BOT_TEMPLATE_SKILL_TEXT } from "./templates/skills.js";
+import { botFirstScreenState } from "@jagentdesk/protocol/bots/rules";
+import { attachBotSchedules } from "./test-utils/schedules.js";
 
 const homes: string[] = [];
 const services: BotsService[] = [];
@@ -31,6 +33,7 @@ function setup(options: { home?: string; now?: number } = {}) {
     now: () => clock,
   });
   services.push(service);
+  attachBotSchedules({ service, home, now: () => new Date(clock) });
   return { home, service, runtime, setTime: (v: number) => (clock = v) };
 }
 
@@ -690,7 +693,8 @@ describe("templates, hand over, groups, New Home Chat", () => {
       provider: "claude",
       model: "default",
     });
-    expect(dep.bot.schedules.map((s) => s.enabled)).toEqual([false]);
+    // Template automations are core schedules, made off (spec 37.4.10).
+    expect((await service.schedulesOf(dep.bot.id)).map((s) => s.enabled)).toEqual([false]);
   });
 
   it("hands a workspace over with Orca's one-line ask when there is no goal (A37.7.24)", async () => {
@@ -751,5 +755,116 @@ describe("templates, hand over, groups, New Home Chat", () => {
     expect(readFileSync(join(service.storage.botHome(bot), "SOUL.md"), "utf8")).toContain(
       "Heo Con",
     );
+  });
+});
+
+describe("first run: the kickoff and the first-run screen (spec 37.4.2, A37.7.5)", () => {
+  const KICKOFF = "JAgentDesk: you were just created. Start your first-run setup.";
+
+  function started() {
+    const env = setup();
+    env.service.start();
+    return env;
+  }
+
+  async function created(service: BotsService) {
+    const { bot } = await rpc<{ bot: Bot }>(service, {
+      type: "bots.create.request",
+      bot: { name: "Heo Con", provider: "claude", model: "default" },
+    });
+    return bot;
+  }
+
+  function screen(service: BotsService, botId: string) {
+    return botFirstScreenState(service.storage.history(botId, 200));
+  }
+
+  it("sends the kickoff as soon as the bot exists, without waiting for a tick", async () => {
+    const { service, runtime } = started();
+    await service.settled();
+    const bot = await created(service);
+    await service.settled();
+    expect(runtime.sent).toEqual([
+      { id: `supervisor:${bot.id}`, text: `[jagentdesk]\n${KICKOFF}` },
+    ]);
+    expect(service.storage.pending(bot.id)).toEqual([]);
+    expect(screen(service, bot.id)).toMatchObject({ phase: "starting" });
+  });
+
+  it("leaves the screen once the bot's first reply lands; first run ends with the owner's turn", async () => {
+    const { service, runtime } = started();
+    const bot = await created(service);
+    await service.settled();
+    runtime.emit({
+      agentId: `supervisor:${bot.id}`,
+      kind: "done",
+      key: "t1",
+      text: "Hi! What first?",
+    });
+    await service.settled();
+    expect(screen(service, bot.id)).toBeNull();
+    // The first-run rules still steer the owner's answer (bot-preamble.ts FIRST_RUN_RULES).
+    expect(service.storage.bot(bot.id).firstRun).toBe(true);
+    service.wake(bot.id, "Look at my PRs", "chat");
+    await service.settled();
+    runtime.emit({ agentId: `supervisor:${bot.id}`, kind: "done", key: "t2", text: "On it." });
+    await service.settled();
+    expect(service.storage.bot(bot.id).firstRun).toBe(false);
+  });
+
+  it("fails the screen when the kickoff turn ends without words, and Try again sends it again", async () => {
+    const { service, runtime } = started();
+    const bot = await created(service);
+    await service.settled();
+    await expect(
+      rpc(service, { type: "bots.kickoff.retry.request", botId: bot.id }),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
+    runtime.emit({ agentId: `supervisor:${bot.id}`, kind: "done", key: "t1", text: "" });
+    await service.settled();
+    expect(screen(service, bot.id)).toMatchObject({
+      phase: "failed",
+      failure: "The first turn ended without a reply.",
+    });
+    await rpc(service, { type: "bots.kickoff.retry.request", botId: bot.id });
+    await service.settled();
+    expect(runtime.sent.map((s) => s.text)).toEqual([
+      `[jagentdesk]\n${KICKOFF}`,
+      `[jagentdesk]\n${KICKOFF}`,
+    ]);
+    expect(screen(service, bot.id)).toMatchObject({ phase: "starting" });
+  });
+
+  it("shows the agent's error when the kickoff turn fails", async () => {
+    const { service, runtime } = started();
+    const bot = await created(service);
+    await service.settled();
+    runtime.emit({
+      agentId: `supervisor:${bot.id}`,
+      kind: "error",
+      key: "t1",
+      text: "Not logged in",
+    });
+    await service.settled();
+    expect(screen(service, bot.id)).toMatchObject({ phase: "failed", failure: "Not logged in" });
+  });
+
+  it("fails the screen with why when the kickoff cannot start, and does not resend it every tick", async () => {
+    const { service, runtime } = setup();
+    let attempts = 0;
+    runtime.ensureSupervisor = async () => {
+      attempts += 1;
+      throw new Error("Provider claude is not installed");
+    };
+    service.start();
+    const bot = await created(service);
+    await service.settled();
+    await service.tick();
+    await service.settled();
+    expect(attempts).toBe(1);
+    expect(service.storage.pending(bot.id)).toEqual([]);
+    expect(screen(service, bot.id)).toMatchObject({
+      phase: "failed",
+      failure: "Provider claude is not installed",
+    });
   });
 });

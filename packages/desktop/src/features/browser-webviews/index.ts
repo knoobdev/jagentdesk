@@ -8,8 +8,12 @@ import {
   PendingBrowserWindowOpenRequests,
 } from "./window-open.js";
 import { JAgentDeskBrowserWebviewRegistry } from "./registry.js";
+import { BROWSER_LIVE_TABS_EVENT, LiveBrowserTabs, type LiveBrowserTab } from "./live-tabs.js";
+
+export type { LiveBrowserTab, LiveBrowserTabStatus } from "./live-tabs.js";
 
 export {
+  BROWSER_LIVE_TABS_EVENT,
   BROWSER_DIALOG_EVENT,
   BROWSER_NEW_TAB_REQUEST_EVENT,
   decideBrowserWindowOpenRequest,
@@ -17,6 +21,19 @@ export {
 };
 
 const browserRegistry = new JAgentDeskBrowserWebviewRegistry();
+const LIVE_TABS_PUBLISH_DELAY_MS = 50;
+const liveBrowserTabs = new LiveBrowserTabs({
+  registry: browserRegistry,
+  publish: (hostWebContentsId, tabs) => {
+    const host = allWebContents.fromId(hostWebContentsId);
+    if (host && !host.isDestroyed()) {
+      host.send(BROWSER_LIVE_TABS_EVENT, tabs);
+    }
+  },
+  schedule: (flush) => {
+    setTimeout(flush, LIVE_TABS_PUBLISH_DELAY_MS);
+  },
+});
 
 interface BrowserWebContentsIdentity {
   readonly id: number;
@@ -66,6 +83,70 @@ export function prepareJAgentDeskBrowserWebContents(contents: RegisteredBrowserW
   contents.once("destroyed", () => {
     browserRegistry.unregisterWebContents(webContentsId);
   });
+}
+
+/**
+ * Lists a guest in the host window's "browser tabs open" list for as long as it lives
+ * (spec 04 §27d.1). Reads only cached event payloads afterwards, so a crashed or hung guest is
+ * never asked for anything.
+ */
+export function trackJAgentDeskBrowserLiveTab(contents: WebContents): void {
+  const host = contents.hostWebContents;
+  if (!host || contents.isDestroyed()) {
+    return;
+  }
+  const webContentsId = contents.id;
+  liveBrowserTabs.attach({
+    webContentsId,
+    hostWebContentsId: host.id,
+    url: contents.getURL(),
+    title: contents.getTitle(),
+  });
+  contents.on("did-start-loading", () => {
+    liveBrowserTabs.update(webContentsId, { loading: true, crashed: false });
+  });
+  contents.on("did-stop-loading", () => {
+    liveBrowserTabs.update(webContentsId, { loading: false });
+  });
+  contents.on("did-navigate", (_event, url) => {
+    liveBrowserTabs.update(webContentsId, { url, faviconUrl: null });
+  });
+  contents.on("did-navigate-in-page", (_event, url, isMainFrame) => {
+    if (isMainFrame) liveBrowserTabs.update(webContentsId, { url });
+  });
+  contents.on("page-title-updated", (_event, title) => {
+    liveBrowserTabs.update(webContentsId, { title });
+  });
+  contents.on("page-favicon-updated", (_event, favicons) => {
+    liveBrowserTabs.update(webContentsId, { faviconUrl: favicons[0] ?? null });
+  });
+  contents.on("unresponsive", () => {
+    liveBrowserTabs.update(webContentsId, { unresponsive: true });
+  });
+  contents.on("responsive", () => {
+    liveBrowserTabs.update(webContentsId, { unresponsive: false });
+  });
+  contents.on("render-process-gone", () => {
+    liveBrowserTabs.update(webContentsId, { crashed: true, loading: false });
+  });
+  contents.once("destroyed", () => {
+    liveBrowserTabs.detach(webContentsId);
+  });
+}
+
+/**
+ * Marks a guest "Not responding" in the browser tabs list, or clears it. Integration point for
+ * a CDP command that never answers (spec 04 §27d.3: identity apply timing out after 10 s).
+ */
+export function setJAgentDeskBrowserNotResponding(
+  webContentsId: number,
+  notResponding: boolean,
+): void {
+  liveBrowserTabs.update(webContentsId, { notResponding });
+}
+
+export function listLiveJAgentDeskBrowserTabs(hostWebContentsId: number): LiveBrowserTab[] {
+  return liveBrowserTabs.listForHost(hostWebContentsId);
 }
 
 export function registerAttachedJAgentDeskBrowser(input: RegisterAttachedBrowserInput): boolean {

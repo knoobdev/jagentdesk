@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   botEnvelopeSource,
   botIdFromLabels,
+  isBotKickoffWake,
   isBotRestartWake,
   stripBotEnvelope,
   stripBotQuietMarker,
@@ -27,6 +28,19 @@ describe("isBotRestartWake", () => {
     expect(isBotRestartWake("[resume]\nThe daemon resumed.")).toBe(true);
     expect(isBotRestartWake("[chat]\n[restart]\nhi")).toBe(false);
     expect(isBotRestartWake("restart")).toBe(false);
+  });
+});
+
+describe("isBotKickoffWake", () => {
+  it("knows the daemon's kickoff turn, a template's too, and not the owner's words", () => {
+    const kickoff = "JAgentDesk: you were just created. Start your first-run setup.";
+    expect(isBotKickoffWake(`[jagentdesk]\n${kickoff}`)).toBe(true);
+    expect(
+      isBotKickoffWake(`[jagentdesk]\n${kickoff} You were made from the Reviewer template.`),
+    ).toBe(true);
+    expect(isBotKickoffWake(`[chat]\n${kickoff}`)).toBe(false);
+    expect(isBotKickoffWake(kickoff)).toBe(false);
+    expect(isBotKickoffWake("[jagentdesk]\nAdded #1")).toBe(false);
   });
 });
 

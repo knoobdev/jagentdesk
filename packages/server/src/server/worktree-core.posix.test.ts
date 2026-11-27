@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test, afterEach } from "vitest";
 import type { ForgeService } from "../services/forge-service.js";
+import { createGitHubService } from "../services/github-service.js";
 import { createGitLabService } from "../services/gitlab-service.js";
 import {
   getCheckoutSnapshotFacts,
@@ -2261,6 +2262,89 @@ exit 1
         startPoint: "refs/jagentdesk/change-requests/1790",
         branchName: "follow-up",
       });
+    });
+
+    test("checks out the base repository's pull request when the fork has its own pull request with that number", async () => {
+      const { tempDir, repoDir, jagentdeskHome } = createGitRepo();
+      cleanupPaths.push(tempDir);
+      // A fork clone: origin is the fork, upstream is the base repository, and both have a
+      // pull request #42 with different heads.
+      const pullRequestHeads: Record<string, string> = {};
+      for (const name of ["fork", "base"]) {
+        const bareDir = path.join(tempDir, `${name}.git`);
+        execFileSync("git", ["clone", "--bare", repoDir, bareDir], { stdio: "pipe" });
+        pullRequestHeads[name] = execFileSync("git", [
+          "-c",
+          "user.name=Test",
+          "-c",
+          "user.email=test@test.com",
+          `--git-dir=${bareDir}`,
+          "commit-tree",
+          "main^{tree}",
+          "-p",
+          "main",
+          "-m",
+          `${name} pull request 42`,
+        ])
+          .toString()
+          .trim();
+        execFileSync("git", [
+          `--git-dir=${bareDir}`,
+          "update-ref",
+          "refs/pull/42/head",
+          pullRequestHeads[name],
+        ]);
+      }
+      const remotes = [
+        { name: "origin", url: "https://github.com/someone/jagentdesk.git", dir: "fork.git" },
+        { name: "upstream", url: "git@github.com:jagentdesk/jagentdesk.git", dir: "base.git" },
+      ];
+      for (const remote of remotes) {
+        execFileSync("git", ["remote", "add", remote.name, remote.url], { cwd: repoDir });
+        execFileSync(
+          "git",
+          ["config", `url.${path.join(tempDir, remote.dir)}.insteadOf`, remote.url],
+          { cwd: repoDir },
+        );
+      }
+      // gh resolves the base repository for a clone with an upstream remote.
+      const ghReplies = [
+        JSON.stringify({ owner: { login: "jagentdesk" }, name: "jagentdesk", parent: null }),
+        JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                number: 42,
+                baseRefName: "main",
+                headRefName: "feature/base-pr",
+                isCrossRepository: false,
+                headRepositoryOwner: { login: "jagentdesk" },
+                headRepository: {
+                  sshUrl: "git@github.com:jagentdesk/jagentdesk.git",
+                  url: "https://github.com/jagentdesk/jagentdesk",
+                },
+              },
+            },
+          },
+        }),
+      ];
+      const github = createGitHubService({
+        runner: async () => ({ stdout: ghReplies.shift() ?? "{}", stderr: "" }),
+        resolveGhPath: async () => "/usr/bin/gh",
+      });
+
+      const result = await createCoreWorktree(
+        {
+          cwd: repoDir,
+          action: "checkout",
+          checkoutSource: { kind: "change_request", forge: "github", number: 42 },
+          jagentdeskHome,
+        },
+        createCoreDeps({ github }),
+      );
+
+      expect(result.worktree.branchName).toBe("feature/base-pr");
+      expect(git(result.worktree.worktreePath, "rev-parse", "HEAD")).toBe(pullRequestHeads.base);
     });
 
     test("branches off a fork pull request's head without checking it out", async () => {

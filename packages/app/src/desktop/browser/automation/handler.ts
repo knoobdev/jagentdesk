@@ -375,7 +375,10 @@ async function openBrowserTabForRequest(params: {
   }
 
   const url = command.args.url ?? "https://example.com";
-  const { browserId, url: normalizedUrl } = createWorkspaceBrowser({ initialUrl: url });
+  const { browserId, url: normalizedUrl } = createWorkspaceBrowser({
+    initialUrl: url,
+    ...(request.agentId ? { openedBy: { serverId, workspaceId, agentId: request.agentId } } : {}),
+  });
   const workspaceKey = buildWorkspaceTabPersistenceKey({ serverId, workspaceId });
   if (!workspaceKey) {
     return browserAutomationFailure({

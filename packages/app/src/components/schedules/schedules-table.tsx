@@ -9,6 +9,7 @@ import type { ScheduleDerivedState } from "@/schedules/schedule-derivation";
 import { settingsStyles } from "@/styles/settings";
 import { confirmDialog } from "@/utils/confirm-dialog";
 import { resolveScheduleTitle, scheduleProductName } from "@/utils/schedule-format";
+import { editScheduleInBotChat } from "@/components/schedules/schedule-bot";
 
 /** A schedule plus the client-derived fields the row renders. */
 export interface ScheduleRowView {
@@ -98,8 +99,17 @@ function SchedulesTableRow({
   );
 
   const handleEdit = useCallback(() => {
+    // A bot's automation is changed only in its chat (spec 37.2.6).
+    if (schedule.bot) {
+      editScheduleInBotChat({
+        serverId,
+        botId: schedule.bot.botId,
+        scheduleName: resolveScheduleTitle(schedule),
+      });
+      return;
+    }
     onEditSchedule(schedule);
-  }, [onEditSchedule, schedule]);
+  }, [onEditSchedule, schedule, serverId]);
 
   const handlePause = useCallback(() => {
     void runAction("pause", () => mutations.pauseSchedule(id));
@@ -132,6 +142,7 @@ function SchedulesTableRow({
   return (
     <ScheduleRow
       schedule={schedule}
+      serverId={serverId}
       targetLabel={row.targetLabel}
       provider={row.provider}
       state={row.state}

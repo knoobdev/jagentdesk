@@ -163,6 +163,7 @@ export const ja: TranslationResources = {
       interruptAgent: "エージェントを中断",
       queueMessage: "メッセージをキューに追加",
       sendAndInterrupt: "送信して中断",
+      sendAndSteer: "送信して指示を追加",
       sendMessage: "メッセージを送信",
       queue: "キュー",
       send: "送信",
@@ -433,6 +434,8 @@ export const ja: TranslationResources = {
       pillOne: "バックグラウンドタスク1件",
       pillMany: "バックグラウンドタスク{{count}}件",
       notRunning: "実行は終了しました",
+      dismissAll: "すべて閉じる",
+      ended: "終了",
       dismiss: "閉じる",
       stop: "停止",
       stopping: "停止中…",
@@ -1991,6 +1994,8 @@ export const ja: TranslationResources = {
     pillLabelNeedsInputOne: "1 件が入力待ち",
     pillLabelNeedsInputMany: "{{count}} 件が入力待ち",
     pillLabelReadyToReview: "{{count}} 件レビュー待ち",
+    rowFailed: "失敗",
+    rowStopped: "停止",
     detachAction: "{{label}}を切り離す",
     detachTooltip: "サブエージェントを切り離す",
     archiveAction: "{{label}}をアーカイブ",
@@ -2148,6 +2153,48 @@ export const ja: TranslationResources = {
       editProject: "{{projectName}}を編集",
     },
     groupInfo: "{{title}}について",
+    notifications: {
+      title: "通知",
+      enabled: {
+        label: "通知を有効にする",
+        description: "このデバイスでエージェント、ターミナル、プラグインからの通知を受け取ります",
+        pausedDescription: "プラグインを含むすべての通知がこのデバイスで一時停止されています",
+      },
+      events: {
+        title: "イベント",
+        agentPermission: {
+          label: "エージェントが権限を要求",
+          description: "承認、プラン、質問",
+        },
+        agentError: {
+          label: "エージェントのエラー",
+          description: "エージェントがエラーで停止したとき",
+        },
+        agentFinished: {
+          label: "エージェントが完了",
+          description: "エージェントがターンを完了したとき",
+        },
+        terminalNeedsInput: {
+          label: "ターミナルが入力を待機",
+          description: "ターミナルコマンドが入力を待っているとき",
+        },
+        terminalFinished: {
+          label: "ターミナルが完了",
+          description: "ターミナルコマンドが完了したとき",
+        },
+      },
+      plugins: {
+        title: "プラグイン",
+        enabled: {
+          label: "プラグイン通知",
+          description: "インストール済みプラグインによる通知の送信を許可します",
+        },
+        empty: "インストールされたプラグインがここに表示され、個別にミュートできます",
+      },
+      legacyHostTitle: "プッシュ通知設定にはホストの更新が必要です",
+      legacyHostHint:
+        "このデバイスのカスタムプッシュ通知設定を同期するには、接続中のホストを更新してください",
+    },
     sections: {
       hosts: "ホスト",
       sidebar: "サイドバー",
@@ -2846,6 +2893,10 @@ export const ja: TranslationResources = {
       },
       agentProfiles: {
         featureCountOne: "{{count}}個の機能",
+        systemPromptLabel: "システムプロンプト",
+        systemPromptPlaceholder:
+          "レイアウト、アクセシビリティ、デザイントークンに集中してください。",
+        systemPromptHint: "新しいエージェントにのみ適用されます",
         featureCount: "{{count}}個の機能",
         editProfileTitle: "エージェントプロファイルを編集",
         addProfileTitle: "エージェントプロファイルを追加",
@@ -3144,6 +3195,26 @@ export const ja: TranslationResources = {
     search: "検索",
     newWorkspace: "新規",
     workspaces: "ワークスペース",
+  },
+  browserTabs: {
+    openOne: "ブラウザタブを1件開いています",
+    openMany: "ブラウザタブを{{count}}件開いています",
+    title: "ブラウザタブ",
+    closeAll: "すべて閉じる",
+    show: "表示",
+    close: "閉じる",
+    notInWorkspace: "ワークスペース外",
+    untitled: "新しいタブ",
+    status: {
+      loading: "読み込み中",
+      notResponding: "応答なし",
+      crashed: "クラッシュ",
+    },
+    pill: {
+      tooltip: "このエージェントが開いたブラウザタブ",
+      notResponding: "応答なし {{count}}",
+      crashed: "クラッシュ {{count}}",
+    },
   },
   marketplace: {
     title: "Plugin Marketplace",

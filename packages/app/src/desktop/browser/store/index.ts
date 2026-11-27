@@ -7,6 +7,7 @@ import {
   type BrowserIndexState,
   type BrowserRecord,
   type BrowserRecordPatch,
+  type BrowserTabOpener,
   createBrowserRecord,
   normalizeBrowserUrl,
   removeBrowserFromIndex,
@@ -14,10 +15,12 @@ import {
   trimNonEmpty,
 } from "./state";
 
-export type { BrowserRecord } from "./state";
+export type { BrowserRecord, BrowserTabOpener } from "./state";
 
 interface BrowserStoreState extends BrowserIndexState {
-  createBrowser: (input?: { initialUrl?: string }) => string;
+  createBrowser: (input?: { initialUrl?: string; openedBy?: BrowserTabOpener }) => string;
+  /** Keeps a record for a live webview whose record was lost, so a tab can show it again. */
+  ensureBrowser: (input: { browserId: string; url: string; title: string }) => void;
   updateBrowser: (browserId: string, patch: BrowserRecordPatch) => void;
   removeBrowser: (browserId: string) => void;
 }
@@ -43,6 +46,7 @@ export const useBrowserStore = create<BrowserStoreState>()(
           browserId,
           initialUrl: input?.initialUrl,
           now: Date.now(),
+          ...(input?.openedBy ? { openedBy: input.openedBy } : {}),
         });
 
         set((state) => ({
@@ -53,6 +57,24 @@ export const useBrowserStore = create<BrowserStoreState>()(
         }));
 
         return browserId;
+      },
+      ensureBrowser: (input) => {
+        set((state) => {
+          if (state.browsersById[input.browserId]) {
+            return state;
+          }
+          const record = createBrowserRecord({
+            browserId: input.browserId,
+            initialUrl: input.url,
+            now: Date.now(),
+          });
+          return {
+            browsersById: {
+              ...state.browsersById,
+              [input.browserId]: { ...record, title: input.title },
+            },
+          };
+        });
       },
       updateBrowser: (browserId, patch) => {
         set((state) => applyBrowserPatch(state, browserId, patch));
@@ -77,7 +99,10 @@ export function getBrowserRecord(browserId: string): BrowserRecord | null {
   return useBrowserStore.getState().browsersById[normalizedBrowserId] ?? null;
 }
 
-export function createWorkspaceBrowser(input?: { initialUrl?: string }): {
+export function createWorkspaceBrowser(input?: {
+  initialUrl?: string;
+  openedBy?: BrowserTabOpener;
+}): {
   browserId: string;
   url: string;
 } {

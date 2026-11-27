@@ -258,3 +258,30 @@ test("keeps work that left the list as finished until it is dismissed", async ()
   expect(model.getSnapshot().finished).toEqual({});
   unsubscribe();
 });
+
+test("dismisses every ended task at once and keeps the running ones", async () => {
+  const at = "2026-01-01T00:00:00Z";
+  const first = { id: "1", kind: "shell", description: "sleep 1", startedAt: at };
+  const second = { id: "2", kind: "shell", description: "sleep 2", startedAt: at };
+  const third = { id: "3", kind: "shell", description: "sleep 3", startedAt: at };
+  let update!: (items: (typeof first)[]) => void;
+  let snapshot!: () => void;
+  const model = createBackgroundWorkModel({
+    list: () => Promise.resolve([first, second, third]),
+    observe: (callbacks) => {
+      snapshot = callbacks.snapshot;
+      update = callbacks.update;
+      return () => {};
+    },
+  });
+  const unsubscribe = model.subscribe(() => {});
+  snapshot();
+  await Promise.resolve();
+  await Promise.resolve();
+  update([third]);
+  expect(Object.keys(model.getSnapshot().finished ?? {}).sort()).toEqual(["1", "2"]);
+  model.dismissAllEnded();
+  expect(model.getSnapshot().finished).toEqual({});
+  expect(model.getSnapshot().items).toEqual([third]);
+  unsubscribe();
+});

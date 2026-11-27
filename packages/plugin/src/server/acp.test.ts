@@ -69,6 +69,24 @@ async function waitForEvent(
   return events.find(predicate)!;
 }
 
+interface ModelThinking {
+  id: string;
+  thinkingOptions?: readonly { id: string }[];
+  defaultThinkingOptionId?: string;
+}
+
+function modelThinking(model: ModelThinking) {
+  return {
+    id: model.id,
+    thinkingOptions: model.thinkingOptions?.map(optionId),
+    defaultThinkingOptionId: model.defaultThinkingOptionId,
+  };
+}
+
+function optionId(option: { id: string }): string {
+  return option.id;
+}
+
 type AcpRequestMessage = Extract<AcpStreamMessage, { id: string | number | null; method: string }>;
 
 interface ConnectorInstance {
@@ -954,6 +972,42 @@ lines.on("line", (line) => {
     }
   });
 
+  it("short-circuits workspace-only global discovery with zero spawns", async () => {
+    let unavailable = false;
+    const harness = connectorHarness({
+      handleRequest(instance, request) {
+        if (unavailable && request.method === "initialize") {
+          instance.reject(request, "Bridge unavailable");
+          return true;
+        }
+        return false;
+      },
+    });
+    const registration = runAcpProvider({
+      id: "workspace-acp",
+      label: "Workspace ACP",
+      connector: harness.connector,
+      acpOptions: { workspaceOnlyCatalog: true },
+    });
+    expect(registration.getCatalogCacheKey).toBeUndefined();
+    const connection = await registration.connect({ versions: [1], capabilities: [] });
+    const events: ProviderEvent[] = [];
+    connection.onEvent((event) => events.push(event));
+    try {
+      unavailable = true;
+      const spawnsBefore = harness.instances.length;
+      await connection.send({ type: "catalog", requestId: "global" });
+      expect(await waitForEvent(events, (event) => event.type === "catalog")).toEqual({
+        type: "catalog",
+        requestId: "global",
+        catalog: { models: [], modes: [] },
+      });
+      expect(harness.instances.length).toBe(spawnsBefore);
+    } finally {
+      await connection.close();
+    }
+  });
+
   it("rejects connection cleanly when the ACP executable does not exist", async () => {
     const registration = runAcpProvider({
       id: "missing-acp",
@@ -1176,7 +1230,6 @@ lines.on("line", (line) => {
       capabilities: ["prompt.message"],
     });
     expect(harness.instances).toHaveLength(1);
-    expect(harness.instances[0]).toMatchObject({ readsCanceled: true, writesClosed: true });
 
     const events: ProviderEvent[] = [];
     connection.onEvent((event) => events.push(event));
@@ -1185,6 +1238,7 @@ lines.on("line", (line) => {
     await connection.close();
 
     expect(harness.instances).toHaveLength(2);
+    expect(harness.instances[0]).toMatchObject({ readsCanceled: true, writesClosed: true });
     expect(harness.instances[1]).toMatchObject({ readsCanceled: true, writesClosed: true });
   });
 
@@ -1966,6 +2020,70 @@ lines.on("line", (line) => {
       await connection.close();
     },
   );
+
+  it("discovers each model's own thinking options when the agent describes only the selected model", async () => {
+    const executable = await fakeAcp(`const readline = require("node:readline");
+const lines = readline.createInterface({ input: process.stdin });
+const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+const levels = (values) => values.map((value) => ({ name: value[0].toUpperCase() + value.slice(1), value }));
+const thinking = {
+  neon: { currentValue: "high", options: levels(["low", "high", "xhigh"]) },
+  carbon: { currentValue: "medium", options: levels(["low", "medium", "high"]) },
+};
+let model = "neon";
+const options = () => [
+  { id: "model", name: "Model", category: "model", type: "select", currentValue: model, options: [{ name: "Neon", value: "neon" }, { name: "Carbon", value: "carbon" }, { name: "Orchestrator", value: "orchestrator" }] },
+  ...(thinking[model] ? [{ id: "thought_level", name: "Thinking", category: "thought_level", type: "select", ...thinking[model] }] : []),
+];
+lines.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: message.params.protocolVersion, agentCapabilities: {} } });
+  else if (message.method === "session/new") send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "native-1", modes: null, configOptions: options() } });
+  else if (message.method === "session/set_config_option") {
+    if (message.params.configId === "model") model = message.params.value;
+    send({ jsonrpc: "2.0", id: message.id, result: { configOptions: options() } });
+  }
+});`);
+    let modelSeenByTransformer: unknown;
+    const registration = runAcpProvider({
+      id: "test-acp",
+      label: "Test ACP",
+      command: [process.execPath, executable],
+      acpOptions: { perModelThinkingOptions: true },
+      transformers: [
+        {
+          async discover(catalog, { config }) {
+            modelSeenByTransformer = (await config.read()).model;
+            return catalog;
+          },
+        },
+      ],
+    });
+    const connection = await registration.connect({ versions: [1], capabilities: [] });
+    const events: ProviderEvent[] = [];
+    connection.onEvent((event) => events.push(event));
+    try {
+      await connection.send({ type: "catalog", requestId: "catalog-1", cwd: process.cwd() });
+      const event = await waitForEvent(
+        events,
+        (candidate) => candidate.type === "catalog" || candidate.type === "request.failed",
+      );
+      if (event.type !== "catalog") throw new Error(`Expected catalog, got ${event.type}`);
+      expect(event.catalog.defaultModel).toBe("neon");
+      expect(event.catalog.models.map(modelThinking)).toEqual([
+        { id: "neon", thinkingOptions: ["low", "high", "xhigh"], defaultThinkingOptionId: "high" },
+        {
+          id: "carbon",
+          thinkingOptions: ["low", "medium", "high"],
+          defaultThinkingOptionId: "medium",
+        },
+        { id: "orchestrator", thinkingOptions: [], defaultThinkingOptionId: undefined },
+      ]);
+      expect(modelSeenByTransformer).toBe("neon");
+    } finally {
+      await connection.close();
+    }
+  });
 
   it("selects the model control when an agent files several controls under the model category", async () => {
     const executable = await fakeAcp(`const readline = require("node:readline");
@@ -2819,7 +2937,7 @@ it("sends extension requests from discovery and configure and preserves JSON-RPC
         (event) => event.type === "catalog" || event.type === "request.failed",
       ),
     ).toMatchObject({ type: "catalog", catalog: { defaultModel: "vendor-model" } });
-    expect(instances[1].requests).toContainEqual(
+    expect(instances[0].requests).toContainEqual(
       expect.objectContaining({
         method: "_example/catalog",
         params: { scope: "all" },
@@ -2834,7 +2952,7 @@ it("sends extension requests from discovery and configure and preserves JSON-RPC
         (event) => event.type === "session.ready" || event.type === "request.failed",
       ),
     ).toMatchObject({ type: "session.ready" });
-    expect(instances[2].requests).toContainEqual(
+    expect(instances[1].requests).toContainEqual(
       expect.objectContaining({
         method: "_example/select",
         params: { model: "vendor-model" },
@@ -7277,7 +7395,11 @@ lines.on("line", (line) => {
         requestId: "open-one",
         error: { message: expect.stringMatching(/ENOENT/u) },
       });
-      expect(spawned.map((child) => child.spawnargs)).toEqual([
+      // Closing the connection's idle capability probe on Windows spawns taskkill.exe.
+      const launchedArgs = spawned
+        .map((child) => child.spawnargs)
+        .filter((args) => args[0]?.toLowerCase() !== "taskkill.exe");
+      expect(launchedArgs).toEqual([
         [missing, "--profile", "a b", process.execPath, fixture.agent],
       ]);
       // The only start of the agent is the connection's capability probe, before the open.
@@ -7299,5 +7421,129 @@ lines.on("line", (line) => {
     });
     expect(connection.capabilities).not.toContain("session.launch_wrap");
     await connection.close();
+  });
+});
+
+describe("respectful ACP probing defaults and hygiene", () => {
+  it("defaults catalogRefresh to on_demand and supplies a global getCatalogCacheKey hashed from launch", async () => {
+    const registration = runAcpProvider({
+      id: "default-acp",
+      label: "Default ACP",
+      command: ["/usr/bin/agent", "acp"],
+    });
+    expect(registration.catalogRefresh).toBe("on_demand");
+    expect(registration.getCatalogCacheKey).toBeTypeOf("function");
+
+    const launchA = { command: "/usr/bin/agent", args: ["acp"], env: { B: "2", A: "1" } };
+    const launchAReorderedEnv = {
+      command: "/usr/bin/agent",
+      args: ["acp"],
+      env: { A: "1", B: "2" },
+    };
+    const launchB = { command: "/usr/bin/agent", args: ["acp", "--v2"], env: { A: "1", B: "2" } };
+    const launchC = { command: "/usr/bin/agent", args: ["acp"], env: { A: "1", B: "3" } };
+
+    const keyGlobal = await registration.getCatalogCacheKey!({
+      scope: "global",
+      launch: launchA,
+    });
+    const keyWorkspace = await registration.getCatalogCacheKey!({
+      scope: "workspace",
+      cwd: "/tmp/ws-1",
+      launch: launchAReorderedEnv,
+    });
+    const keyDifferentArgs = await registration.getCatalogCacheKey!({
+      scope: "global",
+      launch: launchB,
+    });
+    const keyDifferentEnv = await registration.getCatalogCacheKey!({
+      scope: "global",
+      launch: launchC,
+    });
+
+    expect(keyGlobal).toBeTruthy();
+    expect(keyWorkspace).toBe(keyGlobal);
+    expect(keyDifferentArgs).not.toBe(keyGlobal);
+    expect(keyDifferentEnv).not.toBe(keyGlobal);
+
+    const background = runAcpProvider({
+      id: "background-acp",
+      label: "Background ACP",
+      command: ["/usr/bin/agent", "acp"],
+      catalogRefresh: "background",
+    });
+    expect(background.catalogRefresh).toBe("background");
+  });
+
+  it("reuses the initialized capability probe for global discover() (1 spawn total) and cleans up on close", async () => {
+    const harness = connectorHarness();
+    const registration = runAcpProvider({
+      id: "warm-probe-acp",
+      label: "Warm Probe ACP",
+      connector: harness.connector,
+    });
+    const connection = await registration.connect({
+      versions: [1],
+      capabilities: [],
+      clientInfo: { name: "jagentdesk", title: "JAgentDesk", version: "0.17.5" },
+    });
+    const events: ProviderEvent[] = [];
+    connection.onEvent((event) => events.push(event));
+    try {
+      expect(harness.instances).toHaveLength(1);
+      await connection.send({ type: "catalog", requestId: "global-catalog" });
+      expect(await waitForEvent(events, (event) => event.type === "catalog")).toMatchObject({
+        type: "catalog",
+        requestId: "global-catalog",
+      });
+      // connect() + global discover() shared the single initialized warmProbe instance.
+      expect(harness.instances).toHaveLength(1);
+      expect(countRequests(harness.instances[0]!, "initialize")).toBe(1);
+      expect(countRequests(harness.instances[0]!, "session/new")).toBe(1);
+      const initReq = harness.instances[0]!.requests.find((req) => req.method === "initialize");
+      expect(initReq?.params).toMatchObject({
+        clientInfo: { name: "jagentdesk", title: "JAgentDesk", version: "0.17.5" },
+      });
+      expect(harness.instances[0]).toMatchObject({ readsCanceled: true, writesClosed: true });
+    } finally {
+      await connection.close();
+    }
+  });
+
+  it("closes an unused warmProbe when connection.close() runs without discover()", async () => {
+    const harness = connectorHarness();
+    const registration = runAcpProvider({
+      id: "unused-warm-probe",
+      label: "Unused Warm Probe",
+      connector: harness.connector,
+    });
+    const connection = await registration.connect({ versions: [1], capabilities: [] });
+    expect(harness.instances).toHaveLength(1);
+    await connection.close();
+    expect(harness.instances[0]).toMatchObject({ readsCanceled: true, writesClosed: true });
+  });
+
+  it("omits _meta when no transformer supplies metadata and never sends _meta._jagentdesk", async () => {
+    const harness = connectorHarness();
+    const registration = runAcpProvider({
+      id: "no-jagentdesk-meta",
+      label: "No JAgentDesk Meta",
+      connector: harness.connector,
+    });
+    const connection = await registration.connect({
+      versions: [1],
+      capabilities: ["prompt.message"],
+    });
+    const events: ProviderEvent[] = [];
+    connection.onEvent((event) => events.push(event));
+    try {
+      await connection.send(openInput());
+      await waitForEvent(events, (event) => event.type === "session.ready");
+      const sessionInstance = harness.instances[1]!;
+      const newSessionReq = sessionInstance.requests.find((req) => req.method === "session/new");
+      expect(newSessionReq?.params).not.toHaveProperty("_meta");
+    } finally {
+      await connection.close();
+    }
   });
 });

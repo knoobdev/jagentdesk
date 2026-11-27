@@ -169,6 +169,25 @@ function omitProvidersFromOverrides(
   return Object.keys(nextOverrides).length > 0 ? nextOverrides : undefined;
 }
 
+// COMPAT(agentProfileSystemPrompt): added in v0.17.6, remove after 2027-06-01.
+// Apps predating `systemPrompt` omit the key when saving an edited profile; preserve
+// the stored prompt unless the write explicitly sends `systemPrompt` (empty clears it).
+function foldProfileSystemPrompt(
+  profile: AgentProfile,
+  stored: AgentProfile | undefined,
+  source: "stored" | "client write",
+): AgentProfile {
+  if (profile.systemPrompt === undefined) {
+    if (source === "client write" && stored?.systemPrompt) {
+      return { ...profile, systemPrompt: stored.systemPrompt };
+    }
+    return profile;
+  }
+  const trimmed = profile.systemPrompt.trim();
+  const { systemPrompt: _ignored, ...rest } = profile;
+  return trimmed.length > 0 ? { ...rest, systemPrompt: trimmed } : rest;
+}
+
 function omitProvidersFromPersistedAgents(
   agents: PersistedConfig["agents"],
 ): Record<string, unknown> | undefined {
@@ -621,13 +640,15 @@ function foldConfigProfiles<T extends { agentProfiles?: AgentProfile[] }>(input:
       options,
     });
   const identity = (_provider: string, options: Record<string, unknown> | undefined) => options;
-  const foldWith = (profile: AgentProfile, convertWith: typeof convert) =>
-    foldProfileFeatureValues({
-      profile,
-      stored: held.find((candidate) => candidate.id === profile.id),
+  const foldWith = (profile: AgentProfile, convertWith: typeof convert) => {
+    const stored = held.find((candidate) => candidate.id === profile.id);
+    return foldProfileSystemPrompt(
+      // `Omit` over the profile's open index signature drops its known keys; the fold keeps them.
+      foldProfileFeatureValues({ profile, stored, source, convert: convertWith }) as AgentProfile,
+      stored,
       source,
-      convert: convertWith,
-    });
+    );
+  };
   return {
     ...config,
     agentProfiles: config.agentProfiles.map((profile) => {

@@ -2,6 +2,7 @@ import { BuiltinLeftPanel, BuiltinSidebarDestinations } from "@/plugins/builtin/
 import { builtinClientRegistry } from "@/plugins/builtin/loaded";
 import { SidebarFooterIconHighlight } from "@/components/sidebar/sidebar-footer-icon-highlight";
 import { UsageSidebarItem, useUsageSummary, useOpenSidebarUsage } from "@/usage/sidebar-item";
+import { BrowserTabsHostButton } from "@/desktop/browser/live-tabs/host-button";
 import { SidebarBotsSection } from "@/bots/sidebar-section";
 import { isNative as platformIsNative } from "@/constants/platform";
 import { PluginSidebarPanel } from "@/plugins/sidebar-screen-items";
@@ -709,6 +710,7 @@ function SidebarFooter({
             theme={theme}
           />
         ) : null}
+        <BrowserTabsHostButton variant="classic" />
         <SidebarHelpMenu />
         <FooterIconButton
           onPress={handleSettings}

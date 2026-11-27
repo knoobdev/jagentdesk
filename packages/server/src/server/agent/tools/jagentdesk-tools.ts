@@ -42,7 +42,10 @@ import {
   type AgentProvider,
   type AgentPermissionAction,
   type AgentPermissionResponse,
+  type AgentSessionConfig,
 } from "../agent-sdk-types.js";
+import { AgentProfileSchema } from "@jagentdesk/protocol/messages";
+import type { DaemonConfigStore } from "../../daemon-config-store.js";
 import {
   AgentFeatureSchema,
   AgentPermissionRequestPayloadSchema,
@@ -172,6 +175,8 @@ export interface JAgentDeskToolHostDependencies {
   getDaemonTcpPort?: () => number | null;
   scheduleService?: ScheduleService | null;
   providerSnapshotManager: ProviderSnapshotManager;
+  /** Read for `list_profiles`: the agent profiles a human configured. */
+  daemonConfigStore?: Pick<DaemonConfigStore, "get">;
   github?: ForgeService;
   workspaceGitService?: Pick<
     WorkspaceGitService,
@@ -955,6 +960,7 @@ function createToolCatalog(
     workspaceScripts,
     scheduleService,
     providerSnapshotManager,
+    daemonConfigStore,
     callerAgentId,
     resolveSpeakHandler,
     resolveCallerContext,
@@ -965,6 +971,23 @@ function createToolCatalog(
   const callerContext = callerAgentId ? (resolveCallerContext?.(callerAgentId) ?? null) : null;
   const openingLabels = options.callerAgentLabels;
   const openingRole = openingLabels?.["jagentdesk.orchestration.role"];
+  const callerLabel = (key: string): string | undefined =>
+    openingLabels?.[key] ??
+    (callerAgentId ? agentManager.getAgent(callerAgentId)?.labels[key] : undefined);
+  // A bot's own chat (its ORC supervisor) reaches the core schedule tools for its own automations
+  // only (spec 37.2.6); its workers and other bot agents get none.
+  const scheduleBotId =
+    callerLabel("jagentdesk.orchestration.role") === "supervisor"
+      ? callerLabel("jagentdesk.bot.id")
+      : undefined;
+  const botScheduleTools = new Set([
+    "create_schedule",
+    "pause_schedule",
+    "resume_schedule",
+    "delete_schedule",
+    "update_schedule",
+    "run_schedule_once",
+  ]);
   const callerOrchestrationContext = callerAgentId
     ? (orchestrationRuntime?.getAgentContext(callerAgentId) ??
       (openingRole
@@ -1050,18 +1073,13 @@ function createToolCatalog(
         : undefined);
     if (
       botId &&
-      [
+      ([
         "set_agent_mode",
         "update_agent",
         "respond_to_permission",
         "orchestration.bootstrap_lead",
-        "create_schedule",
-        "pause_schedule",
-        "resume_schedule",
-        "delete_schedule",
-        "update_schedule",
-        "run_schedule_once",
-      ].includes(name)
+      ].includes(name) ||
+        (botScheduleTools.has(name) && botId !== scheduleBotId))
     )
       return;
     const plugin = builtinPluginForTool(name);
@@ -1197,6 +1215,13 @@ function createToolCatalog(
       background: inheritWorkspaceBackground(background, caller),
       callerWorkspaceId: caller?.workspaceId,
     };
+  };
+
+  const resolveCreateAgentConfig = (
+    rawSystemPrompt?: string,
+  ): Partial<AgentSessionConfig> | undefined => {
+    const systemPrompt = rawSystemPrompt?.trim();
+    return systemPrompt ? { systemPrompt } : undefined;
   };
 
   const resolveScopedCwd = (requestedCwd?: string, opts?: { required?: boolean }): string => {
@@ -1356,7 +1381,11 @@ function createToolCatalog(
     };
   };
 
-  async function requireScheduleTarget(id: string, type: "agent" | "new-agent") {
+  async function requireScheduleTarget(
+    id: string,
+    type: "agent" | "new-agent",
+    access: "read" | "write" = "write",
+  ) {
     if (!scheduleService) {
       throw new Error("Schedule service is not configured");
     }
@@ -1372,6 +1401,16 @@ function createToolCatalog(
     if (schedule.target.type !== type) {
       throw new JAgentDeskToolInputError(
         type === "agent" ? `Heartbeat not found: ${id}` : `Schedule not found: ${id}`,
+      );
+    }
+    // A bot reaches only its own automations; anyone else reads a bot's but changes it only
+    // through that bot's chat (spec 37.2.6).
+    if (scheduleBotId !== undefined && schedule.bot?.botId !== scheduleBotId) {
+      throw new JAgentDeskToolInputError(`Schedule not found: ${id}`);
+    }
+    if (scheduleBotId === undefined && schedule.bot && access === "write") {
+      throw new JAgentDeskToolInputError(
+        `Schedule ${id} is a bot's automation; change it in that bot's chat`,
       );
     }
     return schedule;
@@ -1442,6 +1481,10 @@ function createToolCatalog(
         .record(z.string(), z.unknown())
         .optional()
         .describe("Provider-specific feature values, for example { fast_mode: true } for Codex."),
+      systemPrompt: z
+        .string()
+        .optional()
+        .describe("Optional system prompt applied to the new agent."),
     })
     .strict();
   const UpdateAgentSettingsInputSchema = z
@@ -2284,6 +2327,7 @@ function createToolCatalog(
         requestedBackground = resolvedArgs.parsedArgs.background;
         notifyOnFinish = resolvedArgs.parsedArgs.notifyOnFinish ?? false;
       }
+      const createConfig = resolveCreateAgentConfig(parsedArgs.settings?.systemPrompt);
       const {
         snapshot,
         background: createdInBackground,
@@ -2307,6 +2351,7 @@ function createToolCatalog(
           provider: parsedArgs.provider,
           title: parsedArgs.title,
           initialPrompt,
+          config: createConfig,
           cwd: resolvedArgs.cwd,
           workspaceId: resolvedArgs.workspaceId,
           thinking: parsedArgs.settings?.thinkingOptionId,
@@ -3626,6 +3671,28 @@ function createToolCatalog(
         throw new Error("Schedule service is not configured");
       }
 
+      if (scheduleBotId !== undefined) {
+        if (maxRuns !== undefined || expiresIn !== undefined) {
+          throw new JAgentDeskToolInputError(
+            "A bot's automation runs until it is removed; maxRuns and expiresIn don't apply",
+          );
+        }
+        const schedule = await scheduleService.createForBot({
+          bot: { botId: scheduleBotId, runsIn: "home" },
+          name: name?.trim() || prompt.trim().slice(0, 100),
+          prompt: prompt.trim(),
+          cadence: buildCronScheduleCadence({
+            cron,
+            ...(timezone !== undefined ? { timezone } : {}),
+          }),
+          enabled: true,
+        });
+        return {
+          content: [],
+          structuredContent: ensureValidJson(toScheduleSummary(schedule)),
+        };
+      }
+
       const expiresAt = buildScheduleExpiry(expiresIn);
       const schedule = await scheduleService.createOrReplace({
         prompt: prompt.trim(),
@@ -3795,7 +3862,11 @@ function createToolCatalog(
       }
 
       const schedules = (await scheduleService.list())
-        .filter((schedule) => schedule.target.type === "new-agent")
+        .filter(
+          (schedule) =>
+            schedule.target.type === "new-agent" &&
+            (scheduleBotId === undefined || schedule.bot?.botId === scheduleBotId),
+        )
         .map((schedule) => toScheduleSummary(schedule));
       return {
         content: [],
@@ -3819,7 +3890,7 @@ function createToolCatalog(
         throw new Error("Schedule service is not configured");
       }
 
-      const schedule = await requireScheduleTarget(id, "new-agent");
+      const schedule = await requireScheduleTarget(id, "new-agent", "read");
       return {
         content: [],
         structuredContent: ensureValidJson(schedule),
@@ -3971,8 +4042,14 @@ function createToolCatalog(
         throw new Error("Schedule service is not configured");
       }
 
-      await requireScheduleTarget(input.id, "new-agent");
-      const schedule = await scheduleService.update(buildScheduleUpdateInput(input));
+      const current = await requireScheduleTarget(input.id, "new-agent");
+      const update = buildScheduleUpdateInput(input);
+      if (current.bot && update.newAgentConfig) {
+        throw new JAgentDeskToolInputError(
+          "A bot's automation runs as the bot; provider, model, mode and cwd don't apply",
+        );
+      }
+      const schedule = await scheduleService.update(update);
 
       return {
         content: [],
@@ -3998,7 +4075,7 @@ function createToolCatalog(
         throw new Error("Schedule service is not configured");
       }
 
-      await requireScheduleTarget(id, "new-agent");
+      await requireScheduleTarget(id, "new-agent", "read");
       const runs = await scheduleService.logs(id);
       return {
         content: [],
@@ -4019,8 +4096,14 @@ function createToolCatalog(
       if (!scheduleService) {
         throw new Error("Schedule service is not configured");
       }
-      await requireScheduleTarget(id, "new-agent");
-      const schedule = await runScheduleAction(() => scheduleService.runOnce(id));
+      const current = await requireScheduleTarget(id, "new-agent");
+      // A bot's run may need the very chat that asked, so it starts and is not waited for.
+      const schedule = current.bot
+        ? await runScheduleAction(async () => {
+            await scheduleService.startRunOnce(id);
+            return scheduleService.inspect(id);
+          })
+        : await runScheduleAction(() => scheduleService.runOnce(id));
       return {
         content: [],
         structuredContent: ensureValidJson(schedule),
@@ -4073,6 +4156,31 @@ function createToolCatalog(
           provider,
           models,
         }),
+      };
+    },
+  );
+
+  registerTool(
+    "list_profiles",
+    {
+      title: "List agent profiles",
+      description:
+        "List agent profiles: named provider/model/mode bundles a human configured for specific " +
+        "kinds of work. Read each profile's `notes` to pick the one that fits the task you're " +
+        "delegating, then copy its `provider`, `model`, `modeId`, `thinkingOptionId`, " +
+        "`systemPrompt` (as `settings.systemPrompt`), and `options` (as `settings.features`) " +
+        "into create_agent (there is no `profile` parameter). " +
+        "Returns an empty list if none are configured.",
+      inputSchema: {},
+      outputSchema: {
+        profiles: z.array(AgentProfileSchema),
+      },
+    },
+    async () => {
+      const profiles = daemonConfigStore?.get().agentProfiles ?? [];
+      return {
+        content: [],
+        structuredContent: ensureValidJson({ profiles }),
       };
     },
   );

@@ -159,6 +159,7 @@ export const zhCN: TranslationResources = {
       interruptAgent: "中断 Agent",
       queueMessage: "消息排队",
       sendAndInterrupt: "发送并中断",
+      sendAndSteer: "发送并引导",
       sendMessage: "发送消息",
       queue: "排队",
       send: "发送",
@@ -424,6 +425,8 @@ export const zhCN: TranslationResources = {
       pillOne: "1 个后台任务",
       pillMany: "{{count}} 个后台任务",
       notRunning: "已不再运行",
+      dismissAll: "全部关闭",
+      ended: "已结束",
       dismiss: "关闭",
       stop: "停止",
       stopping: "正在停止…",
@@ -1935,6 +1938,8 @@ export const zhCN: TranslationResources = {
     pillLabelNeedsInputOne: "1 个需要输入",
     pillLabelNeedsInputMany: "{{count}} 个需要输入",
     pillLabelReadyToReview: "{{count}} 个待查看",
+    rowFailed: "失败",
+    rowStopped: "已停止",
     detachAction: "分离 {{label}}",
     detachTooltip: "分离 subagent",
     archiveAction: "归档 {{label}}",
@@ -2090,6 +2095,47 @@ export const zhCN: TranslationResources = {
       editProject: "编辑 {{projectName}}",
     },
     groupInfo: "关于 {{title}}",
+    notifications: {
+      title: "通知",
+      enabled: {
+        label: "启用通知",
+        description: "在此设备上接收来自智能体、终端和插件的通知",
+        pausedDescription: "此设备上的所有通知（包括插件通知）均已暂停",
+      },
+      events: {
+        title: "事件",
+        agentPermission: {
+          label: "智能体需要权限",
+          description: "审批、计划与提问",
+        },
+        agentError: {
+          label: "智能体出错",
+          description: "当智能体因错误停止时",
+        },
+        agentFinished: {
+          label: "智能体已完成",
+          description: "当智能体完成一轮回复时",
+        },
+        terminalNeedsInput: {
+          label: "终端等待输入",
+          description: "当终端命令正在等待输入时",
+        },
+        terminalFinished: {
+          label: "终端命令完成",
+          description: "当终端命令执行结束时",
+        },
+      },
+      plugins: {
+        title: "插件",
+        enabled: {
+          label: "插件通知",
+          description: "允许已安装的插件发送通知",
+        },
+        empty: "已安装的插件会显示在这里，方便你单独静音",
+      },
+      legacyHostTitle: "更新主机以同步推送偏好",
+      legacyHostHint: "更新已连接的主机，以同步此设备上的自定义推送通知偏好设置",
+    },
     sections: {
       hosts: "主机",
       sidebar: "侧边栏",
@@ -2774,6 +2820,9 @@ export const zhCN: TranslationResources = {
       },
       agentProfiles: {
         featureCountOne: "{{count}} 个 Feature",
+        systemPromptLabel: "System prompt",
+        systemPromptPlaceholder: "专注于布局、无障碍和设计 token。",
+        systemPromptHint: "仅适用于新 Agent",
         featureCount: "{{count}} 个 Feature",
         editProfileTitle: "编辑 Agent 配置",
         addProfileTitle: "添加 Agent 配置",
@@ -3070,6 +3119,26 @@ export const zhCN: TranslationResources = {
     search: "搜索",
     newWorkspace: "新建",
     workspaces: "工作区",
+  },
+  browserTabs: {
+    openOne: "已打开 1 个浏览器标签页",
+    openMany: "已打开 {{count}} 个浏览器标签页",
+    title: "浏览器标签页",
+    closeAll: "全部关闭",
+    show: "显示",
+    close: "关闭",
+    notInWorkspace: "不在任何工作区",
+    untitled: "新标签页",
+    status: {
+      loading: "加载中",
+      notResponding: "无响应",
+      crashed: "已崩溃",
+    },
+    pill: {
+      tooltip: "此智能体打开的浏览器标签页",
+      notResponding: "{{count}} 个无响应",
+      crashed: "{{count}} 个已崩溃",
+    },
   },
   marketplace: {
     title: "Plugin Marketplace",

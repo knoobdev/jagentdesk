@@ -7,7 +7,9 @@ import {
   type ReactElement,
 } from "react";
 import { ScrollView, Text, View } from "react-native";
+import { useLocalSearchParams } from "expo-router";
 import { useIsFocused } from "expo-router/react-navigation";
+import { useTranslation } from "react-i18next";
 import { CalendarClock, Plus } from "lucide-react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { PageHeader } from "@/components/headers/page-header";
@@ -40,6 +42,12 @@ import {
   buildScheduleProjectTargets,
 } from "@/schedules/schedule-project-targets";
 import type { ScheduleSummary } from "@jagentdesk/protocol/schedule/types";
+import {
+  ScheduleBotFilter,
+  type ScheduleBotFilterValue,
+} from "@/components/schedules/schedule-bot-filter";
+import { scheduleBotName, useScheduleBot } from "@/components/schedules/schedule-bot";
+import { useHostFeature } from "@/runtime/host-features";
 
 type FormState =
   | { mode: "closed" }
@@ -63,8 +71,18 @@ export function SchedulesScreen(): ReactElement {
   return <SchedulesScreenContent />;
 }
 
+function routeBotFilter(params: {
+  serverId?: string | string[];
+  botId?: string | string[];
+}): ScheduleBotFilterValue | null {
+  const serverId = typeof params.serverId === "string" ? params.serverId : null;
+  const botId = typeof params.botId === "string" ? params.botId : null;
+  return serverId && botId ? { serverId, botId } : null;
+}
+
 function SchedulesScreenContent(): ReactElement {
   const { loadState, hostErrors, isError, refetch } = useSchedules();
+  const params = useLocalSearchParams<{ serverId?: string; botId?: string }>();
   const schedules = loadState.status === "loaded" ? loadState.data : EMPTY_SCHEDULES;
   const { agents } = useAggregatedAgents({ includeArchived: true });
   const { projects } = useProjects();
@@ -96,6 +114,26 @@ function SchedulesScreenContent(): ReactElement {
   const [form, setForm] = useState<FormState>({ mode: "closed" });
   const [selectedHost, setSelectedHost] = useState(ALL_HOSTS_OPTION_ID);
   const [statusFilter, setStatusFilter] = useState<ScheduleBucket>("runnable");
+  // A bot's panel opens Schedules filtered by that bot (spec 37.4.4).
+  const routeServerId = typeof params.serverId === "string" ? params.serverId : undefined;
+  const routeBotId = typeof params.botId === "string" ? params.botId : undefined;
+  const [botFilter, setBotFilter] = useState<ScheduleBotFilterValue | null>(() =>
+    routeBotFilter(params),
+  );
+  useEffect(() => {
+    if (routeServerId && routeBotId) setBotFilter({ serverId: routeServerId, botId: routeBotId });
+  }, [routeServerId, routeBotId]);
+
+  const botOptions = useMemo(() => {
+    const options = new Map<string, ScheduleBotFilterValue>();
+    if (botFilter) options.set(`${botFilter.serverId}:${botFilter.botId}`, botFilter);
+    for (const schedule of schedules) {
+      if (!schedule.bot) continue;
+      const option = { serverId: schedule.serverId, botId: schedule.bot.botId };
+      options.set(`${option.serverId}:${option.botId}`, option);
+    }
+    return [...options.values()];
+  }, [schedules, botFilter]);
 
   useEffect(() => {
     if (
@@ -149,6 +187,9 @@ function SchedulesScreenContent(): ReactElement {
       .filter(
         ({ schedule, resolved }) =>
           (selectedHost === ALL_HOSTS_OPTION_ID || schedule.serverId === selectedHost) &&
+          (!botFilter ||
+            (schedule.serverId === botFilter.serverId &&
+              schedule.bot?.botId === botFilter.botId)) &&
           resolved.bucket === statusFilter,
       )
       .sort((a, b) => Date.parse(b.schedule.createdAt) - Date.parse(a.schedule.createdAt))
@@ -160,7 +201,7 @@ function SchedulesScreenContent(): ReactElement {
         serverName: schedule.serverName,
         singleHost,
       }));
-  }, [resolvedRows, selectedHost, statusFilter, hosts.length]);
+  }, [resolvedRows, selectedHost, statusFilter, hosts.length, botFilter]);
 
   const showLoadError = isError && loadState.status !== "loaded";
   const headerActions = useMemo(
@@ -203,6 +244,9 @@ function SchedulesScreenContent(): ReactElement {
         onRetry={refetch}
         onCreate={openCreate}
         onEdit={openEdit}
+        botOptions={botOptions}
+        botFilter={botFilter}
+        onBotFilterChange={setBotFilter}
       />
       <ScheduleFormSheet
         serverId={form.mode === "edit" ? form.serverId : undefined}
@@ -230,6 +274,9 @@ function SchedulesScreenBody({
   onRetry,
   onCreate,
   onEdit,
+  botOptions,
+  botFilter,
+  onBotFilterChange,
 }: {
   scrollProps: PageScroll["scrollProps"];
   rows: ScheduleRowView[];
@@ -245,6 +292,9 @@ function SchedulesScreenBody({
   onRetry: () => void;
   onCreate: () => void;
   onEdit: (schedule: AggregatedSchedule) => void;
+  botOptions: readonly ScheduleBotFilterValue[];
+  botFilter: ScheduleBotFilterValue | null;
+  onBotFilterChange: (value: ScheduleBotFilterValue | null) => void;
 }): ReactElement {
   const bodyState = resolveSchedulesScreenBodyState({ loadState, showLoadError });
   const gutter = useGumloopPageGutterStyle();
@@ -268,7 +318,7 @@ function SchedulesScreenBody({
     );
   }
 
-  if (bodyState.kind === "empty") {
+  if (bodyState.kind === "empty" && !botFilter) {
     return (
       <View style={styles.centered}>
         {hostErrors.length > 0 ? <ScheduleHostErrorsBanner errors={hostErrors} /> : null}
@@ -280,6 +330,8 @@ function SchedulesScreenBody({
   let schedulesContent: ReactElement;
   if (rows.length > 0) {
     schedulesContent = <SchedulesTable rows={rows} onEditSchedule={onEdit} />;
+  } else if (botFilter) {
+    schedulesContent = <BotSchedulesEmptyState filter={botFilter} hosts={hosts} />;
   } else if (statusFilter === "ended") {
     schedulesContent = <SchedulesEndedEmptyState />;
   } else {
@@ -301,6 +353,9 @@ function SchedulesScreenBody({
               onSelectHost={onSelectHost}
               triggerTestID="schedules-host-filter-trigger"
             />
+          ) : null}
+          {botOptions.length > 0 ? (
+            <ScheduleBotFilter bots={botOptions} value={botFilter} onChange={onBotFilterChange} />
           ) : null}
           <SegmentedControl
             size="sm"
@@ -343,6 +398,32 @@ function SchedulesEmptyState({
       <Button variant="outline" leftIcon={Plus} onPress={onCreate} testID="schedules-empty-new">
         New schedule
       </Button>
+    </View>
+  );
+}
+
+/** The filtered bot has no automation here, or its host predates bot automations as schedules. */
+function BotSchedulesEmptyState({
+  filter,
+  hosts,
+}: {
+  filter: ScheduleBotFilterValue;
+  hosts: ReturnType<typeof useHosts>;
+}): ReactElement {
+  const { t } = useTranslation();
+  const bot = useScheduleBot(filter.serverId, filter.botId);
+  const supported = useHostFeature(filter.serverId, "botsSchedules");
+  const host = hosts.find((entry) => entry.serverId === filter.serverId)?.label ?? filter.serverId;
+  return (
+    <View style={styles.filterEmpty} testID="schedules-bot-empty">
+      <View style={styles.endedEmptyState}>
+        <CalendarClock size={styles.emptyIcon.width} color={styles.emptyIcon.color} />
+        <Text style={styles.emptyDescription}>
+          {supported
+            ? t("bots.jad.schedulesScreen.empty", { name: scheduleBotName(bot) })
+            : t("bots.jad.schedulesScreen.updateHost", { host })}
+        </Text>
+      </View>
     </View>
   );
 }

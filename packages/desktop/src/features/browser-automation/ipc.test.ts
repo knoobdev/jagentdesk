@@ -65,12 +65,24 @@ class FakeDebugger {
     return { ok: true };
   }
 
+  private detachListener: ((event: unknown, reason: string) => void) | null = null;
+
   public on(
-    event: "message",
+    event: "message" | "detach",
     listener: (event: unknown, method: string, params?: Record<string, unknown>) => void,
   ): void {
+    if (event === "detach") {
+      this.detachListener = listener as (event: unknown, reason: string) => void;
+      return;
+    }
     expect(event).toBe("message");
     this.messageListener = listener;
+  }
+
+  /** What Electron does when the guest's target goes away. */
+  public closeTarget(): void {
+    this.attachedProtocolVersions = [];
+    this.detachListener?.({}, "target closed");
   }
 
   public emitMessage(method: string, params?: Record<string, unknown>): void {
@@ -106,7 +118,7 @@ class FakeWebContents {
   }> = [];
   public readonly invalidations: string[] = [];
   private consoleMessageListener: ConsoleMessageListener | null = null;
-  private destroyedListener: (() => void) | null = null;
+  private readonly destroyedListeners: Array<() => void> = [];
   public destroyed = false;
 
   public constructor(private readonly webContentsId: number) {}
@@ -179,7 +191,7 @@ class FakeWebContents {
 
   public once(event: "destroyed", listener: () => void): void {
     expect(event).toBe("destroyed");
-    this.destroyedListener = listener;
+    this.destroyedListeners.push(listener);
   }
 
   public emitConsoleMessage(input: {
@@ -196,7 +208,7 @@ class FakeWebContents {
 
   public destroy(): void {
     this.destroyed = true;
-    this.destroyedListener?.();
+    for (const listener of this.destroyedListeners) listener();
   }
 }
 
@@ -277,6 +289,42 @@ describe("browser automation IPC adapter", () => {
       { command: "Emulation.setFocusEmulationEnabled", params: { enabled: true } },
       { command: "Page.captureScreenshot", params: { format: "png" } },
     ]);
+  });
+
+  test("does not attach or send to a guest whose target closed", async () => {
+    const contents = new FakeWebContents(30);
+    const tab = adaptWebContents(contents);
+    await tab.sendDebugCommand?.("Page.enable");
+
+    contents.debugger.closeTarget();
+
+    await expect(tab.sendDebugCommand?.("Page.captureScreenshot")).rejects.toThrow(
+      "Browser tab was closed",
+    );
+    expect(contents.debugger.attachedProtocolVersions).toEqual([]);
+    expect(contents.debugger.commands.map((entry) => entry.command)).toEqual([
+      "Emulation.setFocusEmulationEnabled",
+      "Page.enable",
+    ]);
+    expect(tab.isDestroyed()).toBe(true);
+    expect(() => tab.reload()).toThrow("Browser tab was closed");
+    await expect(tab.loadURL("https://example.com/next")).rejects.toThrow("Browser tab was closed");
+  });
+
+  test("a command queued behind one the teardown rejects does not re-attach", async () => {
+    const contents = new FakeWebContents(31);
+    contents.debugger.blockedCommandNames.add("Runtime.evaluate");
+    const tab = adaptWebContents(contents);
+    const first = tab.sendDebugCommand?.("Runtime.evaluate", { expression: "1" });
+    const second = tab.sendDebugCommand?.("Page.captureScreenshot");
+    await flushMicrotasks();
+
+    contents.debugger.closeTarget();
+    contents.debugger.finishNextCommand();
+
+    await first;
+    await expect(second).rejects.toThrow("Browser tab was closed");
+    expect(contents.debugger.attachedProtocolVersions).toEqual([]);
   });
 
   test("serializes CDP commands per guest contents", async () => {
@@ -383,17 +431,17 @@ class FakeDialogGuest extends EventEmitter {
 }
 
 class FakeHostWebContents {
-  private destroyedListener: (() => void) | null = null;
+  private readonly destroyedListeners: Array<() => void> = [];
 
   public constructor(public readonly id: number) {}
 
   public once(event: "destroyed", listener: () => void): void {
     expect(event).toBe("destroyed");
-    this.destroyedListener = listener;
+    this.destroyedListeners.push(listener);
   }
 
   public destroy(): void {
-    this.destroyedListener?.();
+    for (const listener of this.destroyedListeners) listener();
   }
 }
 

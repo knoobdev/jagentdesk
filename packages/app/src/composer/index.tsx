@@ -1188,10 +1188,6 @@ function ComposerCancelButton({
   t,
 }: ComposerCancelButtonProps) {
   const gumloop = useIsGumloopTheme();
-  const buttonStyle = useMemo(
-    () => [cancelButtonStyle, gumloop && styles.gumloopStop],
-    [cancelButtonStyle, gumloop],
-  );
   const stopColor = gumloop ? "#FF4EA6" : "white";
   const accessibilityLabel = isCancellingAgent
     ? t("composer.cancel.cancelingAgent")
@@ -1209,7 +1205,7 @@ function ComposerCancelButton({
         disabled={!isConnected || isCancellingAgent}
         accessibilityLabel={accessibilityLabel}
         accessibilityRole="button"
-        style={buttonStyle}
+        style={cancelButtonStyle}
       >
         <View style={[styles.cancelButtonDisc, gumloop && styles.gumloopStop]}>{icon}</View>
       </TooltipTrigger>
@@ -1235,24 +1231,15 @@ interface ComposerVoiceModeButtonProps {
   t: TFunction;
 }
 
-function showsVoiceModeButton(input: {
+// Whether the agent offers voice mode; the input's trailing slot shows it only while there is
+// nothing to send (Paseo 0.18.0, spec 38 §4.4).
+function offersVoiceMode(input: {
   isVoiceModeForAgent: boolean;
   hasAgent: boolean;
   isAgentRunning: boolean;
-  hasSendableContent: boolean;
   showVoice: boolean;
-  sendAlwaysPresent: boolean;
 }): boolean {
-  // Classic: voice mode holds the trailing disc until there is something to send, then Send
-  // takes it. Gumloop: Send always holds that disc and voice mode stays just before it, so the
-  // row does not change while typing (spec 38 §4.4).
-  return (
-    input.showVoice &&
-    !input.isVoiceModeForAgent &&
-    input.hasAgent &&
-    !input.isAgentRunning &&
-    (input.sendAlwaysPresent || !input.hasSendableContent)
-  );
+  return input.showVoice && !input.isVoiceModeForAgent && input.hasAgent && !input.isAgentRunning;
 }
 
 function ComposerVoiceModeButton({
@@ -1439,11 +1426,6 @@ function ComposerContentImpl({
   const { finePointer: hasFinePointer } = usePointerCapabilities();
   const isDesktopLayout = resolveIsDesktopWebBreakpoint(isCompactLayout);
   const messagePlaceholder = resolveMessagePlaceholder(inputMode, isDesktopLayout, t, placeholder);
-  const hasText = useSyncExternalStore(
-    textSource.subscribe,
-    () => textSource.getSnapshot().trim().length > 0,
-    () => textSource.getSnapshot().trim().length > 0,
-  );
   const setUserInput = onChangeText;
   const workspaceAttachments = useWorkspaceAttachmentsForScopes(attachmentScopeKeys);
   const {
@@ -1734,6 +1716,15 @@ function ComposerContentImpl({
       },
     });
   }, []);
+
+  const handleImagesDropped = useCallback(
+    (images: ImageAttachment[]) => {
+      if (images.length === 0) return;
+      addImages(images);
+      focusInput();
+    },
+    [addImages, focusInput],
+  );
 
   const handleWorkspaceFileDropped = useCallback(
     (payload: WorkspaceFileDragPayload) => {
@@ -2063,6 +2054,7 @@ function ComposerContentImpl({
           toastErrorRef.current(t("composer.errors.daemonClientDisconnected"));
           return;
         }
+        focusInput();
         await uploadSelectedFiles(files);
       } catch (error) {
         console.error("[Composer] Failed to upload dropped files:", error);
@@ -2071,7 +2063,7 @@ function ComposerContentImpl({
         );
       }
     },
-    [client, isConnected, t, uploadSelectedFiles],
+    [client, focusInput, isConnected, t, uploadSelectedFiles],
   );
 
   const handleRemoveAttachment = useCallback(
@@ -2207,8 +2199,6 @@ function ComposerContentImpl({
     ],
   );
 
-  const hasSendableContent = hasText || selectedAttachments.length > 0;
-
   // An open autocomplete owns the arrows; otherwise they may recall sent messages.
   const handleCommandKeyPress = useCallback(
     (event: ComposerKeyPressEvent) => {
@@ -2261,16 +2251,13 @@ function ComposerContentImpl({
     ],
   );
 
-  const isGumloop = useIsGumloopTheme();
   const voiceModeContent = useMemo(
     () =>
-      showsVoiceModeButton({
+      offersVoiceMode({
         isVoiceModeForAgent,
         hasAgent,
         isAgentRunning,
-        hasSendableContent,
         showVoice: mode.showVoice,
-        sendAlwaysPresent: isGumloop,
       }) ? (
         <View style={styles.rightControls}>
           <ComposerVoiceModeButton
@@ -2288,11 +2275,9 @@ function ComposerContentImpl({
       toolbarGlyph,
       handleToggleRealtimeVoice,
       hasAgent,
-      hasSendableContent,
       isAgentRunning,
       isConnected,
       isVoiceModeForAgent,
-      isGumloop,
       isVoiceSwitching,
       mode.showVoice,
       realtimeVoiceButtonStyle,
@@ -2638,7 +2623,7 @@ function ComposerContentImpl({
   // backdrop and rejects the drop atomically, instead of accepting a drop with no feedback.
   useFileDrop(
     {
-      onFiles: addImages,
+      onFiles: handleImagesDropped,
       onGenericFiles: handleGenericFilesDropped,
       onWorkspaceFile: handleWorkspaceFileDropped,
     },
@@ -2860,7 +2845,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     width: "100%",
     gap: theme.spacing[3],
   },
-  gumloopStop: { width: 32, height: 32, borderRadius: 16, backgroundColor: "#FFEFF0" },
+  gumloopStop: { backgroundColor: "#FFEFF0" },
   cancelButton: {
     ...toolbarSlot(COMPOSER_TOOLBAR_SHAPES.disc),
     alignItems: "center",

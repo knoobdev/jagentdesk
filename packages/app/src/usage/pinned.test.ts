@@ -7,6 +7,8 @@ import {
   type PinnedUsageWindow,
 } from "./pinned";
 import type { UsageReportEntry, UsageWindow } from "./types";
+import { BUNDLED_USAGE_SOURCE_ICONS } from "./bundled-source-icons.generated";
+import { findSvgIconProblem } from "@jagentdesk/plugin";
 
 function report(input: {
   sourceId: string;
@@ -490,4 +492,49 @@ it("localizes pinned labels and meanings while preserving custom window names", 
   } finally {
     await i18n.changeLanguage("en");
   }
+});
+
+describe("summary source icons", () => {
+  const sourceIcons = (reports: UsageReportEntry[]) =>
+    resolvePinnedUsage(reports, preferences(null)).map((source) => [source.key, source.icon]);
+
+  it("draws the icon the host sent", () => {
+    expect(sourceIcons([claude])).toEqual([["claude:default", "<svg/>"]]);
+  });
+
+  it("draws a bundled source's own icon when the host sent none", () => {
+    // `codex` carries no icon, like a report from a host older than usage-source icons.
+    expect(sourceIcons([codex])).toEqual([["codex:default", BUNDLED_USAGE_SOURCE_ICONS.codex]]);
+    expect(BUNDLED_USAGE_SOURCE_ICONS.codex).toMatch(/^<svg\b/);
+  });
+
+  it("leaves the gauge to a source with no icon anywhere", () => {
+    const custom = report({
+      sourceId: "custom-quota",
+      sourceLabel: "Custom",
+      windows: [{ id: "weekly", label: "Weekly", usedPct: 5 }],
+    });
+    expect(sourceIcons([custom])).toEqual([["custom-quota:default", null]]);
+  });
+});
+
+describe("BUNDLED_USAGE_SOURCE_ICONS", () => {
+  it("has an SVG for every bundled usage source", () => {
+    expect(Object.keys(BUNDLED_USAGE_SOURCE_ICONS)).toEqual([
+      "claude",
+      "codex",
+      "copilot",
+      "cursor",
+      "grok",
+      "kimi",
+      "minimax",
+      "muse",
+      "opencode-go",
+      "openrouter-host",
+      "zai",
+    ]);
+    for (const svg of Object.values(BUNDLED_USAGE_SOURCE_ICONS)) {
+      expect(findSvgIconProblem(svg)).toBeNull();
+    }
+  });
 });

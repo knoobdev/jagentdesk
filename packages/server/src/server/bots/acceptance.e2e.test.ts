@@ -1,6 +1,6 @@
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 import { createTestAgentClients } from "../test-utils/fake-agent-client.js";
 import type { Bot, BotItem } from "@jagentdesk/protocol/bots/types";
@@ -112,6 +112,8 @@ test("A37.7.6/A37.7.33/A37.7.34: dispatches a worker in a new ORC worktree, answ
     daemon!.daemon.agentManager.listAgents().reduce((n, a) => n + a.pendingPermissions.size, 0),
   ).toBe(0);
   expect(provider.created.filter((c) => c.config.title?.startsWith("Bot review"))).toHaveLength(6);
+  // A worker is named by its task (the item's title), never by the item's id.
+  expect(provider.created.filter((c) => c.config.title === "Fix sum")).toHaveLength(1);
 }, 60000);
 
 test("A37.7.27: attended bots raise a card for starting a worker, item bookkeeping needs none; plugin off rejects RPC", async () => {
@@ -132,6 +134,17 @@ test("A37.7.27: attended bots raise a card for starting a worker, item bookkeepi
     .find((a) => a.labels["jagentdesk.bot.id"] === bot.id)!;
   const request = [...supervisor.pendingPermissions.values()][0];
   expect(request.name).toBe("bot_worker_start");
+  // The owner reads what happens, not the tool's instructions to the model.
+  expect(request.title).toBe("Start a worker for #1 Fix sum?");
+  expect(request.description).toBe(
+    `Builder starts a worker in a new worktree of ${basename(repo)} (${repo}). The worker reports back when it is done.`,
+  );
+  expect(request.detail).toEqual({
+    type: "plain_text",
+    label: "Task",
+    text: "Fix sum.js and test",
+  });
+  expect(request.metadata?.botCard).toMatchObject({ kind: "worker_start", itemTitle: "Fix sum" });
   const originalCatalog = provider.created[0].launch!.jagentdeskTools!;
   expect(originalCatalog.getTool("bot_item_add")?.name).toBe("bot_item_add");
   expect(originalCatalog.getTool("update_agent")).toBeUndefined();

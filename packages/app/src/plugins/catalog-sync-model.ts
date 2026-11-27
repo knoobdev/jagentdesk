@@ -7,11 +7,13 @@ interface CatalogSyncInput {
   client: DaemonClient;
   audio: Pick<AudioEngine, "play"> | null;
   connected: boolean;
-  supported: boolean;
+  /** `null` while `server_info` has not yet arrived for this host. */
+  supported: boolean | null;
   registry: Pick<
     PluginRegistry,
     "installCatalog" | "getSnapshot" | "removeHost" | "setCatalogStatus"
   >;
+  onCatalogChanged?: () => void;
 }
 export function syncPluginCatalog({
   serverId,
@@ -20,7 +22,13 @@ export function syncPluginCatalog({
   connected,
   supported,
   registry,
+  onCatalogChanged,
 }: CatalogSyncInput): () => void {
+  if (supported === null) {
+    // Plugin support is unknown until `server_info` arrives; keep status "loading" so cold-launch
+    // plugin notification taps wait instead of falling back prematurely.
+    return () => {};
+  }
   let cancelled = false;
   let refreshQueue = Promise.resolve();
   if (!supported || !audio) {
@@ -83,6 +91,7 @@ export function syncPluginCatalog({
       }
     }
     if (message.payload.status === "plugin_catalog_changed") {
+      onCatalogChanged?.();
       const pluginId = message.payload.pluginId;
       if (typeof pluginId === "string") void refresh(pluginId);
     }

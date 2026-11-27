@@ -100,6 +100,8 @@ export const TelegramStatusSchema = z.object({
   requestUrl: z.string().optional(),
   botUsername: z.string().optional(),
   allowedUsers: z.array(AllowedUserSchema),
+  /** The last link code someone sent the bot, and who: the open dialog shows "Linked · {{name}}". */
+  linked: z.object({ code: z.string(), user: AllowedUserSchema }).optional(),
 });
 export type TelegramStatus = z.infer<typeof TelegramStatusSchema>;
 const botId = { botId: z.string() };
@@ -297,6 +299,8 @@ export const BotsRequestSchemas = [
   request("bots.automations.run_now.request", { ...botId, automationId: z.string() }),
   request("bots.automations.cancel_wait.request", { ...botId, itemId: z.string() }),
   request("bots.first_screen.scan.request", botId),
+  // Orca `bots.kickoff.retry`: the first-run screen's Try again. Gate on `features.botsKickoff`.
+  request("bots.kickoff.retry.request", botId),
   request("bots.allowed.list.request", botId),
   // Orca `bots.avatar.upload` / `.read`: a square PNG, 512-2000 px, at most 2 MB, base64.
   request("bots.avatar.upload.request", { ...botId, png: z.string().min(1).max(2_800_000) }),
@@ -417,6 +421,7 @@ export const BotsResponseSchemas = [
   response("bots.automations.run_now.response", { started: z.boolean() }),
   response("bots.automations.cancel_wait.response", { item: BotItemSchema }),
   response("bots.first_screen.scan.response", { scan: BotFirstScreenSchema }),
+  response("bots.kickoff.retry.response", {}),
   response("bots.allowed.list.response", { people: z.array(BotAllowedPersonSchema) }),
   response("bots.avatar.upload.response", { bot: BotSchema }),
   response("bots.avatar.read.response", { png: z.string().nullable() }),

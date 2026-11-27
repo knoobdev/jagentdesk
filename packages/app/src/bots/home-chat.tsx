@@ -1,19 +1,20 @@
 // The bot page's centre (spec 37.4.2): a Home Chat tab that is always there and never closes
 // (Orca dfdb4fda (MIT) src/renderer/src/components/bots/BotHomeChat.tsx:10-37 — the daemon makes the
 // chat again when it is gone), a tab for a home file the Files tab opened, the first-run screen until
-// the owner's first turn ends, the Home Chat timeline, its cards, and the composer.
+// the bot first speaks, the Home Chat timeline, its cards, and the composer.
 import { useCallback, useMemo } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { X } from "lucide-react-native";
 import type { Bot } from "@jagentdesk/protocol/bots/types";
+import { botFirstScreenState } from "@jagentdesk/protocol/bots/rules";
 import type { Theme } from "@/styles/theme";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FilePanelView } from "@/file-panels/view";
 import { AgentTimeline, MessageComposer } from "./chat";
 import { BotAvatar } from "./avatar";
-import { useBotsConnection, useBotsMutation } from "./queries";
+import { useBotHistory, useBotsConnection, useBotsMutation } from "./queries";
 import { useBotPanel, useBotPanelStore } from "./panel-store";
 import { useHomeChatFocus } from "./home-chat-draft";
 import { BotFirstScreen } from "./first-screen";
@@ -90,6 +91,15 @@ export function BotHomeChat({ serverId, bot }: { serverId: string; bot: Bot }) {
     [send, bot.id],
   );
   const homeAgentId = bot.homeAgentId ?? bot.agentId;
+  const history = useBotHistory(serverId, bot.id, Boolean(bot.firstRun));
+  const kickoff = useMemo(
+    () => (history.data ? botFirstScreenState(history.data) : null),
+    [history.data],
+  );
+  // Orca `nativeChatFirstScreen`: the screen leads from the kickoff until the bot speaks or the
+  // owner writes, then the conversation shows from its first words. `firstRun` itself lasts until
+  // the owner's first turn ends (its rules steer that turn), so it only bounds the screen.
+  const firstScreen = Boolean(bot.firstRun) && (history.isPending || kickoff !== null);
   const location = useMemo(
     () => (panel.openFile ? { path: panel.openFile } : null),
     [panel.openFile],
@@ -116,11 +126,11 @@ export function BotHomeChat({ serverId, bot }: { serverId: string; bot: Bot }) {
     </View>
   );
   let conversation;
-  // `NativeChatBotHomeScope.tsx`: the first-run screen leads until the owner's first turn ends.
-  if (bot.firstRun)
+  // `NativeChatBotHomeScope.tsx`: the first-run screen leads until the bot's first words.
+  if (firstScreen)
     conversation = (
       <ScrollView contentContainerStyle={styles.firstRun}>
-        <BotFirstScreen serverId={serverId} bot={bot} />
+        <BotFirstScreen serverId={serverId} bot={bot} kickoff={kickoff} />
         {/* The first-run screen already shows the picture and name. */}
         <Text style={styles.firstRunLine} testID="bot-home-chat-empty">
           {t("bots.chat.emptySubtitle", { name: bot.name })}

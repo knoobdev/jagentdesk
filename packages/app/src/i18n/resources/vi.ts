@@ -33,6 +33,8 @@ export const vi = {
     pillLabelNeedsInputOne: "1 cần nhập",
     pillLabelNeedsInputMany: "{{count}} cần nhập",
     pillLabelReadyToReview: "{{count}} chờ xem",
+    rowFailed: "Lỗi",
+    rowStopped: "Đã dừng",
     parent: {
       openParent: "Open parent",
 
@@ -183,6 +185,7 @@ export const vi = {
       interruptAgent: "Ngắt agent",
       queueMessage: "Xếp hàng tin nhắn",
       sendAndInterrupt: "Gửi và ngắt",
+      sendAndSteer: "Gửi và điều hướng",
       sendMessage: "Gửi tin nhắn",
       queue: "Xếp hàng",
       send: "Gửi",
@@ -363,6 +366,48 @@ export const vi = {
       app: "Thiết bị này",
       host: "Host",
     },
+    notifications: {
+      title: "Thông báo",
+      enabled: {
+        label: "Bật thông báo",
+        description: "Nhận thông báo từ agent, terminal và plugin trên thiết bị này",
+        pausedDescription: "Mọi thông báo, kể cả của plugin, đang tạm dừng trên thiết bị này",
+      },
+      events: {
+        title: "Sự kiện",
+        agentPermission: {
+          label: "Agent cần cấp quyền",
+          description: "Duyệt quyền, kế hoạch và câu hỏi",
+        },
+        agentError: {
+          label: "Agent gặp lỗi",
+          description: "Khi agent dừng vì lỗi",
+        },
+        agentFinished: {
+          label: "Agent đã xong",
+          description: "Khi agent hoàn tất một lượt",
+        },
+        terminalNeedsInput: {
+          label: "Terminal cần nhập",
+          description: "Khi lệnh trong terminal đang chờ nhập",
+        },
+        terminalFinished: {
+          label: "Terminal đã xong",
+          description: "Khi lệnh trong terminal chạy xong",
+        },
+      },
+      plugins: {
+        title: "Plugin",
+        enabled: {
+          label: "Thông báo plugin",
+          description: "Cho phép plugin đã cài gửi thông báo",
+        },
+        empty: "Plugin đã cài hiện ở đây để bạn tắt tiếng từng plugin",
+      },
+      legacyHostTitle: "Cập nhật host để đồng bộ tuỳ chọn push",
+      legacyHostHint:
+        "Cập nhật các host đang kết nối để đồng bộ tuỳ chọn thông báo push của thiết bị này",
+    },
     sections: {
       hosts: "Host",
       chatAndPanes: "Chat & khung",
@@ -419,6 +464,9 @@ export const vi = {
       },
       agentProfiles: {
         featureCountOne: "{{count}} feature",
+        systemPromptLabel: "Lời nhắc hệ thống",
+        systemPromptPlaceholder: "Tập trung vào bố cục, khả năng truy cập và design token.",
+        systemPromptHint: "Chỉ áp dụng cho agent mới",
         featureCount: "{{count}} features",
         editProfileTitle: "Edit agent profile",
         addProfileTitle: "Add agent profile",
@@ -576,6 +624,26 @@ export const vi = {
     search: "Tìm kiếm",
     newWorkspace: "Mới",
     workspaces: "Workspace",
+  },
+  browserTabs: {
+    openOne: "1 tab trình duyệt đang mở",
+    openMany: "{{count}} tab trình duyệt đang mở",
+    title: "Tab trình duyệt",
+    closeAll: "Đóng tất cả",
+    show: "Hiện",
+    close: "Đóng",
+    notInWorkspace: "Không thuộc workspace nào",
+    untitled: "Tab mới",
+    status: {
+      loading: "Đang tải",
+      notResponding: "Không phản hồi",
+      crashed: "Đã sập",
+    },
+    pill: {
+      tooltip: "Tab trình duyệt agent này đã mở",
+      notResponding: "{{count}} không phản hồi",
+      crashed: "{{count}} đã sập",
+    },
   },
   marketplace: {
     title: "Chợ plugin",

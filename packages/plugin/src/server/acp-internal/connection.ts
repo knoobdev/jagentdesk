@@ -1,4 +1,5 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { spawnProcess, terminateProcess } from "../process.js";
 import { Readable, Writable } from "node:stream";
 import {
@@ -41,6 +42,7 @@ import {
   requireProviderCapabilities,
   type ProviderCatalog,
   type ProviderCapability,
+  type ProviderClientInfo,
   type ProviderCommand,
   type ProviderConfigState,
   type ProviderConnectRequest,
@@ -48,6 +50,7 @@ import {
   type ProviderEvent,
   type ProviderInput,
   type ProviderLaunch,
+  type ProviderModel,
   type ProviderPermissionResponse,
   type ProviderToolCallDetail,
   type ProviderPersistence,
@@ -65,6 +68,28 @@ const ADAPTER_CAPABILITIES = [
   "request.cancel",
 ] as const;
 
+const WARM_PROBE_IDLE_MS = 5_000;
+
+function readPluginPackageVersion(): string {
+  try {
+    const manifest = JSON.parse(
+      readFileSync(new URL("../../../package.json", import.meta.url), "utf8"),
+    ) as { version?: unknown };
+    if (typeof manifest.version === "string" && manifest.version.trim().length > 0) {
+      return manifest.version.trim();
+    }
+  } catch {
+    // Bundled or standalone callers without adjacent package.json fall back below.
+  }
+  return "0.0.0";
+}
+
+const DEFAULT_CLIENT_INFO: ProviderClientInfo = {
+  name: "jagentdesk",
+  title: "JAgentDesk",
+  version: readPluginPackageVersion(),
+};
+
 interface AcpBoundarySession {
   runtime: AcpRuntime;
   capabilities: readonly ProviderCapability[];
@@ -78,9 +103,11 @@ export async function createAcpProviderConnection(
   if (!request.versions.includes(PROVIDER_PROTOCOL_VERSION)) {
     throw new Error(`ACP adapter requires provider protocol ${PROVIDER_PROTOCOL_VERSION}`);
   }
+  const clientInfo = request.clientInfo ?? DEFAULT_CLIENT_INFO;
   const probe = await AcpRuntime.start({
     options,
     launch: request.launch,
+    clientInfo,
     boundarySessionId: "capability-probe",
     env: {},
     emit: () => undefined,
@@ -100,7 +127,6 @@ export async function createAcpProviderConnection(
   if (options.acpOptions?.deferTurnOnRunningTools) {
     supportedCapabilities.push("prompt.steer");
   }
-  await probe.close();
   const capabilities = negotiateProviderCapabilities(request.capabilities, supportedCapabilities);
   const listeners = new Set<(event: ProviderEvent) => void>();
   const sessions = new Map<string, AcpBoundarySession>();
@@ -109,6 +135,42 @@ export async function createAcpProviderConnection(
   const cancellable = new Map<string, AbortController>();
   let closed = false;
   let closePromise: Promise<void> | null = null;
+
+  // Keep the initialized capability probe briefly so an immediate global catalog/sessions
+  // request reuses the already-initialized process instead of spawning a second one.
+  let warmProbe: { runtime: AcpRuntime; timer: ReturnType<typeof setTimeout> } | null = null;
+  let warmProbeClose: Promise<void> | null = null;
+  const disposeWarmProbe = (): Promise<void> => {
+    if (warmProbe) {
+      const { runtime, timer } = warmProbe;
+      warmProbe = null;
+      clearTimeout(timer);
+      warmProbeClose = runtime.close().catch(() => undefined);
+    }
+    return warmProbeClose ?? Promise.resolve();
+  };
+  const discardWarmProbe = (): void => {
+    void disposeWarmProbe();
+  };
+  const claimWarmProbe = (binding: {
+    boundarySessionId: string;
+    emit: (event: ProviderEvent) => void;
+  }): AcpRuntime | null => {
+    if (!warmProbe) return null;
+    const { runtime, timer } = warmProbe;
+    warmProbe = null;
+    clearTimeout(timer);
+    if (!runtime.isUsable()) {
+      warmProbeClose = runtime.close().catch(() => undefined);
+      return null;
+    }
+    runtime.rebindRequest(binding);
+    return runtime;
+  };
+  const warmProbeTimer = setTimeout(discardWarmProbe, WARM_PROBE_IDLE_MS);
+  warmProbeTimer.unref?.();
+  warmProbe = { runtime: probe, timer: warmProbeTimer };
+
   const emit = (event: ProviderEvent) => {
     if (closed) return;
     const parsed = ProviderEventSchema.parse(event);
@@ -117,10 +179,13 @@ export async function createAcpProviderConnection(
   const state: AcpConnectionState = {
     options,
     launch: request.launch,
+    clientInfo,
     capabilities,
     sessions,
     emit,
     isClosed: () => closed,
+    claimWarmProbe,
+    discardWarmProbe,
   };
 
   return {
@@ -164,13 +229,17 @@ export async function createAcpProviderConnection(
       if (closePromise) return closePromise;
       closed = true;
       closePromise = (async () => {
+        const closingWarmProbe = disposeWarmProbe();
         for (const controller of cancellable.values()) {
           controller.abort(new Error("ACP provider connection closed"));
         }
         await Promise.all(inFlight);
         const active = [...sessions.values()];
         sessions.clear();
-        await Promise.all(active.map(({ runtime }) => runtime.closeSession()));
+        await Promise.all([
+          closingWarmProbe,
+          ...active.map(({ runtime }) => runtime.closeSession()),
+        ]);
         listeners.clear();
       })();
       return closePromise;
@@ -180,11 +249,17 @@ export async function createAcpProviderConnection(
 
 interface AcpConnectionState {
   launch?: ProviderLaunch;
+  clientInfo: ProviderClientInfo;
   options: RunAcpProviderOptions;
   capabilities: readonly ProviderCapability[];
   sessions: Map<string, AcpBoundarySession>;
   emit(event: ProviderEvent): void;
   isClosed(): boolean;
+  claimWarmProbe(binding: {
+    boundarySessionId: string;
+    emit: (event: ProviderEvent) => void;
+  }): AcpRuntime | null;
+  discardWarmProbe(): void;
 }
 
 function validateAdmission(
@@ -303,9 +378,20 @@ async function withRequestRuntime<Result>(
   },
 ): Promise<void> {
   const { signal } = request;
-  const runtime = await AcpRuntime.start({
+  signal.throwIfAborted();
+  let runtime: AcpRuntime | null = null;
+  if (request.cwd === undefined) {
+    runtime = state.claimWarmProbe({
+      boundarySessionId: request.boundarySessionId,
+      emit: state.emit,
+    });
+  } else {
+    state.discardWarmProbe();
+  }
+  runtime ??= await AcpRuntime.start({
     options: state.options,
     launch: state.launch,
+    clientInfo: state.clientInfo,
     boundarySessionId: request.boundarySessionId,
     cwd: request.cwd,
     env: {},
@@ -330,6 +416,11 @@ async function discover(
   state: AcpConnectionState,
   signal: AbortSignal,
 ): Promise<void> {
+  if (input.cwd === undefined && state.options.acpOptions?.workspaceOnlyCatalog) {
+    state.discardWarmProbe();
+    state.emit({ type: "catalog", requestId: input.requestId, catalog: { models: [], modes: [] } });
+    return;
+  }
   await withRequestRuntime(state, {
     boundarySessionId: "catalog",
     cwd: input.cwd,
@@ -386,9 +477,11 @@ async function openSession(
 ): Promise<void> {
   if (state.sessions.has(input.sessionId))
     throw new Error(`Session already exists: ${input.sessionId}`);
+  state.discardWarmProbe();
   const runtime = await AcpRuntime.start({
     options: state.options,
     launch: state.launch,
+    clientInfo: state.clientInfo,
     boundarySessionId: input.sessionId,
     cwd: input.config.cwd,
     env: input.config.env,
@@ -431,6 +524,7 @@ function requireSession(state: AcpConnectionState, sessionId: string): AcpBounda
 
 interface StartRuntimeOptions {
   launch?: ProviderLaunch;
+  clientInfo?: ProviderClientInfo;
   options: RunAcpProviderOptions;
   boundarySessionId: string;
   cwd?: string;
@@ -595,7 +689,7 @@ class AcpRuntime {
           runtime.connection.initialize({
             protocolVersion: PROTOCOL_VERSION,
             clientCapabilities: {},
-            clientInfo: { name: "jagentdesk", version: "1" },
+            clientInfo: options.clientInfo ?? DEFAULT_CLIENT_INFO,
           }),
         ),
         options.options.acpOptions?.startupTimeoutMs ?? 10_000,
@@ -670,6 +764,21 @@ class AcpRuntime {
     });
   }
 
+  isUsable(): boolean {
+    if (this.closing || this.processFailed) return false;
+    if (this.child && (this.child.exitCode !== null || this.child.signalCode !== null))
+      return false;
+    return true;
+  }
+
+  rebindRequest(binding: {
+    boundarySessionId: string;
+    emit: (event: ProviderEvent) => void;
+  }): void {
+    this.options.boundarySessionId = binding.boundarySessionId;
+    this.emit = binding.emit;
+  }
+
   async open(
     input: Extract<ProviderInput, { type: "session.open" }>,
     connectionCapabilities: readonly ProviderCapability[],
@@ -678,14 +787,7 @@ class AcpRuntime {
     const mcpServers = toAcpMcpServers(input.config);
     this.mcpServerNames = mcpServers.map((server) => server.name);
     let nativeSessionId = readNativeSessionId(input.persistence);
-    const metadata: Record<string, unknown> = {
-      _jagentdesk: {
-        systemPrompt: input.config.systemPrompt,
-        providerOptions: input.config.providerOptions,
-        toolPolicy: input.config.toolPolicy,
-        persist: input.config.persist,
-      },
-    };
+    const metadata: Record<string, unknown> = {};
     for (const transformer of this.transformers) {
       const prepared = transformer.sessionOpen?.({
         persistence: input.persistence,
@@ -695,6 +797,7 @@ class AcpRuntime {
       nativeSessionId ??= prepared?.sessionId ?? null;
       Object.assign(metadata, prepared?.metadata);
     }
+    const meta = Object.keys(metadata).length > 0 ? metadata : undefined;
     let response: Pick<NewSessionResponse, "modes" | "configOptions">;
     if (nativeSessionId) {
       // ACP agents replay the loaded session's updates before session/load resolves,
@@ -706,7 +809,7 @@ class AcpRuntime {
           sessionId: nativeSessionId,
           cwd: input.config.cwd,
           mcpServers,
-          _meta: metadata,
+          ...(meta ? { _meta: meta } : {}),
         }),
       );
       await this.drainNotifications();
@@ -716,7 +819,7 @@ class AcpRuntime {
         this.connection.newSession({
           cwd: input.config.cwd,
           mcpServers,
-          _meta: metadata,
+          ...(meta ? { _meta: meta } : {}),
         }),
       );
       response = newSession;
@@ -772,7 +875,10 @@ class AcpRuntime {
     this.nativeSessionId = response.sessionId;
     this.modes = response.modes ?? null;
     this.configOptions = response.configOptions ?? [];
-    const catalog = toProviderCatalog(this.modes, this.configOptions);
+    let catalog = toProviderCatalog(this.modes, this.configOptions);
+    if (this.options.options.acpOptions?.perModelThinkingOptions) {
+      catalog = { ...catalog, models: await this.modelsWithOwnThinkingOptions(catalog) };
+    }
     const autoAcceptMode = this.options.options.acpOptions?.autoAcceptMode;
     if (!autoAcceptMode) return catalog;
     return {
@@ -780,6 +886,33 @@ class AcpRuntime {
       modes: [...catalog.modes, { ...autoAcceptMode.mode, isUnattended: true }],
       defaultMode: autoAcceptMode.default ? autoAcceptMode.mode.id : catalog.defaultMode,
     };
+  }
+
+  /**
+   * Selects each model in the discovery session to read the thinking options the agent lists for
+   * it, then selects the opening model again for the transformers that run after discovery.
+   */
+  private async modelsWithOwnThinkingOptions(catalog: ProviderCatalog): Promise<ProviderModel[]> {
+    const models: ProviderModel[] = [];
+    for (const model of catalog.models) {
+      await this.selectModel(model.id);
+      const { thinkingOptions, thinkingOption } = toProviderConfigState(
+        this.modes,
+        this.configOptions,
+      );
+      models.push({
+        ...model,
+        thinkingOptions: [...thinkingOptions],
+        defaultThinkingOptionId: thinkingOption,
+      });
+    }
+    if (catalog.defaultModel) await this.selectModel(catalog.defaultModel);
+    return models;
+  }
+
+  private async selectModel(model: string): Promise<void> {
+    if (selectedValue(modelOption(this.configOptions)) === model) return;
+    await this.applyNativeConfigChange({ target: "model", value: model });
   }
 
   prompt(input: Extract<ProviderInput, { type: "session.prompt" }>): Promise<void> {

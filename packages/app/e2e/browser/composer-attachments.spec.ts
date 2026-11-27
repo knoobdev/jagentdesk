@@ -11,9 +11,12 @@ import {
   openImageLightbox,
   closeImageLightbox,
   pressInterruptShortcut,
+  blurComposerInput,
   expectComposerDraft,
   expectComposerDisabled,
   expectComposerEditable,
+  expectComposerFocused,
+  expectComposerNotFocused,
   expectAttachButtonDisabled,
   fillComposerDraft,
   dropFileOnComposer,
@@ -221,6 +224,30 @@ test.describe("Composer attachments", () => {
     await expectAttachmentPill(page, "composer-file-attachment-pill");
   });
 
+  test("dropping attachments focuses the composer", async ({ page, withWorkspace }) => {
+    test.setTimeout(60_000);
+    const workspace = await withWorkspace({ prefix: "attach-drop-focus-" });
+    await workspace.navigateTo();
+    await clickNewChat(page);
+    await expectComposerVisible(page);
+
+    await test.step("dropping a file focuses the composer", async () => {
+      await blurComposerInput(page);
+      await expectComposerNotFocused(page);
+      await dropFileOnComposer(page, TEST_JSON);
+      await expectAttachmentPill(page, "composer-file-attachment-pill");
+      await expectComposerFocused(page);
+    });
+
+    await test.step("dropping an image focuses the composer", async () => {
+      await blurComposerInput(page);
+      await expectComposerNotFocused(page);
+      await dropFileOnComposer(page, TEST_IMAGE);
+      await expectAttachmentPill(page, "composer-image-attachment-pill");
+      await expectComposerFocused(page);
+    });
+  });
+
   test("dropped JSON file renders as a file attachment in New Workspace", async ({ page }) => {
     test.setTimeout(120_000);
     const workspace = await seedWorkspace({ repoPrefix: "attach-drop-new-workspace-" });
@@ -239,9 +266,12 @@ test.describe("Composer attachments", () => {
         projectDisplayName: workspace.projectDisplayName,
       });
 
+      await blurComposerInput(page);
+      await expectComposerNotFocused(page);
       await dropFileOnComposer(page, TEST_JSON);
 
       await expectAttachmentPill(page, "composer-file-attachment-pill");
+      await expectComposerFocused(page);
     } finally {
       await workspace.cleanup();
     }

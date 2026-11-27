@@ -105,7 +105,7 @@ describe("snapshot mutation ownership boundary", () => {
         onMessage,
         logger: createStub<SessionOptions["logger"]>(logger),
         downloadTokenStore: createStub<SessionOptions["downloadTokenStore"]>({}),
-        pushTokenStore: createStub<SessionOptions["pushTokenStore"]>({}),
+        pushNotifications: createStub<SessionOptions["pushNotifications"]>({}),
         jagentdeskHome: "/tmp/jagentdesk-test",
         agentManager: createStub<SessionOptions["agentManager"]>({
           subscribe: () => () => {},

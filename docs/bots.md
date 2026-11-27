@@ -84,10 +84,44 @@ Round-1 RPC names stay. A running Home Chat note is pushed again under the same 
 it finishes; replace messages by id. `bots.items_changed` and `bots.activity_changed` say which
 read to refetch. The Home Chat agent id is absent until the first delivered message.
 
+The first-run screen reads Home Chat history with `botFirstScreenState` (`bots/rules`), as Orca
+does: it leads from the kickoff until the bot speaks or the owner writes. A kickoff turn that ends
+without words, or that the host cannot start, gets an `assistant` row with `source: "error"`; the
+screen shows it with Try again (`bots.kickoff.retry`, gated on `features.botsKickoff`). The drain
+never resends a failed kickoff on its own. `firstRun` is a different thing: it lasts until the
+owner's first turn ends, because the first-run rules steer that turn too, so never use it alone to
+decide whether to show the screen. In the agent timeline the kickoff is a notice row, not a user
+bubble.
+
+## Automations
+
+A bot's automation is a core schedule with `bot: { botId, runsIn, chatId? }`
+([schedule service](../packages/server/src/server/schedule/service.ts), ADR-0060). There is no
+second scheduler: the schedule service owns cadence, next run and run history, and hands each due
+bot schedule to the bots service's launcher, which runs it the way a bot runs: a Home Chat note
+(running, done, failed), the prompt in the Home Chat (`runsIn: "home"`), one of the bot's side
+chats (`"chat"`, the Home Chat when that chat is gone) or a new "Automation run" conversation in
+its home (`"new"`, in the bot's permission mode, its cards going to the owner). A reply ending in
+the quiet marker posts nothing.
+
+- Created and changed only in the bot's chat: `bot_automation_*`, or the core schedule tools,
+  which a bot's own chat may use for its own schedules only. `schedule/update` refuses a bot
+  schedule, and the Schedules screen offers "Edit in {{bot}}'s chat" instead of the form. Pause,
+  resume, Run now and Delete work from both places.
+- A paused bot's due slot is not claimed; resuming runs it once. The Schedules row shows
+  "Bot paused" meanwhile.
+- `target` is a new-agent target for the bot's provider in its home, so apps that don't read
+  `bot` still list it. It follows provider and model changes.
+- Round-1 bots kept `Bot.schedules` on the record. On start each one becomes a core schedule with
+  the same id, cron, prompt, on/off and next run; the record is cleared only after all of them
+  are in, and an id already present is kept, so a rerun makes no duplicates. `Bot.schedules` is
+  `[]` from then on.
+- Deleting a bot deletes its schedules. Templates and shared bots create theirs off.
+
 ## Triggers
 
-Cron automations, Look around slots and wait deadlines use persisted occurrence keys. Paused bots
-queue chat but run no turns or background work; resuming catches up one overdue cron occurrence.
+Look around slots and wait deadlines use persisted occurrence keys. Paused bots queue chat but run
+no turns or background work.
 A daemon restart wakes a bot only when it cut the bot's turn: one `[restart]` turn per cut
 message, in Orca's words, shown in the app as a notice row. Open items, waits and workers need no
 turn and stay as stored (ADR-0060 §6 allows no other model calls).
@@ -96,9 +130,10 @@ it was turned on, and never before the bot's first conversation. Tidy memory run
 window after a night with chat.
 
 Event automations run a prompt in the Home Chat when a GitHub, GitLab or Telegram event of the bot
-happens (`event-automations.ts`). The bot creates them only with its `bot_event_automation_save`
-tool; they list in `bots.automations.list` with `event` set. They live in the bots state table,
-not on `Bot.schedules`, because round-1 apps parse every schedule with a required `cron`. An event
+happens (`event-automations.ts`), through the same Home Chat launch as a scheduled run. The bot
+creates them only with its `bot_event_automation_save` tool; they list in `bots.automations.list`
+with `event` set. They live in the bots state table, not in core schedules, because a schedule
+needs a cadence and older apps parse every schedule's. An event
 runs every matching automation whoever caused it (Who can ask gates only asking the bot), once
 per automation and event key, and nothing while the bot is paused. Slack and Jira events do not
 reach them yet.
@@ -147,11 +182,17 @@ Worker forwards only the kind's headers; the daemon reads only those, never the 
   status, whatever GitLab resends.
 - Telegram: `message_thread_id` is part of the thread key only when `is_topic_message` is true; replies
   in ordinary groups carry one too.
+- Telegram linking: the code arrives as `<code>` or as `/start <code>` from the `t.me/<bot>?start=<code>`
+  button. Until someone is linked, every refusal carries the "tap Link my Telegram account" hint, at most
+  once a minute per sender, because the sender is most likely the owner who never sent the code. After
+  that it is one refusal a day. The status's `linked` (who sent the current code) lives in daemon memory
+  and the daemon pushes `bots.changed` on link, so the open dialog turns into "Linked" without polling.
 
 The RPCs and the client contract are in `bots.github.*`, `bots.gitlab.*` and `bots.telegram.*` of
 `packages/protocol/src/bots/rpc-schemas.ts`, gated on `features.botsHooks`. The local acceptance test
 `packages/server/src/server/bots/hooks.local.e2e.test.ts` runs against `wrangler dev --local --port 8972`
-with local GitHub, GitLab and Telegram simulators; never run it against the real services.
+with local GitHub, GitLab and Telegram simulators; never run it against the real services. Run it with
+`JAGENTDESK_TAILSCALE_ENABLED=0`, or the daemon fails to start without the embedded Tailscale bridge.
 
 ## Sharing
 

@@ -152,6 +152,7 @@ export const en = {
       interruptAgent: "Interrupt agent",
       queueMessage: "Queue message",
       sendAndInterrupt: "Send and interrupt",
+      sendAndSteer: "Send and steer",
       sendMessage: "Send message",
       queue: "Queue",
       send: "Send",
@@ -418,6 +419,8 @@ export const en = {
       pillOne: "1 background task",
       pillMany: "{{count}} background tasks",
       notRunning: "No longer running",
+      dismissAll: "Dismiss all",
+      ended: "Ended",
       dismiss: "Dismiss",
       stop: "Stop",
       stopping: "Stopping…",
@@ -2018,6 +2021,8 @@ export const en = {
     pillLabelNeedsInputOne: "1 needs input",
     pillLabelNeedsInputMany: "{{count}} need input",
     pillLabelReadyToReview: "{{count}} ready to review",
+    rowFailed: "Failed",
+    rowStopped: "Stopped",
     detachAction: "Detach {{label}}",
     detachTooltip: "Detach subagent",
     archiveAction: "Archive {{label}}",
@@ -2168,6 +2173,48 @@ export const en = {
       editProject: "Edit {{projectName}}",
     },
     groupInfo: "About {{title}}",
+    notifications: {
+      title: "Notifications",
+      enabled: {
+        label: "Enable notifications",
+        description: "Receive notifications from agents, terminals, and plugins on this device",
+        pausedDescription: "All notifications, including plugins, are paused on this device",
+      },
+      events: {
+        title: "Events",
+        agentPermission: {
+          label: "Agent needs permission",
+          description: "Approvals, plans, and questions",
+        },
+        agentError: {
+          label: "Agent errored",
+          description: "When an agent stops with an error",
+        },
+        agentFinished: {
+          label: "Agent finished",
+          description: "When an agent completes a turn",
+        },
+        terminalNeedsInput: {
+          label: "Terminal needs input",
+          description: "When a terminal command is waiting for input",
+        },
+        terminalFinished: {
+          label: "Terminal finished",
+          description: "When a terminal command finishes",
+        },
+      },
+      plugins: {
+        title: "Plugins",
+        enabled: {
+          label: "Plugin notifications",
+          description: "Allow installed plugins to send notifications",
+        },
+        empty: "Installed plugins appear here so you can mute them individually",
+      },
+      legacyHostTitle: "Update host for push preferences",
+      legacyHostHint:
+        "Update connected hosts to sync custom push notification preferences from this device",
+    },
     sections: {
       hosts: "Hosts",
       sidebar: "Sidebar",
@@ -2861,6 +2908,9 @@ export const en = {
       },
       agentProfiles: {
         featureCountOne: "{{count}} feature",
+        systemPromptLabel: "System prompt",
+        systemPromptPlaceholder: "Focus on layout, accessibility, and design tokens.",
+        systemPromptHint: "Applies to new agents only",
         featureCount: "{{count}} features",
         editProfileTitle: "Edit agent profile",
         addProfileTitle: "Add agent profile",
@@ -3157,6 +3207,26 @@ export const en = {
     search: "Search",
     newWorkspace: "New",
     workspaces: "Workspaces",
+  },
+  browserTabs: {
+    openOne: "1 browser tab open",
+    openMany: "{{count}} browser tabs open",
+    title: "Browser tabs",
+    closeAll: "Close all",
+    show: "Show",
+    close: "Close",
+    notInWorkspace: "Not in a workspace",
+    untitled: "New tab",
+    status: {
+      loading: "Loading",
+      notResponding: "Not responding",
+      crashed: "Crashed",
+    },
+    pill: {
+      tooltip: "Browser tabs this agent opened",
+      notResponding: "{{count}} not responding",
+      crashed: "{{count}} crashed",
+    },
   },
   marketplace: {
     title: "Plugin Marketplace",

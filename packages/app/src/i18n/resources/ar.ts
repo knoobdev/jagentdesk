@@ -174,6 +174,7 @@ export const ar: TranslationResources = {
       interruptAgent: "عامل المقاطعة",
       queueMessage: "رسالة قائمة الانتظار",
       sendAndInterrupt: "إرسال ومقاطعة",
+      sendAndSteer: "إرسال وتوجيه",
       sendMessage: "أرسل رسالة",
       queue: "طابور",
       send: "يرسل",
@@ -439,6 +440,8 @@ export const ar: TranslationResources = {
       pillOne: "مهمة واحدة في الخلفية",
       pillMany: "{{count}} مهمة في الخلفية",
       notRunning: "لم يعد قيد التشغيل",
+      dismissAll: "تجاهل الكل",
+      ended: "انتهى",
       dismiss: "إغلاق",
       stop: "إيقاف",
       stopping: "جارٍ الإيقاف…",
@@ -2001,6 +2004,8 @@ export const ar: TranslationResources = {
     pillLabelNeedsInputOne: "واحد يحتاج إدخالاً",
     pillLabelNeedsInputMany: "{{count}} تحتاج إدخالاً",
     pillLabelReadyToReview: "{{count}} جاهزة للمراجعة",
+    rowFailed: "فشل",
+    rowStopped: "متوقف",
     detachAction: "فصل {{label}}",
     detachTooltip: "فصل الوكيل الفرعي",
     archiveAction: "أرشيف{{label}}",
@@ -2160,6 +2165,47 @@ export const ar: TranslationResources = {
       editProject: "تحرير{{projectName}}",
     },
     groupInfo: "حول{{title}}",
+    notifications: {
+      title: "الإشعارات",
+      enabled: {
+        label: "تفعيل الإشعارات",
+        description: "تلقّي الإشعارات من الوكلاء والطرفيات والإضافات على هذا الجهاز",
+        pausedDescription: "جميع الإشعارات، بما في ذلك الإضافات، متوقفة مؤقتًا على هذا الجهاز",
+      },
+      events: {
+        title: "الأحداث",
+        agentPermission: {
+          label: "الوكيل يحتاج إلى إذن",
+          description: "الموافقات والخطط والأسئلة",
+        },
+        agentError: {
+          label: "تعطّل الوكيل بخطأ",
+          description: "عندما يتوقف الوكيل بسبب خطأ",
+        },
+        agentFinished: {
+          label: "انتهى الوكيل",
+          description: "عندما يكمل الوكيل دورة عمل",
+        },
+        terminalNeedsInput: {
+          label: "الطرفية تنتظر إدخالًا",
+          description: "عندما ينتظر أمر الطرفية إدخالًا",
+        },
+        terminalFinished: {
+          label: "انتهى أمر الطرفية",
+          description: "عندما ينتهي أمر في الطرفية",
+        },
+      },
+      plugins: {
+        title: "الإضافات",
+        enabled: {
+          label: "إشعارات الإضافات",
+          description: "السماح للإضافات المثبتة بإرسال إشعارات",
+        },
+        empty: "تظهر الإضافات المثبتة هنا لكتمها بشكل فردي",
+      },
+      legacyHostTitle: "حدّث المضيف لتفضيلات الإشعارات الفورية",
+      legacyHostHint: "حدّث المضيفين المتصلين لمزامنة تفضيلات الإشعارات المخصصة من هذا الجهاز",
+    },
     sections: {
       hosts: "المضيفون",
       sidebar: "الشريط الجانبي",
@@ -2851,6 +2897,9 @@ export const ar: TranslationResources = {
       },
       agentProfiles: {
         featureCountOne: "{{count}} سمة",
+        systemPromptLabel: "موجه النظام",
+        systemPromptPlaceholder: "ركز على التخطيط وإمكانية الوصول ورموز التصميم.",
+        systemPromptHint: "ينطبق على الوكلاء الجدد فقط",
         featureCount: "{{count}} سمة",
         editProfileTitle: "تعديل ملف تعريف الوكيل",
         addProfileTitle: "إضافة ملف تعريف وكيل",
@@ -3147,6 +3196,26 @@ export const ar: TranslationResources = {
     search: "بحث",
     newWorkspace: "جديد",
     workspaces: "مساحات العمل",
+  },
+  browserTabs: {
+    openOne: "علامة تبويب متصفح واحدة مفتوحة",
+    openMany: "{{count}} علامات تبويب متصفح مفتوحة",
+    title: "علامات تبويب المتصفح",
+    closeAll: "إغلاق الكل",
+    show: "إظهار",
+    close: "إغلاق",
+    notInWorkspace: "ليست في مساحة عمل",
+    untitled: "علامة تبويب جديدة",
+    status: {
+      loading: "جارٍ التحميل",
+      notResponding: "لا يستجيب",
+      crashed: "تعطّل",
+    },
+    pill: {
+      tooltip: "علامات تبويب المتصفح التي فتحها هذا الوكيل",
+      notResponding: "{{count}} لا يستجيب",
+      crashed: "{{count}} تعطّل",
+    },
   },
   marketplace: {
     title: "Plugin Marketplace",

@@ -6,6 +6,12 @@ import type { TabContents, BrowserRegistry, TabImage } from "./service.js";
 import type { IsolatedKeyboardInputEvent } from "./trusted-input.js";
 import { CdpSessionQueue } from "./cdp-session-queue.js";
 import {
+  GuestGoneError,
+  isGuestGone,
+  watchGuestTeardown,
+  whenGuestSettled,
+} from "../guest-teardown.js";
+import {
   answerDialog,
   drainDialogEvents,
   getPendingDialog,
@@ -64,10 +70,7 @@ interface WebContentsDebugger {
   isAttached(): boolean;
   attach(protocolVersion?: string): void;
   sendCommand(command: string, params?: Record<string, unknown>): Promise<unknown>;
-  on?(
-    event: "message",
-    listener: (event: unknown, method: string, params?: Record<string, unknown>) => void,
-  ): void;
+  on(event: "detach", listener: (event: unknown, reason: string) => void): unknown;
 }
 
 interface ConsoleMessageEmitter {
@@ -81,7 +84,7 @@ interface ConsoleMessageEmitter {
       sourceId: unknown,
     ) => void,
   ): void;
-  once(event: "destroyed", listener: () => void): void;
+  once(event: "destroyed", listener: () => void): unknown;
 }
 
 interface BrowserAutomationWebContents extends ConsoleMessageEmitter {
@@ -104,36 +107,54 @@ interface BrowserAutomationWebContents extends ConsoleMessageEmitter {
   insertText(text: string): Promise<void>;
 }
 
+/**
+ * Automation commands await CDP and page calls, and a tab can be torn down while they do.
+ * Their continuations may then run inside the teardown, where calling into the guest
+ * crashes the main process (guest-teardown.ts): every call into the guest checks
+ * {@link isGuestGone} first, and the asynchronous ones start on a later macrotask.
+ */
 export function adaptWebContents(contents: BrowserAutomationWebContents): TabContents {
   const contentsId = contents.id;
+  watchGuestTeardown(contents);
   observeConsoleMessages(contents, contentsId);
   const cdpQueue = getCdpQueue(contentsId);
+  const alive = <T>(task: () => T): T => {
+    if (isGuestGone(contents)) {
+      throw new GuestGoneError();
+    }
+    return task();
+  };
+  const gone = () => isGuestGone(contents);
   return {
     id: contentsId,
-    getURL: () => contents.getURL(),
-    getTitle: () => contents.getTitle(),
-    canGoBack: () => contents.canGoBack(),
-    canGoForward: () => contents.canGoForward(),
-    isLoading: () => contents.isLoading(),
-    isDestroyed: () => contents.isDestroyed(),
-    executeJavaScript: (code: string) => contents.executeJavaScript(code),
-    loadURL: (url: string) => contents.loadURL(url),
-    goBack: () => contents.goBack(),
-    goForward: () => contents.goForward(),
-    reload: () => contents.reload(),
-    capturePage: (captureOptions) => contents.capturePage(undefined, captureOptions),
+    getURL: () => (gone() ? "" : contents.getURL()),
+    getTitle: () => (gone() ? "" : contents.getTitle()),
+    canGoBack: () => !gone() && contents.canGoBack(),
+    canGoForward: () => !gone() && contents.canGoForward(),
+    isLoading: () => !gone() && contents.isLoading(),
+    isDestroyed: gone,
+    executeJavaScript: (code: string) =>
+      whenGuestSettled(contents, () => contents.executeJavaScript(code)),
+    loadURL: (url: string) => whenGuestSettled(contents, () => contents.loadURL(url)),
+    goBack: () => alive(() => contents.goBack()),
+    goForward: () => alive(() => contents.goForward()),
+    reload: () => alive(() => contents.reload()),
+    capturePage: (captureOptions) =>
+      whenGuestSettled(contents, () => contents.capturePage(undefined, captureOptions)),
     decodePng: (png) => nativeImage.createFromBuffer(Buffer.from(png)),
-    invalidate: () => contents.invalidate(),
-    sendInputEvent: (event) => contents.sendInputEvent(event),
-    insertText: (text) => contents.insertText(text),
+    invalidate: () => alive(() => contents.invalidate()),
+    sendInputEvent: (event) => alive(() => contents.sendInputEvent(event)),
+    insertText: (text) => whenGuestSettled(contents, () => contents.insertText(text)),
     getConsoleMessages: () => consoleMessagesByContentsId.get(contentsId) ?? [],
     captureDialogs: (task) => captureDialogs(contentsId, task),
     getPendingDialog: () => getPendingDialog(contentsId),
     answerDialog: (answer) => answerDialog(contentsId, { ...answer, by: "agent" }),
     drainDialogEvents: () => drainDialogEvents(contentsId),
     sendDebugCommand: (command: string, params?: Record<string, unknown>) =>
+      // A queued command starts when the one before it settles, which may be the rejection
+      // of a tab being torn down: check before attaching or sending.
       cdpQueue.run(async () => {
-        if (!contents.debugger.isAttached()) {
+        if (!alive(() => contents.debugger.isAttached())) {
           contents.debugger.attach("1.3");
           // Treat an automated tab as focused so a backgrounded/hidden tab is not
           // throttled — timers, requestAnimationFrame, and layout keep running while
@@ -147,7 +168,7 @@ export function adaptWebContents(contents: BrowserAutomationWebContents): TabCon
             // Unsupported CDP method — the tab still works, just without focus emulation.
           }
         }
-        return contents.debugger.sendCommand(command, params ?? {});
+        return alive(() => contents.debugger.sendCommand(command, params ?? {}));
       }),
   };
 }
