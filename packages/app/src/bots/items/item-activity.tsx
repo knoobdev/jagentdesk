@@ -13,6 +13,7 @@ import { BotItemStatusIcon, itemStyles } from "./item-parts";
 import {
   BOT_ITEM_STATUSES,
   botItemActivity,
+  botItemLinkedEventName,
   botItemStatusName,
   formatBotItemSnoozeTime,
   isBotItemWorkerFailed,
@@ -61,13 +62,21 @@ function fieldName(field: string, t: Translate): string {
   return t("bots.items.field.title");
 }
 
-function linkName(link: unknown): string {
-  if (!link || typeof link !== "object") return str(link);
-  const value = link as { kind?: unknown; ref?: unknown; title?: unknown; name?: unknown };
-  return str(value.title) || str(value.name) || str(value.ref);
+/** Named as the item's Links rows name it (PR #n, a host, a file name), never by an id. */
+function linkedLine(event: BotItemEvent, item: BotItem, by: string, t: Translate): string {
+  const name = botItemLinkedEventName(event, item.links ?? []);
+  return name
+    ? `${by} ${t("bots.items.activity.linked", { links: name })}`
+    : `${by} ${t("bots.jad.items.activity.linkedUnnamed")}`;
 }
 
-function eventLine(event: BotItemEvent, by: string, t: Translate, locale: string): string {
+function eventLine(
+  event: BotItemEvent,
+  item: BotItem,
+  by: string,
+  t: Translate,
+  locale: string,
+): string {
   const { data } = event;
   switch (event.kind) {
     case "made":
@@ -98,7 +107,7 @@ function eventLine(event: BotItemEvent, by: string, t: Translate, locale: string
       return `${by} ${verb}${reason ? `: ${reason}` : ""}`;
     }
     case "linked":
-      return `${by} ${t("bots.items.activity.linked", { links: linkName(data.link) })}`;
+      return linkedLine(event, item, by, t);
     case "snoozed":
       return `${by} ${
         typeof data.until_ms === "number"
@@ -148,9 +157,16 @@ function CommentCard({
   );
 }
 
-function WorkerLine({ entry }: { entry: Extract<BotItemActivityEntry, { kind: "worker" }> }) {
+function WorkerLine({
+  entry,
+  itemTitle,
+}: {
+  entry: Extract<BotItemActivityEntry, { kind: "worker" }>;
+  itemTitle: string;
+}) {
   const { t } = useTranslation();
-  const title = entry.link.title ?? entry.link.ref;
+  // A worker is named by its task (the item's title), never by its agent id.
+  const title = entry.link.title?.trim() || itemTitle;
   let label = t("bots.items.activity.workerFinished");
   if (entry.phase === "started") label = t("bots.items.activity.workerStarted");
   else if (isBotItemWorkerFailed(entry.link)) label = t("bots.items.activity.workerFailed");
@@ -223,7 +239,8 @@ export function BotItemActivityList({
   return (
     <View style={styles.list} testID="bot-item-activity">
       {entries.map((entry) => {
-        if (entry.kind === "worker") return <WorkerLine key={entry.key} entry={entry} />;
+        if (entry.kind === "worker")
+          return <WorkerLine key={entry.key} entry={entry} itemTitle={item.title} />;
         const { event } = entry;
         const by = botItemActorName(event, item, bot, t);
         if (event.kind === "commented")
@@ -237,7 +254,11 @@ export function BotItemActivityList({
             />
           );
         return (
-          <EventLine key={entry.key} event={event} line={eventLine(event, by, t, i18n.language)} />
+          <EventLine
+            key={entry.key}
+            event={event}
+            line={eventLine(event, item, by, t, i18n.language)}
+          />
         );
       })}
     </View>

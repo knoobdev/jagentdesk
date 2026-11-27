@@ -285,20 +285,29 @@ export type BotItemActivityEntry =
       link: Extract<BotItemLink, { kind: "dispatch" }>;
     };
 
+/** A `linked` event's link, as the bt1 shape stores it (`{ link: { kind, ref, … } }`). */
+function linkedEventLink(event: BotItemEvent): { kind: string; ref: string } | null {
+  const link = event.data.link;
+  if (!link || typeof link !== "object") return null;
+  const { kind, ref } = link as { kind?: unknown; ref?: unknown };
+  return typeof kind === "string" && typeof ref === "string" ? { kind, ref } : null;
+}
+
 /**
  * The item's Activity: its events, and for each worker it dispatched a "Worker started:" line and,
  * once settled, "Worker finished:" / "Worker stopped:", in time order (Orca `botItemActivity`).
+ * A worker's link event is its start, so it shows only as that line (Orca bot-item-activity.ts
+ * `linksOnlyWorkers`).
  */
 export function botItemActivity(
   item: Pick<BotItem, "links">,
   events: readonly BotItemEvent[],
 ): BotItemActivityEntry[] {
-  const entries: BotItemActivityEntry[] = events.map((event) => ({
-    kind: "event",
-    key: event.id,
-    at: event.at_ms,
-    event,
-  }));
+  const entries: BotItemActivityEntry[] = events.flatMap((event): BotItemActivityEntry[] =>
+    event.kind === "linked" && linkedEventLink(event)?.kind === "dispatch"
+      ? []
+      : [{ kind: "event", key: event.id, at: event.at_ms, event }],
+  );
   for (const link of item.links ?? []) {
     if (link.kind !== "dispatch") continue;
     if (link.startedAt_ms !== null)
@@ -319,6 +328,77 @@ export function botItemActivity(
       });
   }
   return entries.sort((a, b) => a.at - b.at || a.key.localeCompare(b.key));
+}
+
+const GITHUB_PATH = /^\/([\w.-]+\/[\w.-]+)\/(pull|issues)\/(\d+)/;
+const LINEAR_PATH = /^\/[^/]+\/issue\/([A-Za-z0-9]+-\d+)/;
+
+function parsedUrl(url: string): URL | null {
+  try {
+    return new URL(url);
+  } catch {
+    return null;
+  }
+}
+
+function fileName(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, "");
+  const cut = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  return cut >= 0 ? trimmed.slice(cut + 1) : trimmed;
+}
+
+/** A GitHub PR or issue URL as `#n`, a Linear issue as its key, any other URL as its host. */
+function urlName(ref: string): string {
+  const parsed = parsedUrl(ref);
+  if (!parsed) return ref;
+  const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+  const github = host === "github.com" ? GITHUB_PATH.exec(parsed.pathname) : null;
+  if (github) return `#${github[3]}`;
+  const linear = /(^|\.)linear\.app$/.test(host) ? LINEAR_PATH.exec(parsed.pathname) : null;
+  if (linear) return linear[1]!.toUpperCase();
+  return host || ref;
+}
+
+/**
+ * A linked thing's short name, as an item's Activity names it: a PR or GitHub issue as `#n`, a
+ * Linear issue as its key, a URL as its host, a file as its name, a worker as its task title and an
+ * automation as its name, read against the item's links; null for a worker or automation it can't
+ * name (never its id). Ported from Orca dfdb4fda (MIT) src/shared/bots/bot-item-link-names.ts.
+ */
+export function botItemLinkName(
+  link: { kind: string; ref: string },
+  links: readonly BotItemLink[],
+): string | null {
+  const { kind, ref } = link;
+  switch (kind) {
+    case "dispatch": {
+      const worker = links.find((entry) => entry.kind === "dispatch" && entry.ref === ref);
+      return (worker?.kind === "dispatch" && worker.title?.trim()) || null;
+    }
+    case "automation": {
+      const automation = links.find((entry) => entry.kind === "automation" && entry.ref === ref);
+      return (automation?.kind === "automation" && automation.name?.trim()) || null;
+    }
+    case "pr": {
+      const number = botItemPrNumber(ref);
+      return number === null ? ref : `#${number}`;
+    }
+    case "url":
+      return urlName(ref);
+    case "file":
+      return fileName(ref);
+    default:
+      return ref;
+  }
+}
+
+/** The `linked` event's link by its short name; null when it names nothing showable. */
+export function botItemLinkedEventName(
+  event: BotItemEvent,
+  links: readonly BotItemLink[],
+): string | null {
+  const link = linkedEventLink(event);
+  return link ? botItemLinkName(link, links) : null;
 }
 
 export function isBotItemWorkerFailed(link: Extract<BotItemLink, { kind: "dispatch" }>): boolean {
