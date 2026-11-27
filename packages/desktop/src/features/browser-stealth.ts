@@ -550,6 +550,8 @@ interface GuestLifecycle {
   /** Applies in flight. */
   applying: number;
   childTargetListener: boolean;
+  /** main.ts holds this guest's first URL until the identity is applied. */
+  firstLoadHeld: boolean;
 }
 
 const guestStates = new WeakMap<WebContents, GuestIdentityState>();
@@ -569,7 +571,12 @@ function watchGuest(contents: WebContents): GuestLifecycle {
   if (existing) {
     return existing;
   }
-  const lifecycle: GuestLifecycle = { rendererExits: 0, applying: 0, childTargetListener: false };
+  const lifecycle: GuestLifecycle = {
+    rendererExits: 0,
+    applying: 0,
+    childTargetListener: false,
+    firstLoadHeld: false,
+  };
   guestLifecycles.set(contents, lifecycle);
   watchGuestTeardown(contents);
   contents.on("render-process-gone", () => {
@@ -581,23 +588,21 @@ function watchGuest(contents: WebContents): GuestLifecycle {
   return lifecycle;
 }
 
-/** The guest has no live renderer: its last one exited, or it never got one. */
-function hasNoRenderer(contents: WebContents): boolean {
-  return contents.isCrashed() || contents.getOSProcessId() === 0;
-}
-
 /**
- * A guest with nothing committed has its first URL held until the identity is applied, so
- * no navigation will start a renderer for it: not after one exits, and not at all for a
- * guest that never got one (a tab that is not the focused tab of its pane sits under
- * `display: none`, and its guest gets no renderer until something navigates it). CDP
- * commands wait for a renderer, so the apply would wait forever and the tab stay blank.
- * A blank page starts one without any request leaving the tab;
- * browser-guest-initial-load.ts drops that entry from the history once the URL loads.
+ * A guest whose first URL is held until the identity is applied gets no navigation, so
+ * nothing gives it a working renderer: not after its renderer exits, and not at all when
+ * the tab is not the focused tab of its pane (its webview sits under `display: none`; the
+ * guest may even have a renderer process, but CDP commands still wait forever). The apply
+ * then never finished and the tab stayed blank. A blank page gives it one without any
+ * request leaving the tab; browser-guest-initial-load.ts drops that history entry once
+ * the held URL loads.
  */
 function startRendererForHeldGuest(contents: WebContents): void {
   runWhenGuestSettled(contents, () => {
-    if (contents.getURL() === "" && hasNoRenderer(contents)) {
+    const url = contents.getURL();
+    const crashedBeforeLoad = contents.isCrashed() && (url === "" || url === "about:blank");
+    const heldNeverNavigated = guestLifecycles.get(contents)?.firstLoadHeld === true && url === "";
+    if (crashedBeforeLoad || heldNeverNavigated) {
       contents.loadURL("about:blank").catch(() => undefined);
     }
   });
@@ -624,12 +629,19 @@ export function isIdentityProtected(): boolean {
  * Apply the current identity to a guest (webview or popup) and resolve once it is in
  * place. Idempotent per identity: concurrent callers share one application, and a later
  * profile change replaces the previous overrides and init scripts. Never rejects.
+ * `firstLoadHeld`: the caller holds the guest's first URL until this resolves.
  */
-export function applyStealthToWebContents(contents: WebContents): Promise<IdentityOutcome> {
+export function applyStealthToWebContents(
+  contents: WebContents,
+  options: { firstLoadHeld?: boolean } = {},
+): Promise<IdentityOutcome> {
   if (isGuestGone(contents)) {
     return Promise.resolve("closed");
   }
-  watchGuest(contents);
+  const lifecycle = watchGuest(contents);
+  if (options.firstLoadHeld) {
+    lifecycle.firstLoadHeld = true;
+  }
   if (!identityResolved) {
     return waitForIdentity().then(() => {
       identityResolved = true;
@@ -699,7 +711,7 @@ async function applyGuestIdentity(
     return "closed";
   }
   const rendererExitsAtStart = lifecycle.rendererExits;
-  if (hasNoRenderer(contents)) {
+  if (contents.isCrashed() || lifecycle.firstLoadHeld) {
     startRendererForHeldGuest(contents);
   }
   const profile = effectiveProfile();

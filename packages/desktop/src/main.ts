@@ -1187,10 +1187,11 @@ async function createWindow(
     installGuestDialogHandler(contents);
     // Anti-detection: the guest's identity (UA, Client Hints, timezone, locale, init
     // scripts) is in place before its first request, then the held URL loads.
+    const initialUrl = takeInitialGuestLoad(contents);
     loadHeldGuestUrlAfterIdentity({
       contents,
-      initialUrl: takeInitialGuestLoad(contents),
-      identity: applyStealthToWebContents(contents),
+      initialUrl,
+      identity: applyStealthToWebContents(contents, { firstLoadHeld: initialUrl !== null }),
       identityProtected: isIdentityProtected,
       setNotResponding: (notResponding) =>
         setJAgentDeskBrowserNotResponding(contents.id, notResponding),

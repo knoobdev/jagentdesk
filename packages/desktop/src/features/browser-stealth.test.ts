@@ -153,8 +153,8 @@ class FakeGuestContents extends EventEmitter {
   public readonly loads: string[] = [];
   public readonly webRtcPolicies: string[] = [];
   public crashed = false;
-  /** 0 = no renderer yet: Electron's getOSProcessId() for a guest that never got one. */
-  public rendererPid = 4242;
+  /** No live renderer frame yet (a hidden tab): CDP commands wait until something navigates it. */
+  public frameless = false;
 
   public isDestroyed(): boolean {
     return false;
@@ -168,15 +168,11 @@ class FakeGuestContents extends EventEmitter {
     return this.loads.at(-1) ?? "";
   }
 
-  public getOSProcessId(): number {
-    return this.crashed ? 0 : this.rendererPid;
-  }
-
   public async loadURL(url: string): Promise<void> {
     this.loads.push(url);
-    if (this.rendererPid === 0) {
-      // A navigation starts the guest's first renderer; the commands waiting for it run.
-      this.rendererPid = 4243;
+    if (this.frameless) {
+      // A navigation gives the guest a live renderer; the commands waiting for it run.
+      this.frameless = false;
       this.debugger.held.clear();
       this.debugger.answerPending();
     }
@@ -200,9 +196,9 @@ class FakeGuestContents extends EventEmitter {
 
 const nextMacrotask = () => new Promise<void>((resolve) => setImmediate(resolve));
 
-function applyTo(guest: FakeGuestContents) {
+function applyTo(guest: FakeGuestContents, options: { firstLoadHeld?: boolean } = {}) {
   setActiveFingerprintProfile(null);
-  return applyStealthToWebContents(guest as unknown as Electron.WebContents);
+  return applyStealthToWebContents(guest as unknown as Electron.WebContents, options);
 }
 
 describe("applyStealthToWebContents", () => {
@@ -221,17 +217,31 @@ describe("applyStealthToWebContents", () => {
   // Spec 04 §27d.3: a tab that is not the focused tab of its pane sits under `display: none`;
   // its guest gets no renderer until something navigates it, and the held first URL waits for
   // the identity, so every CDP command waited forever and the tab stayed blank.
-  it("starts a renderer for a held guest that has none, then applies", async () => {
+  it("starts a renderer for a held guest whose commands wait for one, then applies", async () => {
     const guest = new FakeGuestContents();
-    guest.rendererPid = 0;
+    guest.frameless = true;
     guest.debugger.held.add("Network.enable");
-    const outcome = applyTo(guest);
+    const outcome = applyTo(guest, { firstLoadHeld: true });
     await nextMacrotask();
     await nextMacrotask();
 
     expect(guest.loads).toEqual(["about:blank"]);
     await expect(outcome).resolves.toBe("applied");
     expect(guest.debugger.commands).toContain("Target.setAutoAttach");
+  });
+
+  it("never navigates a guest whose first load is not held (a popup opening its page)", async () => {
+    const guest = new FakeGuestContents();
+    guest.debugger.held.add("Network.enable");
+    const outcome = applyTo(guest);
+    await nextMacrotask();
+    await nextMacrotask();
+    expect(guest.loads).toEqual([]);
+
+    guest.debugger.held.clear();
+    guest.debugger.answerPending();
+    await expect(outcome).resolves.toBe("applied");
+    expect(guest.loads).toEqual([]);
   });
 
   it("stops touching a guest whose target closes while a command is pending", async () => {
