@@ -1,4 +1,5 @@
 import type { BotsSlack } from "./slack.js";
+import { isBotsHookRequest, type BotsHookConnectors } from "./hooks/connectors.js";
 import { createHash, randomUUID } from "node:crypto";
 import { appendFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -78,6 +79,12 @@ import { BOT_TEMPLATES } from "./templates/catalog.js";
 import { BOT_TEMPLATE_SKILL_TEXT } from "./templates/skills.js";
 import { BOT_SETUP_FILE, BOT_TEMPLATE_CATEGORY_LABELS } from "./templates/types.js";
 
+/** Who sent a message from outside JAgentDesk (Slack, GitHub, GitLab, Telegram). */
+function externalSenderId(message: BotMessage): string | undefined {
+  if (message.slack) return `slack:${message.slack.userId}`;
+  if (message.connector) return `${message.connector.kind}:${message.connector.userId}`;
+  return undefined;
+}
 export interface BotTrigger {
   key: string;
   text: string;
@@ -177,6 +184,8 @@ const HANDOFF_VERBS = {
 
 export class BotsService {
   slack?: BotsSlack;
+  /** GitHub, GitLab and Telegram (spec 37.10–37.12). */
+  hooks?: BotsHookConnectors;
   readonly memory: BotMemory;
   readonly allowedSources: BotAllowedSource[] = [];
   private readonly replyListeners = new Set<(request: BotMessage, reply: BotMessage) => void>();
@@ -345,6 +354,7 @@ export class BotsService {
     const bot = this.storage.bot(id);
     const rooms = this.storage.rooms().filter((room) => room.memberBotIds.includes(id));
     await this.slack?.disconnect(id);
+    await this.hooks?.disconnect(id);
     this.storage.saveBot({ ...bot, paused: true });
     for (const item of this.storage.items(id)) await this.cancel(id, item.id, "Bot deleted");
     if (bot.agentId) await this.runtime.cancel(bot.agentId);
@@ -403,7 +413,7 @@ export class BotsService {
     text: string,
     source: string,
     key: string = randomUUID(),
-    place: Pick<BotMessage, "roomId" | "rootId" | "slack"> = {},
+    place: Pick<BotMessage, "roomId" | "rootId" | "slack" | "connector"> = {},
   ): BotMessage | null {
     this.storage.bot(botId);
     const message = this.storage.enqueue(botId, `${botId}:${key}`, text, source, place);
@@ -458,19 +468,14 @@ export class BotsService {
       }
       if (!this.enabled || this.storage.bot(botId).paused) return;
       const activate = () => this.storage.setState(`active:${botId}`, message);
-      if (!message.slack) activate();
+      const senderId = externalSenderId(message);
+      if (!senderId) activate();
       await this.runtime.send(
         agentId,
         `[${message.source}]\n${message.text}`,
         message.id,
         undefined,
-        message.slack
-          ? {
-              senderId: `slack:${message.slack.userId}`,
-              title: message.source,
-              beforeDispatch: activate,
-            }
-          : undefined,
+        senderId ? { senderId, title: message.source, beforeDispatch: activate } : undefined,
       );
       this.storage.delivered(message.id);
     } finally {
@@ -551,9 +556,16 @@ export class BotsService {
             kind: "thread",
             title: active.source,
           }
-        : { id: "home", kind: "home", title: null },
+        : active?.connector
+          ? {
+              id: `${active.connector.kind}:${active.connector.thread}`,
+              kind: "thread",
+              title: active.source,
+            }
+          : { id: "home", kind: "home", title: null },
     });
     if (active?.slack) this.storage.setState(`slack:item:${item.id}`, active.slack);
+    if (active?.connector) this.storage.setState(`connector:item:${item.id}`, active.connector);
     const saved = this.saveItem(item);
     this.storage.addItemEvent(saved, "made", this.actorOf(actor, botId), { title });
     this.itemNote(saved, "added", `Added #${saved.number}`);
@@ -1110,6 +1122,7 @@ export class BotsService {
       source: event.kind,
       rootId: active?.rootId,
       slack: active?.slack,
+      connector: active?.connector,
       createdAt_ms: this.now(),
     };
     if (!this.storage.append(message)) return;
@@ -2465,11 +2478,19 @@ export class BotsService {
     },
   };
 
+  /** Slack, GitHub, GitLab and Telegram requests, or undefined for the rest. */
+  private routeConnector(msg: BotsRequest): Promise<Record<string, unknown>> | undefined {
+    if (msg.type.startsWith("bots.slack."))
+      return this.handleSlack(msg as Extract<BotsRequest, { type: `bots.slack.${string}` }>);
+    if (!isBotsHookRequest(msg)) return undefined;
+    if (!this.hooks) throw new Error("Bot connectors are unavailable");
+    return this.hooks.handle(msg);
+  }
+
   // Successful results are parsed by the matching protocol schema at the session boundary.
   async handle(msg: BotsRequest): Promise<Record<string, unknown>> {
-    if (msg.type.startsWith("bots.slack.")) {
-      return this.handleSlack(msg as Extract<BotsRequest, { type: `bots.slack.${string}` }>);
-    }
+    const connector = this.routeConnector(msg);
+    if (connector) return connector;
     const handler = this.handlers[msg.type] as
       | ((msg: BotsRequest) => Promise<Record<string, unknown>>)
       | undefined;

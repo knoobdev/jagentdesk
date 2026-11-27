@@ -1,4 +1,4 @@
-import { RelayHooks, slackHookPath, readHookBody } from "./hooks.js";
+import { RelayHooks, hookPath, readHookBody } from "./hooks.js";
 /**
  * Cloudflare Durable Objects adapter for the relay (spec 35.2).
  *
@@ -734,8 +734,8 @@ export class RelayDurableObject {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    const hook = slackHookPath(url.pathname);
-    if (hook) return this.hooks.fetch(request, hook.hookId);
+    const hook = hookPath(url.pathname);
+    if (hook) return this.hooks.fetch(request, hook.hookId, hook.kind);
     if (url.pathname.startsWith("/hooks/")) return new Response("Unknown hook", { status: 404 });
     const roleRaw = url.searchParams.get("role");
     const role = roleRaw === "server" || roleRaw === "client" ? roleRaw : null;
@@ -949,7 +949,7 @@ export default {
       });
     }
 
-    const hook = slackHookPath(url.pathname);
+    const hook = hookPath(url.pathname);
     if (hook) {
       if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
       // Consume the bounded upload before handing it to a DO. Returning early from

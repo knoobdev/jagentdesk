@@ -17,6 +17,9 @@ import type { PushNotificationSender } from "../push/notifications.js";
 interface TestJAgentDeskDaemonOptions {
   relay?: { endpoint: string; useTls: boolean };
   slackApiBaseUrl?: string;
+  telegramApiBaseUrl?: string;
+  botsGh?: import("../bots/hooks/cli.js").ForgeCli;
+  botsGlab?: import("../bots/hooks/cli.js").ForgeCli;
   hostCapabilities?: import("../host-capabilities/service.js").HostCapabilityService;
   botsTriggerSource?: import("../bots/service.js").BotTriggerSource;
   sessionShareTunnelManager?: import("../tunnels/tunnel-manager.js").TunnelManager;
@@ -106,6 +109,9 @@ export async function createTestJAgentDeskDaemon(
       hostCapabilities: options.hostCapabilities,
       botsTriggerSource: options.botsTriggerSource,
       slackApiBaseUrl: options.slackApiBaseUrl,
+      telegramApiBaseUrl: options.telegramApiBaseUrl,
+      botsGh: options.botsGh,
+      botsGlab: options.botsGlab,
       sessionShareTunnelManager: options.sessionShareTunnelManager,
       builtinPlugins: options.builtinPlugins ?? new BuiltinPluginLoader(undefined, []),
       serverFeatureOverrides: {

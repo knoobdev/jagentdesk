@@ -343,6 +343,22 @@ export const BotChatNoteSchema = z.object({
   verb: z.string().optional(),
   status: BotItemStatusSchema.optional(),
 });
+/** A GitHub, GitLab or Telegram thread a bot was asked in; its final reply goes back there (spec 37.10–37.12). */
+export const BotConnectorThreadSchema = z.object({
+  /** "github" | "gitlab" | "telegram"; a string so a newer daemon's kinds still parse. */
+  kind: z.string(),
+  hookId: z.string(),
+  /** "owner/repo#12", "group/project!3" or "<chat id>:<root message id>[:<topic id>]". */
+  thread: z.string(),
+  userId: z.string(),
+  userName: z.string().optional(),
+  /** GitLab host the thread lives on. */
+  host: z.string().optional(),
+  /** Telegram chat, the asker's message to reply to, and the forum topic. */
+  chatId: z.string().optional(),
+  messageId: z.string().optional(),
+  topicId: z.string().optional(),
+});
 export const BotMessageSchema = z.object({
   id: z.string(),
   botId: z.string(),
@@ -356,6 +372,7 @@ export const BotMessageSchema = z.object({
   note: BotChatNoteSchema.optional(),
   /** Updated in place (a running note that finished); clients replace by `id`. */
   updatedAt_ms: z.number().int().optional(),
+  connector: BotConnectorThreadSchema.optional(),
 });
 /** `shared/bots/bot-group-schema.ts` BotGroupReplyMode. */
 export const BotGroupReplyModeSchema = z.discriminatedUnion("kind", [
@@ -388,6 +405,7 @@ export type BotItemsStale = z.infer<typeof BotItemsStaleSchema>;
 export type BotQuestion = z.infer<typeof BotQuestionSchema>;
 export type BotMessage = z.infer<typeof BotMessageSchema>;
 export type BotChatNote = z.infer<typeof BotChatNoteSchema>;
+export type BotConnectorThread = z.infer<typeof BotConnectorThreadSchema>;
 export type BotRoom = z.infer<typeof BotRoomSchema>;
 export type BotGroupReplyMode = z.infer<typeof BotGroupReplyModeSchema>;
 export type BotSchedule = z.infer<typeof BotScheduleSchema>;
