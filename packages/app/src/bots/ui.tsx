@@ -80,10 +80,10 @@ export function QueryNotice({
   if (query.isError)
     return (
       <Alert variant="error" title={query.error?.message ?? ""}>
-        <Button onPress={retry}>{t("bots.retry")}</Button>
+        <Button onPress={retry}>{t("bots.jad.retry")}</Button>
       </Alert>
     );
-  if (query.isPending) return <Text style={styles.muted}>{t("bots.loading")}</Text>;
+  if (query.isPending) return <Text style={styles.muted}>{t("bots.jad.loading")}</Text>;
   return null;
 }
 export function Section({ title, children }: { title: string; children: ReactNode }) {

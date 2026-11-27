@@ -200,7 +200,7 @@ function PartView({
     };
   }, [requests, botId, previewId, part, t]);
   if (error) return <Alert variant="error" title={error} />;
-  if (!files) return <Text style={styles.muted}>{t("bots.loading")}</Text>;
+  if (!files) return <Text style={styles.muted}>{t("bots.jad.loading")}</Text>;
   return (
     <View style={styles.column}>
       {files.map((file) => {
@@ -790,7 +790,7 @@ export function BotShareDialog({
   );
 
   let body: ReactNode;
-  if (!candidate) body = <Text style={styles.muted}>{t("bots.loading")}</Text>;
+  if (!candidate) body = <Text style={styles.muted}>{t("bots.jad.loading")}</Text>;
   else if (page.kind === "overview")
     body = (
       <Overview

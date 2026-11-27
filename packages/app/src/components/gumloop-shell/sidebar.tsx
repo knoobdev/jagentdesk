@@ -3,7 +3,7 @@ import { RetainedPanelActivity } from "@/components/retained-panel";
 import { openSettingsFromSidebar } from "@/navigation/settings-navigation";
 import { getSettingsSidebarReturn } from "@/navigation/settings-presentation/session";
 import { getLastWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
-import { useWindowDimensions } from "react-native";
+import { useWindowDimensions, type LayoutChangeEvent } from "react-native";
 import { useWindowLayout, resolveDesktopDivisionLayout } from "@/window-layout";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -74,6 +74,8 @@ import {
 } from "@/utils/host-routes";
 import { resolveSidebarNavBody, resolveSectionRoute } from "@/components/left-sidebar";
 import { WorkspaceSidebar } from "./workspace-sidebar";
+import { SidebarBotsSection } from "@/bots/sidebar-section";
+import { useSidebarMiddleHeight } from "@/bots/sidebar-store";
 import {
   GUMLOOP_PANEL_HOST,
   resolveSidebarDrillIn as resolveCoreSidebarDrillIn,
@@ -90,7 +92,6 @@ const PRIMARY_ORDER: readonly string[] = [
   "schedules",
   "skills",
   "memory",
-  "bots",
   "marketplace",
   "usage",
   "insights",
@@ -355,8 +356,9 @@ function PluginGroupRow({
   );
 }
 
-function RootNavigation({ onNavigate }: { onNavigate: () => void }) {
-  const items = useAppNavItems();
+function RootNavigation({ serverId, onNavigate }: { serverId: string; onNavigate: () => void }) {
+  // Bots is a section above Projects, not a nav row (spec 38.4.2).
+  const items = useAppNavItems().filter((item) => item.key !== "bots");
   const groups = usePluginSidebarGroups();
   const pluginHeaders = usePluginScreenSidebarItems("header");
   const pluginFooters = usePluginScreenSidebarItems("footer");
@@ -404,6 +406,11 @@ function RootNavigation({ onNavigate }: { onNavigate: () => void }) {
               ))}
             </View>
           )}
+        </View>
+      ) : null}
+      {serverId ? (
+        <View style={styles.botsSection}>
+          <SidebarBotsSection serverId={serverId} onNavigate={onNavigate} />
         </View>
       ) : null}
       <View style={styles.projectsHeading}>
@@ -506,7 +513,15 @@ export function GumloopSidebar({ active }: { active: boolean }) {
     usePanelStore.getState().showMobileAgent();
   }, []);
   const back = useCallback(() => setDismissedPath(pathname), [pathname]);
-  const navigation = useMemo(() => <RootNavigation onNavigate={resetDrill} />, [resetDrill]);
+  const navigation = useMemo(
+    () => <RootNavigation serverId={serverId} onNavigate={resetDrill} />,
+    [resetDrill, serverId],
+  );
+  const setMiddleHeight = useSidebarMiddleHeight((state) => state.set);
+  const onMiddleLayout = useCallback(
+    (event: LayoutChangeEvent) => setMiddleHeight(event.nativeEvent.layout.height),
+    [setMiddleHeight],
+  );
   let middle: ReactNode;
   if (drill?.kind === "workspace")
     middle = <WorkspaceSidebar serverId={drill.serverId} workspaceId={drill.workspaceId} />;
@@ -589,7 +604,7 @@ export function GumloopSidebar({ active }: { active: boolean }) {
             <Text style={styles.newAgentLabel}>New agent</Text>
           </Pressable>
         </View>
-        <View style={styles.middle} testID="gumloop-sidebar-middle">
+        <View style={styles.middle} onLayout={onMiddleLayout} testID="gumloop-sidebar-middle">
           {middle}
         </View>
         <ConnectionFooter serverId={serverId} onNavigate={resetDrill} />
@@ -631,9 +646,7 @@ function DrillQuickSwitch({
       );
     }
     return destinations
-      .filter(
-        (item) => (!PRIMARY_KEYS.has(item.key) && item.group !== "main") || item.key === "bots",
-      )
+      .filter((item) => !PRIMARY_KEYS.has(item.key) && item.group !== "main" && item.key !== "bots")
       .map((item) => ({
         id: item.key,
         label: item.label,
@@ -725,6 +738,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
   // Tools sits right under the main nav behind a 1 px rule with 8 px either side (spec 38 §4.2).
   divider: { height: 1, marginVertical: 8, backgroundColor: theme.colors.border },
   projectsHeading: { marginTop: 16 },
+  botsSection: { marginTop: 16 },
   groupHeading: {
     height: { xs: 44, md: 32 },
     flexDirection: "row",

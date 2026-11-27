@@ -11,7 +11,7 @@ import type { BotShareExisting, BotShareReview } from "@jagentdesk/protocol/bots
 import { AdaptiveModalSheet } from "@/components/adaptive-modal-sheet";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { BotForm } from "../bot-form";
+import { NewBotDialog } from "../dialogs/new-bot-dialog";
 import { botsKey, useBotsConnection } from "../queries";
 import { Input } from "../ui";
 import { styles } from "../styles";
@@ -135,12 +135,11 @@ export function BotShareReviewPanel({
 export function BotShareReceiveSheet({
   serverId,
   onClose,
-  onCreated,
   onOpenBot,
 }: {
   serverId: string;
+  /** Also closes after New bot made the copy and opened it. */
   onClose: () => void;
-  onCreated: (bot: Bot) => void;
   onOpenBot: (botId: string) => void;
 }) {
   const { t } = useTranslation();
@@ -169,8 +168,8 @@ export function BotShareReceiveSheet({
   }, [client, link, t]);
 
   const create = useCallback(
-    async (review: BotShareReview, bot: BotInput) => {
-      if (!client) return;
+    async (review: BotShareReview, bot: BotInput): Promise<Bot> => {
+      if (!client) throw new Error(t("bots.jad.offline"));
       setError(null);
       try {
         const result = await client.botsRequest("bots.share.create.request", {
@@ -178,16 +177,15 @@ export function BotShareReceiveSheet({
           bot,
         });
         await queryClient.invalidateQueries({ queryKey: [...botsKey(serverId), "list"] });
-        onCreated(result.bot);
+        return result.bot;
       } catch (err) {
         const code = shareErrorCode(err);
         if (code === "bot_share_updated") setStep({ kind: "updated", review });
         else if (code === "bot_share_stopped") setStep({ kind: "stopped" });
-        else setError(new Error(shareErrorCopy(err, t)));
-        throw err;
+        throw new Error(shareErrorCopy(err, t), { cause: err });
       }
     },
-    [client, queryClient, serverId, onCreated, t],
+    [client, queryClient, serverId, t],
   );
 
   const openExisting = useCallback(
@@ -208,13 +206,21 @@ export function BotShareReceiveSheet({
     },
     [step],
   );
-  const saveCopy = useCallback(
-    function saveCopy(input: BotInput) {
-      if (step.kind !== "create") return Promise.resolve();
-      return create(step.review, input);
-    },
-    [step, create],
+  const shareSource = useMemo(
+    () =>
+      step.kind === "create"
+        ? {
+            review: step.review,
+            onBack: toReview,
+            create: (bot: BotInput) => create(step.review, bot),
+          }
+        : null,
+    [step, toReview, create],
   );
+  // The regular New bot dialog, made from the review (Orca BotShareReceiveFlow.tsx NewBotFromShare).
+  if (shareSource) {
+    return <NewBotDialog serverId={serverId} fromShare={shareSource} onClose={onClose} />;
+  }
 
   let body: React.ReactNode;
   switch (step.kind) {
@@ -290,28 +296,6 @@ export function BotShareReceiveSheet({
       break;
     case "review":
       body = <BotShareReviewPanel review={step.review} onNotNow={onClose} onCreate={toCreate} />;
-      break;
-    case "create":
-      body = (
-        <>
-          <Text style={styles.muted}>
-            {step.review.sharedBy
-              ? t("bots.share.receive.origin", { who: step.review.sharedBy })
-              : t("bots.share.receive.originAnonymous")}
-          </Text>
-          <BotForm
-            serverId={serverId}
-            bot={null}
-            initialName={step.review.bot.name}
-            save={saveCopy}
-            pending={false}
-            error={null}
-          />
-          <Button variant="ghost" onPress={toReview}>
-            {t("bots.share.receive.back")}
-          </Button>
-        </>
-      );
       break;
   }
   return (

@@ -1,5 +1,6 @@
 import { BuiltinClientItems } from "@/plugins/builtin/surfaces";
 import { BuiltinPluginsSection } from "@/plugins/builtin/settings-section";
+import { BotsAppSettingsSection } from "@/bots/settings/app-pane";
 import { formatPluginInstallation } from "@jagentdesk/protocol/plugin-source-reference";
 import { PluginSettingsButton } from "@/plugins/settings";
 import { pluginDisplayName } from "@/plugins/plugin-list";
@@ -461,6 +462,7 @@ export function HostPluginsPage({ serverId }: { serverId: string }) {
   return (
     <View>
       <BuiltinPluginsSection serverId={serverId} />
+      <BotsAppSettingsSection serverId={serverId} />
       <BuiltinClientItems serverId={serverId} kind="settings" />
       <SettingsSection title={t("builtinPlugins.installed")}>
         <View style={settingsStyles.card}>

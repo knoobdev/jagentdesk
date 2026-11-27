@@ -18,7 +18,7 @@ export function useBotShareStatus(serverId: string, botId: string) {
     dataShape: "value",
     staleTimeMs: 5000,
     queryFn: async () => {
-      if (!client) throw new Error(i18n.t("bots.offline"));
+      if (!client) throw new Error(i18n.t("bots.jad.offline"));
       return (await client.botsRequest("bots.share.status.request", { botId })).status;
     },
   });

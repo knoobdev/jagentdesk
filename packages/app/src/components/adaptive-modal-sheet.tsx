@@ -221,6 +221,13 @@ const styles = StyleSheet.create((theme) => ({
     flexShrink: 1,
     minHeight: 0,
   },
+  // A fixed-height card (desktopHeight) clipped by maxHeight shrinks its static body, so the
+  // body's own scroll views scroll instead of spilling past the card.
+  desktopStaticBody: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minHeight: 0,
+  },
   footer: {
     paddingHorizontal: theme.spacing[SHEET_HORIZONTAL_PADDING_SCALE],
     paddingVertical: theme.spacing[3],
@@ -810,7 +817,7 @@ export function AdaptiveModalSheet({
           </ScrollView>
         </View>
       ) : (
-        <View style={[styles.contentGrow, bodyStyle]}>
+        <View style={[styles.desktopStaticBody, bodyStyle]}>
           <SheetContent style={desktopStaticContentStyle}>{children}</SheetContent>
         </View>
       )}

@@ -1,26 +1,23 @@
 import { useCallback } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
 import type { Bot, BotMessage } from "@jagentdesk/protocol/bots/types";
 import { PaneFocusProvider, createPaneFocusContextValue } from "@/panels/pane-context";
 import { AgentStreamView } from "@/agent-stream/view";
-import { Button } from "@/components/ui/button";
 import { useFetchQuery } from "@/data/query";
 import { useAgentInitialization } from "@/hooks/use-agent-initialization";
 import { useSessionStore, selectAgentTurnPresentation } from "@/stores/session-store";
 import { normalizeAgentSnapshot } from "@/utils/agent-snapshots";
-import { useBotsConnection, useBotAgent, useBotsMutation, useBotHistory, botsKey } from "./queries";
+import { useBotsConnection, useBotAgent, botsKey } from "./queries";
 import { QueryNotice, ErrorNotice } from "./ui";
 import { Composer } from "@/composer";
 import { useAgentInputDraft } from "@/composer/draft/input-draft";
 import type { MessagePayload } from "@/composer/types";
 import { buildDraftStoreKey } from "@/stores/draft-keys";
 import { styles } from "./styles";
-import { mergeMessages } from "./model";
 import { botIdFromLabels } from "./envelope";
-import { HowToAsk } from "./help";
 export function AgentTimeline({ serverId, agentId }: { serverId: string; agentId: string }) {
   const { client, enabled } = useBotsConnection(serverId);
   const agent = useBotAgent(serverId, agentId);
@@ -88,7 +85,7 @@ export function AgentTimeline({ serverId, agentId }: { serverId: string; agentId
 }
 function MessageRow({ message, speaker }: { message: BotMessage; speaker?: string }) {
   const { t } = useTranslation();
-  const role = t(`bots.${message.role}`);
+  const role = t(`bots.jad.${message.role}`);
   const label = speaker && message.role === "assistant" ? speaker : role;
   const rowStyle = [styles.message, message.role === "user" && styles.userMessage];
   return (
@@ -116,7 +113,7 @@ export function Messages({
       {messages.map((message) => (
         <MessageRow key={message.id} message={message} speaker={names.get(message.botId)} />
       ))}
-      {messages.length === 0 ? <Text style={styles.muted}>{t("bots.messageHint")}</Text> : null}
+      {messages.length === 0 ? <Text style={styles.muted}>{t("bots.jad.messageHint")}</Text> : null}
     </ScrollView>
   );
 }
@@ -133,6 +130,7 @@ export function MessageComposer({
   send,
   hint,
   disabled = false,
+  autoFocusKey,
 }: {
   serverId: string;
   /** Stable per conversation (`bot:<id>`, `room:<id>`), so each keeps its own draft. */
@@ -142,6 +140,8 @@ export function MessageComposer({
   send: (text: string) => Promise<unknown>;
   hint: string;
   disabled?: boolean;
+  /** Changing it focuses the input (Home Chat's "New automation" pre-fill). */
+  autoFocusKey?: string;
 }) {
   const { t } = useTranslation();
   const composerId = `bots-${draftId}`;
@@ -152,7 +152,7 @@ export function MessageComposer({
   const draft = useAgentInputDraft({ draftKey });
   const submit = useCallback(
     async function submit(payload: MessagePayload) {
-      if (disabled) throw new Error(t("bots.offline"));
+      if (disabled) throw new Error(t("bots.jad.offline"));
       const text = payload.text.trim();
       if (!text) return;
       await send(text);
@@ -171,7 +171,7 @@ export function MessageComposer({
         onSubmitMessage={submit}
         isSubmitLoading={pending || disabled}
         submitButtonTestID="bots-send"
-        submitButtonAccessibilityLabel={t("bots.send")}
+        submitButtonAccessibilityLabel={t("bots.jad.send")}
         textSource={draft.textSource}
         textReplacement={draft.textReplacement}
         onChangeText={draft.editText}
@@ -179,100 +179,8 @@ export function MessageComposer({
         onChangeAttachments={draft.setAttachments}
         cwd=""
         clearDraft={draft.clear}
-      />
-    </View>
-  );
-}
-export function BotChat({ serverId, bot }: { serverId: string; bot: Bot }) {
-  const { t } = useTranslation();
-  const history = useBotHistory(serverId, bot.id);
-  const send = useBotsMutation(serverId, "bots.chat.send.request");
-  const { client, enabled } = useBotsConnection(serverId);
-  const [showHistory, setShowHistory] = useState(false);
-  const [older, setOlder] = useState<BotMessage[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
-  const messages = mergeMessages(older, history.data ?? []);
-  const loadEarlier = useCallback(
-    async function loadEarlier() {
-      if (!client || !messages.length) return;
-      setLoading(true);
-      setError(null);
-      try {
-        const result = await client.botsRequest("bots.chat.history.request", {
-          botId: bot.id,
-          before_ms: messages[0].createdAt_ms,
-          limit: 200,
-        });
-        setOlder((previous) => mergeMessages(previous, result.messages));
-      } catch (caught) {
-        setError(caught instanceof Error ? caught : new Error(String(caught)));
-      } finally {
-        setLoading(false);
-      }
-    },
-    [client, messages, setLoading, setError, bot, setOlder],
-  );
-  const toggleHistory = useCallback(
-    function toggleHistory() {
-      setShowHistory((value) => !value);
-    },
-    [setShowHistory],
-  );
-  const sendMessage = useCallback(
-    function sendMessage(text: string) {
-      return send.mutateAsync({ botId: bot.id, text });
-    },
-    [send, bot],
-  );
-  const useTimeline = Boolean(bot.agentId && !showHistory);
-  // A bot that has never been asked anything: no Supervisor yet and no stored messages.
-  const fresh = !bot.agentId && history.isSuccess && messages.length === 0;
-  let conversation;
-  if (fresh)
-    conversation = (
-      <>
-        <View style={styles.grow} />
-        <HowToAsk serverId={serverId} bot={bot} />
-      </>
-    );
-  else if (useTimeline && bot.agentId)
-    conversation = <AgentTimeline serverId={serverId} agentId={bot.agentId} />;
-  else
-    conversation = (
-      <>
-        <QueryNotice query={history} />
-        <Messages messages={messages} />
-      </>
-    );
-  return (
-    <View style={styles.column}>
-      <View style={styles.row}>
-        <Button size="sm" variant="ghost" onPress={toggleHistory}>
-          {t(showHistory ? "bots.supervisor" : "bots.history")}
-        </Button>
-        {showHistory ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={loading || messages.length === 0}
-            loading={loading}
-            onPress={loadEarlier}
-          >
-            {t("bots.loadEarlier")}
-          </Button>
-        ) : null}
-      </View>
-      <ErrorNotice error={error} />
-      {conversation}
-      <MessageComposer
-        serverId={serverId}
-        draftId={`bot:${bot.id}`}
-        pending={send.isPending}
-        error={send.error}
-        send={sendMessage}
-        hint={t("bots.message")}
-        disabled={!enabled}
+        autoFocus={autoFocusKey !== undefined}
+        autoFocusKey={autoFocusKey}
       />
     </View>
   );

@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/context-menu";
 import { Shortcut } from "@/components/ui/shortcut";
 import { OpenInFileManagerMenuItem } from "@/workspace/open-in-file-manager/menu-item";
+import { HandToBotMenuItem } from "@/bots/dialogs/hand-to-bot-menu-item";
 import { resolveSidebarWorkspaceAccessibilityLabel } from "@/components/sidebar/sidebar-workspace-title";
 
 const foregroundColorMapping = (theme: Theme) => ({ color: theme.colors.foreground });
@@ -236,6 +237,7 @@ function SidebarWorkspaceMenuItems({
         path={openInFileManagerPath}
         testID={`sidebar-workspace-menu-open-folder-${workspaceKey}`}
       />
+      <HandToBotMenuItem surface={surface} workspaceKey={workspaceKey} />
       {onSelectWorkspace ? (
         <WorkspaceMenuItem
           surface={surface}

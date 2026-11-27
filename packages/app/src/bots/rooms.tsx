@@ -54,7 +54,7 @@ export function RoomSheet({
   const [model] = useState(() => new RoomFormModel(room));
   const draft = useSyncExternalStore(model.subscribe, model.getState, model.getState);
   const save = useBotsMutation(serverId, "bots.rooms.save.request");
-  const header = useMemo(() => ({ title: t("bots.rooms") }), [t]);
+  const header = useMemo(() => ({ title: t("bots.jad.rooms") }), [t]);
   const submit = useCallback(
     function submit() {
       save.mutate(
@@ -80,12 +80,12 @@ export function RoomSheet({
     <AdaptiveModalSheet visible onClose={onClose} onDismiss={onClose} header={header}>
       <ScrollView contentContainerStyle={styles.body}>
         <Input
-          label={t("bots.roomName")}
+          label={t("bots.jad.roomName")}
           value={draft.name}
           onChange={setName}
           testID="bot-room-name"
         />
-        <Text style={styles.title}>{t("bots.members")}</Text>
+        <Text style={styles.title}>{t("bots.jad.members")}</Text>
         {bots.map((bot) => (
           <MemberOption
             key={bot.id}
@@ -101,7 +101,7 @@ export function RoomSheet({
           loading={save.isPending}
           testID="bot-room-save"
         >
-          {t("bots.save")}
+          {t("bots.jad.save")}
         </Button>
       </ScrollView>
     </AdaptiveModalSheet>
@@ -127,7 +127,11 @@ export function RoomChat({
   const deleteRoom = useCallback(
     async function deleteRoom() {
       if (
-        await confirmDialog({ title: t("bots.deleteRoom"), message: room.name, destructive: true })
+        await confirmDialog({
+          title: t("bots.jad.deleteRoom"),
+          message: room.name,
+          destructive: true,
+        })
       )
         remove.mutate({ roomId: room.id }, { onSuccess: onDeleted });
     },
@@ -159,7 +163,7 @@ export function RoomChat({
         </Text>
         <View style={styles.row}>
           <Button size="sm" variant="outline" onPress={openMembers}>
-            {t("bots.members")}
+            {t("bots.jad.members")}
           </Button>
           <Button
             size="sm"
@@ -168,7 +172,7 @@ export function RoomChat({
             loading={remove.isPending}
             onPress={deleteRoom}
           >
-            {t("bots.delete")}
+            {t("bots.jad.delete")}
           </Button>
         </View>
         <ErrorNotice error={remove.error} />
@@ -180,7 +184,7 @@ export function RoomChat({
         pending={send.isPending}
         error={send.error}
         send={sendMessage}
-        hint={t("bots.mention")}
+        hint={t("bots.jad.mention")}
         disabled={!enabled}
       />
       {editing ? (

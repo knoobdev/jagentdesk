@@ -4,7 +4,7 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { BotsPush } from "@jagentdesk/protocol/bots/rpc-schemas";
-import { useBotsPushes, useBots, useBotsMutation, botsKey } from "./queries";
+import { useBotsPushes, useBots, useBotsMutation, botsReadKey } from "./queries";
 const state = vi.hoisted(() => ({
   connected: true,
   supported: true,
@@ -48,33 +48,59 @@ it("does not request Bots when the host feature is off", () => {
   expect(result.current.fetchStatus).toBe("idle");
   expect(state.request).not.toHaveBeenCalled();
 });
-it("invalidates the lazy Supervisor binding after bots.changed without invalidating home files", () => {
-  const key = [...botsKey("host"), "list"];
-  queryClient.setQueryData(key, [{ id: "bot" }]);
-  const fileKey = [...botsKey("host"), "home-file", "/home", "SOUL.md"];
-  queryClient.setQueryData(fileKey, "editor base");
+it("refetches the bot list and that bot's chat tree on bots.changed, not other bots' reads", () => {
+  const list = botsReadKey("host", "bots.list.request", {});
+  const tree = botsReadKey("host", "bots.chats.tree.request", { botId: "bot" });
+  const otherTree = botsReadKey("host", "bots.chats.tree.request", { botId: "other" });
+  const soul = botsReadKey("host", "bots.home_file.read.request", {
+    botId: "bot",
+    file: "SOUL.md",
+  });
+  for (const key of [list, tree, otherTree, soul]) queryClient.setQueryData(key, {});
   renderHook(() => useBotsPushes("host"), { wrapper: Wrapper });
   act(() =>
     state.listeners.get("bots.changed")?.({ type: "bots.changed", payload: { botId: "bot" } }),
   );
-  expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true);
-  expect(queryClient.getQueryState(fileKey)?.isInvalidated).toBe(false);
+  expect(queryClient.getQueryState(list)?.isInvalidated).toBe(true);
+  expect(queryClient.getQueryState(tree)?.isInvalidated).toBe(true);
+  expect(queryClient.getQueryState(otherTree)?.isInvalidated).toBe(false);
+  expect(queryClient.getQueryState(soul)?.isInvalidated).toBe(false);
 });
-it("deduplicates chat pushes and releases subscriptions on unmount", () => {
+it("refetches only the reads an activity push names", () => {
+  const needs = botsReadKey("host", "bots.needs_you.list.request", { botId: "b" });
+  const automations = botsReadKey("host", "bots.automations.list.request", { botId: "b" });
+  queryClient.setQueryData(needs, { rows: [] });
+  queryClient.setQueryData(automations, { automations: [], total: 0 });
+  renderHook(() => useBotsPushes("host"), { wrapper: Wrapper });
+  act(() =>
+    state.listeners.get("bots.activity_changed")?.({
+      type: "bots.activity_changed",
+      payload: { botId: "b", parts: ["needs_you"] },
+    }),
+  );
+  expect(queryClient.getQueryState(needs)?.isInvalidated).toBe(true);
+  expect(queryClient.getQueryState(automations)?.isInvalidated).toBe(false);
+});
+it("replaces a chat line by id (a running note that finished) and releases subscriptions", () => {
   const message = {
     id: "m",
     botId: "b",
-    role: "assistant" as const,
-    text: "Ready",
-    source: "chat",
+    role: "system" as const,
+    text: "Looking around",
+    source: "look_around",
     createdAt_ms: 1,
   };
-  queryClient.setQueryData([...botsKey("host"), "chat", "b"], [message]);
+  const key = botsReadKey("host", "bots.chat.history.request", { botId: "b", limit: 200 });
+  queryClient.setQueryData(key, { messages: [message] });
   const { unmount } = renderHook(() => useBotsPushes("host"), { wrapper: Wrapper });
+  const done = { ...message, text: "Looked around · 2 suggestions", updatedAt_ms: 2 };
   act(() =>
-    state.listeners.get("bots.chat.message")?.({ type: "bots.chat.message", payload: { message } }),
+    state.listeners.get("bots.chat.message")?.({
+      type: "bots.chat.message",
+      payload: { message: done },
+    }),
   );
-  expect(queryClient.getQueryData([...botsKey("host"), "chat", "b"])).toEqual([message]);
+  expect(queryClient.getQueryData(key)).toEqual({ messages: [done] });
   unmount();
   expect(state.listeners.size).toBe(0);
 });
