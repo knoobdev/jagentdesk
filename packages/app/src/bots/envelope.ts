@@ -1,3 +1,5 @@
+import { isBotCreatedKickoff } from "@jagentdesk/protocol/bots/rules";
+
 /** The label the daemon puts on a bot's supervisor agent (`server/bots/daemon-runtime.ts`). */
 export const BOT_ID_LABEL = "jagentdesk.bot.id";
 
@@ -28,6 +30,14 @@ export function botEnvelopeSource(text: string): string | null {
 export function isBotRestartWake(text: string): boolean {
   const source = botEnvelopeSource(text);
   return source === "restart" || source === "resume";
+}
+
+/**
+ * The daemon's kickoff turn to a new bot (`[jagentdesk]` + `BOT_CREATED_KICKOFF`). The owner never
+ * typed it, so the chat shows Orca's bot-created row in its place, not a user bubble.
+ */
+export function isBotKickoffWake(text: string): boolean {
+  return botEnvelopeSource(text) === "jagentdesk" && isBotCreatedKickoff(stripBotEnvelope(text));
 }
 
 /** `BOT_QUIET_MARKER` (`server/bots/look-around.ts`): a bot ends a reply with it to post nothing. */

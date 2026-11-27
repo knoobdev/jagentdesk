@@ -1,16 +1,20 @@
-// A new bot's Home while its first turn runs (spec 37.4.2, `firstRun=true`): who it is, its two setup
-// steps, and what it finds as it reads the host. Ported from Orca dfdb4fda (MIT)
+// A new bot's Home until it first speaks (spec 37.4.2): who it is, its two setup steps, and what it
+// finds as it reads the host. Ported from Orca dfdb4fda (MIT)
 // src/renderer/src/components/bots/BotFirstScreen.tsx:1-266 (layout, steps, Try again) and
-// src/shared/bots/bot-first-look-words.ts (the rows); the scan is `bots.first_screen.scan`.
+// src/shared/bots/bot-first-look-words.ts (the rows); the scan is `bots.first_screen.scan`. The
+// "First message" step reads the kickoff from Home Chat (`botFirstScreenState`): it fails, with
+// the line about why and Try again (`bots.kickoff.retry`), when the kickoff turn ended silently.
 import { useCallback, useMemo } from "react";
 import { ActivityIndicator, ScrollView, Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
 import { Check, RotateCcw, X } from "lucide-react-native";
 import type { Bot } from "@jagentdesk/protocol/bots/types";
+import type { BotFirstScreenState } from "@jagentdesk/protocol/bots/rules";
 import { Button } from "@/components/ui/button";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
-import { useBotsRead } from "@/bots/queries";
+import { useHostFeature } from "@/runtime/host-features";
+import { useBotsMutation, useBotsRead } from "@/bots/queries";
 import { BotAvatar } from "@/bots/avatar";
 import { firstLookRows } from "./panel/first-look-words";
 
@@ -41,14 +45,70 @@ function useAgentLabel(serverId: string, provider: string): string {
   );
 }
 
-export function BotFirstScreen({ serverId, bot }: { serverId: string; bot: Bot }) {
+/** The failed kickoff's line about why, and Try again (or "update the host" on an older host). */
+function KickoffFailed({
+  serverId,
+  bot,
+  failure,
+}: {
+  serverId: string;
+  bot: Bot;
+  failure: string | undefined;
+}) {
+  const { t } = useTranslation();
+  const canRetry = useHostFeature(serverId, "botsKickoff");
+  const retry = useBotsMutation(serverId, "bots.kickoff.retry.request");
+  const tryAgain = useCallback(() => retry.mutate({ botId: bot.id }), [retry, bot.id]);
+  return (
+    <View style={styles.tryAgain} testID="bot-first-screen-failed">
+      <View style={styles.failedText}>
+        <Text style={styles.tryAgainText}>{t("bots.firstScreen.failed")}</Text>
+        {failure ? (
+          <Text style={styles.failureDetail} selectable testID="bot-first-screen-failure">
+            {failure}
+          </Text>
+        ) : null}
+        {retry.isError ? (
+          <Text style={styles.failureDetail}>{t("bots.firstScreen.retryFailed")}</Text>
+        ) : null}
+        {canRetry ? null : (
+          <Text style={styles.failureDetail}>{t("bots.jad.kickoffUpdateHost")}</Text>
+        )}
+      </View>
+      {canRetry ? (
+        <Button
+          size="xs"
+          variant="outline"
+          leftIcon={RotateCcw}
+          onPress={tryAgain}
+          disabled={retry.isPending}
+          testID="bot-first-screen-try-again"
+        >
+          {t("bots.firstScreen.tryAgain")}
+        </Button>
+      ) : null}
+    </View>
+  );
+}
+
+export function BotFirstScreen({
+  serverId,
+  bot,
+  kickoff,
+}: {
+  serverId: string;
+  bot: Bot;
+  /** Null while Home Chat loads: the kickoff is taken to be starting. */
+  kickoff: BotFirstScreenState | null;
+}) {
   const { t } = useTranslation();
   const scan = useBotsRead(serverId, "bots.first_screen.scan.request", { botId: bot.id });
   const agent = useAgentLabel(serverId, bot.provider);
-  const failed = scan.isError;
+  const scanFailed = scan.isError;
   const rows = firstLookRows(scan.data?.scan, t);
-  const reading = !scan.isSuccess && !failed;
-  const tryAgain = useCallback(() => void scan.refetch(), [scan]);
+  const reading = !scan.isSuccess && !scanFailed;
+  const rescan = useCallback(() => void scan.refetch(), [scan]);
+  const failed = kickoff?.phase === "failed";
   const steps: { id: string; state: StepState; label: string }[] = [
     { id: "create", state: "done", label: t("bots.firstScreen.stepCreate") },
     {
@@ -73,16 +133,16 @@ export function BotFirstScreen({ serverId, bot }: { serverId: string; bot: Bot }
             </Text>
           </View>
         ))}
-        {failed ? (
-          <View style={styles.tryAgain}>
-            <Text style={styles.tryAgainText}>{t("bots.firstScreen.failed")}</Text>
-            <Button size="xs" variant="outline" leftIcon={RotateCcw} onPress={tryAgain}>
-              {t("bots.firstScreen.tryAgain")}
-            </Button>
-          </View>
-        ) : null}
+        {failed ? <KickoffFailed serverId={serverId} bot={bot} failure={kickoff.failure} /> : null}
       </View>
-      {failed ? null : (
+      {scanFailed ? (
+        <View style={[styles.rows, styles.scanFailed]}>
+          <Text style={styles.tryAgainText}>{t("bots.firstScreen.failed")}</Text>
+          <Button size="xs" variant="outline" leftIcon={RotateCcw} onPress={rescan}>
+            {t("bots.firstScreen.tryAgain")}
+          </Button>
+        </View>
+      ) : (
         <View style={styles.rows}>
           <Text style={styles.readingTitle}>
             {reading ? t("bots.firstScreen.reading") : t("bots.firstScreen.read")}
@@ -138,6 +198,9 @@ const styles = StyleSheet.create((theme) => ({
     gap: 8,
   },
   tryAgainText: { flex: 1, fontSize: 12, color: theme.colors.foregroundMuted },
+  failedText: { flex: 1, minWidth: 0, gap: 2 },
+  failureDetail: { fontSize: 12, color: theme.colors.foregroundMuted },
+  scanFailed: { flexDirection: "row", alignItems: "center", gap: 8 },
   rows: { width: 384, maxWidth: "100%", gap: 8, paddingTop: 24 },
   readingTitle: { fontSize: 12, color: theme.colors.foregroundMuted },
   rowText: { flex: 1, minWidth: 0, fontSize: 14, color: theme.colors.foreground },
