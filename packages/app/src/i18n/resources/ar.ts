@@ -439,6 +439,8 @@ export const ar: TranslationResources = {
       pillOne: "مهمة واحدة في الخلفية",
       pillMany: "{{count}} مهمة في الخلفية",
       notRunning: "لم يعد قيد التشغيل",
+      dismissAll: "تجاهل الكل",
+      ended: "انتهى",
       dismiss: "إغلاق",
       stop: "إيقاف",
       stopping: "جارٍ الإيقاف…",

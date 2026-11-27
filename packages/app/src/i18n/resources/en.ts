@@ -418,6 +418,8 @@ export const en = {
       pillOne: "1 background task",
       pillMany: "{{count}} background tasks",
       notRunning: "No longer running",
+      dismissAll: "Dismiss all",
+      ended: "Ended",
       dismiss: "Dismiss",
       stop: "Stop",
       stopping: "Stopping…",

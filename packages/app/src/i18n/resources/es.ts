@@ -427,6 +427,8 @@ export const es: TranslationResources = {
       pillOne: "1 tarea en segundo plano",
       pillMany: "{{count}} tareas en segundo plano",
       notRunning: "Ya no está en ejecución",
+      dismissAll: "Descartar todo",
+      ended: "Terminado",
       dismiss: "Cerrar",
       stop: "Detener",
       stopping: "Deteniendo…",

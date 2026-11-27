@@ -446,6 +446,8 @@ export const ru: TranslationResources = {
       pillOne: "1 фоновая задача",
       pillMany: "Фоновые задачи: {{count}}",
       notRunning: "Больше не выполняется",
+      dismissAll: "Скрыть все",
+      ended: "Завершено",
       dismiss: "Закрыть",
       stop: "Остановить",
       stopping: "Остановка…",

@@ -424,6 +424,8 @@ export const zhCN: TranslationResources = {
       pillOne: "1 个后台任务",
       pillMany: "{{count}} 个后台任务",
       notRunning: "已不再运行",
+      dismissAll: "全部关闭",
+      ended: "已结束",
       dismiss: "关闭",
       stop: "停止",
       stopping: "正在停止…",

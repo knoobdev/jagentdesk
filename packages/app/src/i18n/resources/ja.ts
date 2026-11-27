@@ -433,6 +433,8 @@ export const ja: TranslationResources = {
       pillOne: "バックグラウンドタスク1件",
       pillMany: "バックグラウンドタスク{{count}}件",
       notRunning: "実行は終了しました",
+      dismissAll: "すべて閉じる",
+      ended: "終了",
       dismiss: "閉じる",
       stop: "停止",
       stopping: "停止中…",

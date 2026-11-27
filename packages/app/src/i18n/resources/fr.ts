@@ -431,6 +431,8 @@ export const fr: TranslationResources = {
       pillOne: "1 tâche en arrière-plan",
       pillMany: "{{count}} tâches en arrière-plan",
       notRunning: "N’est plus en cours",
+      dismissAll: "Tout ignorer",
+      ended: "Terminé",
       dismiss: "Fermer",
       stop: "Arrêter",
       stopping: "Arrêt…",

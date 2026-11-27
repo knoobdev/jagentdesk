@@ -9,7 +9,12 @@ import {
 import { Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
-import { ComposerTrackPill, ComposerTrackRow, useComposerTrackPanelRoom } from "@/composer/tracks";
+import {
+  ComposerTrackActions,
+  ComposerTrackPill,
+  ComposerTrackRow,
+  useComposerTrackPanelRoom,
+} from "@/composer/tracks";
 import { LiveElapsed } from "@/components/message";
 import { Button } from "@/components/ui/button";
 import { useMenuContext, type MenuPageDefinition } from "@/components/ui/menu";
@@ -18,13 +23,19 @@ import { CODE_SURFACE_DATASET } from "@/styles/code-surface";
 import type { JAgentDeskAgentBackgroundWorkItem } from "@jagentdesk/client";
 import { BackgroundWorkDetail } from "./detail";
 import { backgroundWorkKind, BackgroundWorkKindIcon } from "./kind";
-import { backgroundWorkText } from "./presentation";
+import {
+  backgroundWorkRowStatus,
+  backgroundWorkText,
+  showsDismissAll,
+  type BackgroundWorkRowState,
+} from "./presentation";
 import {
   consumeBackgroundWorkTrackOpen,
   getBackgroundWorkModel,
   useBackgroundWorkTrackOpenRequest,
   type BackgroundWorkModel,
 } from "./shared";
+import { useBackgroundWorkDetail } from "./use-detail";
 export { createHostBackgroundWorkModel } from "./host";
 
 type TrackRow =
@@ -146,6 +157,8 @@ export function BackgroundWorkTrack({
         />
       ) : (
         <BackgroundWorkRows
+          serverId={serverId}
+          agentId={agentId}
           model={model}
           rows={rows}
           status={snapshot.status}
@@ -217,12 +230,16 @@ function SheetDetailPage({
 }
 
 function BackgroundWorkRows({
+  serverId,
+  agentId,
   model,
   rows,
   status,
   onSelect,
   opensPages,
 }: {
+  serverId: string;
+  agentId: string;
   model: BackgroundWorkModel;
   rows: TrackRow[];
   status: ReturnType<BackgroundWorkModel["getSnapshot"]>["status"];
@@ -232,8 +249,25 @@ function BackgroundWorkRows({
   opensPages: boolean;
 }): ReactElement {
   const { t } = useTranslation();
+  const endedCount = rows.filter(
+    (row) => row.state === "finished" || (row.state === "stopping" && row.failed),
+  ).length;
   return (
     <>
+      {showsDismissAll(endedCount) ? (
+        <ComposerTrackActions>
+          <ComposerTrackRow
+            onPress={model.dismissAllEnded}
+            closeOnSelect={false}
+            accessibilityLabel={t("message.backgroundWork.dismissAll")}
+            testID="background-work-dismiss-all"
+          >
+            <Text style={styles.label} numberOfLines={1}>
+              {t("message.backgroundWork.dismissAll")}
+            </Text>
+          </ComposerTrackRow>
+        </ComposerTrackActions>
+      ) : null}
       {status === "loading" || status === "stale" ? (
         <ComposerTrackRow>
           <Text style={styles.facts}>{t("message.backgroundWork.waiting")}</Text>
@@ -256,6 +290,8 @@ function BackgroundWorkRows({
       {rows.map((row) => (
         <BackgroundWorkRow
           key={`${row.state}:${row.item.stopToken ?? row.item.id}`}
+          serverId={serverId}
+          agentId={agentId}
           row={row}
           model={model}
           ready={status === "ready"}
@@ -268,12 +304,16 @@ function BackgroundWorkRows({
 }
 
 function BackgroundWorkRow({
+  serverId,
+  agentId,
   row,
   model,
   ready,
   onSelect,
   opensPage,
 }: {
+  serverId: string;
+  agentId: string;
   row: TrackRow;
   model: BackgroundWorkModel;
   ready: boolean;
@@ -294,17 +334,32 @@ function BackgroundWorkRow({
       })}
     >
       <View style={styles.row}>
-        <BackgroundWorkRowContent row={row} model={model} ready={ready} />
+        <BackgroundWorkRowContent
+          serverId={serverId}
+          agentId={agentId}
+          row={row}
+          model={model}
+          ready={ready}
+        />
       </View>
     </ComposerTrackRow>
   );
 }
 
+/**
+ * One task: its kind icon, then the label (the command in mono, one line, cut with …) over one
+ * status line ("Running · 2m", "Finished · exit 0", "Failed · exit 1", "Stopped"), then Stop or
+ * Dismiss (spec 38 §4.4b). Pressing the row opens the task's detail.
+ */
 function BackgroundWorkRowContent({
+  serverId,
+  agentId,
   row,
   model,
   ready,
 }: {
+  serverId: string;
+  agentId: string;
   row: TrackRow;
   model: BackgroundWorkModel;
   ready: boolean;
@@ -327,29 +382,29 @@ function BackgroundWorkRowContent({
   const labelIsCommand = Boolean(command ?? item.command);
   return (
     <>
-      <BackgroundWorkKindIcon kind={kind} />
-      <Text
-        style={labelIsCommand ? styles.commandLabel : styles.label}
-        numberOfLines={1}
-        accessibilityLabel={title}
-        dataSet={labelIsCommand ? CODE_SURFACE_DATASET : undefined}
-      >
-        {label}
-      </Text>
-      {row.state === "live" ? (
-        <LiveElapsed startedAt={new Date(item.startedAt)} active style={styles.facts} />
-      ) : null}
-      {row.state === "stopping" && !row.failed ? (
-        <Text style={styles.facts}>{t("message.backgroundWork.stopping")}</Text>
-      ) : null}
-      {row.state === "stopping" && row.failed ? (
-        <Text style={styles.facts} numberOfLines={1}>
-          {t("message.backgroundWork.stopError")}
+      {/* Held at its size: a long label must not squeeze the glyph. */}
+      <View style={styles.kindIcon}>
+        <BackgroundWorkKindIcon kind={kind} />
+      </View>
+      <View style={styles.rowText}>
+        <Text
+          style={labelIsCommand ? styles.commandLabel : styles.label}
+          numberOfLines={1}
+          accessibilityLabel={title}
+          dataSet={labelIsCommand ? CODE_SURFACE_DATASET : undefined}
+          testID="background-work-row-label"
+        >
+          {label}
         </Text>
-      ) : null}
-      {row.state === "finished" ? (
-        <Text style={styles.facts}>{t("message.backgroundWork.notRunning")}</Text>
-      ) : null}
+        {row.state === "finished" ? (
+          <FinishedRowStatus serverId={serverId} agentId={agentId} itemId={item.id} />
+        ) : (
+          <RowStatusLine
+            state={row.state === "live" ? LIVE_ROW : stoppingRow(row.failed)}
+            startedAt={item.startedAt}
+          />
+        )}
+      </View>
       {row.state === "live" && item.canStop && ready ? (
         <Button
           variant="ghost"
@@ -367,6 +422,69 @@ function BackgroundWorkRowContent({
         </Button>
       ) : null}
     </>
+  );
+}
+
+const LIVE_ROW: BackgroundWorkRowState = { state: "live" };
+const STOPPING_ROW: BackgroundWorkRowState = { state: "stopping", failed: false };
+const STOP_FAILED_ROW: BackgroundWorkRowState = { state: "stopping", failed: true };
+
+function stoppingRow(failed: boolean): BackgroundWorkRowState {
+  return failed ? STOP_FAILED_ROW : STOPPING_ROW;
+}
+
+/** An ended task's outcome comes from the host's detail of it (ADR-0062). */
+function FinishedRowStatus({
+  serverId,
+  agentId,
+  itemId,
+}: {
+  serverId: string;
+  agentId: string;
+  itemId: string;
+}): ReactElement {
+  const { state } = useBackgroundWorkDetail({ serverId, agentId, itemId });
+  const detail = state.status === "ready" ? state.detail : null;
+  const rowState = useMemo<BackgroundWorkRowState>(
+    () => ({
+      state: "finished",
+      outcome: detail ? { status: detail.status, exitCode: detail.exitCode } : null,
+    }),
+    [detail],
+  );
+  return <RowStatusLine state={rowState} />;
+}
+
+function RowStatusLine({
+  state,
+  startedAt,
+}: {
+  state: BackgroundWorkRowState;
+  startedAt?: string;
+}): ReactElement {
+  const { t } = useTranslation();
+  const status = backgroundWorkRowStatus(state);
+  if (status.kind === "elapsed") {
+    return (
+      <Text style={styles.status} numberOfLines={1} testID="background-work-row-status">
+        {t("message.backgroundWork.detail.statusValue.running")}
+        {" · "}
+        <LiveElapsed startedAt={new Date(startedAt ?? Date.now())} active style={styles.status} />
+      </Text>
+    );
+  }
+  const word = t(status.key);
+  const text =
+    status.exitCode === null
+      ? word
+      : `${word} · ${t("message.backgroundWork.exitCode", { code: status.exitCode })}`;
+  let style = styles.status;
+  if (status.tone === "success") style = styles.statusSuccess;
+  else if (status.tone === "danger") style = styles.statusDanger;
+  return (
+    <Text style={style} numberOfLines={1} testID="background-work-row-status">
+      {text}
+    </Text>
   );
 }
 
@@ -399,6 +517,18 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foreground,
   },
   facts: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
+  kindIcon: { flexShrink: 0 },
+  // Label over status, each one line; takes the room the trailing button leaves.
+  rowText: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: "auto",
+    minWidth: 0,
+    gap: 2,
+  },
+  status: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
+  statusSuccess: { fontSize: theme.fontSize.xs, color: theme.colors.statusSuccess },
+  statusDanger: { fontSize: theme.fontSize.xs, color: theme.colors.statusDanger },
   // The detail is a panel, not a menu: radius 12 and the standard border (spec 04 §27c).
   detailSurface: {
     borderRadius: theme.borderRadius.xl,
