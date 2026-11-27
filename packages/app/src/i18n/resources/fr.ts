@@ -303,6 +303,7 @@ export const fr: TranslationResources = {
     archived: {
       callout: "Cet agent est archivé",
       unarchive: "Désarchiver",
+      unarchiving: "Désarchivage...",
     },
   },
   sessions: {
@@ -2137,7 +2138,7 @@ export const fr: TranslationResources = {
     title: "Paramètres",
     loading: "Chargement des param\u00E8tres\u2026",
     groups: {
-      app: "Application",
+      app: "Cet appareil",
       host: "H\u00F4te",
     },
     hostPicker: {
@@ -2155,6 +2156,10 @@ export const fr: TranslationResources = {
     },
     groupInfo: "\u00C0 propos de {{title}}",
     sections: {
+      hosts: "Hôtes",
+      sidebar: "Barre latérale",
+      chatAndPanes: "Chat et panneaux",
+      notifications: "Notifications",
       general: "Général",
       connection: "Connexion",
       appearance: "Apparence",
@@ -2164,6 +2169,14 @@ export const fr: TranslationResources = {
       permissions: "Autorisations",
       diagnostics: "Diagnostic",
     },
+    clientHosts: {
+      title: "Hôtes enregistrés",
+      info: "Hôtes auxquels cet appareil se connecte. Les noms, icônes, badges et routes ici ne concernent que cet appareil.",
+      offline: "Hors ligne",
+    },
+    chat: {
+      sendingTitle: "Envoi",
+    },
     editor: {
       title: "Éditeur",
       vimKeybindings: "Raccourcis Vim",
@@ -2171,7 +2184,8 @@ export const fr: TranslationResources = {
     },
     plugins: pluginSettings.fr,
     hostSections: {
-      tools: "Tools",
+      daemon: "Daemon",
+      tools: "Outils et instructions",
       plugins: "Plugins",
       projects: "Projets",
       connections: "Connexions",
@@ -2773,7 +2787,12 @@ export const fr: TranslationResources = {
         emptyState:
           "Aucun profil pour le moment. Ajoutez-en un pour lancer des terminaux avec une commande pr\u00E9cise.",
       },
+      tools: {
+        instructionsTitle: "Instructions",
+        toolsTitle: "Outils des agents",
+      },
       daemon: {
+        runtimeTitle: "Exécution des agents",
         rename: {
           editLabel: "Modifier le libell\u00E9",
           title: "Renommer l\u2019h\u00F4te",

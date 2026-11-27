@@ -297,6 +297,7 @@ export const zhCN: TranslationResources = {
     archived: {
       callout: "此 Agent 已归档",
       unarchive: "取消归档",
+      unarchiving: "正在取消归档...",
     },
   },
   sessions: {
@@ -2044,7 +2045,7 @@ export const zhCN: TranslationResources = {
     title: "设置",
     loading: "正在加载设置...",
     groups: {
-      app: "应用",
+      app: "此设备",
       host: "主机",
     },
     hostPicker: {
@@ -2061,6 +2062,10 @@ export const zhCN: TranslationResources = {
     },
     groupInfo: "关于 {{title}}",
     sections: {
+      hosts: "主机",
+      sidebar: "侧边栏",
+      chatAndPanes: "聊天与面板",
+      notifications: "通知",
       general: "通用",
       connection: "连接",
       appearance: "外观",
@@ -2070,6 +2075,14 @@ export const zhCN: TranslationResources = {
       permissions: "权限",
       diagnostics: "诊断",
     },
+    clientHosts: {
+      title: "已保存的主机",
+      info: "此设备连接的主机。这里的名称、图标、徽章和连接路径仅影响此设备。",
+      offline: "离线",
+    },
+    chat: {
+      sendingTitle: "发送",
+    },
     editor: {
       title: "编辑器",
       vimKeybindings: "Vim 键位",
@@ -2077,7 +2090,8 @@ export const zhCN: TranslationResources = {
     },
     plugins: pluginSettings["zh-CN"],
     hostSections: {
-      tools: "Tools",
+      daemon: "守护进程",
+      tools: "工具与提示词",
       plugins: "插件",
       projects: "项目",
       connections: "连接",
@@ -2658,7 +2672,12 @@ export const zhCN: TranslationResources = {
         save: "Save",
         emptyState: "No profiles yet. Add one to launch terminals with a specific command.",
       },
+      tools: {
+        instructionsTitle: "指令",
+        toolsTitle: "代理工具",
+      },
       daemon: {
+        runtimeTitle: "代理运行时",
         rename: {
           editLabel: "编辑标签",
           title: "重命名 Host",

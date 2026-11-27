@@ -312,6 +312,7 @@ export const ar: TranslationResources = {
     archived: {
       callout: "تمت أرشفة هذا الوكيل",
       unarchive: "إلغاء الأرشفة",
+      unarchiving: "جارٍ إلغاء الأرشفة...",
     },
   },
   sessions: {
@@ -2114,7 +2115,7 @@ export const ar: TranslationResources = {
     title: "إعدادات",
     loading: "جارٍ تحميل الإعدادات...",
     groups: {
-      app: "برنامج",
+      app: "هذا الجهاز",
       host: "Host",
     },
     hostPicker: {
@@ -2131,6 +2132,10 @@ export const ar: TranslationResources = {
     },
     groupInfo: "حول{{title}}",
     sections: {
+      hosts: "المضيفون",
+      sidebar: "الشريط الجانبي",
+      chatAndPanes: "الدردشة والأجزاء",
+      notifications: "الإشعارات",
       general: "عام",
       connection: "الاتصال",
       appearance: "مظهر",
@@ -2140,6 +2145,14 @@ export const ar: TranslationResources = {
       permissions: "الأذونات",
       diagnostics: "التشخيص",
     },
+    clientHosts: {
+      title: "المضيفون المحفوظون",
+      info: "المضيفون الذين يتصل بهم هذا الجهاز. الأسماء والأيقونات والشارات والمسارات هنا تؤثر على هذا الجهاز فقط.",
+      offline: "غير متصل",
+    },
+    chat: {
+      sendingTitle: "الإرسال",
+    },
     editor: {
       title: "المحرر",
       vimKeybindings: "اختصارات Vim",
@@ -2147,7 +2160,8 @@ export const ar: TranslationResources = {
     },
     plugins: pluginSettings.ar,
     hostSections: {
-      tools: "Tools",
+      daemon: "الخدمة",
+      tools: "الأدوات والتعليمات",
       plugins: "الإضافات",
       projects: "المشاريع",
       connections: "اتصالات",
@@ -2732,7 +2746,12 @@ export const ar: TranslationResources = {
         save: "Save",
         emptyState: "No profiles yet. Add one to launch terminals with a specific command.",
       },
+      tools: {
+        instructionsTitle: "التعليمات",
+        toolsTitle: "أدوات الوكلاء",
+      },
       daemon: {
+        runtimeTitle: "بيئة تشغيل الوكلاء",
         rename: {
           editLabel: "تحرير التسمية",
           title: "إعادة تسمية المضيف",

@@ -951,6 +951,18 @@ function resolveWorkspaceCreationService(
   );
 }
 
+/**
+ * Agent IDs the client holds after a fetch_agents snapshot. `null` when the client may page
+ * further, so removals for agents beyond the first page are never suppressed.
+ */
+function resolveAgentSubscriptionSnapshotIds(
+  payload: { entries: ReadonlyArray<{ agent: { id: string } }>; pageInfo: { hasMore: boolean } },
+  request: { page?: { cursor?: string } },
+): Iterable<string> | null {
+  if (payload.pageInfo.hasMore || Boolean(request.page?.cursor)) return null;
+  return payload.entries.map((entry) => entry.agent.id);
+}
+
 export class Session {
   private readonly authorization: SessionAuthorization;
   private readonly connectedHostSession: ConnectedHostSession | null;
@@ -1086,6 +1098,7 @@ export class Session {
   private unsubscribeProjectMutations: (() => void) | null = null;
 
   private unsubscribeWorkspaceMutations: (() => void) | null = null;
+  private unsubscribeBeforeWorkspacePublish: (() => void) | null = null;
 
   private readonly pluginRuntime: SessionOptions["pluginRuntime"];
 
@@ -1359,6 +1372,8 @@ export class Session {
       unarchiveWorkspace: async (workspace) => {
         await this.workspaceProvisioning.ensureWorkspaceRecordUnarchived(workspace);
       },
+      waitForDeferredPublication: (workspaceId) =>
+        this.workspaceRegistry.waitForDeferredPublication?.(workspaceId) ?? Promise.resolve(false),
       isCheckoutUntrusted: (checkoutPath) =>
         isCheckoutUntrusted(this.workspaceRegistry, checkoutPath),
       syncCheckoutWorktreeManager: async ({
@@ -2115,6 +2130,7 @@ export class Session {
     workspace: PersistedWorkspaceRecord,
   ): Promise<void> {
     try {
+      await this.agentUpdates.flushPendingUpdates();
       await this.workspaceGitObserver.syncObserverForWorkspace(workspace);
       if (workspace.kind !== "directory") {
         // Recovery can refresh Git before this session starts observing again.
@@ -2310,6 +2326,11 @@ export class Session {
       this.workspaceRegistry.subscribeToMutations?.((mutation) =>
         this.enqueueRegistryMutation(() => this.handleWorkspaceMutation(mutation)),
       ) ?? null;
+    this.unsubscribeBeforeWorkspacePublish?.();
+    this.unsubscribeBeforeWorkspacePublish =
+      this.workspaceRegistry.subscribeBeforePublish?.(() =>
+        this.agentUpdates.flushPendingUpdates(),
+      ) ?? null;
   }
 
   private enqueueRegistryMutation(handleMutation: () => Promise<void>): Promise<void> {
@@ -2335,6 +2356,7 @@ export class Session {
       if (this.isCleanedUp) {
         return;
       }
+      await this.agentUpdates.flushPendingUpdates();
       await this.emitWorkspaceUpdatesForWorkspaceIds(
         [mutation.workspaceId],
         mutation.expectsInitialAgent ? { optimisticStatus: "running" } : undefined,
@@ -2382,7 +2404,11 @@ export class Session {
         return;
       }
       const projectWorkspaceIds = (await this.workspaceRegistry.list())
-        .filter((workspace) => workspace.projectId === mutation.projectId)
+        .filter(
+          (workspace) =>
+            workspace.projectId === mutation.projectId &&
+            !this.workspaceRegistry.isBroadcastDeferred?.(workspace.workspaceId),
+        )
         .map((workspace) => workspace.workspaceId);
 
       if (mutation.kind === "remove") {
@@ -7198,7 +7224,11 @@ export class Session {
       return;
     }
 
-    const uniqueWorkspaceIds = new Set(Array.from(workspaceIds));
+    const uniqueWorkspaceIds = new Set<string>();
+    for (const workspaceId of workspaceIds) {
+      if (this.workspaceRegistry.isBroadcastDeferred?.(workspaceId)) continue;
+      uniqueWorkspaceIds.add(workspaceId);
+    }
     if (uniqueWorkspaceIds.size === 0) {
       return;
     }
@@ -7409,6 +7439,7 @@ export class Session {
       }
 
       const payload = await this.listFetchAgentsEntries(request);
+      const snapshotAgentIds = resolveAgentSubscriptionSnapshotIds(payload, request);
       const snapshotUpdatedAtByAgentId = new Map<string, number>();
       for (const entry of payload.entries) {
         const parsedUpdatedAt = Date.parse(entry.agent.updatedAt);
@@ -7427,7 +7458,10 @@ export class Session {
       });
 
       if (subscriptionId) {
-        this.agentUpdates.flushBootstrapped(subscriptionId, { snapshotUpdatedAtByAgentId });
+        this.agentUpdates.flushBootstrapped(subscriptionId, {
+          snapshotUpdatedAtByAgentId,
+          snapshotAgentIds,
+        });
       }
     } catch (error) {
       if (subscriptionId) {
@@ -9995,6 +10029,8 @@ export class Session {
     this.unsubscribeProjectMutations = null;
     this.unsubscribeWorkspaceMutations?.();
     this.unsubscribeWorkspaceMutations = null;
+    this.unsubscribeBeforeWorkspacePublish?.();
+    this.unsubscribeBeforeWorkspacePublish = null;
     this.unsubscribePluginChanges?.();
     this.unsubscribePluginChanges = null;
     this.agentUpdates.dispose();

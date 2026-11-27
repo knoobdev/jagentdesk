@@ -4,8 +4,9 @@ import {
   clearWorkspaceArchivePending,
   isWorkspaceArchivePending,
   isWorkspaceArchiveUndoPending,
+  isWorkspaceArchiveUndoRestoringAgent,
 } from "@/contexts/session-workspace-upserts";
-import { useSessionStore, type WorkspaceDescriptor } from "@/stores/session-store";
+import { useSessionStore, type Agent, type WorkspaceDescriptor } from "@/stores/session-store";
 import {
   archiveWorkspaceOptimistically,
   archiveWorkspacesOptimistically,
@@ -255,7 +256,7 @@ describe("undoWorkspaceArchiveOptimistically", () => {
     }).toEqual({ row: archived, archivePending: false, undoPending: false });
   });
 
-  it("hides the row again when the host cannot undo the archive", async () => {
+  it("hides the row again and clears agent restoring state when the host cannot undo the archive", async () => {
     const archived = workspace();
     useSessionStore.getState().seedWorkspaces(SERVER_ID, [archived]);
     const archive = beginOptimisticWorkspaceArchive({
@@ -264,20 +265,35 @@ describe("undoWorkspaceArchiveOptimistically", () => {
     });
     await archive.done;
 
-    await expect(
-      undoWorkspaceArchiveOptimistically({
-        client: {
-          undoWorkspaceArchive: async () => {
-            throw new Error("Branch is gone");
-          },
-        },
-        workspace: target(),
-        hidden: archive.hidden,
+    const undoResponse = deferred<void>();
+    const undo = undoWorkspaceArchiveOptimistically({
+      client: {
+        undoWorkspaceArchive: async () => undoResponse.promise,
+      },
+      workspace: target(),
+      hidden: archive.hidden,
+      archivedAgentIds: new Set(["agent-1"]),
+    });
+    expect(
+      isWorkspaceArchiveUndoRestoringAgent({
+        serverId: SERVER_ID,
+        workspaceId: archived.id,
+        agentId: "agent-1",
       }),
-    ).rejects.toThrow("Branch is gone");
+    ).toBe(true);
+
+    undoResponse.reject(new Error("Branch is gone"));
+    await expect(undo).rejects.toThrow("Branch is gone");
 
     expect(storedWorkspace(archived.id)).toBeUndefined();
     expect(isWorkspaceArchiveUndoPending(target())).toBe(false);
+    expect(
+      isWorkspaceArchiveUndoRestoringAgent({
+        serverId: SERVER_ID,
+        workspaceId: archived.id,
+        agentId: "agent-1",
+      }),
+    ).toBe(false);
   });
 
   it("leaves a re-archived row hidden when the earlier undo settles", async () => {
@@ -356,6 +372,82 @@ describe("undoWorkspaceArchiveOptimistically", () => {
       row: storedWorkspace(archived.id),
       undoPending: isWorkspaceArchiveUndoPending(target()),
     }).toEqual({ row: archived, undoPending: true });
+    secondUndoResponse.resolve();
+    await secondUndo;
+  });
+
+  it("carries forward archivedAgentIds across archive -> undo -> archive -> undo while agents are still archived", async () => {
+    const archived = workspace();
+    useSessionStore.getState().mergeWorkspaces(SERVER_ID, [archived]);
+    const activeAgent: Agent = {
+      id: "agent-active",
+      serverId: SERVER_ID,
+      workspaceId: archived.id,
+      title: "Active",
+      provider: "claude",
+      cwd: archived.workspaceDirectory,
+      status: "idle",
+      activeTurn: null,
+      createdAt: new Date("2026-04-01T00:00:00.000Z"),
+      updatedAt: new Date("2026-04-01T00:00:00.000Z"),
+      lastUserMessageAt: null,
+      lastActivityAt: new Date("2026-04-01T00:00:00.000Z"),
+      capabilities: {
+        supportsStreaming: true,
+        supportsSessionPersistence: true,
+        supportsDynamicModes: false,
+        supportsMcpServers: false,
+        supportsReasoningStream: false,
+        supportsToolInvocations: true,
+      },
+      currentModeId: null,
+      availableModes: [],
+      pendingPermissions: [],
+      persistence: null,
+      model: null,
+      parentAgentId: null,
+      requiresAttention: false,
+      attentionReason: null,
+      attentionTimestamp: null,
+      archivedAt: null,
+      labels: {},
+    };
+    useSessionStore.getState().setAgents(SERVER_ID, new Map([[activeAgent.id, activeAgent]]));
+
+    const firstUndoResponse = deferred<void>();
+    const secondUndoResponse = deferred<void>();
+    const first = beginOptimisticWorkspaceArchive({
+      client: createClient(async () => archivePayload({ workspaceId: archived.id })),
+      workspace: target(),
+    });
+    expect([...first.archivedAgentIds]).toEqual(["agent-active"]);
+    await first.done;
+
+    // Simulate the agent having been archived on the daemon before the first undo completes.
+    useSessionStore.getState().setAgents(SERVER_ID, new Map());
+    const firstUndo = undoWorkspaceArchiveOptimistically({
+      client: { undoWorkspaceArchive: async () => firstUndoResponse.promise },
+      workspace: target(),
+      hidden: first.hidden,
+      archivedAgentIds: first.archivedAgentIds,
+    });
+
+    // Re-archive while first undo is still in flight and agents are not back in active directory yet.
+    const second = beginOptimisticWorkspaceArchive({
+      client: createClient(async () => new Promise<ArchiveWorkspacePayload>(() => {})),
+      workspace: target(),
+    });
+    expect([...second.archivedAgentIds]).toEqual(["agent-active"]);
+
+    const secondUndo = undoWorkspaceArchiveOptimistically({
+      client: { undoWorkspaceArchive: async () => secondUndoResponse.promise },
+      workspace: target(),
+      hidden: second.hidden,
+      archivedAgentIds: second.archivedAgentIds,
+    });
+
+    firstUndoResponse.resolve();
+    await firstUndo;
     secondUndoResponse.resolve();
     await secondUndo;
   });

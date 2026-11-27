@@ -4,6 +4,7 @@ import { derivePendingPermissionKey, normalizeAgentSnapshot } from "@/utils/agen
 import { resolveProjectPlacement } from "@/utils/project-placement";
 import type { SessionOutboundMessage } from "@jagentdesk/protocol/messages";
 import { clearArchiveAgentPending } from "@/hooks/use-archive-agent";
+import { clearUnarchiveAgentPending } from "@/stores/unarchive-agent-store";
 import { queryClient } from "@/data/query-client";
 import { acceptAgentDirectoryUpdate } from "@/utils/agent-directory-update-policy";
 import { getInitDeferred, getInitKey, rejectInitDeferred } from "@/utils/agent-initialization";
@@ -71,8 +72,21 @@ export function upsertAgentReplica(serverId: string, agent: Agent): Agent {
     next.set(agent.id, acceptedAgent);
     return next;
   });
+  if (!acceptedAgent.archivedAt) {
+    clearUnarchiveAgentPending({ serverId, agentId: acceptedAgent.id });
+    removeAgentDetails(serverId, acceptedAgent.id);
+  }
   applyAgentTurnSnapshot(serverId, acceptedAgent);
   return acceptedAgent;
+}
+
+export function removeAgentDetails(serverId: string, agentId: string): void {
+  useSessionStore.getState().setAgentDetails(serverId, (current) => {
+    if (!current.has(agentId)) return current;
+    const next = new Map(current);
+    next.delete(agentId);
+    return next;
+  });
 }
 
 function applyAgentTurnSnapshot(serverId: string, agent: Agent): void {
@@ -106,7 +120,15 @@ export function removeAgentDirectoryReplica(serverId: string, agentId: string): 
     return next;
   };
   store.setAgents(serverId, removeKey);
-  store.setAgentDetails(serverId, removeKey);
+  // Leaving the active directory (for example an archived agent loaded for history) must not
+  // wipe an archived detail snapshot that an open pane is currently displaying.
+  store.setAgentDetails(serverId, (current) => {
+    const existing = current.get(agentId);
+    if (!existing || existing.archivedAt != null) return current;
+    const next = new Map(current);
+    next.delete(agentId);
+    return next;
+  });
   store.setQueuedMessages(serverId, removeKey);
   store.setInitializingAgents(serverId, removeKey);
   store.setPendingPermissions(serverId, (current) => {
@@ -177,6 +199,8 @@ export function replaceFetchedAgentDirectory(input: {
   for (const agent of fetchedAgents.values()) {
     if (agent.archivedAt) {
       clearArchiveAgentPending({ queryClient, serverId: input.serverId, agentId: agent.id });
+    } else {
+      clearUnarchiveAgentPending({ serverId: input.serverId, agentId: agent.id });
     }
   }
 

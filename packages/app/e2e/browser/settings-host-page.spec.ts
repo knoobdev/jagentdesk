@@ -21,7 +21,7 @@ import {
 } from "../support/helpers/settings";
 
 test.describe("Settings host page", () => {
-  test("connections section shows the seeded connection endpoint", async ({ page }) => {
+  test("this device's page for a host shows the seeded connection endpoint", async ({ page }) => {
     const serverId = getServerId();
     const port = getE2EDaemonPort();
 
@@ -29,19 +29,19 @@ test.describe("Settings host page", () => {
     await openSettings(page);
     await openSettingsHost(page, serverId);
 
-    await expectSettingsHeader(page, "Connections");
+    await expectSettingsHeader(page, TEST_HOST_LABEL);
     await expectHostConnectionsCard(page, port);
   });
 
-  test("agents section shows the inject MCP toggle", async ({ page }) => {
+  test("tools & prompts section shows the inject MCP toggle", async ({ page }) => {
     const serverId = getServerId();
 
     await gotoAppShell(page);
     await openSettings(page);
     await openSettingsHost(page, serverId);
 
-    await openHostSection(page, serverId, "agents");
-    await expectSettingsHeader(page, "Agents");
+    await openHostSection(page, serverId, "tools");
+    await expectSettingsHeader(page, "Tools & prompts");
     await expectHostInjectMcpCard(page);
   });
 
@@ -56,16 +56,18 @@ test.describe("Settings host page", () => {
     await expectSettingsHeader(page, "Providers");
   });
 
-  test("host section shows the host label and restart/remove action cards", async ({ page }) => {
+  test("daemon section shows restart; the device's host page shows label and remove", async ({
+    page,
+  }) => {
     const serverId = getServerId();
 
     await gotoAppShell(page);
     await openSettings(page);
     await openSettingsHost(page, serverId);
-
-    await openHostSection(page, serverId, "host");
-    await expectSettingsHeader(page, "Overview");
     await expectHostLabelDisplayed(page);
+
+    await openHostSection(page, serverId, "daemon");
+    await expectSettingsHeader(page, "Daemon");
     await expectHostActionCards(page, serverId);
   });
 
@@ -77,7 +79,7 @@ test.describe("Settings host page", () => {
     await page.reload();
     await openSettings(page);
     await openSettingsHost(page, outdatedDaemon.serverId);
-    await openHostSection(page, outdatedDaemon.serverId, "host");
+    await openHostSection(page, outdatedDaemon.serverId, "daemon");
 
     page.once("dialog", (dialog) => dialog.accept());
     const updateButton = page.getByTestId("host-page-update-button");
@@ -100,7 +102,6 @@ test.describe("Settings host page", () => {
     await gotoAppShell(page);
     await openSettings(page);
     await openSettingsHost(page, serverId);
-    await openHostSection(page, serverId, "host");
 
     await expectHostLabelDisplayed(page);
     await clickEditHostLabel(page);
@@ -115,7 +116,7 @@ test.describe("Settings host page", () => {
     await gotoAppShell(page);
     await openSettings(page);
     await openSettingsHost(page, serverId);
-    await openHostSection(page, serverId, "host");
+    await openHostSection(page, serverId, "daemon");
 
     // TODO: add a local-daemon fixture for positive daemon lifecycle coverage.
     await expectHostNoDaemonLifecycleRow(page);
@@ -128,7 +129,7 @@ test.describe("Settings host page", () => {
     await expectRetiredSidebarSectionsAbsent(page);
   });
 
-  test("navigating to /settings/hosts/[serverId] redirects to the connections section", async ({
+  test("navigating to /settings/hosts/[serverId] redirects to the daemon section", async ({
     page,
   }) => {
     const serverId = getServerId();
@@ -136,10 +137,17 @@ test.describe("Settings host page", () => {
     await gotoAppShell(page);
     await page.goto(`/settings/hosts/${encodeURIComponent(serverId)}`);
 
-    await expectHostPageVisible(page, serverId);
-    await expectSettingsHeader(page, "Connections");
-    await openHostSection(page, serverId, "host");
-    await expectHostLabelDisplayed(page);
+    await expectSettingsHeader(page, "Daemon");
     await expectHostActionCards(page, serverId);
+  });
+
+  test("the legacy connections route opens this device's page for the host", async ({ page }) => {
+    const serverId = getServerId();
+
+    await gotoAppShell(page);
+    await page.goto(`/settings/hosts/${encodeURIComponent(serverId)}/connections`);
+
+    await expectHostPageVisible(page, serverId);
+    await expectSettingsHeader(page, TEST_HOST_LABEL);
   });
 });

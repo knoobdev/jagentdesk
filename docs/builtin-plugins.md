@@ -182,7 +182,7 @@ libraries.
 `register(app)` uses `BuiltinClientHost` from `packages/app/src/plugins/builtin/host.ts`. It can
 add a sidebar destination and mobile drawer entry, a left panel, a route screen, settings sections,
 a card on Settings → Providers, composer items, agent controls, header controls, composer docks,
-agent panel accessories, Settings → Agents cards, a user message body, turn preparers, timeline
+agent panel accessories, Settings → host → Tools & prompts cards, a user message body, turn preparers, timeline
 renderers, tool call cards, attachment sources and pills, per-host mounts, message actions (under every user message and
 assistant turn) and agent inspector tabs. Read the interface
 for each signature.

@@ -359,6 +359,23 @@ export const vi = {
     },
   },
   settings: {
+    groups: {
+      app: "Thiết bị này",
+      host: "Host",
+    },
+    sections: {
+      hosts: "Host",
+      chatAndPanes: "Chat & khung",
+      notifications: "Thông báo",
+    },
+    clientHosts: {
+      title: "Host đã lưu",
+      info: "Các host thiết bị này kết nối tới. Tên, biểu tượng, huy hiệu và đường kết nối ở đây chỉ áp dụng cho thiết bị này.",
+      offline: "Ngoại tuyến",
+    },
+    chat: {
+      sendingTitle: "Gửi",
+    },
     shortcuts: {
       help: {
         cycleEffort: "Cycle effort",
@@ -437,7 +454,8 @@ export const vi = {
       },
     },
     hostSections: {
-      tools: "Công cụ",
+      tools: "Công cụ & lời nhắc",
+      daemon: "Daemon",
     },
     hostTools: {
       title: "Công cụ của host",

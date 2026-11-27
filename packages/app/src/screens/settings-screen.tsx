@@ -46,18 +46,18 @@ import {
   Settings,
   Palette,
   Server,
-  Network,
+  Laptop,
+  MessageSquare,
+  Bell,
   Bot,
   Boxes,
   Gauge,
   Keyboard,
   Stethoscope,
-  Shield,
   Puzzle,
   Plus,
   FolderGit2,
   SquareTerminal,
-  Code2,
   Smartphone,
   GitBranch,
   Wrench,
@@ -71,7 +71,7 @@ import { HostPicker as SharedHostPicker } from "@/components/hosts/host-picker";
 import { HostStatusDot } from "@/components/host-status-dot";
 import { ScreenTitle } from "@/components/headers/screen-title";
 import { HeaderIconBadge } from "@/components/headers/header-icon-badge";
-import { HostToolsPage } from "@/screens/settings/host-tools-page";
+import { ClientHostDetailPage, ClientHostsSection } from "@/screens/settings/client-hosts-page";
 import { SettingsSection } from "@/screens/settings/settings-section";
 import { AppearanceSection } from "@/screens/settings/appearance/appearance-section";
 import {
@@ -117,11 +117,11 @@ import {
   type SupportedLocale,
 } from "@/i18n/locales";
 import {
-  HostConnectionsPage,
   HostPairDevicePage,
   HostAgentsPage,
   HostAgentProfilesPage,
-  HostSettingsPage,
+  HostDaemonPage,
+  HostToolsAndPromptsPage,
   HostProvidersPage,
   HostUsagePage,
   HostWorkspacesPage,
@@ -149,6 +149,7 @@ import {
   useEnableBuiltInDaemonOption,
 } from "@/desktop/hooks/use-enable-built-in-daemon-option";
 import {
+  buildClientHostSettingsRoute,
   buildOpenProjectRoute,
   buildSettingsHostSectionRoute,
   buildSettingsSectionRoute,
@@ -182,6 +183,7 @@ function SettingsDesktopHeader({
 export type SettingsView =
   | { kind: "root" }
   | { kind: "section"; section: SettingsSectionSlug }
+  | { kind: "clientHost"; serverId: string }
   | { kind: "host"; serverId: string; section: HostSectionSlug }
   | { kind: "project"; serverId: string; projectId: string }
   | { kind: "plugin"; serverId: string; pluginId: string; screenId: string };
@@ -196,22 +198,18 @@ interface SidebarSectionItem {
   desktopOnly?: boolean;
 }
 
+// "This device": settings stored on this device only. Host sections below are the daemon's.
 const SIDEBAR_SECTION_ITEMS: SidebarSectionItem[] = [
-  { id: "sidebar", labelKey: "Sidebar", icon: FolderGit2 },
   { id: "general", labelKey: "settings.sections.general", icon: Settings },
+  { id: "hosts", labelKey: "settings.sections.hosts", icon: Laptop },
   { id: "appearance", labelKey: "settings.sections.appearance", icon: Palette },
-  { id: "editor", labelKey: "settings.sections.editor", icon: Code2 },
+  { id: "sidebar", labelKey: "settings.sections.sidebar", icon: FolderGit2 },
+  { id: "chat", labelKey: "settings.sections.chatAndPanes", icon: MessageSquare },
   { id: "shortcuts", labelKey: "settings.sections.shortcuts", icon: Keyboard, desktopOnly: true },
   {
-    id: "integrations",
-    labelKey: "settings.sections.integrations",
-    icon: Puzzle,
-    desktopOnly: true,
-  },
-  {
-    id: "permissions",
-    labelKey: "settings.sections.permissions",
-    icon: Shield,
+    id: "notifications",
+    labelKey: "settings.sections.notifications",
+    icon: Bell,
     desktopOnly: true,
   },
   { id: "diagnostics", labelKey: "settings.sections.diagnostics", icon: Stethoscope },
@@ -224,32 +222,25 @@ interface HostSectionItem {
 }
 
 const HOST_SECTION_ITEMS: HostSectionItem[] = [
-  { id: "host", labelKey: "settings.hostSections.host", icon: Server },
-  { id: "projects", labelKey: "settings.hostSections.projects", icon: FolderGit2 },
-  { id: "connections", labelKey: "settings.hostSections.connections", icon: Network },
-  { id: "pair-device", labelKey: "openProject.tiles.pairDevice.title", icon: Smartphone },
-  { id: "agents", labelKey: "settings.hostSections.agents", icon: Bot },
-  { id: "agent-profiles", labelKey: "settings.hostSections.agentProfiles", icon: Layers },
-  { id: "orchestration", labelKey: "settings.hostSections.orchestration", icon: GitBranch },
-  { id: "voice", labelKey: "settings.hostSections.voice", icon: Mic },
-  { id: "workspaces", labelKey: "settings.hostSections.workspaces", icon: FolderGit2 },
   { id: "providers", labelKey: "settings.hostSections.providers", icon: Boxes },
+  { id: "agent-profiles", labelKey: "settings.hostSections.agentProfiles", icon: Layers },
+  { id: "tools", labelKey: "settings.hostSections.tools", icon: Wrench },
+  { id: "agents", labelKey: "settings.hostSections.agents", icon: Bot },
+  { id: "orchestration", labelKey: "settings.hostSections.orchestration", icon: GitBranch },
+  { id: "projects", labelKey: "settings.hostSections.projects", icon: FolderGit2 },
+  { id: "workspaces", labelKey: "settings.hostSections.workspaces", icon: FolderGit2 },
+  { id: "voice", labelKey: "settings.hostSections.voice", icon: Mic },
   { id: "usage", labelKey: "settings.hostSections.usage", icon: Gauge },
   { id: "terminals", labelKey: "settings.hostSections.terminals", icon: SquareTerminal },
   { id: "plugins", labelKey: "settings.hostSections.plugins", icon: Puzzle },
-  { id: "tools", labelKey: "settings.hostSections.tools", icon: Wrench },
+  { id: "pair-device", labelKey: "openProject.tiles.pairDevice.title", icon: Smartphone },
+  { id: "daemon", labelKey: "settings.hostSections.daemon", icon: Server },
 ];
 
-function renderHostSettingsContent(
-  view: Extract<SettingsView, { kind: "host" }>,
-  onHostRemoved: () => void,
-  onAddConnection: () => void,
-): ReactNode {
+function renderHostSettingsContent(view: Extract<SettingsView, { kind: "host" }>): ReactNode {
   switch (view.section) {
     case "projects":
       return <ProjectsScreen serverId={view.serverId} />;
-    case "connections":
-      return <HostConnectionsPage serverId={view.serverId} onAddConnection={onAddConnection} />;
     case "pair-device":
       return <HostPairDevicePage serverId={view.serverId} />;
     case "agents":
@@ -272,9 +263,9 @@ function renderHostSettingsContent(
     case "plugins":
       return <HostPluginsPage serverId={view.serverId} />;
     case "tools":
-      return <HostToolsPage serverId={view.serverId} />;
-    case "host":
-      return <HostSettingsPage serverId={view.serverId} onHostRemoved={onHostRemoved} />;
+      return <HostToolsAndPromptsPage serverId={view.serverId} />;
+    case "daemon":
+      return <HostDaemonPage serverId={view.serverId} />;
   }
 }
 
@@ -340,10 +331,14 @@ const SERVICE_URL_BEHAVIOR_VALUES: ServiceUrlBehavior[] = ["ask", "in-app", "ext
 interface GeneralSectionProps {
   settings: AppSettings;
   isDesktopApp: boolean;
-  handleSendShortcutChange: (shortcut: SendShortcut) => void;
-  handleSendBehaviorChange: (behavior: SendBehavior) => void;
   handleServiceUrlBehaviorChange: (behavior: ServiceUrlBehavior) => void;
   handleLanguageChange: (language: AppLanguage) => void;
+}
+
+interface ChatSectionProps {
+  settings: AppSettings;
+  handleSendShortcutChange: (shortcut: SendShortcut) => void;
+  handleSendBehaviorChange: (behavior: SendBehavior) => void;
   handleTerminalScrollbackLinesChange: (lines: number) => void;
 }
 
@@ -397,29 +392,11 @@ function LanguageMenuItem({ value, activeLocale, selected, onChange }: LanguageM
 function GeneralSection({
   settings,
   isDesktopApp,
-  handleSendBehaviorChange,
-  handleSendShortcutChange,
   handleServiceUrlBehaviorChange,
   handleLanguageChange,
-  handleTerminalScrollbackLinesChange,
 }: GeneralSectionProps) {
   const { t, i18n } = useTranslation();
   const activeLocale = getActiveLocale(i18n.language);
-  const sendBehaviorOptions = useMemo(() => getSendBehaviorOptions(t), [t]);
-  const shortcutsAvailable = useKeyboardShortcutsAvailable();
-  const modifier = getShortcutOs() === "mac" ? "⌘" : "Ctrl";
-  const shortcutOptions = useMemo(
-    () =>
-      (["enter", "mod-enter"] as const).map((value) => ({
-        value,
-        label: t(`settings.general.sendShortcut.options.${value}`, { modifier }),
-      })),
-    [t, modifier],
-  );
-  const sendBehaviorDescriptionKey =
-    shortcutsAvailable && settings.sendShortcut === "mod-enter"
-      ? `settings.general.defaultSend.commandEnterDescriptions.${settings.sendBehavior}`
-      : `settings.general.defaultSend.descriptions.${settings.sendBehavior}`;
   const selectedLanguageOption = LANGUAGE_OPTIONS.find(
     (option) => option.value === settings.language,
   );
@@ -430,64 +407,11 @@ function GeneralSection({
         t(selectedLanguageOption.labelKey),
       )
     : settings.language;
-  const [terminalScrollbackValue, setTerminalScrollbackValue] = useState(
-    String(settings.terminalScrollbackLines),
-  );
-
-  const handleTerminalScrollbackChangeText = useCallback((value: string) => {
-    setTerminalScrollbackValue(value.replace(/[^\d]/g, ""));
-  }, []);
-
-  const commitTerminalScrollback = useCallback(() => {
-    const parsed = parseTerminalScrollbackLines(terminalScrollbackValue);
-    const nextValue = parsed ?? settings.terminalScrollbackLines;
-    setTerminalScrollbackValue(String(nextValue));
-    if (nextValue !== settings.terminalScrollbackLines) {
-      handleTerminalScrollbackLinesChange(nextValue);
-    }
-  }, [
-    handleTerminalScrollbackLinesChange,
-    settings.terminalScrollbackLines,
-    terminalScrollbackValue,
-  ]);
-
-  useEffect(() => {
-    setTerminalScrollbackValue(String(settings.terminalScrollbackLines));
-  }, [settings.terminalScrollbackLines]);
 
   return (
     <SettingsSection title={t("settings.general.title")}>
       <View style={settingsStyles.card}>
-        {shortcutsAvailable ? (
-          <View style={settingsStyles.row}>
-            <View style={settingsStyles.rowContent}>
-              <Text style={settingsStyles.rowTitle}>
-                {t("settings.general.sendShortcut.label")}
-              </Text>
-            </View>
-            <SegmentedControl
-              size="sm"
-              value={settings.sendShortcut}
-              onValueChange={handleSendShortcutChange}
-              options={shortcutOptions}
-            />
-          </View>
-        ) : null}
         <View style={settingsStyles.row}>
-          <View style={settingsStyles.rowContent}>
-            <Text style={settingsStyles.rowTitle}>{t("settings.general.defaultSend.label")}</Text>
-            <Text style={settingsStyles.rowHint}>
-              {t(sendBehaviorDescriptionKey, { modifier })}
-            </Text>
-          </View>
-          <SegmentedControl
-            size="sm"
-            value={settings.sendBehavior}
-            onValueChange={handleSendBehaviorChange}
-            options={sendBehaviorOptions}
-          />
-        </View>
-        <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
           <View style={settingsStyles.rowContent}>
             <Text style={settingsStyles.rowTitle}>{t("settings.general.language.label")}</Text>
             <Text style={settingsStyles.rowHint}>{t("settings.general.language.description")}</Text>
@@ -541,6 +465,91 @@ function GeneralSection({
             </DropdownMenu>
           </View>
         ) : null}
+      </View>
+    </SettingsSection>
+  );
+}
+
+/** Chat & panes: how messages send and how much terminal history a pane keeps. */
+function ChatSection({
+  settings,
+  handleSendBehaviorChange,
+  handleSendShortcutChange,
+  handleTerminalScrollbackLinesChange,
+}: ChatSectionProps) {
+  const { t } = useTranslation();
+  const sendBehaviorOptions = useMemo(() => getSendBehaviorOptions(t), [t]);
+  const shortcutsAvailable = useKeyboardShortcutsAvailable();
+  const modifier = getShortcutOs() === "mac" ? "⌘" : "Ctrl";
+  const shortcutOptions = useMemo(
+    () =>
+      (["enter", "mod-enter"] as const).map((value) => ({
+        value,
+        label: t(`settings.general.sendShortcut.options.${value}`, { modifier }),
+      })),
+    [t, modifier],
+  );
+  const sendBehaviorDescriptionKey =
+    shortcutsAvailable && settings.sendShortcut === "mod-enter"
+      ? `settings.general.defaultSend.commandEnterDescriptions.${settings.sendBehavior}`
+      : `settings.general.defaultSend.descriptions.${settings.sendBehavior}`;
+  const [terminalScrollbackValue, setTerminalScrollbackValue] = useState(
+    String(settings.terminalScrollbackLines),
+  );
+
+  const handleTerminalScrollbackChangeText = useCallback((value: string) => {
+    setTerminalScrollbackValue(value.replace(/[^\d]/g, ""));
+  }, []);
+
+  const commitTerminalScrollback = useCallback(() => {
+    const parsed = parseTerminalScrollbackLines(terminalScrollbackValue);
+    const nextValue = parsed ?? settings.terminalScrollbackLines;
+    setTerminalScrollbackValue(String(nextValue));
+    if (nextValue !== settings.terminalScrollbackLines) {
+      handleTerminalScrollbackLinesChange(nextValue);
+    }
+  }, [
+    handleTerminalScrollbackLinesChange,
+    settings.terminalScrollbackLines,
+    terminalScrollbackValue,
+  ]);
+
+  useEffect(() => {
+    setTerminalScrollbackValue(String(settings.terminalScrollbackLines));
+  }, [settings.terminalScrollbackLines]);
+
+  return (
+    <SettingsSection title={t("settings.chat.sendingTitle")}>
+      <View style={settingsStyles.card}>
+        {shortcutsAvailable ? (
+          <View style={settingsStyles.row}>
+            <View style={settingsStyles.rowContent}>
+              <Text style={settingsStyles.rowTitle}>
+                {t("settings.general.sendShortcut.label")}
+              </Text>
+            </View>
+            <SegmentedControl
+              size="sm"
+              value={settings.sendShortcut}
+              onValueChange={handleSendShortcutChange}
+              options={shortcutOptions}
+            />
+          </View>
+        ) : null}
+        <View style={[settingsStyles.row, shortcutsAvailable && settingsStyles.rowBorder]}>
+          <View style={settingsStyles.rowContent}>
+            <Text style={settingsStyles.rowTitle}>{t("settings.general.defaultSend.label")}</Text>
+            <Text style={settingsStyles.rowHint}>
+              {t(sendBehaviorDescriptionKey, { modifier })}
+            </Text>
+          </View>
+          <SegmentedControl
+            size="sm"
+            value={settings.sendBehavior}
+            onValueChange={handleSendBehaviorChange}
+            options={sendBehaviorOptions}
+          />
+        </View>
         <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
           <View style={settingsStyles.rowContent}>
             <Text style={settingsStyles.rowTitle}>
@@ -897,7 +906,9 @@ function SettingsSidebar({
     () => [{ flex: 1 }, isDesktop ? { paddingTop: insets.top } : null],
     [insets.top, isDesktop],
   );
-  const selectedSectionId = view.kind === "section" ? view.section : null;
+  let selectedSectionId: SettingsSectionSlug | null = null;
+  if (view.kind === "section") selectedSectionId = view.section;
+  if (view.kind === "clientHost") selectedSectionId = "hosts";
   let selectedHostSection: HostSectionSlug | null = null;
   if (view.kind === "host") selectedHostSection = view.section;
   if (view.kind === "project") selectedHostSection = "projects";
@@ -1172,7 +1183,12 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   // The host the four sections scope to: the host on the active view, otherwise
   // the picker choice, otherwise the connected local daemon, otherwise the first host.
   const activeHostServerId = useMemo(() => {
-    if (view.kind === "host" || view.kind === "project" || view.kind === "plugin")
+    if (
+      view.kind === "host" ||
+      view.kind === "clientHost" ||
+      view.kind === "project" ||
+      view.kind === "plugin"
+    )
       return view.serverId;
     return resolveActiveHostServerId({
       selectedServerId: selectedSettingsHostServerId,
@@ -1296,7 +1312,7 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
 
   const handleHostAdded = useCallback(
     ({ serverId }: { serverId: string }) => {
-      const target = buildSettingsHostSectionRoute(serverId, "connections");
+      const target = buildClientHostSettingsRoute(serverId);
       if (isCompactLayout) {
         router.push(target);
       } else {
@@ -1400,15 +1416,29 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   }, [router]);
 
   const detailProjectServerId = view.kind === "project" ? view.serverId : null;
+  const isClientHostView = view.kind === "clientHost";
   const handleBackFromDetail = useCallback(() => {
     guardNavigation(() => {
       if (detailProjectServerId) {
         router.navigate(buildSettingsHostSectionRoute(detailProjectServerId, "projects"));
         return;
       }
+      if (isClientHostView) {
+        router.navigate(buildSettingsSectionRoute("hosts"));
+        return;
+      }
       handleBackToRoot();
     });
-  }, [detailProjectServerId, guardNavigation, handleBackToRoot, router]);
+  }, [detailProjectServerId, guardNavigation, handleBackToRoot, isClientHostView, router]);
+
+  const handleOpenClientHost = useCallback(
+    (serverId: string) => {
+      const target = buildClientHostSettingsRoute(serverId);
+      guardNavigation(() => router.push(target));
+    },
+    [guardNavigation, router],
+  );
+  const enableBuiltInDaemonOption = useEnableBuiltInDaemonOption();
 
   const handleBackToWorkspace = useCallback(() => {
     guardNavigation(() => {
@@ -1457,6 +1487,10 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
     if (view.kind === "project") {
       return { title: t("settings.projects"), Icon: FolderGit2 };
     }
+    if (view.kind === "clientHost") {
+      const host = hosts.find((candidate) => candidate.serverId === view.serverId);
+      return { title: host?.label ?? t("settings.sections.hosts"), Icon: Laptop };
+    }
     return null;
   })();
 
@@ -1473,7 +1507,16 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
       );
     }
     if (view.kind === "host") {
-      return renderHostSettingsContent(view, handleHostRemoved, handleAddHost);
+      return renderHostSettingsContent(view);
+    }
+    if (view.kind === "clientHost") {
+      return (
+        <ClientHostDetailPage
+          serverId={view.serverId}
+          onAddConnection={handleAddHost}
+          onHostRemoved={handleHostRemoved}
+        />
+      );
     }
     if (view.kind === "project") {
       return <ProjectSettingsScreen serverId={view.serverId} projectId={view.projectId} />;
@@ -1486,26 +1529,40 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
               <GeneralSection
                 settings={settings}
                 isDesktopApp={isDesktopApp}
-                handleSendBehaviorChange={handleSendBehaviorChange}
-                handleSendShortcutChange={handleSendShortcutChange}
                 handleServiceUrlBehaviorChange={handleServiceUrlBehaviorChange}
                 handleLanguageChange={handleLanguageChange}
-                handleTerminalScrollbackLinesChange={handleTerminalScrollbackLinesChange}
               />
-              {isDesktopApp ? <BrowserDataSection /> : null}
+              {isDesktopApp ? <IntegrationsSection /> : null}
             </>
+          );
+        case "hosts":
+          return (
+            <ClientHostsSection
+              onSelectHost={handleOpenClientHost}
+              onAddHost={handleAddHost}
+              enableBuiltInDaemonOption={enableBuiltInDaemonOption}
+            />
           );
         case "sidebar":
           return <SidebarViewPicker />;
         case "appearance":
           return <AppearanceSection />;
-        case "editor":
-          return <EditorSection />;
+        case "chat":
+          return (
+            <>
+              <ChatSection
+                settings={settings}
+                handleSendBehaviorChange={handleSendBehaviorChange}
+                handleSendShortcutChange={handleSendShortcutChange}
+                handleTerminalScrollbackLinesChange={handleTerminalScrollbackLinesChange}
+              />
+              <EditorSection />
+              {isDesktopApp ? <BrowserDataSection /> : null}
+            </>
+          );
         case "shortcuts":
           return isDesktopApp ? <KeyboardShortcutsSection /> : null;
-        case "integrations":
-          return isDesktopApp ? <IntegrationsSection /> : null;
-        case "permissions":
+        case "notifications":
           return isDesktopApp ? <DesktopPermissionsSection /> : null;
         case "diagnostics":
           return (

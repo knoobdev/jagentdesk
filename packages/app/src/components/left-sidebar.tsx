@@ -89,7 +89,7 @@ import {
   buildSchedulesRoute,
   buildSessionsRoute,
   buildSettingsAddHostRoute,
-  buildSettingsHostSectionRoute,
+  buildClientHostSettingsRoute,
   buildSettingsRoute,
 } from "@/utils/host-routes";
 import type { ShortcutKey } from "@/utils/format-shortcut";
@@ -304,13 +304,13 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
   const handleOpenHostSettingsMobile = useCallback(
     (serverId: string) => {
       showMobileAgent();
-      router.push(buildSettingsHostSectionRoute(serverId, "connections"));
+      router.push(buildClientHostSettingsRoute(serverId));
     },
     [showMobileAgent],
   );
 
   const handleOpenHostSettingsDesktop = useCallback((serverId: string) => {
-    router.push(buildSettingsHostSectionRoute(serverId, "connections"));
+    router.push(buildClientHostSettingsRoute(serverId));
   }, []);
 
   const handleImportSessionMobile = useCallback(() => {

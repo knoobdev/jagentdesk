@@ -2,7 +2,7 @@ import { expect, type Page } from "@playwright/test";
 import { identityColor, type IdentityColorName } from "@/styles/identity-colors";
 import { openSettings } from "./app";
 import { buildSeededHost } from "./daemon-registry";
-import { clickSettingsBackToWorkspace, openHostSection, selectSettingsHost } from "./settings";
+import { clickSettingsBackToWorkspace, openSettingsHost } from "./settings";
 
 const REGISTRY_KEY = "@jagentdesk:daemon-registry";
 const SEED_NONCE_KEY = "@jagentdesk:e2e-seed-nonce";
@@ -175,8 +175,7 @@ function parseHex(hex: string): RgbChannels {
 
 export async function openHostAppearanceSettings(page: Page, serverId: string): Promise<void> {
   await openSettings(page);
-  await selectSettingsHost(page, serverId);
-  await openHostSection(page, serverId, "host");
+  await openSettingsHost(page, serverId);
   await expect(page.getByTestId("host-appearance-preview")).toBeVisible({ timeout: 15_000 });
 }
 

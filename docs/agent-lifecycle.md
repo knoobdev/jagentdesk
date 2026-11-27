@@ -14,7 +14,7 @@ Each live agent in `AgentManager` carries a `lastStatus` of `initializing`, `idl
 
 ## Restart recovery
 
-Recovery is opt-in: Settings → host → Agents → **Resume agents after restart**
+Recovery is opt-in: Settings → host → Daemon → **Resume agents after restart**
 (`agents.resumeOnStartup`). After restart it sends `agents.resumePrompt` (default
 `Resume working.`) only to agents interrupted during a running turn. Idle agents stay dormant. Archived, internal, daemon-owned and archived-workspace agents
 are excluded. A slow or unavailable provider holds back only its own agent.
@@ -36,7 +36,7 @@ Idle runtimes are released after one hour while their saved conversations remain
 Reopening a runtime starts a fresh idle window without changing sidebar activity timestamps.
 Tracked background work, outstanding local finish subscriptions, queued messages, and provider
 safety vetoes keep runtimes resident. Claude session crons and `/loop` wakeups are process-local
-work and prevent release. Hosts can disable cleanup live with Settings → host → Agents → **Release idle agents**
+work and prevent release. Hosts can disable cleanup live with Settings → host → Daemon → **Release idle agents**
 (`agents.idleRuntimeCleanup`). The timer lives in
 `packages/server/src/server/agent/idle-runtime-cleanup/`.
 

@@ -69,7 +69,7 @@ import { useUsageSummary, UsageSidebarItem } from "@/usage/sidebar-item";
 import type { Theme } from "@/styles/theme";
 import {
   buildSettingsAddHostRoute,
-  buildSettingsHostSectionRoute,
+  buildClientHostSettingsRoute,
   buildSettingsSectionRoute,
 } from "@/utils/host-routes";
 import { resolveSidebarNavBody, resolveSectionRoute } from "@/components/left-sidebar";
@@ -232,7 +232,7 @@ function ConnectionFooter({ serverId, onNavigate }: { serverId: string; onNaviga
   );
   const connections = useCallback(() => {
     onNavigate();
-    router.push(buildSettingsHostSectionRoute(serverId, "connections"));
+    router.push(buildClientHostSettingsRoute(serverId));
   }, [serverId, onNavigate]);
   const notifications = useCallback(() => {
     onNavigate();
@@ -634,10 +634,13 @@ function DrillQuickSwitch({
       }));
     }
     if (drill.kind === "settings") {
-      return (["sidebar", "general", "appearance", "editor", "diagnostics"] as const).map(
+      return (["general", "hosts", "appearance", "sidebar", "chat", "diagnostics"] as const).map(
         (section) => ({
           id: section,
-          label: section.charAt(0).toUpperCase() + section.slice(1),
+          label:
+            section === "chat"
+              ? "Chat & panes"
+              : section.charAt(0).toUpperCase() + section.slice(1),
           action: () => {
             onSelect();
             router.push(buildSettingsSectionRoute(section));

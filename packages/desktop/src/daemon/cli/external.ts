@@ -4,8 +4,6 @@ import type { NodeEntrypointInvocation } from "../node-entrypoint-launcher.js";
 import { createNodeEntrypointInvocation } from "../runtime-paths.js";
 import { resolveExternalCliEntrypoint } from "./entrypoints.js";
 
-const EXTERNAL_CLI_TIMEOUT_MS = 8_000;
-
 function createExternalCliInvocation(args: string[]): NodeEntrypointInvocation {
   return createNodeEntrypointInvocation({
     entrypoint: resolveExternalCliEntrypoint(),
@@ -15,8 +13,15 @@ function createExternalCliInvocation(args: string[]): NodeEntrypointInvocation {
   });
 }
 
+// JAgentDesk keeps a short budget so a wedged CLI cannot stall desktop startup or the
+// Tailscale login screen (see 7d652ce73); upstream uses 15 s.
+const DEFAULT_EXTERNAL_CLI_TIMEOUT_MS = 8_000;
+const EXTERNAL_CLI_KILL_GRACE_MS = 2_000;
+
 function spawnExternalCli(
   invocation: NodeEntrypointInvocation,
+  args: string[],
+  timeoutMs = DEFAULT_EXTERNAL_CLI_TIMEOUT_MS,
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
   return new Promise((resolve, reject) => {
     const child = spawnProcess(invocation.command, invocation.args, {
@@ -27,22 +32,44 @@ function spawnExternalCli(
 
     let stdout = "";
     let stderr = "";
-    let timedOut = false;
     let settled = false;
-    let forceKillTimeout: ReturnType<typeof setTimeout> | undefined;
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGTERM");
-      forceKillTimeout = setTimeout(() => child.kill("SIGKILL"), 250);
-    }, EXTERNAL_CLI_TIMEOUT_MS);
+    let killTimer: ReturnType<typeof setTimeout> | null = null;
 
-    const finish = (result: { stdout: string; stderr: string; exitCode: number | null }) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      if (forceKillTimeout !== undefined) clearTimeout(forceKillTimeout);
-      resolve(result);
+    const cleanupTimers = () => {
+      clearTimeout(timeoutTimer);
+      if (killTimer !== null) {
+        clearTimeout(killTimer);
+        killTimer = null;
+      }
     };
+
+    const timeoutTimer = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      log.warn("[desktop external-cli]", "CLI command timed out", {
+        args,
+        timeoutMs,
+        command: invocation.command,
+        stdout: stdout.trim().slice(0, 500),
+        stderr: stderr.trim().slice(0, 500),
+      });
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        // Ignore kill failures if the process already exited.
+      }
+      killTimer = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // Ignore kill failures if the process already exited.
+        }
+      }, EXTERNAL_CLI_KILL_GRACE_MS);
+      killTimer.unref?.();
+      reject(new Error(`CLI command timed out after ${timeoutMs}ms: ${args.join(" ")}`));
+    }, timeoutMs);
 
     child.stdout!.on("data", (data: Buffer) => {
       stdout += data.toString();
@@ -52,20 +79,21 @@ function spawnExternalCli(
     });
 
     child.on("error", (error) => {
-      if (settled) return;
+      if (settled) {
+        return;
+      }
       settled = true;
-      clearTimeout(timeout);
-      if (forceKillTimeout !== undefined) clearTimeout(forceKillTimeout);
+      cleanupTimers();
       reject(error);
     });
     child.on("close", (exitCode) => {
-      finish({
-        stdout,
-        stderr: timedOut
-          ? `${stderr}\nCLI command timed out after ${EXTERNAL_CLI_TIMEOUT_MS}ms.`
-          : stderr,
-        exitCode,
-      });
+      if (settled) {
+        cleanupTimers();
+        return;
+      }
+      settled = true;
+      cleanupTimers();
+      resolve({ stdout, stderr, exitCode });
     });
   });
 }
@@ -84,7 +112,7 @@ function externalCliFailureMessage(
 
 export async function runExternalCliTextCommand(args: string[]): Promise<string> {
   const invocation = createExternalCliInvocation(args);
-  const result = await spawnExternalCli(invocation);
+  const result = await spawnExternalCli(invocation, args);
 
   if (result.exitCode !== 0) {
     const stderr = result.stderr.trim();
@@ -103,7 +131,7 @@ export async function runExternalCliTextCommand(args: string[]): Promise<string>
 
 export async function runExternalCliJsonCommand(args: string[]): Promise<unknown> {
   const invocation = createExternalCliInvocation(args);
-  const result = await spawnExternalCli(invocation);
+  const result = await spawnExternalCli(invocation, args);
 
   if (result.exitCode !== 0) {
     const stderr = result.stderr.trim();

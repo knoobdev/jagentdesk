@@ -262,7 +262,7 @@ export function deriveAgentScreenViewState({
     };
   }
 
-  if (candidateAgent && shouldBlockReadyState) {
+  if (candidateAgent && shouldBlockReadyState && !nextMemory.hasRenderedReady) {
     return {
       state: {
         tag: "boot",

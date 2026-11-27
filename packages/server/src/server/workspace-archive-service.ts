@@ -195,7 +195,7 @@ export async function archiveByScope(
     checkpoint();
 
     if (targetWorkspaceIds.length > 0) {
-      dependencies.markWorkspaceArchiving(targetWorkspaceIds, new Date().toISOString());
+      dependencies.markWorkspaceArchiving(targetWorkspaceIds, archivedAt);
     }
 
     let removedDirectory = false;

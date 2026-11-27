@@ -9,6 +9,7 @@ import { normalizeAgentSnapshot } from "@/utils/agent-snapshots";
 import {
   applyAgentDirectoryDelta,
   type AgentDirectoryDelta,
+  removeAgentDetails,
   removeAgentDirectoryReplica,
   replaceAgentPendingPermissions,
   replaceFetchedAgentDirectory,
@@ -150,6 +151,8 @@ export class AgentDirectoryReplica {
     this.members.delete(agentId);
     this.advance(agentId);
     removeAgentDirectoryReplica(this.serverId, agentId);
+    // Entity removal also drops an archived detail snapshot the directory remove keeps.
+    removeAgentDetails(this.serverId, agentId);
   }
 
   private advance(agentId: string): void {

@@ -76,6 +76,7 @@ export interface WorkspaceDirectoryDeps {
   };
   workspaceRegistry: {
     list(): Promise<PersistedWorkspaceRecord[]>;
+    isPublicationDeferred?(workspaceId: string): boolean;
   };
   getArchivingAt(workspaceId: string): string | null;
   listAgentPayloads(): Promise<AgentSnapshotPayload[]>;
@@ -219,7 +220,10 @@ export class WorkspaceDirectory {
       persistedProjects.filter((project) => project.archivedAt).map((project) => project.projectId),
     );
     const activeRecords = persistedWorkspaces.filter(
-      (workspace) => !workspace.archivedAt && !archivedProjectIds.has(workspace.projectId),
+      (workspace) =>
+        !workspace.archivedAt &&
+        !archivedProjectIds.has(workspace.projectId) &&
+        !this.deps.workspaceRegistry.isPublicationDeferred?.(workspace.workspaceId),
     );
     const descriptorsByWorkspaceId = new Map<string, WorkspaceDescriptorPayload>();
     const workspaceIds = options.workspaceIds ? new Set(options.workspaceIds) : null;
@@ -561,7 +565,9 @@ export class WorkspaceDirectory {
       persistedWorkspaces
         .filter(
           (workspace) =>
-            !workspace.archivedAt && (options?.includeBackground === true || !workspace.background),
+            !workspace.archivedAt &&
+            !this.deps.workspaceRegistry.isPublicationDeferred?.(workspace.workspaceId) &&
+            (options?.includeBackground === true || !workspace.background),
         )
         .map((workspace) => workspace.projectId),
     );

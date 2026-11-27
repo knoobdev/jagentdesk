@@ -300,6 +300,7 @@ export const es: TranslationResources = {
     archived: {
       callout: "Este agente está archivado.",
       unarchive: "Desarchivar",
+      unarchiving: "Desarchivando...",
     },
   },
   sessions: {
@@ -2109,7 +2110,7 @@ export const es: TranslationResources = {
     title: "Ajustes",
     loading: "Cargando configuración...",
     groups: {
-      app: "Aplicación",
+      app: "Este dispositivo",
       host: "Host",
     },
     hostPicker: {
@@ -2126,6 +2127,10 @@ export const es: TranslationResources = {
     },
     groupInfo: "Acerca de{{title}}",
     sections: {
+      hosts: "Hosts",
+      sidebar: "Barra lateral",
+      chatAndPanes: "Chat y paneles",
+      notifications: "Notificaciones",
       general: "General",
       connection: "Conexión",
       appearance: "Apariencia",
@@ -2135,6 +2140,14 @@ export const es: TranslationResources = {
       permissions: "Permisos",
       diagnostics: "Diagnóstico",
     },
+    clientHosts: {
+      title: "Hosts guardados",
+      info: "Hosts a los que se conecta este dispositivo. Los nombres, iconos, insignias y rutas aquí solo afectan a este dispositivo.",
+      offline: "Desconectado",
+    },
+    chat: {
+      sendingTitle: "Envío",
+    },
     editor: {
       title: "Editor",
       vimKeybindings: "Atajos de Vim",
@@ -2142,7 +2155,8 @@ export const es: TranslationResources = {
     },
     plugins: pluginSettings.es,
     hostSections: {
-      tools: "Tools",
+      daemon: "Daemon",
+      tools: "Herramientas e instrucciones",
       plugins: "Plugins",
       projects: "Proyectos",
       connections: "Conexiones",
@@ -2736,7 +2750,12 @@ export const es: TranslationResources = {
         save: "Save",
         emptyState: "No profiles yet. Add one to launch terminals with a specific command.",
       },
+      tools: {
+        instructionsTitle: "Instrucciones",
+        toolsTitle: "Herramientas de agentes",
+      },
       daemon: {
+        runtimeTitle: "Ejecución de agentes",
         rename: {
           editLabel: "Editar etiqueta",
           title: "Cambiar nombre de host",

@@ -8,6 +8,7 @@ import {
   resolveJAgentDeskHome,
   spawnProcess,
   reapTerminalWorkers,
+  stripAppImageRuntimeEnv,
 } from "@jagentdesk/server";
 import treeKill from "tree-kill";
 import { requireTerminalKeepCapability } from "@jagentdesk/client/internal/daemon-client";
@@ -166,6 +167,8 @@ function buildChildEnv(options: DaemonStartOptions): NodeJS.ProcessEnv {
   if (options.webUi === false) {
     childEnv.JAGENTDESK_WEB_UI_ENABLED = "false";
   }
+  // A CLI started from a desktop AppImage terminal still carries APPIMAGE/APPDIR/ARGV0.
+  stripAppImageRuntimeEnv(childEnv);
   return childEnv;
 }
 
