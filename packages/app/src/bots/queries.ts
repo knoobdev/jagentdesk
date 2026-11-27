@@ -209,7 +209,17 @@ export function useBotsPushes(serverId: string) {
     const unsubscribes = [
       client.onBotsPush("bots.changed", ({ payload }) => {
         refetch(["bots.list.request"], null);
-        if (!payload.deleted) refetch(["bots.chats.tree.request"], payload.botId);
+        // A connector that links a person (Telegram's code) pushes this too: the open dialog
+        // and Who can ask refetch so "Linked · {{name}}" shows without reopening.
+        if (!payload.deleted)
+          refetch(
+            [
+              "bots.chats.tree.request",
+              "bots.telegram.status.request",
+              "bots.allowed.list.request",
+            ],
+            payload.botId,
+          );
       }),
       client.onBotsPush("bots.room.changed", () => refetch(["bots.rooms.list.request"], null)),
       client.onBotsPush("bots.item.changed", ({ payload }) => {

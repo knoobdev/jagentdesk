@@ -59,7 +59,11 @@ export const botsJadPanelsStrings = {
       groupsHint:
         "To use it in groups, add @{{username}} to the group. It answers when mentioned or replied to.",
       linkAccount: "Link my Telegram account",
-      linkCode: "DM {{code}} to your bot. Expires at {{time}}.",
+      openInTelegram: "Open in Telegram",
+      sendCode: "Or send this code to @{{username}}:",
+      copyCode: "Copy code",
+      expiresAt: "Expires at {{time}}",
+      linked: "Linked · {{name}}",
       allowed: "Allowed Telegram users",
       noUsers: "No allowed users",
       disconnect: "Disconnect",
