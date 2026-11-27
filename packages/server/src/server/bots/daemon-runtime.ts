@@ -412,6 +412,7 @@ export class DaemonBotRuntime implements BotRuntime {
     return this.deps.orchestration.startBotWorker({
       supervisorAgentId,
       itemId: item.id,
+      title: item.title,
       workspaceId: result.workspace.workspaceId,
       briefId: `bot-item:${item.id}`,
       cwd,

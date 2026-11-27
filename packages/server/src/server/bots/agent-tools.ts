@@ -4,11 +4,26 @@
 // gate (ADR-0046), which an unattended mode answers itself.
 import { z } from "zod";
 import { BotItemAskSchema, BotItemPatchSchema } from "@jagentdesk/protocol/bots/types";
+import {
+  botPermissionRequestText,
+  botProjectName,
+  type BotPermissionCard,
+} from "@jagentdesk/protocol/bots/permission-cards";
 import type { JAgentDeskToolDefinition } from "../agent/tools/types.js";
 import type { AgentManager } from "../agent/agent-manager.js";
 import type { BotsService } from "./service.js";
 import { BOT_ID_LABEL } from "./runtime.js";
 import { BOT_EVENT_AUTOMATION_SOURCES } from "./event-automations.js";
+
+/** What a gated tool asks: its card, and `once`, a key no second ask may share while it waits. */
+interface BotToolAsk {
+  card: BotPermissionCard;
+  once?: string;
+}
+
+// Asks waiting for the owner, by `once`: a model that calls bot_worker_start twice in one turn gets
+// one card, not two for the same item (the second could only fail once the first was allowed).
+const waitingAsks = new Set<string>();
 
 export function createBotAgentTools(options: {
   service: BotsService;
@@ -22,12 +37,13 @@ export function createBotAgentTools(options: {
   if (labels?.["jagentdesk.orchestration.role"] !== "supervisor") return [];
   const bot = service.storage.listBots().find((b) => b.id === labels?.[BOT_ID_LABEL]);
   if (!bot) return [];
+  /** `ask`: the tool asks the owner first, with this card. */
   function define<S extends z.ZodRawShape>(
     name: string,
     description: string,
     shape: S,
     run: (input: z.infer<z.ZodObject<S>>) => unknown | Promise<unknown>,
-    gated = false,
+    ask?: (input: z.infer<z.ZodObject<S>>) => BotToolAsk,
   ): JAgentDeskToolDefinition {
     const schema = z.object(shape);
     return {
@@ -38,15 +54,27 @@ export function createBotAgentTools(options: {
       async handler(raw) {
         try {
           const input = schema.parse(raw);
-          if (gated) {
-            const decision = await agentManager.requestHostToolPermission(callerAgentId!, {
-              name,
-              kind: "tool",
-              title: description,
-              description: JSON.stringify(input),
-              input,
-            });
-            if (decision.behavior !== "allow") throw new Error("Denied by user");
+          if (ask) {
+            const { card, once } = ask(input);
+            if (once && waitingAsks.has(once))
+              throw new Error("This is already waiting for your owner's answer; end your turn");
+            if (once) waitingAsks.add(once);
+            try {
+              // The owner reads what will happen, not the tool's instructions to the model.
+              const text = botPermissionRequestText(card);
+              const decision = await agentManager.requestHostToolPermission(callerAgentId!, {
+                name,
+                kind: "tool",
+                title: text.title,
+                description: text.description,
+                detail: text.detail,
+                metadata: text.metadata,
+                input,
+              });
+              if (decision.behavior !== "allow") throw new Error("Denied by user");
+            } finally {
+              if (once) waitingAsks.delete(once);
+            }
           }
           const result = await run(input);
           return { content: [{ type: "text", text: JSON.stringify(result ?? { ok: true }) }] };
@@ -131,7 +159,26 @@ export function createBotAgentTools(options: {
         assignment: z.string().trim().min(1).max(20000),
       },
       (i) => service.startWorker(bot.id, i.itemId, i.repo, i.assignment),
-      true,
+      (i) => {
+        // The same checks startWorker makes, before the owner is asked about a start that can't run.
+        const item = service.storage.findItem(bot.id, i.itemId);
+        if (item.workerAgentIds.length || item.status === "done" || item.status === "canceled")
+          throw new Error("Item already has a worker or is closed");
+        const projectPath = i.repo ?? service.storage.bot(bot.id).defaultRepo;
+        if (!projectPath) throw new Error("Choose a target repository");
+        return {
+          once: `worker-start:${item.id}`,
+          card: {
+            kind: "worker_start",
+            botName: bot.name,
+            itemNumber: item.number ?? null,
+            itemTitle: item.title,
+            projectPath,
+            projectName: botProjectName(projectPath),
+            task: i.assignment,
+          },
+        };
+      },
     ),
     define(
       "bot_wait",
@@ -234,7 +281,15 @@ export function createBotAgentTools(options: {
         text: z.string().trim().min(1).max(20000),
       },
       (i) => service.handoff(bot.id, i.botId, i.text, i.type ?? "handoff"),
-      true,
+      (i) => ({
+        card: {
+          kind: "handoff",
+          botName: bot.name,
+          toBotName: service.storage.bot(i.botId).name,
+          type: i.type ?? "handoff",
+          text: i.text,
+        },
+      }),
     ),
   ];
 }

@@ -114,6 +114,18 @@ function viewportContext(): JAgentDeskToolContext {
       : undefined;
 }
 
+/** A bot tool's item as `#N`; an item named by its id shows no context. */
+function botItem(): JAgentDeskToolContext {
+  return (input) => {
+    const ref = typeof input.itemId === "string" ? input.itemId.trim() : "";
+    return /^#?\d+$/.test(ref) ? `#${ref.replace(/^#/, "")}` : undefined;
+  };
+}
+
+function bot(label: string, completedLabel: string, context?: JAgentDeskToolContext) {
+  return { label, completedLabel, ...(context ? { context } : {}) };
+}
+
 function isPresent(value: unknown): boolean {
   if (typeof value === "string") return value.trim().length > 0;
   if (Array.isArray(value)) return value.length > 0;
@@ -398,6 +410,25 @@ export const JAGENTDESK_TOOL_CATALOG = {
   browser_resize: browser("Resize browser", "Resized browser", viewportContext()),
   browser_logs: browser("Read browser logs", "Read browser logs"),
   browser_evaluate: browser("Run JavaScript", "Ran JavaScript", field("function")),
+  // Bots (spec 37.3.2): the bot's own bookkeeping, worded like its item notes in chat (Orca
+  // `bots.items.chat.*`: "Added", "Commented on", "Marked … done"), never the tool's name.
+  bot_item_add: bot("Add item", "Added item", field("title")),
+  bot_item_list: bot("List items", "Listed items"),
+  bot_item_set: bot("Update item", "Updated item", botItem()),
+  bot_item_ask: bot("Ask you about item", "Asked you about item", botItem()),
+  bot_item_comment: bot("Comment on item", "Commented on item", botItem()),
+  bot_item_link: bot("Link to item", "Linked to item", botItem()),
+  bot_item_done: bot("Mark item done", "Marked item done", botItem()),
+  bot_item_cancel: bot("Cancel item", "Canceled item", botItem()),
+  bot_worker_start: bot("Start worker", "Started worker", botItem()),
+  bot_wait: bot("Wait on item", "Waiting on item", field("condition")),
+  bot_memory_forget: bot("Forget memory", "Forgot memory", field("fact")),
+  bot_automation_save: bot("Save automation", "Saved automation", field("name")),
+  bot_event_automation_save: bot("Save automation", "Saved automation", field("name")),
+  bot_automation_list: bot("List automations", "Listed automations"),
+  bot_automation_delete: bot("Delete automation", "Deleted automation"),
+  bot_list: bot("List bots", "Listed bots"),
+  bot_handoff: bot("Message bot", "Messaged bot", field("text")),
 } satisfies Record<string, JAgentDeskToolEntry>;
 
 export type JAgentDeskToolName = keyof typeof JAGENTDESK_TOOL_CATALOG;

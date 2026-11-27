@@ -56,6 +56,15 @@ export function getJAgentDeskToolActionLabel(toolName: string): string | null {
   return getJAgentDeskToolEntry(leafName)?.completedLabel ?? humanizeLeafName(leafName);
 }
 
+/**
+ * A JAgentDesk tool's label ("Start worker") for a namespaced or bare tool name, as permission rows
+ * name the tool they ask about; null for any other tool.
+ */
+export function getJAgentDeskToolLabel(toolName: string): string | null {
+  const leafName = jagentdeskLeafName(toolName) ?? toolName.trim();
+  return getJAgentDeskToolEntry(leafName)?.label ?? null;
+}
+
 /** The agent a JAgentDesk call acts on, so callers can resolve its title. */
 export function getJAgentDeskToolTargetAgentId(
   toolName: string,

@@ -7,6 +7,8 @@ import {
   botItemActivity,
   botItemAnswersText,
   botItemChats,
+  botItemLinkName,
+  botItemLinkedEventName,
   botItemPrNumber,
   botItemQuestionLine,
   botItemSnoozePickerPresets,
@@ -180,6 +182,55 @@ describe("activity", () => {
       "agent-1:settled",
       "e2",
     ]);
+  });
+});
+
+describe("linked things by name (Orca bot-item-link-names)", () => {
+  const worker = {
+    kind: "dispatch" as const,
+    ref: "1af7e410-1c2d-4e5f-8a9b-0c1d2e3f4a5b",
+    title: "Fix the flaky test",
+    state: "working" as const,
+    startedAt_ms: 20,
+    settledAt_ms: null,
+    report: null,
+  };
+
+  it("shows a worker's link only as its Worker started line, never its agent id", () => {
+    const events: BotItemEvent[] = [
+      {
+        id: "e1",
+        itemId: "i1",
+        kind: "linked",
+        actor: { kind: "bot", botId: "b1" },
+        data: { link: { kind: "dispatch", ref: worker.ref } },
+        at_ms: 20,
+      },
+      {
+        id: "e2",
+        itemId: "i1",
+        kind: "linked",
+        actor: { kind: "bot", botId: "b1" },
+        data: { link: { kind: "pr", ref: "acme/shop#42" } },
+        at_ms: 30,
+      },
+    ];
+    const entries = botItemActivity(item({ links: [worker] }), events);
+    expect(entries.map((entry) => entry.key)).toEqual([`${worker.ref}:started`, "e2"]);
+    expect(botItemLinkedEventName(events[1]!, [worker])).toBe("#42");
+  });
+
+  it.each([
+    [{ kind: "pr", ref: "acme/shop#42" }, "#42"],
+    [{ kind: "url", ref: "https://github.com/acme/shop/issues/7" }, "#7"],
+    [{ kind: "url", ref: "https://linear.app/acme/issue/eng-12/fix" }, "ENG-12"],
+    [{ kind: "url", ref: "https://www.example.org/docs?a=1" }, "example.org"],
+    [{ kind: "file", ref: "/Users/me/code/shop/src/login.ts" }, "login.ts"],
+    [{ kind: "dispatch", ref: "1af7e410-1c2d-4e5f-8a9b-0c1d2e3f4a5b" }, "Fix the flaky test"],
+    [{ kind: "dispatch", ref: "0b2c-gone" }, null],
+    [{ kind: "automation", ref: "auto-1" }, null],
+  ])("names %o as %s", (link, name) => {
+    expect(botItemLinkName(link, [worker])).toBe(name);
   });
 });
 

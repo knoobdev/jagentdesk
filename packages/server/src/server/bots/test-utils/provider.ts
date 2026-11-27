@@ -40,6 +40,8 @@ export function createBotsTestProvider() {
       for (const cb of subscribers) cb(event);
     };
     let turnId = "";
+    // A bot worker is the ORC Lead its first prompt relays a bot item's brief to.
+    let worker = false;
     session.subscribe = (cb) => {
       subscribers.add(cb);
       return () => subscribers.delete(cb);
@@ -50,7 +52,10 @@ export function createBotsTestProvider() {
       const text = typeof prompt === "string" ? prompt : JSON.stringify(prompt);
       let role = "supervisor";
       if (config.title?.includes("Bot review")) role = config.title.split("·").at(-1)?.trim() ?? "";
-      else if (config.title?.includes("Bot worker")) role = "worker";
+      else if (worker || text.includes("Brief: bot-item:")) {
+        worker = true;
+        role = "worker";
+      }
       // A macrotask models async inference and lets AgentManager settle run admission.
       setTimeout(() => {
         void (async () => {

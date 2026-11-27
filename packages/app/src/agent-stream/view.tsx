@@ -10,6 +10,7 @@ import { useRevealedText } from "@/hooks/use-revealed-text";
 import { createStreamPresentation } from "./presentation";
 import { useInstalledTimelineTransform, PluginTimelineItemView } from "@/plugins/timeline";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
+import { botPermissionCardText } from "@/bots/permission-card-text";
 import { renderStreamRow, type RenderStreamItem } from "./stream-row";
 import { GumloopAgentHeader } from "@/components/gumloop-shell/chat-headers";
 import { GUMLOOP_MESSAGE_INDENT } from "@/components/gumloop-shell/chat-layout";
@@ -1731,13 +1732,16 @@ export function PermissionRequestCard({
 
   const { request } = permission;
   const isPlanRequest = request.kind === "plan";
-  const title = isPlanRequest
-    ? t("agentStream.permission.plan")
-    : (request.title ?? request.name ?? t("agentStream.permission.required"));
-  const description = request.description ?? "";
+  const botCard = useMemo(() => botPermissionCardText(request, t), [request, t]);
+  let title: string;
+  if (isPlanRequest) title = t("agentStream.permission.plan");
+  else
+    title = botCard?.title ?? request.title ?? request.name ?? t("agentStream.permission.required");
+  const description = botCard?.description ?? request.description ?? "";
   const resolvedToolCallDetail = useMemo(
-    () => permissionRequestDetail({ detail: request.detail, input: request.input }),
-    [request.detail, request.input],
+    () =>
+      permissionRequestDetail({ detail: botCard?.detail ?? request.detail, input: request.input }),
+    [botCard, request.detail, request.input],
   );
   const resolvedActions = useMemo((): AgentPermissionAction[] => {
     if (request.kind === "question") {
