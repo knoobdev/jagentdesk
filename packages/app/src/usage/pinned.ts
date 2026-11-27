@@ -7,6 +7,7 @@ import {
   formatUsageAccountName,
 } from "./format";
 import { displayPercent, resolveUsageSnapshot } from "./model";
+import { usageSourceIconSvg } from "./source-icon-svg";
 import {
   arrangeUsageReports,
   defaultUsagePins,
@@ -206,7 +207,7 @@ export function resolvePinnedUsage(
     return [
       {
         key: entry.id,
-        icon: entry.icon ?? null,
+        icon: usageSourceIconSvg(entry),
         hasError: entry.report.status === "error",
         windows,
       },

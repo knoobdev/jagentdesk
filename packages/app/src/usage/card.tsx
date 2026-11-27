@@ -22,6 +22,7 @@ import { formatAgo, formatProviderUsageLabel, formatUsageAccountName } from "./f
 import { resolveUsageReport, type UsageRefresh } from "./model";
 import { useReportRefresh } from "./queries";
 import { UsageSourceIcon } from "./source-icon";
+import { usageSourceIconSvg } from "./source-icon-svg";
 import type { UsageReport, UsageReportEntry, UsageWindow } from "./types";
 import { UsageWindowBar } from "./window-bar";
 import { useRelativeTimeTick } from "./use-relative-time-tick";
@@ -97,7 +98,7 @@ export function UsageCard({
             visible={arrangement.handleVisible}
           />
         ) : null}
-        <UsageSourceIcon svg={entry.icon ?? null} size={14} />
+        <UsageSourceIcon svg={usageSourceIconSvg(entry)} size={14} />
         <Text style={styles.name} numberOfLines={1}>
           {entry.sourceLabel}
         </Text>
