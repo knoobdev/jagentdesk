@@ -95,10 +95,22 @@ is usually saved as 2560x1600.
 
 Electron captures copy from the guest web contents' compositor surface. A resident
 webview parked with `display:none`, offscreen coordinates, or `opacity:0` can lose its
-copyable surface. The production parking state keeps the host fixed at `left:0`, `top:0`,
-`width:1px`, `height:1px`, `overflow:hidden`, `opacity:1`, and `pointer-events:none`.
-The webviews inside stay full-size at 1280x800, `display:inline-flex`, and absolutely
-overlap at `left:0`, `top:0`.
+copyable surface. Each production webview keeps one permanent body-level surface. Presenting
+or parking changes that surface's geometry without reparenting the webview: Electron replaces the
+guest WebContents of a reparented webview, so the page reloads and loses its state. The parking
+state uses `left:0`, `top:0`, `width:1px`, `height:1px`, `overflow:hidden`, `opacity:1`, and
+`pointer-events:none`. The webview stays at its resolved logical viewport, defaulting to
+1280x800 before first presentation, with `display:inline-flex` at `left:0`, `top:0`.
+Presentation resolves responsive guests to the pane's exact pixel dimensions after the surface
+has visible bounds. Do not apply percentage guest sizing against the parked surface: Electron
+exposes the 1x1 parking geometry as a real guest resize before expanding it again.
+
+The permanent browser host and `overlay-root` are sibling paint planes, and every React Native
+web view sits at `z-index: 0`, so a presented page paints over any app DOM in its bounds. Anything
+drawn over a page, or a resize handle on a page's edge, renders through `OverlayPlaneLayer`
+(`components/overlay-plane-layer.web.tsx`). Input over a guest goes to the guest by compositor
+hit-test, which pointer capture in the app document cannot override, so `ResizeHandle` suspends
+the surfaces' pointer events for the length of a drag.
 
 There is no renderer prep/restore handshake. Main disables guest background throttling
 once when the webview attaches, then screenshot capture uses the shared serialized queue,

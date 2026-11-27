@@ -61,10 +61,17 @@ import {
   type BrowserStepsLayout,
 } from "@/desktop/browser/pane/cockpit";
 import {
+  applyInactiveBrowserWebviewViewport,
   prepareBrowserWebview,
+  presentBrowserWebview,
+  rememberBrowserWebviewSize,
   releaseResidentBrowserWebview,
+  removeResidentBrowserWebview,
   takeResidentBrowserWebview,
+  type BrowserViewport,
 } from "../resident-webviews";
+import { useRetainedPanelActive } from "@/components/retained-panel";
+import { OverlayPlaneLayer } from "@/components/overlay-plane-layer";
 
 type ElectronWebview = HTMLElement & {
   canGoBack?: () => boolean;
@@ -602,6 +609,11 @@ function DeviceSizeMenu({
 
 const ThemedListChecks = withUnistyles(ListChecks);
 
+function rememberResolvedBrowserWebviewSize(browserId: string, webview: HTMLElement): void {
+  const bounds = webview.getBoundingClientRect();
+  rememberBrowserWebviewSize({ browserId, width: bounds.width, height: bounds.height });
+}
+
 /** Narrow pane: opens the folded steps panel over the page. */
 function BrowserStepsToggle({
   steps,
@@ -657,11 +669,15 @@ export function BrowserPane({
   const updateBrowser = useBrowserStore((state) => state.updateBrowser);
   const isAgentDriving = useAgentDriving(browserId);
   const steps = useBrowserStepsLayout();
+  const isPresented = useRetainedPanelActive();
+  const isPresentedRef = useRef(isPresented);
+  isPresentedRef.current = isPresented;
   // Stealth state lives in the stealth store (read inside the cockpit controls).
   // Connected-logins count comes from the vault (Phase 5); 0 until saved.
   const connectedLogins = 0;
   const webviewRef = useRef<ElectronWebview | null>(null);
   const webviewHostRef = useRef<HTMLDivElement | null>(null);
+  const webviewClipRef = useRef<HTMLElement | null>(null);
   const urlInputRef = useRef<WebTextInput | null>(null);
   const initialUrlRef = useRef(browser?.url ?? "https://example.com");
   const browserIdRef = useRef(browserId);
@@ -680,6 +696,20 @@ export function BrowserPane({
   const toastRef = useRef(toast);
   toastRef.current = toast;
   const [deviceSizeId, setDeviceSizeId] = useState<DeviceSizeId>("responsive");
+  const devicePreset = useMemo(
+    () =>
+      DEVICE_SIZE_PRESETS.find((preset) => preset.id === deviceSizeId) ?? DEVICE_SIZE_PRESETS[0],
+    [deviceSizeId],
+  );
+  const browserViewport = useMemo<BrowserViewport>(
+    () =>
+      devicePreset.width === null || devicePreset.height === null
+        ? { mode: "responsive" }
+        : { mode: "fixed", width: devicePreset.width, height: devicePreset.height },
+    [devicePreset.height, devicePreset.width],
+  );
+  const browserViewportRef = useRef(browserViewport);
+  browserViewportRef.current = browserViewport;
   const [pendingSelection, setPendingSelection] = useState<BrowserElementSelection | null>(null);
   // Screenshot is captured at selection time (overlay already torn down, no
   // scroll drift) and reused when the annotation card is submitted.
@@ -777,7 +807,8 @@ export function BrowserPane({
     }
 
     const host = webviewHostRef.current;
-    if (!host) {
+    const clip = webviewClipRef.current;
+    if (!host || !clip) {
       return;
     }
 
@@ -797,12 +828,29 @@ export function BrowserPane({
         initialUrl: initialUnsafeNavigationMessage ? "about:blank" : initialUrlRef.current,
       });
     }
-    webview.style.display = "flex";
-    webview.style.flex = "1";
-    webview.style.width = "100%";
-    webview.style.height = "100%";
-    webview.style.border = "0";
-    webview.style.background = "transparent";
+    // The webview never moves into the pane: its resident surface is placed over `host`.
+    releaseResidentBrowserWebview(browserId, webview);
+    if (isPresentedRef.current) {
+      presentBrowserWebview(browserId, webview, host, clip, browserViewportRef.current);
+    } else {
+      applyInactiveBrowserWebviewViewport(browserId, webview, browserViewportRef.current);
+    }
+    const sizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => {
+            if (!isPresentedRef.current) {
+              return;
+            }
+            presentBrowserWebview(
+              browserIdRef.current,
+              webview,
+              host,
+              clip,
+              browserViewportRef.current,
+            );
+            rememberResolvedBrowserWebviewSize(browserIdRef.current, webview);
+          });
 
     const handleStartLoading = () => {
       updateBrowser(browserId, { isLoading: true, lastError: null });
@@ -903,7 +951,11 @@ export function BrowserPane({
     webview.addEventListener("focus", handleWebviewFocus);
     webview.addEventListener("mousedown", handleWebviewFocus);
 
-    host.appendChild(webview);
+    if (isPresentedRef.current) {
+      rememberResolvedBrowserWebviewSize(browserId, webview);
+    }
+    sizeObserver?.observe(host);
+    sizeObserver?.observe(clip);
     if (initialUnsafeNavigationMessage) {
       updateBrowserRef.current(browserIdRef.current, {
         isLoading: false,
@@ -912,6 +964,7 @@ export function BrowserPane({
     }
 
     return () => {
+      sizeObserver?.disconnect();
       webview.removeEventListener("did-start-loading", handleStartLoading);
       webview.removeEventListener("did-stop-loading", handleStopLoading);
       webview.removeEventListener("will-navigate", handleWillNavigate);
@@ -923,15 +976,13 @@ export function BrowserPane({
       webview.removeEventListener("dom-ready", handleDomReady);
       webview.removeEventListener("focus", handleWebviewFocus);
       webview.removeEventListener("mousedown", handleWebviewFocus);
-      if (host.contains(webview)) {
-        const browserStillExists = Boolean(
-          useBrowserStore.getState().browsersById[browserIdRef.current],
-        );
-        if (browserStillExists) {
-          releaseResidentBrowserWebview(browserIdRef.current, webview);
-        } else {
-          host.removeChild(webview);
-        }
+      const browserStillExists = Boolean(
+        useBrowserStore.getState().browsersById[browserIdRef.current],
+      );
+      if (browserStillExists) {
+        releaseResidentBrowserWebview(browserIdRef.current, webview);
+      } else {
+        removeResidentBrowserWebview(browserIdRef.current);
       }
       if (webviewRef.current === webview) {
         webviewRef.current = null;
@@ -940,6 +991,32 @@ export function BrowserPane({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [browserId, onFocusPane]);
+
+  // Present or park as the pane shows or hides (inactive tab, closed inspector, other workspace).
+  useEffect(() => {
+    const webview = webviewRef.current;
+    if (!webview) {
+      return;
+    }
+    if (!isPresented) {
+      releaseResidentBrowserWebview(browserId, webview);
+      return;
+    }
+    const host = webviewHostRef.current;
+    const clip = webviewClipRef.current;
+    if (host && clip) {
+      presentBrowserWebview(browserId, webview, host, clip, browserViewport);
+    }
+    if (browserViewport.mode === "fixed") {
+      rememberBrowserWebviewSize({
+        browserId,
+        width: browserViewport.width,
+        height: browserViewport.height,
+      });
+    } else {
+      rememberResolvedBrowserWebviewSize(browserId, webview);
+    }
+  }, [browserId, browserViewport, isPresented]);
 
   const navigate = useCallback(
     (nextUrl: string) => {
@@ -1590,11 +1667,6 @@ export function BrowserPane({
     [selectorMode],
   );
 
-  const devicePreset = useMemo(
-    () =>
-      DEVICE_SIZE_PRESETS.find((preset) => preset.id === deviceSizeId) ?? DEVICE_SIZE_PRESETS[0],
-    [deviceSizeId],
-  );
   const isResponsiveDevice = devicePreset.width === null;
 
   const webviewHostStyle = useMemo<CSSProperties>(
@@ -1629,6 +1701,10 @@ export function BrowserPane({
 
   const setWebviewHostNode = useCallback((node: HTMLDivElement | null) => {
     webviewHostRef.current = node;
+  }, []);
+
+  const setWebviewClipNode = useCallback((node: unknown) => {
+    webviewClipRef.current = node instanceof HTMLElement ? node : null;
   }, []);
 
   if (!isElectronRuntime()) {
@@ -1752,27 +1828,39 @@ export function BrowserPane({
               </Text>
             </View>
           ) : null}
-          <View style={webviewWrapStyle}>
+          <View
+            ref={setWebviewClipNode}
+            style={webviewWrapStyle}
+            testID={`browser-webview-clip-${browserId}`}
+          >
             {createElement("div", {
               ref: setWebviewHostNode,
               style: webviewHostStyle,
             })}
-            {isAgentDriving ? (
-              <View style={styles.drivingBadge} pointerEvents="none">
-                <View style={styles.drivingBadgeDot} />
-                <Text style={styles.drivingBadgeText}>agent driving</Text>
-              </View>
-            ) : null}
-            <BrowserDialogBar browserId={browserId} />
-            {steps.overlayOpen ? (
-              <BrowserTaskPanel browserId={browserId} title={browser?.title ?? draftUrl} overlay />
-            ) : null}
-            {pendingSelection ? (
-              <BrowserElementAnnotationCard
-                selection={pendingSelection}
-                onSubmit={submitAnnotation}
-                onCancel={cancelAnnotation}
-              />
+            {isPresented ? (
+              <OverlayPlaneLayer style={styles.pageOverlay}>
+                {isAgentDriving ? (
+                  <View style={styles.drivingBadge} pointerEvents="none">
+                    <View style={styles.drivingBadgeDot} />
+                    <Text style={styles.drivingBadgeText}>agent driving</Text>
+                  </View>
+                ) : null}
+                <BrowserDialogBar browserId={browserId} />
+                {steps.overlayOpen ? (
+                  <BrowserTaskPanel
+                    browserId={browserId}
+                    title={browser?.title ?? draftUrl}
+                    overlay
+                  />
+                ) : null}
+                {pendingSelection ? (
+                  <BrowserElementAnnotationCard
+                    selection={pendingSelection}
+                    onSubmit={submitAnnotation}
+                    onCancel={cancelAnnotation}
+                  />
+                ) : null}
+              </OverlayPlaneLayer>
             ) : null}
           </View>
         </View>
@@ -1889,6 +1977,14 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     minWidth: 0,
     minHeight: 0,
+  },
+  // Controls over the page render in the overlay plane, above the page's browser surface.
+  pageOverlay: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    right: 0,
+    bottom: 0,
   },
   drivingBadge: {
     position: "absolute",

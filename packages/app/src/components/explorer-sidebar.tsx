@@ -46,6 +46,7 @@ import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { RetainedPanelActivity } from "@/components/retained-panel";
 import { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
 import { ResizeHandle } from "@/components/resize-handle";
+import { OverlayPlaneLayer } from "@/components/overlay-plane-layer";
 import {
   resolveExplorerSidebarDockSizes,
   resolveExplorerSidebarWidth,
@@ -311,19 +312,21 @@ function useInspectorResize(containerWidth: number): { width: number; handle: Re
   );
   const handle = useMemo(
     () => (
-      <View style={explorerStaticStyles.inspectorResize}>
-        <ResizeHandle
-          testID="workspace-explorer-sidebar-resize-handle"
-          direction="horizontal"
-          hitAreaAlignment="end"
-          groupId="explorer-sidebar"
-          index={0}
-          sizes={sizes}
-          containerSize={containerWidth}
-          onPreviewResizeSplit={preview}
-          onResizeSplit={commit}
-        />
-      </View>
+      <OverlayPlaneLayer style={explorerStaticStyles.inspectorResize}>
+        <View style={explorerStaticStyles.inspectorResizeRow}>
+          <ResizeHandle
+            testID="workspace-explorer-sidebar-resize-handle"
+            direction="horizontal"
+            hitAreaAlignment="end"
+            groupId="explorer-sidebar"
+            index={0}
+            sizes={sizes}
+            containerSize={containerWidth}
+            onPreviewResizeSplit={preview}
+            onResizeSplit={commit}
+          />
+        </View>
+      </OverlayPlaneLayer>
     ),
     [commit, containerWidth, preview, sizes],
   );
@@ -756,14 +759,16 @@ const explorerStaticStyles = RNStyleSheet.create({
   desktopSidebar: {
     position: "relative" as const,
   },
+  // The handle's 10 px hit area inside the left edge. It renders in the overlay plane: a browser
+  // tab in the inspector paints its page above the app's DOM and would cover it.
   inspectorResize: {
     position: "absolute",
     left: 0,
     top: 0,
     bottom: 0,
-    zIndex: 2,
-    flexDirection: "row",
+    width: 10,
   },
+  inspectorResizeRow: { flex: 1, flexDirection: "row" },
 });
 
 const styles = StyleSheet.create((theme) => ({
