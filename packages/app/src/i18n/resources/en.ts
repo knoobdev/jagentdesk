@@ -3228,6 +3228,25 @@ export const en = {
       crashed: "{{count}} crashed",
     },
   },
+  notificationFeed: {
+    title: "Notifications",
+    unread: "{{count}} unread notifications",
+    markAllRead: "Mark all read",
+    settings: "Notification settings",
+    emptyTitle: "No notifications yet",
+    emptyBody: "Agents that finish, ask for permission or fail show up here.",
+    loadFailed: "Couldn't load notifications",
+    day: {
+      today: "Today",
+      yesterday: "Yesterday",
+    },
+    time: {
+      now: "now",
+      minutes: "{{count}}m",
+      hours: "{{count}}h",
+      yesterday: "Yesterday",
+    },
+  },
   marketplace: {
     title: "Plugin Marketplace",
     subtitle: "Discover and install community plugins for JAgentDesk.",

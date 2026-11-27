@@ -22,7 +22,6 @@ import { Pressable, ScrollView, Text, View } from "react-native";
 import {
   ArrowLeft,
   ArrowDownUp,
-  Bell,
   Blocks,
   ChevronDown,
   ChevronRight,
@@ -67,6 +66,7 @@ import { useSidebarViewStore } from "@/stores/sidebar-view-store";
 import { usePairDeviceModalStore } from "@/stores/pair-device-modal-store";
 import { useUsageSummary, UsageSidebarItem } from "@/usage/sidebar-item";
 import { BrowserTabsHostButton } from "@/desktop/browser/live-tabs/host-button";
+import { NotificationsHostButton } from "@/notification-feed/host-button";
 import type { Theme } from "@/styles/theme";
 import {
   buildSettingsAddHostRoute,
@@ -235,10 +235,6 @@ function ConnectionFooter({ serverId, onNavigate }: { serverId: string; onNaviga
     onNavigate();
     router.push(buildClientHostSettingsRoute(serverId));
   }, [serverId, onNavigate]);
-  const notifications = useCallback(() => {
-    onNavigate();
-    router.push(buildSettingsSectionRoute("general"));
-  }, [onNavigate]);
   // Same transport label as the host picker and Settings: Local, Tailscale or
   // Relay (spec 05.1.2; the desktop's bundled daemon reads "Local", ADR-0056).
   const transportLabel = t(hostTransportLabelKey(snapshot?.activeConnection?.type ?? "directTcp"));
@@ -293,12 +289,7 @@ function ConnectionFooter({ serverId, onNavigate }: { serverId: string; onNaviga
           testID="sidebar-settings"
         />
         <BrowserTabsHostButton />
-        <AccountButton
-          icon={Bell}
-          label="Notifications"
-          onPress={notifications}
-          testID="sidebar-notifications"
-        />
+        <NotificationsHostButton serverId={serverId} onNavigate={onNavigate} />
         <SidebarHelpMenu />
       </View>
     </View>

@@ -59,6 +59,7 @@ import { toErrorMessage } from "@/utils/error-messages";
 import { showProviderNoticeToast } from "@/utils/provider-notice-toast";
 import { applyCheckoutStatusUpdateFromEvent } from "@/git/checkout-status-cache";
 import { resyncProviderSubagents, useProviderSubagentStore } from "@/subagents/provider-store";
+import { useNotificationFeedSync } from "@/notification-feed/store";
 import { revalidateSessionAfterResume } from "@/contexts/session-resume-revalidation";
 
 function applyToolResultToMessages(
@@ -200,6 +201,16 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
   const supportsPluginNotifications =
     useHostFeature(serverId, "pluginNotifications") ||
     client.getLastServerInfoMessage()?.features?.pluginNotifications === true;
+  // COMPAT(notificationFeed): added in v0.12.3, remove gate after 2027-06-01.
+  const supportsNotificationFeed =
+    useHostFeature(serverId, "notificationFeed") ||
+    client.getLastServerInfoMessage()?.features?.notificationFeed === true;
+  useNotificationFeedSync({
+    client,
+    serverId,
+    supported: supportsNotificationFeed,
+    connected: isConnected,
+  });
   const toast = useToast();
 
   // Zustand store actions

@@ -3276,6 +3276,26 @@ export const ru: TranslationResources = {
       crashed: "сбой: {{count}}",
     },
   },
+  notificationFeed: {
+    title: "Уведомления",
+    unread: "Непрочитанных уведомлений: {{count}}",
+    markAllRead: "Отметить все как прочитанные",
+    settings: "Настройки уведомлений",
+    emptyTitle: "Уведомлений пока нет",
+    emptyBody:
+      "Здесь появляются агенты, которые завершили работу, запросили разрешение или завершились с ошибкой.",
+    loadFailed: "Не удалось загрузить уведомления",
+    day: {
+      today: "Сегодня",
+      yesterday: "Вчера",
+    },
+    time: {
+      now: "сейчас",
+      minutes: "{{count}} мин",
+      hours: "{{count}} ч",
+      yesterday: "Вчера",
+    },
+  },
   marketplace: {
     title: "Plugin Marketplace",
     subtitle: "Discover and install community plugins for JAgentDesk.",

@@ -3140,6 +3140,25 @@ export const zhCN: TranslationResources = {
       crashed: "{{count}} 个已崩溃",
     },
   },
+  notificationFeed: {
+    title: "通知",
+    unread: "{{count}} 条未读通知",
+    markAllRead: "全部标为已读",
+    settings: "通知设置",
+    emptyTitle: "暂无通知",
+    emptyBody: "完成、请求权限或失败的代理会显示在这里。",
+    loadFailed: "无法加载通知",
+    day: {
+      today: "今天",
+      yesterday: "昨天",
+    },
+    time: {
+      now: "刚刚",
+      minutes: "{{count}} 分钟",
+      hours: "{{count}} 小时",
+      yesterday: "昨天",
+    },
+  },
   marketplace: {
     title: "Plugin Marketplace",
     subtitle: "Discover and install community plugins for JAgentDesk.",

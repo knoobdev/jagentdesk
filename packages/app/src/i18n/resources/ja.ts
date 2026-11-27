@@ -3216,6 +3216,25 @@ export const ja: TranslationResources = {
       crashed: "クラッシュ {{count}}",
     },
   },
+  notificationFeed: {
+    title: "通知",
+    unread: "未読の通知 {{count}} 件",
+    markAllRead: "すべて既読にする",
+    settings: "通知設定",
+    emptyTitle: "通知はまだありません",
+    emptyBody: "完了した、権限を求めている、または失敗したエージェントがここに表示されます。",
+    loadFailed: "通知を読み込めませんでした",
+    day: {
+      today: "今日",
+      yesterday: "昨日",
+    },
+    time: {
+      now: "たった今",
+      minutes: "{{count}}分",
+      hours: "{{count}}時間",
+      yesterday: "昨日",
+    },
+  },
   marketplace: {
     title: "Plugin Marketplace",
     subtitle: "Discover and install community plugins for JAgentDesk.",

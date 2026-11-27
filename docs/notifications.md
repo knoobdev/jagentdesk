@@ -25,6 +25,32 @@ so the daemon filters Expo pushes per token, while desktop and web clients filte
 in-app OS notifications locally before calling `sendOsNotification`. Notification
 generation and presence remain daemon concerns.
 
+## Notification list (the bell)
+
+The bell in the sidebar host row lists what the host notified about (ADR-0063). The daemon owns the
+list so every device sees the same rows and the same read state, including what happened while the
+app was closed. `NotificationFeed` (`packages/server/src/server/notification-feed/feed.ts`) keeps
+500 rows or 30 days in `$JAGENTDESK_HOME/notification-feed.json`.
+
+- Sources append whether or not anyone was told: agent attention in `broadcastAgentAttention`, bot
+  owner notices through `BotsService`'s `recordNotice`, and `sendPluginNotification`. A new source
+  appends through the WebSocket server, which also broadcasts the change.
+- An agent gets one unread row per reason. Repeat finishes while that row is unread add nothing,
+  like the push.
+- A row is read when a client marks it, when any client shows its agent (presence focus or
+  `clear_agent_attention`), or when it opens the bot item (`bots.items.show`).
+- `notifications.feed.changed` goes only to sessions that subscribed to it. Subscribe only when
+  `server_info.features.notificationFeed` is on: an older daemon rejects the whole
+  `session.events.set_subscription` request over the unknown event name, and `DaemonClient.on()`
+  subscribes automatically to any event name it knows.
+- Agent rows store the fixed strings of spec 14 §7.1. The app puts the agent's name in front of the
+  body when it knows the agent, otherwise every row reads "Agent finished".
+- A plugin muted on this device hides its rows here only. The badge subtracts the host's
+  `unreadPlugins` counts for those plugins.
+
+A host without the feature keeps the bell as a shortcut to Settings → This device →
+Notifications.
+
 ## Native delivery
 
 Keep the router instance at module scope. Android's `singleTask` Activity can

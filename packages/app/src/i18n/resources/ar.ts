@@ -3217,6 +3217,25 @@ export const ar: TranslationResources = {
       crashed: "{{count}} تعطّل",
     },
   },
+  notificationFeed: {
+    title: "الإشعارات",
+    unread: "{{count}} إشعارات غير مقروءة",
+    markAllRead: "تعليم الكل كمقروء",
+    settings: "إعدادات الإشعارات",
+    emptyTitle: "لا توجد إشعارات بعد",
+    emptyBody: "تظهر هنا الوكلاء التي تنتهي أو تطلب إذنًا أو تفشل.",
+    loadFailed: "تعذّر تحميل الإشعارات",
+    day: {
+      today: "اليوم",
+      yesterday: "أمس",
+    },
+    time: {
+      now: "الآن",
+      minutes: "{{count}} د",
+      hours: "{{count}} س",
+      yesterday: "أمس",
+    },
+  },
   marketplace: {
     title: "Plugin Marketplace",
     subtitle: "Discover and install community plugins for JAgentDesk.",
