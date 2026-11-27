@@ -52,6 +52,11 @@ export interface AcpOptions {
   };
 
   workspaceOnlyCatalog?: boolean;
+  /**
+   * For an agent that lists thinking options only for the selected model: discovery selects each
+   * model in turn and records the thinking options the agent lists for it, or none.
+   */
+  perModelThinkingOptions?: boolean;
   /** Publish session readiness after this much quiet time following replayed history. */
   loadReplayQuietPeriodMs?: number;
   autoAcceptMode?: {
