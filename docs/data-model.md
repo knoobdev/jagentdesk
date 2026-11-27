@@ -365,6 +365,11 @@ viewed timelines restore through their owning runtime, so opening one chat never
 saved hosts or unrelated streaming agents. Each chat keeps its latest 50 canonical items. The
 whole cache has a 32 MiB budget and evicts whole hosts in least-recently-written order.
 
+On web and Electron, tabs share IndexedDB but hold independent directory snapshots in memory. A
+tab can commit directory deltas only while the persisted checkpoint revision matches the one it
+read or wrote. If a different tab evicts or rewrites that baseline, the next full directory refresh
+can replace it. Timeline writes do not depend on the directory checkpoint.
+
 The cache is disposable; provider history remains authoritative. Changing its schema evicts
 cached rows rather than migrating them. Pending permission requests and unreconciled local
 prompts are never stored. The rows are not encrypted, so cached chats may contain source code,
