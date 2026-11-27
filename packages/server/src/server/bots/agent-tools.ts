@@ -8,6 +8,7 @@ import type { JAgentDeskToolDefinition } from "../agent/tools/types.js";
 import type { AgentManager } from "../agent/agent-manager.js";
 import type { BotsService } from "./service.js";
 import { BOT_ID_LABEL } from "./runtime.js";
+import { BOT_EVENT_AUTOMATION_SOURCES } from "./event-automations.js";
 
 export function createBotAgentTools(options: {
   service: BotsService;
@@ -178,6 +179,30 @@ export function createBotAgentTools(options: {
             name: i.name,
             cron: i.cron,
             ...(i.timezone ? { timezone: i.timezone } : {}),
+            prompt: i.prompt,
+            enabled: i.enabled ?? true,
+          },
+          i.automationId,
+        ),
+    ),
+    define(
+      "bot_event_automation_save",
+      "Create or change an automation that runs a prompt in your Home Chat when a GitHub, GitLab or Telegram event of yours happens (for example github ci_failed, gitlab ci_failed, github comment). It runs whoever caused the event",
+      {
+        automationId: z.string().optional(),
+        name: z.string().trim().min(1).max(100),
+        source: z.enum(BOT_EVENT_AUTOMATION_SOURCES),
+        event: z.string().min(1).max(64),
+        prompt: z.string().trim().min(1).max(20000),
+        enabled: z.boolean().optional(),
+      },
+      (i) =>
+        service.saveEventAutomation(
+          bot.id,
+          {
+            name: i.name,
+            source: i.source,
+            event: i.event,
             prompt: i.prompt,
             enabled: i.enabled ?? true,
           },

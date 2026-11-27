@@ -246,6 +246,36 @@ describe("GitHub webhook connector (spec 37.10)", () => {
       subject: "octo/test-repo#7",
     });
   });
+  it("A37.10.4: the same stranger comment still runs an automation on github / comment, once", async () => {
+    const t = await setup();
+    t.bus.on((event) => t.bots.connectorEvent(event));
+    t.bots.saveEventAutomation(t.bot.id, {
+      name: "Triage comments",
+      source: "github",
+      event: "comment",
+      prompt: "Triage the new comment.",
+      enabled: true,
+    });
+    await t.request("bots.github.add_repo.request", { target: "octo/test-repo" });
+    const comment = issueComment("stranger", "/scout fix the typo");
+    await t.post("issue_comment", comment, { guid: "c-1" });
+    await t.post("issue_comment", comment, { guid: "c-1" });
+    expect(t.runtime.sent).toHaveLength(1);
+    expect(t.runtime.sent[0].text).toContain('your automation "Triage comments" ran');
+    expect(t.runtime.sent[0].text).toContain("Triage the new comment.");
+    expect(t.runtime.sent[0].text).toContain("subject: octo/test-repo#7");
+    expect(t.runtime.sent[0].source).toBeUndefined();
+    t.runtime.finish(t.bot, "auto-1", "Labelled it.");
+    await t.bots.settled();
+    await t.github.settled();
+    expect(t.gh.api("POST", "repos/octo/test-repo/issues")).toHaveLength(0);
+    const { automations } = t.bots.automations(t.bot.id);
+    expect(automations.find((row) => row.event)).toMatchObject({
+      name: "Triage comments",
+      event: { source: "github", event: "comment" },
+      enabled: true,
+    });
+  });
   it("A37.10.6: on relay reconnect asks GitHub to resend failed deliveries of the last 72 h once", async () => {
     const t = await setup();
     await t.request("bots.github.add_repo.request", { target: "octo/test-repo" });

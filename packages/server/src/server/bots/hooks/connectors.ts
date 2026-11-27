@@ -53,6 +53,8 @@ export class BotsHookConnectors {
     this.github = new BotsGitHub(bots, { ...shared, gh: options.gh });
     this.gitlab = new BotsGitLab(bots, { ...shared, glab: options.glab });
     this.telegram = new BotsTelegram(bots, { ...shared, apiBaseUrl: options.telegramApiBaseUrl });
+    // Event automations (spec 37.2.6) hear every verified event, whoever sent it.
+    this.events.on((event) => bots.connectorEvent(event));
     // `bots.allowed.list` merges these with Slack's (bots contract).
     bots.allowedSources.push(async (bot) =>
       this.allowedPeople(bot.id).map(({ source, id, name }) => ({ source, id, name })),

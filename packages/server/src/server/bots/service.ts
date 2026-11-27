@@ -77,6 +77,18 @@ import {
 import { applyTidyOps, nextTidyAt, parseTidyOps, tidyDue, tidyUpPrompt } from "./tidy-up.js";
 import { automationRows, chatTree, needsYouRows } from "./read-models.js";
 import { BOT_TEMPLATES } from "./templates/catalog.js";
+import type { BotConnectorEvent } from "./hooks/events.js";
+import {
+  deleteEventAutomation,
+  eventAutomationTurn,
+  forgetEventAutomations,
+  isEventAutomationId,
+  listEventAutomations,
+  matchingEventAutomations,
+  saveEventAutomation,
+  type BotEventAutomation,
+  type BotEventAutomationInput,
+} from "./event-automations.js";
 import { BOT_TEMPLATE_SKILL_TEXT } from "./templates/skills.js";
 import { BOT_SETUP_FILE, BOT_TEMPLATE_CATEGORY_LABELS } from "./templates/types.js";
 
@@ -378,6 +390,7 @@ export class BotsService {
     this.storage.saveBot({ ...bot, paused: true });
     for (const item of this.storage.items(id)) await this.cancel(id, item.id, "Bot deleted");
     if (bot.agentId) await this.runtime.cancel(bot.agentId);
+    forgetEventAutomations(this.storage, id);
     this.storage.deleteBot(id);
     for (const room of rooms)
       this.emit({ type: "bots.room.changed", payload: { roomId: room.id } });
@@ -966,12 +979,56 @@ export class BotsService {
     return schedule;
   }
   deleteSchedule(botId: string, scheduleId: string): void {
+    if (isEventAutomationId(scheduleId)) {
+      this.storage.bot(botId);
+      deleteEventAutomation(this.storage, botId, scheduleId);
+      this.activity(botId, ["automations"]);
+      return;
+    }
     const bot = this.storage.bot(botId);
     if (!bot.schedules.some((s) => s.id === scheduleId))
       throw new BotsError("not_found", "Schedule not found");
     this.storage.saveBot({ ...bot, schedules: bot.schedules.filter((s) => s.id !== scheduleId) });
     this.changed(botId);
     this.activity(botId, ["automations"]);
+  }
+
+  // ── Event automations (spec 37.2.6): GitHub, GitLab and Telegram events ──
+
+  /** Created only by the bot, through its chat tool (spec 37.2.6). */
+  saveEventAutomation(
+    botId: string,
+    automation: BotEventAutomationInput,
+    automationId?: string,
+  ): BotEventAutomation {
+    this.storage.bot(botId);
+    const saved = saveEventAutomation({
+      storage: this.storage,
+      botId,
+      automation,
+      automationId,
+      now: this.now(),
+    });
+    this.activity(botId, ["automations"]);
+    return saved;
+  }
+
+  /**
+   * A connector event runs every enabled event automation listening for it, whoever caused it;
+   * Who can ask gates only asking the bot. One run per automation and event key, nothing while paused.
+   */
+  connectorEvent(event: BotConnectorEvent): void {
+    const bot = this.storage.listBots().find((entry) => entry.id === event.botId);
+    if (!bot || bot.paused) return;
+    for (const automation of matchingEventAutomations(this.storage, event)) {
+      const queued = this.wake(
+        bot.id,
+        eventAutomationTurn(automation, event),
+        "automation",
+        `event-automation:${automation.id}:${event.key}`,
+      );
+      if (queued) this.note(bot.id, automation.name, { kind: "automation", state: "done" });
+    }
   }
 
   // ── Handoff and groups (spec 37.3.6) ───────────────────────────────────
@@ -1861,12 +1918,24 @@ export class BotsService {
       nextTidyAt: nextTidyAt(this.now()),
       runningSchedules: running,
     });
-    return { automations, total: bot.schedules.length };
+    const events = listEventAutomations(this.storage, botId);
+    for (const entry of events)
+      automations.push({
+        id: entry.id,
+        kind: "schedule",
+        name: entry.name,
+        state: entry.enabled ? "idle" : "stopped",
+        enabled: entry.enabled,
+        event: { source: entry.source, event: entry.event },
+      });
+    return { automations, total: bot.schedules.length + events.length };
   }
 
   async runAutomationNow(botId: string, automationId: string): Promise<boolean> {
     if (automationId === "look_around") return (await this.lookAround(botId, true)).started;
     if (automationId === "tidy_up") return (await this.tidyUp(botId, true)).started;
+    if (isEventAutomationId(automationId))
+      throw new BotsError("invalid_argument", "An event automation runs when its event happens.");
     const bot = this.storage.bot(botId);
     if (bot.paused) throw new BotsError("paused", "Turn the bot on to run its automations.");
     const schedule = bot.schedules.find((s) => s.id === automationId);

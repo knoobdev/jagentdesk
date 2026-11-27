@@ -92,6 +92,14 @@ Look around catches up a slot the host slept through on the same day only, never
 it was turned on, and never before the bot's first conversation. Tidy memory runs in the 3–8 AM
 window after a night with chat.
 
+Event automations run a prompt in the Home Chat when a GitHub, GitLab or Telegram event of the bot
+happens (`event-automations.ts`). The bot creates them only with its `bot_event_automation_save`
+tool; they list in `bots.automations.list` with `event` set. They live in the bots state table,
+not on `Bot.schedules`, because round-1 apps parse every schedule with a required `cron`. An event
+runs every matching automation whoever caused it (Who can ask gates only asking the bot), once
+per automation and event key, and nothing while the bot is paused. Slack and Jira events do not
+reach them yet.
+
 A bot without a GitHub webhook still polls with the installed `gh` every five minutes, after
 `gh auth status` succeeds. Set `githubLogin` when it differs from the slug. Open PRs with review
 requests and open issues labelled `bot:<slug>` wake the bot once per URL/update time. A bot with a

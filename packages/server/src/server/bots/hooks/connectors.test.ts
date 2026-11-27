@@ -108,3 +108,52 @@ describe("connectors on the bot record (bots contract)", () => {
     ]);
   });
 });
+
+describe("event automations (spec 37.2.6)", () => {
+  it("a connector event reaches the bot's event automations through BotsHookConnectors", async () => {
+    const t = await setup();
+    const automation = t.bots.saveEventAutomation(t.bot.id, {
+      name: "Hello",
+      source: "telegram",
+      event: "message",
+      prompt: "Say hello.",
+      enabled: true,
+    });
+    const event = {
+      botId: t.bot.id,
+      source: "telegram" as const,
+      event: "message",
+      key: "u-1",
+      occurredAt: 1,
+    };
+    t.connectors.events.emit(event);
+    t.connectors.events.emit(event);
+    await t.bots.settled();
+    expect(t.runtime.sent).toHaveLength(1);
+    expect(t.runtime.sent[0].text).toContain("Say hello.");
+
+    await t.request("bots.pause.request", { paused: true });
+    t.connectors.events.emit({ ...event, key: "u-2" });
+    await t.bots.settled();
+    expect(t.bots.storage.pending(t.bot.id)).toHaveLength(0);
+
+    await expect(
+      t.request("bots.automations.run_now.request", { automationId: automation.id }),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
+    await t.request("bots.schedules.delete.request", { scheduleId: automation.id });
+    expect(t.bots.automations(t.bot.id).automations.some((row) => row.event)).toBe(false);
+  });
+
+  it("refuses an event the source does not have", async () => {
+    const t = await setup();
+    expect(() =>
+      t.bots.saveEventAutomation(t.bot.id, {
+        name: "Nope",
+        source: "telegram",
+        event: "ci_failed",
+        prompt: "x",
+        enabled: true,
+      }),
+    ).toThrow(/Unknown telegram event/);
+  });
+});

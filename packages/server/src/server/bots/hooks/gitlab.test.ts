@@ -285,6 +285,30 @@ describe("GitLab webhook connector (spec 37.11)", () => {
       expect.objectContaining({ source: "gitlab", event: "ci_failed", place: "grp/app" }),
     ]);
   });
+  it("A37.11.4: an automation on gitlab / ci_failed runs exactly once for a failed pipeline", async () => {
+    const t = await setup();
+    t.bus.on((event) => t.bots.connectorEvent(event));
+    t.bots.saveEventAutomation(t.bot.id, {
+      name: "Fix CI",
+      source: "gitlab",
+      event: "ci_failed",
+      prompt: "Find why the pipeline failed.",
+      enabled: true,
+    });
+    await t.request("bots.gitlab.add_project.request", { host: "gitlab.com", path: "grp/app" });
+    const failed = {
+      object_kind: "pipeline",
+      project,
+      user,
+      object_attributes: { id: 70, status: "failed", ref: "main" },
+    };
+    await t.post("Pipeline Hook", { ...failed, object_attributes: { id: 70, status: "running" } });
+    await t.post("Pipeline Hook", failed, { uuid: "p-1" });
+    await t.post("Pipeline Hook", failed, { uuid: "p-2" });
+    expect(t.runtime.sent).toHaveLength(1);
+    expect(t.runtime.sent[0].text).toContain("Find why the pipeline failed.");
+    expect(t.runtime.sent[0].text).toContain("event: gitlab / ci_failed");
+  });
   it("A37.11.5: rotate → old token 401, new 200; status and logs hold no token", async () => {
     const t = await setup();
     await t.request("bots.gitlab.add_project.request", { host: "gitlab.com", path: "grp/app" });
