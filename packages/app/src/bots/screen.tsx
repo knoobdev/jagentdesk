@@ -30,6 +30,9 @@ import { BotChat } from "./chat";
 import { BotItems, useBotPermissions } from "./items";
 import { HomeFiles } from "./home-files";
 import { BotSlackSettings } from "./slack";
+import { BotSharingRow } from "./sharing/sharing-row";
+import { BotShareReceiveSheet } from "./sharing/receive-flow";
+import { useBotSharingSupported } from "./sharing/share-queries";
 import { BotSchedules } from "./schedules";
 import { RoomSheet, RoomChat } from "./rooms";
 import { HowBotsWorkButton, TeammateCard } from "./help";
@@ -87,6 +90,7 @@ function BotSettings({
       />
       <View style={styles.body}>
         <BotSlackSettings serverId={serverId} botId={bot.id} />
+        <BotSharingRow serverId={serverId} bot={bot} />
         <Button
           variant="outline"
           onPress={togglePause}
@@ -262,6 +266,36 @@ function MissingBotTarget({
   if (!requested || !botsReady || !roomsReady) return null;
   return <Alert title={t("bots.missing")} />;
 }
+function LinkSheet({
+  open,
+  ...props
+}: { open: boolean } & Parameters<typeof BotShareReceiveSheet>[0]) {
+  return open ? <BotShareReceiveSheet {...props} /> : null;
+}
+/** New bot, and From a link… when the host can receive shared bots (spec 37.13.3). */
+function BotsHeaderActions({
+  sharing,
+  onNewBot,
+  onFromLink,
+}: {
+  sharing: boolean;
+  onNewBot: () => void;
+  onFromLink: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <View style={styles.row}>
+      {sharing ? (
+        <Button size="sm" variant="outline" onPress={onFromLink} testID="bots-from-link">
+          {t("bots.share.receive.fromLinkMenu")}
+        </Button>
+      ) : null}
+      <Button size="sm" onPress={onNewBot} testID="bots-create">
+        {t("bots.newBot")}
+      </Button>
+    </View>
+  );
+}
 function HostBotsScreen({ serverId }: { serverId: string }) {
   const gumloop = useGumloopDesktopShell(true);
   const bodyStyle = useMemo(
@@ -305,12 +339,31 @@ function HostBotsScreen({ serverId }: { serverId: string }) {
   const newRoom = useCallback(function newRoom() {
     router.setParams({ create: "room" });
   }, []);
+  const fromLink = useCallback(function fromLink() {
+    router.setParams({ create: "link" });
+  }, []);
+  const openBot = useCallback(
+    function openBot(botId: string) {
+      router.replace(buildBotsRoute(serverId, { botId }) as Href);
+    },
+    [serverId],
+  );
+  const sharing = useBotSharingSupported(serverId);
   const bot = bots.data?.find((entry) => entry.id === params.botId);
   const room = rooms.data?.find((entry) => entry.id === params.roomId);
   const createSheet =
     params.create === "bot" ? (
       <CreateBotSheet serverId={serverId} onClose={closeSheet} onCreated={createdBot} />
     ) : null;
+  const linkSheet = (
+    <LinkSheet
+      open={params.create === "link"}
+      serverId={serverId}
+      onClose={closeSheet}
+      onCreated={createdBot}
+      onOpenBot={openBot}
+    />
+  );
   const roomSheet =
     params.create === "room" ? (
       <RoomSheet
@@ -322,12 +375,8 @@ function HostBotsScreen({ serverId }: { serverId: string }) {
       />
     ) : null;
   const actions = useMemo(
-    () => (
-      <Button size="sm" onPress={newBot} testID="bots-create">
-        {t("bots.newBot")}
-      </Button>
-    ),
-    [newBot, t],
+    () => <BotsHeaderActions sharing={sharing} onNewBot={newBot} onFromLink={fromLink} />,
+    [newBot, fromLink, sharing],
   );
   const roomActions = useMemo(
     () => (
@@ -354,6 +403,7 @@ function HostBotsScreen({ serverId }: { serverId: string }) {
       <>
         <BotView key={bot.id} serverId={serverId} bot={bot} onBack={back} />
         {createSheet}
+        {linkSheet}
         {roomSheet}
       </>
     );
@@ -375,6 +425,7 @@ function HostBotsScreen({ serverId }: { serverId: string }) {
           onDeleted={back}
         />
         {createSheet}
+        {linkSheet}
         {roomSheet}
       </View>
     );
@@ -413,6 +464,7 @@ function HostBotsScreen({ serverId }: { serverId: string }) {
         ))}
       </ScrollView>
       {createSheet}
+      {linkSheet}
       {roomSheet}
     </View>
   );
