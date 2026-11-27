@@ -1,4 +1,4 @@
-import { BotsScreen } from "@/bots/screen";
+import { BotsScreen } from "@/bots/page";
 export default function HostBotsRoute() {
   return <BotsScreen />;
 }

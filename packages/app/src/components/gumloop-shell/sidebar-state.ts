@@ -63,8 +63,8 @@ export type SidebarDrillIn =
   | { kind: "destination"; serverId: string; section: string; title: string }
   | null;
 
+// A bot page keeps the root sidebar: the Bots section is that page's left panel (spec 37.4.1).
 const DESTINATIONS: Readonly<Record<string, string>> = {
-  bots: "Bots",
   plugin: "Plugins",
 };
 

@@ -2,7 +2,7 @@ import { BuiltinLeftPanel, BuiltinSidebarDestinations } from "@/plugins/builtin/
 import { builtinClientRegistry } from "@/plugins/builtin/loaded";
 import { SidebarFooterIconHighlight } from "@/components/sidebar/sidebar-footer-icon-highlight";
 import { UsageSidebarItem, useUsageSummary, useOpenSidebarUsage } from "@/usage/sidebar-item";
-import { BotsSidebar } from "@/bots/sidebar";
+import { SidebarBotsSection } from "@/bots/sidebar-section";
 import { isNative as platformIsNative } from "@/constants/platform";
 import { PluginSidebarPanel } from "@/plugins/sidebar-screen-items";
 import { BuiltinPluginGate } from "@/plugins/builtin/gate";
@@ -147,6 +147,12 @@ export { shouldShowAddProject, shouldShowSidebarFooter } from "./sidebar-add-pro
  * rendered directly (not passed as a prop) so the two sidebar variants avoid a
  * nested ternary without tripping the prop-identity perf rules.
  */
+const noop = () => {};
+/** The classic shell keeps its Bots nav row; its panel is the same Bots section (spec 37.4.1). */
+function ClassicBotsPanel({ serverId }: { serverId: string }) {
+  return <SidebarBotsSection serverId={serverId} onNavigate={noop} />;
+}
+
 export function resolveSidebarNavBody(
   builtinPanelRoute: { serverId: string; segment: string } | null,
   fallback: ReactNode,
@@ -155,7 +161,7 @@ export function resolveSidebarNavBody(
   if (sectionRoute?.section === "bots")
     return (
       <BuiltinPluginGate serverId={sectionRoute.serverId} id="bots">
-        <BotsSidebar serverId={sectionRoute.serverId} />
+        <ClassicBotsPanel serverId={sectionRoute.serverId} />
       </BuiltinPluginGate>
     );
   if (sectionRoute?.section === "plugin")
