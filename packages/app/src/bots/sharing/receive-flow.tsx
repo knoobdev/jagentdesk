@@ -2,7 +2,7 @@
 // shows exactly what Create writes, then the New bot form, prefilled, makes the copy. A port of Orca
 // dfdb4fda src/renderer/src/components/bots/sharing/BotShareReceiveFlow.tsx, BotShareReviewDialog.tsx,
 // BotShareReviewPages.tsx and NewBotFromShareParts.tsx (MIT). The same sheet serves desktop and phone.
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Image, ScrollView, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
@@ -150,6 +150,18 @@ export function BotShareReceiveSheet({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const header = useMemo(() => ({ title: t("bots.share.receive.fromLink") }), [t]);
+  // Review → Create and Back swap this sheet for New bot and back. On a phone the sheet that left
+  // reports its dismiss after the swap, so only the sheet now shown may close the flow.
+  const stepKind = useRef(step.kind);
+  useEffect(() => {
+    stepKind.current = step.kind;
+  }, [step.kind]);
+  const closeReceive = useCallback(() => {
+    if (stepKind.current !== "create") onClose();
+  }, [onClose]);
+  const closeNewBot = useCallback(() => {
+    if (stepKind.current === "create") onClose();
+  }, [onClose]);
 
   const open = useCallback(async () => {
     if (!client) return;
@@ -219,7 +231,7 @@ export function BotShareReceiveSheet({
   );
   // The regular New bot dialog, made from the review (Orca BotShareReceiveFlow.tsx NewBotFromShare).
   if (shareSource) {
-    return <NewBotDialog serverId={serverId} fromShare={shareSource} onClose={onClose} />;
+    return <NewBotDialog serverId={serverId} fromShare={shareSource} onClose={closeNewBot} />;
   }
 
   let body: React.ReactNode;
@@ -301,8 +313,8 @@ export function BotShareReceiveSheet({
   return (
     <AdaptiveModalSheet
       visible
-      onClose={onClose}
-      onDismiss={onClose}
+      onClose={closeReceive}
+      onDismiss={closeReceive}
       header={header}
       testID="bot-share-receive-sheet"
     >

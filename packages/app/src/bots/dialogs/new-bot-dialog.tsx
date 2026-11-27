@@ -89,6 +89,20 @@ function dialogOrigin(
   return handOver ? t("bots.handToBot.newBotOrigin", { name: handOver.name }) : undefined;
 }
 
+/** Where a new bot can start instead. "Template" closes this dialog, so it shows only before anything
+ *  is typed (`NewBotDialog.tsx:242`). A phone's sheet leads with Use template and From a link rows
+ *  instead, kept while typing as Orca's (`MobileNewBotSheet.tsx:331`, spec 37.6). A hand-over or a copy
+ *  made from a link has neither. */
+function templateSources(
+  state: NewBotFormState,
+  handOver: NewBotHandOver | undefined,
+  fromShare: NewBotShareSource | undefined,
+  compact: boolean,
+): { showTemplate: boolean; showSources: boolean } {
+  if (handOver || fromShare || state.templateId) return { showTemplate: false, showSources: false };
+  return { showTemplate: !state.name && !state.identity, showSources: compact };
+}
+
 export interface NewBotHandOver {
   workspaceId: string;
   name: string;
@@ -269,23 +283,13 @@ export function NewBotDialog({
     }),
     [fromShare, handOver, t],
   );
-  // "Template" closes this dialog, so it shows only before anything is typed (`NewBotDialog.tsx:242`).
-  const showTemplate =
-    onOpenTemplates !== undefined &&
-    !handOver &&
-    !fromShare &&
-    !state.templateId &&
-    !state.name &&
-    !state.identity;
   const back = fromShare?.onBack;
-  // A phone's sheet leads with Use template and From a link rows instead, kept while typing as Orca's
-  // (`MobileNewBotSheet.tsx:331`) (spec 37.6). A copy made from a link has neither.
   const compact = useIsCompactFormFactor();
-  const showSources = compact && !handOver && !fromShare && !state.templateId;
+  const { showTemplate, showSources } = templateSources(state, handOver, fromShare, compact);
   const footer = useMemo(
     () => (
       <View style={styles.footer}>
-        {showTemplate && !compact ? (
+        {showTemplate && !compact && onOpenTemplates ? (
           <Button
             variant="outline"
             size="sm"
