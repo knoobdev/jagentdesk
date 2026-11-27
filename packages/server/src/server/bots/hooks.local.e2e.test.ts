@@ -266,9 +266,27 @@ describe.sequential("bot hooks through wrangler dev (spec 37.9–37.12)", () => 
       chat: { id: from.id, type: "private" },
       text,
     });
+    // Spec 37.12.2: before anyone is linked, a DM gets the refusal with the owner hint.
+    expect((await send(dm("/start"))).status).toBe(200);
+    await expect
+      .poll(sentTexts)
+      .toContain(
+        "I only take requests from people my owner allowed.\nIf you own this bot, open its Telegram settings in JAgentDesk and tap Link my Telegram account.",
+      );
+    // Spec 37.12.1: Open in Telegram sends `/start <code>`; the open dialog hears bots.changed.
+    const changed: string[] = [];
+    const unsubscribe = client!.onBotsPush("bots.changed", ({ payload }) => {
+      changed.push(payload.botId);
+    });
     const { code } = await rpc("bots.telegram.link_code.request", { botId });
-    expect((await send(dm(code))).status).toBe(200);
-    await expect.poll(sentTexts).toContain("Your Telegram account is linked.");
+    expect((await send(dm(`/start ${code}`))).status).toBe(200);
+    await expect.poll(sentTexts).toContain("Linked. You can ask me anything here.");
+    await expect.poll(() => changed).toContain(botId);
+    unsubscribe();
+    expect((await rpc("bots.telegram.status.request", { botId })).status.linked).toEqual({
+      code,
+      user: { id: "42", name: "Dana", username: "dana" },
+    });
     // A37.12.2
     const ok = await send(dm("list open items"), { updateId: 500 });
     expect(ok.status).toBe(200);
@@ -278,7 +296,7 @@ describe.sequential("bot hooks through wrangler dev (spec 37.9–37.12)", () => 
     // A37.12.3
     await expect.poll(() => countSent("text", ANSWER), { timeout: 20_000 }).toBe(1);
     const reply = telegram.sent.find((m) => m.text === ANSWER)!;
-    expect(reply).toMatchObject({ chat_id: "42", reply_parameters: { message_id: 11 } });
+    expect(reply).toMatchObject({ chat_id: "42", reply_parameters: { message_id: 12 } });
     expect((await history()).filter((m) => m.source === "Telegram DM: Dana")).toHaveLength(1);
     // A37.12.4
     const group = { from: dana, chat: { id: -100, type: "supergroup", title: "Team" } };

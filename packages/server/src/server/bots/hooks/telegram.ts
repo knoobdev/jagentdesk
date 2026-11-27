@@ -16,6 +16,12 @@ import {
 import { untrustedContent } from "./quoted-text.js";
 
 export const TELEGRAM_MESSAGE_LIMIT = 4096;
+export const TELEGRAM_LINKED_TEXT = "Linked. You can ask me anything here.";
+/** Spec 37.12.2: added to the refusal while no one is linked, so the owner knows to send the code. */
+export const TELEGRAM_OWNER_HINT =
+  "If you own this bot, open its Telegram settings in JAgentDesk and tap Link my Telegram account.";
+const LINK_CODE_TTL_MS = 600_000;
+const OWNER_HINT_EVERY_MS = 60_000;
 const DEFAULT_API = "https://api.telegram.org";
 
 /** Bot API over HTTPS, called by the daemon directly (never through the Worker). */
@@ -118,6 +124,7 @@ export class BotsTelegram extends HookConnector {
     string,
     { code: string; expiresAt_ms: number; attempts: number }
   >();
+  private readonly linked = new Map<string, { code: string; user: z.infer<typeof AllowedUser> }>();
   constructor(bots: BotsService, options: HookConnectorOptions & { apiBaseUrl?: string }) {
     super(bots, options);
     this.api = new TelegramApi(options.apiBaseUrl);
@@ -149,6 +156,7 @@ export class BotsTelegram extends HookConnector {
       requestUrl: connection.hookId ? this.hookUrl(connection.hookId) : undefined,
       botUsername: connection.botUsername,
       allowedUsers: connection.allowedUsers,
+      ...(this.linked.has(botId) ? { linked: this.linked.get(botId) } : {}),
     };
   }
   allowed(botId: string): z.infer<typeof AllowedUser>[] {
@@ -175,7 +183,7 @@ export class BotsTelegram extends HookConnector {
           if (!this.connection(botId).connected) throw new Error("Connect Telegram first");
           const code = {
             code: String(randomInt(1_000_000)).padStart(6, "0"),
-            expiresAt_ms: this.now() + 600_000,
+            expiresAt_ms: this.now() + LINK_CODE_TTL_MS,
             attempts: 0,
           };
           this.codes.set(botId, code);
@@ -242,6 +250,7 @@ export class BotsTelegram extends HookConnector {
         .catch(() => this.options.logger.warn("Telegram deleteWebhook failed"));
     await this.secrets.delete(credentialId(botId));
     this.codes.delete(botId);
+    this.linked.delete(botId);
     this.save(botId, { connected: false, allowedUsers: [] });
     this.forgetQueued(botId);
     if (connection.hookId) await this.retireHook(connection.hookId);
@@ -321,13 +330,25 @@ export class BotsTelegram extends HookConnector {
       ...(topic === undefined ? {} : { topicId: String(topic) }),
     };
   }
-  /** One refusal per person a day (spec 37.12.2). */
-  private async refuse(botId: string, eventId: string, origin: BotConnectorThread): Promise<void> {
-    const key = `telegram:denied:${botId}:${origin.userId}`;
+  /**
+   * One refusal per person a day (spec 37.12.2). While no one is linked the sender may be the owner who
+   * never sent the code, so every message gets the refusal with the hint, at most one a minute.
+   */
+  private async refuse(
+    botId: string,
+    eventId: string,
+    origin: BotConnectorThread,
+    ownerLinked: boolean,
+  ): Promise<void> {
+    const key = ownerLinked
+      ? `telegram:denied:${botId}:${origin.userId}`
+      : `telegram:denied-unlinked:${botId}:${origin.userId}`;
     const last = this.bots.storage.state(key, z.number());
-    if (last !== undefined && this.now() - last < DAY_MS) return;
+    if (last !== undefined && this.now() - last < (ownerLinked ? DAY_MS : OWNER_HINT_EVERY_MS))
+      return;
     this.bots.storage.setState(key, this.now());
-    await this.queueReply(botId, origin, NOT_ALLOWED_TEXT, `denied:${eventId}`);
+    const text = ownerLinked ? NOT_ALLOWED_TEXT : `${NOT_ALLOWED_TEXT}\n${TELEGRAM_OWNER_HINT}`;
+    await this.queueReply(botId, origin, text, `denied:${eventId}`);
   }
   protected async process(botId: string, eventId: string, raw: unknown): Promise<void> {
     const { message, addressed } = EventData.parse(raw);
@@ -352,7 +373,7 @@ export class BotsTelegram extends HookConnector {
       text,
     });
     const asker = connection.allowedUsers.find((u) => u.id === origin.userId);
-    if (!asker) return this.refuse(botId, eventId, origin);
+    if (!asker) return this.refuse(botId, eventId, origin, connection.allowedUsers.length > 0);
     const rootId = `telegram:${connection.hookId}:${origin.thread}`;
     const history = this.threadHistory(botId, rootId);
     const prompt = [
@@ -382,6 +403,10 @@ export class BotsTelegram extends HookConnector {
       .replace(new RegExp(`@${escaped}\\b`, "gi"), "")
       .trim();
   }
+  /**
+   * The link code as a DM: `<code>`, or `/start <code>` from the `t.me/<bot>?start=<code>` deep link
+   * (spec 37.12.1). `questionText` already dropped `@<bot>` from `/start@<bot>`.
+   */
   private async tryLink(
     botId: string,
     eventId: string,
@@ -389,24 +414,30 @@ export class BotsTelegram extends HookConnector {
     from: TelegramUser,
     origin: BotConnectorThread,
   ): Promise<boolean> {
+    const sent = /^(?:\/start\s+)?(\d{6})$/i.exec(text.trim())?.[1];
     const code = this.codes.get(botId);
     if (
-      !/^\d{6}$/.test(text) ||
+      !sent ||
       !code ||
       code.expiresAt_ms <= this.now() ||
       code.attempts++ >= 5 ||
-      !timingSafeEqual(Buffer.from(text), Buffer.from(code.code))
+      !timingSafeEqual(Buffer.from(sent), Buffer.from(code.code))
     )
       return false;
     const connection = this.connection(botId);
     const id = String(from.id);
-    connection.allowedUsers = [
-      ...connection.allowedUsers.filter((u) => u.id !== id),
-      { id, name: displayName(from), ...(from.username ? { username: from.username } : {}) },
-    ];
+    const user = {
+      id,
+      name: displayName(from),
+      ...(from.username ? { username: from.username } : {}),
+    };
+    connection.allowedUsers = [...connection.allowedUsers.filter((u) => u.id !== id), user];
     this.save(botId, connection);
     this.codes.delete(botId);
-    await this.queueReply(botId, origin, "Your Telegram account is linked.", `link:${eventId}`);
+    this.linked.set(botId, { code: code.code, user });
+    // The open Telegram dialog refetches its status on this push and turns into "Linked · {{name}}".
+    this.bots.changed(botId);
+    await this.queueReply(botId, origin, TELEGRAM_LINKED_TEXT, `link:${eventId}`);
     return true;
   }
   protected async deliver(
