@@ -101,3 +101,72 @@ test("stop requests carry an inventory token and preserve legacy item parsing", 
     }),
   ).toMatchObject({ payload: { items: [ITEM] } });
 });
+
+// ADR-0062: detail and output of one background item.
+describe("background work detail and output protocol", () => {
+  test("accepts the detail request and a detail without optional fields", () => {
+    expect(
+      SessionInboundMessageSchema.parse({
+        type: "agent.background_work.get_detail.request",
+        agentId: "agent-1",
+        itemId: "bash-1",
+        requestId: "request-1",
+      }),
+    ).toMatchObject({ itemId: "bash-1" });
+    const detail = {
+      ...ITEM,
+      status: "running",
+      endedAt: null,
+      exitCode: null,
+      cwd: null,
+      provider: "claude",
+      outputAvailable: true,
+    };
+    expect(
+      SessionOutboundMessageSchema.parse({
+        type: "agent.background_work.get_detail.response",
+        payload: { requestId: "r", agentId: "a", itemId: "bash-1", detail, error: null },
+      }),
+    ).toMatchObject({ payload: { detail } });
+  });
+
+  test("the output subscribe request carries no path; extra fields are dropped", () => {
+    const parsed = SessionInboundMessageSchema.parse({
+      type: "agent.background_work.output.subscribe.request",
+      agentId: "agent-1",
+      itemId: "bash-1",
+      subscriptionId: "sub-1",
+      requestId: "request-1",
+      path: "/etc/passwd",
+    });
+    expect(parsed).not.toHaveProperty("path");
+  });
+
+  test("accepts output pushes with and without the optional fields", () => {
+    for (const payload of [
+      { subscriptionId: "s", agentId: "a", itemId: "i", chunk: "x", offset: 0 },
+      {
+        subscriptionId: "s",
+        agentId: "a",
+        itemId: "i",
+        chunk: "x",
+        offset: 4,
+        nextOffset: 5,
+        reset: true,
+      },
+    ])
+      expect(
+        SessionOutboundMessageSchema.parse({ type: "agent.background_work.output", payload }),
+      ).toMatchObject({ payload });
+  });
+
+  test("server info advertises the feature as optional", () => {
+    expect(
+      ServerInfoStatusPayloadSchema.parse({
+        status: "server_info",
+        serverId: "server-1",
+        features: { backgroundWorkOutput: true },
+      }).features,
+    ).toMatchObject({ backgroundWorkOutput: true });
+  });
+});

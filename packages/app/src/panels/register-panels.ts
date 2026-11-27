@@ -15,6 +15,7 @@ import { terminalPanelRegistration } from "@/panels/terminal-panel";
 import { providerSubagentPanelRegistration } from "@/panels/provider-subagent-panel";
 import { pluginPanelRegistration } from "@/plugins/workspace-panels/panel";
 import { builtinInspectorPanelRegistration } from "@/panels/builtin-inspector-panel";
+import { backgroundWorkPanelRegistration } from "@/background-work/panel";
 
 let panelsRegistered = false;
 
@@ -37,5 +38,6 @@ export function ensurePanelsRegistered(): void {
   registerPanel(workingDiffPanelRegistration);
   registerPanel(pluginPanelRegistration);
   registerPanel(builtinInspectorPanelRegistration);
+  registerPanel(backgroundWorkPanelRegistration);
   panelsRegistered = true;
 }

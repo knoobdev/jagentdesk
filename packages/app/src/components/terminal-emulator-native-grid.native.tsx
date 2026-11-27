@@ -103,8 +103,11 @@ function NativeTerminalEmulator({
   onFocus,
   focusRequestToken = 0,
   resizeRequestToken = 0,
+  readOnly = false,
+  onScrolledChange,
 }: TerminalEmulatorProps) {
   const terminalRef = useRef<NativeHeadlessTerminal | null>(null);
+  const returnToBottomRef = useRef<(() => void) | null>(null);
   const mountInputRef = useRef({ streamKey });
   if (
     resolveNativeTerminalMountAction({
@@ -459,6 +462,7 @@ function NativeTerminalEmulator({
         inputRef.current?.blur();
         Keyboard.dismiss();
       },
+      scrollToBottom: () => returnToBottomRef.current?.(),
     }),
     [
       enqueueOutputText,
@@ -516,9 +520,11 @@ function NativeTerminalEmulator({
 
   const focusTerminalFromTap = useCallback(() => {
     clearSelection();
+    // A read-only viewer never raises the keyboard.
+    if (readOnly) return;
     inputRef.current?.focus();
     claimActiveTerminalSizeForAction("focus");
-  }, [claimActiveTerminalSizeForAction, clearSelection]);
+  }, [claimActiveTerminalSizeForAction, clearSelection, readOnly]);
 
   useEffect(() => {
     if (resizeRequestToken <= 0) return;
@@ -575,6 +581,7 @@ function NativeTerminalEmulator({
     const screen = model.returnToBottom({ visibleRows: resolveVisibleRows(terminal) });
     commitTerminalScreen(screen);
   }, [commitTerminalScreen, resolveVisibleRows]);
+  returnToBottomRef.current = returnToBottom;
 
   const resolveSelectionViewport = useCallback((): TerminalSelectionViewport | null => {
     const screen = terminalScreenRef.current;
@@ -695,6 +702,11 @@ function NativeTerminalEmulator({
 
   const terminalState = terminalScreen?.viewport ?? null;
   const isScrolled = terminalScreen?.scroll.mode === "scrolled";
+  const onScrolledChangeRef = useRef(onScrolledChange);
+  onScrolledChangeRef.current = onScrolledChange;
+  useEffect(() => {
+    onScrolledChangeRef.current?.(isScrolled);
+  }, [isScrolled]);
   const viewport = resolveSelectionViewport();
   const handles =
     viewport && cellMetrics
@@ -758,7 +770,7 @@ function NativeTerminalEmulator({
           onTerminalKey={handleNativeTerminalKey}
         />
       </View>
-      {isScrolled ? (
+      {isScrolled && !readOnly ? (
         <Pressable
           accessibilityLabel="Bottom"
           accessibilityRole="button"

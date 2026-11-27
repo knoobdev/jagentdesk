@@ -2097,6 +2097,13 @@ export type AgentBackgroundWorkListPayload =
   CorrelatedResponsePayload<"agent.background_work.list.response">;
 
 export type AgentBackgroundWorkItem = AgentBackgroundWorkListPayload["items"][number];
+export type AgentBackgroundWorkDetail = NonNullable<
+  CorrelatedResponsePayload<"agent.background_work.get_detail.response">["detail"]
+>;
+export type AgentBackgroundWorkOutputPayload = Extract<
+  SessionOutboundMessage,
+  { type: "agent.background_work.output" }
+>["payload"];
 
 // Argo CD (spec 30.5): one typed entry point for every `argocd.*.request`; the response type is
 // the request type with `.response`, its payload carries `error` + `errorCode`.
@@ -5032,6 +5039,80 @@ export class DaemonClient {
   ): OwnedSubscription<CorrelatedResponsePayload<"session.events.set_subscription.response">> {
     this.assertAgentBackgroundWorkSupported();
     return this.observeEvents(["agent.background_work.update"], options);
+  }
+
+  /** ADR-0062: one background item's detail, live or recently ended. */
+  async getAgentBackgroundWorkDetail(
+    agentId: string,
+    itemId: string,
+    options: { requestId?: string; timeout?: number } = {},
+  ): Promise<AgentBackgroundWorkDetail> {
+    this.assertBackgroundWorkOutputSupported();
+    const payload =
+      await this.sendNamespacedCorrelatedSessionRequest<"agent.background_work.get_detail.response">(
+        {
+          requestId: options.requestId,
+          timeout: options.timeout,
+          message: { type: "agent.background_work.get_detail.request", agentId, itemId },
+        },
+      );
+    if (payload.error || !payload.detail)
+      throw new Error(payload.error ?? "Background work not found");
+    return payload.detail;
+  }
+
+  /**
+   * ADR-0062: follows one background item's output. The first push carries the tail with
+   * `reset: true`. The subscription does not survive a reconnect; subscribe again.
+   */
+  async subscribeAgentBackgroundWorkOutput(input: {
+    agentId: string;
+    itemId: string;
+    onOutput: (output: AgentBackgroundWorkOutputPayload) => void;
+    timeout?: number;
+  }): Promise<() => void> {
+    this.assertBackgroundWorkOutputSupported();
+    const subscriptionId = this.createRequestId();
+    const release = this.on("agent.background_work.output", (message) => {
+      if (message.payload.subscriptionId === subscriptionId) input.onOutput(message.payload);
+    });
+    try {
+      const payload =
+        await this.sendNamespacedCorrelatedSessionRequest<"agent.background_work.output.subscribe.response">(
+          {
+            timeout: input.timeout,
+            message: {
+              type: "agent.background_work.output.subscribe.request",
+              agentId: input.agentId,
+              itemId: input.itemId,
+              subscriptionId,
+            },
+          },
+        );
+      if (payload.error) throw new Error(payload.error);
+    } catch (error) {
+      release();
+      throw error;
+    }
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      release();
+      if (this.connectionState.status !== "connected") return;
+      void this.sendNamespacedCorrelatedSessionRequest<"agent.background_work.output.unsubscribe.response">(
+        {
+          message: { type: "agent.background_work.output.unsubscribe.request", subscriptionId },
+        },
+      ).catch(() => undefined);
+    };
+  }
+
+  private assertBackgroundWorkOutputSupported(): void {
+    // COMPAT(backgroundWorkOutput): added in v0.12.0, remove gate after 2027-05-27.
+    if (this.lastServerInfoMessage?.features?.backgroundWorkOutput !== true) {
+      throw new Error("Update the host to see a background task's output.");
+    }
   }
 
   private assertAgentBackgroundWorkSupported(): void {

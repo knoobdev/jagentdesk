@@ -466,6 +466,9 @@ function getFallbackTabOptionDescription(
   if (tab.target.kind === "provider_subagent") {
     return labels.agent;
   }
+  if (tab.target.kind === "background_work") {
+    return labels.terminal;
+  }
   if (tab.target.kind === "commit_diff") {
     return tab.target.sha.slice(0, 7);
   }

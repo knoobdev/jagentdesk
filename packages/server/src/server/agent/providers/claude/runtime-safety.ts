@@ -1,9 +1,23 @@
 import type { SDKMessage, SessionCronSummary } from "@anthropic-ai/claude-agent-sdk";
-import type { AgentBackgroundWorkInput } from "../../background-work/index.js";
+import type {
+  AgentBackgroundWorkEnd,
+  AgentBackgroundWorkInput,
+  BackgroundWorkOutputSource,
+} from "../../background-work/index.js";
 import { parseClaudeCodeVersion } from "./model-manifest.js";
 import { toBackgroundWorkInputs, type ClaudeBackgroundTask } from "./background-work.js";
+import {
+  claudeTaskOutputRoots,
+  createClaudeOutputSource,
+  parseClaudeBackgroundOutputPath,
+} from "./background-output.js";
 
 const SESSION_CRON_TOOLS = new Set(["CronCreate", "CronDelete", "ScheduleWakeup"]);
+const CLAUDE_TASK_END_STATUS: Record<string, AgentBackgroundWorkEnd["status"]> = {
+  completed: "finished",
+  failed: "failed",
+  stopped: "stopped",
+};
 
 /** Process-local background ownership. Completion delivery can follow an empty roster. */
 export class ClaudeRuntimeSafety {
@@ -18,6 +32,16 @@ export class ClaudeRuntimeSafety {
   private readonly monitorTools = new Set<string>();
   private readonly toolInputs = new Map<string, { description?: string; command?: string }>();
   private readonly taskTools = new Map<string, string>();
+  // ADR-0062: the output file Claude reports per Bash call, and per task when it ends.
+  private readonly toolOutputPaths = new Map<string, string>();
+  private readonly taskOutputPaths = new Map<string, string>();
+  private readonly outputSources = new Map<string, BackgroundWorkOutputSource>();
+  private sessionId: string | null = null;
+  private readonly outputRoots: readonly string[];
+
+  constructor(env?: Readonly<Record<string, string | undefined>>) {
+    this.outputRoots = claudeTaskOutputRoots({ ...process.env, ...env });
+  }
   // Session-only crons and wakeups live in the process and die with it. Only the Stop hook
   // lists them, and Claude runs it only for turns that complete. A cron tool call makes the
   // count unknown until the next Stop, so an interrupted or failed turn keeps the runtime.
@@ -38,6 +62,10 @@ export class ClaudeRuntimeSafety {
     this.monitorTools.clear();
     this.toolInputs.clear();
     this.taskTools.clear();
+    this.toolOutputPaths.clear();
+    this.taskOutputPaths.clear();
+    this.outputSources.clear();
+    this.sessionId = null;
   }
 
   retire(): void {
@@ -73,6 +101,7 @@ export class ClaudeRuntimeSafety {
   /** Returns a full replacement only when the visible inventory changes. */
   observe(message: SDKMessage): AgentBackgroundWorkInput[] | undefined {
     if (this.inventoryState === "retired") return undefined;
+    this.observeOutput(message);
     const changed = this.observeTools(message);
     const systemChanged = message.type === "system" ? this.observeSystem(message) : false;
     if ((!changed && !systemChanged) || this.inventoryState !== "supported") return undefined;
@@ -159,6 +188,50 @@ export class ClaudeRuntimeSafety {
     return false;
   }
 
+  /** How a task ended, from its notification. Read after `observe` for the same message. */
+  observeEnd(message: SDKMessage): AgentBackgroundWorkEnd | undefined {
+    if (message.type !== "system" || message.subtype !== "task_notification") return undefined;
+    const exit = /exit code (-?\d+)/.exec(message.summary ?? "");
+    return {
+      id: message.task_id,
+      status: CLAUDE_TASK_END_STATUS[message.status] ?? "stopped",
+      ...(exit ? { exitCode: Number(exit[1]) } : {}),
+      output: this.outputSource(message.task_id),
+    };
+  }
+
+  private observeOutput(message: SDKMessage): void {
+    const sessionId = (message as { session_id?: unknown }).session_id;
+    if (typeof sessionId === "string" && sessionId) this.sessionId = sessionId;
+    if (message.type === "system" && message.subtype === "task_notification") {
+      if (typeof message.output_file === "string" && message.output_file)
+        this.taskOutputPaths.set(message.task_id, message.output_file);
+      return;
+    }
+    if (message.type !== "user" || !Array.isArray(message.message.content)) return;
+    for (const block of message.message.content) {
+      if (block.type !== "tool_result" || !this.toolInputs.has(block.tool_use_id)) continue;
+      const path = parseClaudeBackgroundOutputPath(toolResultText(block.content));
+      if (path) this.toolOutputPaths.set(block.tool_use_id, path);
+    }
+  }
+
+  private outputSource(taskId: string): BackgroundWorkOutputSource {
+    const known = this.outputSources.get(taskId);
+    if (known) return known;
+    const source = createClaudeOutputSource({
+      taskId,
+      reportedPath: () =>
+        this.taskOutputPaths.get(taskId) ??
+        this.toolOutputPaths.get(this.taskTools.get(taskId) ?? "") ??
+        null,
+      sessionId: () => this.sessionId,
+      roots: this.outputRoots,
+    });
+    this.outputSources.set(taskId, source);
+    return source;
+  }
+
   canStopRuntime(): boolean {
     if (this.inventoryState === "unknown" && !this.turnSeen) return true;
     return (
@@ -185,9 +258,23 @@ export class ClaudeRuntimeSafety {
       const input = this.toolInputs.get(tool);
       if (input?.description) item.description = input.description;
       if (input?.command) item.command = input.command;
+      if (item.kind === "shell" || item.kind === "monitor")
+        item.output = this.outputSource(item.id);
       return item;
     });
   }
+}
+
+function toolResultText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part: unknown) =>
+      part && typeof part === "object" && "text" in part && typeof part.text === "string"
+        ? part.text
+        : "",
+    )
+    .join("\n");
 }
 
 function sameInventory(

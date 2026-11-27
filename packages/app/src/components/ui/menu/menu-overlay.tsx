@@ -85,6 +85,16 @@ function useWebContentEntering({
 }
 
 /**
+ * Keeps a surface inside one view on screen — a chat pane — rather than the whole window, so a
+ * panel opened from a control in that view cannot spill over its neighbours.
+ */
+export interface AnchoredSurfaceBoundary {
+  ref: RefObject<View | null>;
+  /** Gap kept between the surface and the boundary's edges. */
+  padding: number;
+}
+
+/**
  * Resolves where an anchored surface sits: measures the anchor, measures the content, and runs
  * the two through `computePosition`. Returns nulls until both measurements have landed, which is
  * why the surface renders off-screen at -9999 rather than at 0,0 on its first frame.
@@ -98,6 +108,7 @@ export function useAnchoredPosition({
   offset,
   scrollable,
   maxHeight,
+  boundary,
 }: {
   open: boolean;
   anchorRect: Rect | null;
@@ -107,11 +118,13 @@ export function useAnchoredPosition({
   offset: number;
   scrollable: boolean;
   maxHeight?: number;
+  boundary?: AnchoredSurfaceBoundary;
 }) {
   const [triggerRect, setTriggerRect] = useState<Rect | null>(null);
   const [contentSize, setContentSize] = useState<Size | null>(null);
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
   const [actualPlacement, setActualPlacement] = useState<Placement>(side);
+  const boundaryRect = useBoundaryRect(open, boundary?.ref);
 
   const visibleContentSize = useMemo(() => {
     if (!contentSize) return null;
@@ -161,23 +174,35 @@ export function useAnchoredPosition({
     };
   }, [anchorRect, anchorRef, open]);
 
+  const boundaryPadding = boundary?.padding;
+  const waitingForBoundary = boundary !== undefined && boundaryRect === null;
   useEffect(() => {
-    if (!triggerRect || !visibleContentSize) return;
+    if (!triggerRect || !visibleContentSize || waitingForBoundary) return;
 
     const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
     // measureInWindow and Modal both use full-screen coordinates, so the display area starts at 0.
     const result = computePosition({
       triggerRect,
       contentSize: visibleContentSize,
-      displayArea: { x: 0, y: 0, width: screenWidth, height: screenHeight },
+      displayArea: boundaryRect ?? { x: 0, y: 0, width: screenWidth, height: screenHeight },
       placement: side,
       alignment: align,
       offset,
+      edgePadding: boundaryRect ? boundaryPadding : undefined,
     });
 
     setPosition({ x: result.x, y: result.y });
     setActualPlacement(result.actualPlacement);
-  }, [triggerRect, visibleContentSize, side, align, offset]);
+  }, [
+    triggerRect,
+    visibleContentSize,
+    side,
+    align,
+    offset,
+    boundaryRect,
+    boundaryPadding,
+    waitingForBoundary,
+  ]);
 
   const onContentLayout = useCallback(
     (event: { nativeEvent: { layout: { width: number; height: number } } }) => {
@@ -190,7 +215,46 @@ export function useAnchoredPosition({
     [],
   );
 
-  return { position, actualPlacement, contentSize, visibleContentSize, onContentLayout };
+  return {
+    position,
+    actualPlacement,
+    contentSize,
+    visibleContentSize,
+    boundaryRect,
+    onContentLayout,
+  };
+}
+
+/**
+ * The boundary view's rect while the surface is open. A boundary that is not mounted falls back
+ * to the window, so a surface never waits on a view that will not come.
+ */
+function useBoundaryRect(
+  open: boolean,
+  boundaryRef: RefObject<View | null> | undefined,
+): Rect | null {
+  const [rect, setRect] = useState<Rect | null>(null);
+  useEffect(() => {
+    if (!open || !boundaryRef) {
+      setRect(null);
+      return undefined;
+    }
+    const element = boundaryRef.current;
+    if (!element) {
+      const { width, height } = Dimensions.get("window");
+      setRect({ x: 0, y: 0, width, height });
+      return undefined;
+    }
+    let cancelled = false;
+    void measureElement(element).then((measured) => {
+      if (!cancelled) setRect(measured);
+      return undefined;
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [boundaryRef, open]);
+  return rect;
 }
 
 export interface AnchoredSurfaceProps {
@@ -209,6 +273,10 @@ export interface AnchoredSurfaceProps {
   fullWidth?: boolean;
   horizontalPadding?: number;
   scrollable?: boolean;
+  /** Keep the surface inside this view instead of the window. */
+  boundary?: AnchoredSurfaceBoundary;
+  /** Overrides the surface's own chrome (radius, border) for a panel that needs its own. */
+  surfaceStyle?: StyleProp<ViewStyle>;
   /** A submenu sits inside its parent's overlay and must not paint a second backdrop. */
   backdrop?: boolean;
   /**
@@ -220,6 +288,35 @@ export interface AnchoredSurfaceProps {
   testID?: string;
   keyboardFocusScope?: KeyboardFocusScope;
   children: ReactElement;
+}
+
+/** The width a surface may take between its boundary's padded edges; null without a boundary. */
+function innerBoundaryWidth(
+  rect: Rect | null,
+  boundary: AnchoredSurfaceBoundary | undefined,
+): number | null {
+  return rect && boundary ? rect.width - boundary.padding * 2 : null;
+}
+
+/** Inside a boundary, every width the caller asked for still has to fit between its edges. */
+function resolveWidthStyle({
+  width,
+  minWidth,
+  maxWidth,
+  boundaryWidth,
+}: {
+  width: number | undefined;
+  minWidth: number | undefined;
+  maxWidth: number | undefined;
+  boundaryWidth: number | null;
+}): ViewStyle {
+  const fit = (value: number) => (boundaryWidth === null ? value : Math.min(value, boundaryWidth));
+  const style: ViewStyle = {};
+  if (typeof width === "number") style.width = fit(width);
+  if (typeof minWidth === "number") style.minWidth = fit(minWidth);
+  if (typeof maxWidth === "number") style.maxWidth = fit(maxWidth);
+  else if (boundaryWidth !== null) style.maxWidth = boundaryWidth;
+  return style;
 }
 
 /**
@@ -242,6 +339,8 @@ export function AnchoredSurface({
   fullWidth = false,
   horizontalPadding = 16,
   scrollable = false,
+  boundary,
+  surfaceStyle,
   backdrop = true,
   onPointerEnter,
   onPointerLeave,
@@ -251,16 +350,18 @@ export function AnchoredSurface({
 }: AnchoredSurfaceProps): ReactElement | null {
   const { t } = useTranslation();
   const surfaceNativeID = useId();
-  const { position, actualPlacement, visibleContentSize, onContentLayout } = useAnchoredPosition({
-    open,
-    anchorRect,
-    anchorRef,
-    side,
-    align,
-    offset,
-    scrollable,
-    maxHeight,
-  });
+  const { position, actualPlacement, visibleContentSize, boundaryRect, onContentLayout } =
+    useAnchoredPosition({
+      open,
+      anchorRect,
+      anchorRef,
+      side,
+      align,
+      offset,
+      scrollable,
+      maxHeight,
+      boundary,
+    });
 
   // The surface is placed once both measurements land. Until then it sits off-screen so it can
   // be measured, and it must not animate: an entering animation that ran there would be over
@@ -281,15 +382,12 @@ export function AnchoredSurface({
     return () => cancelAnimationFrame(frame);
   }, [open, placed, surfaceNativeID]);
 
+  const boundaryWidth = innerBoundaryWidth(boundaryRect, boundary);
   const frameStyle = useMemo<StyleProp<ViewStyle>>(() => {
     const { width: screenWidth } = Dimensions.get("window");
     const resolvedWidthStyle: ViewStyle = fullWidth
       ? { width: screenWidth - horizontalPadding * 2 }
-      : {
-          ...(typeof width === "number" ? { width } : null),
-          ...(typeof minWidth === "number" ? { minWidth } : null),
-          ...(typeof maxWidth === "number" ? { maxWidth } : null),
-        };
+      : resolveWidthStyle({ width, minWidth, maxWidth, boundaryWidth });
     return [
       resolvedWidthStyle,
       {
@@ -309,8 +407,13 @@ export function AnchoredSurface({
     position?.y,
     actualPlacement,
     align,
+    boundaryWidth,
   ]);
 
+  const contentStyle = useMemo(
+    () => (surfaceStyle ? [styles.content, surfaceStyle] : styles.content),
+    [surfaceStyle],
+  );
   const scrollViewportStyle = useMemo(
     () => [visibleContentSize ? { height: visibleContentSize.height } : null],
     [visibleContentSize],
@@ -355,7 +458,7 @@ export function AnchoredSurface({
         nativeID={surfaceNativeID}
         testID={testID}
         dataSet={surfaceDataSet}
-        style={styles.content}
+        style={contentStyle}
         frameStyle={frameStyle}
         entering={placed ? nativeContentEntering : undefined}
         exiting={

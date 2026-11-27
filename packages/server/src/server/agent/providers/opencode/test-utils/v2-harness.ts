@@ -98,6 +98,7 @@ export class V2Harness {
     server: { info: unexpected },
     shell: {
       remove: unexpected,
+      output: unexpected,
       list: async () => ({ location: { directory: this.info.location.directory }, data: [] }),
     },
     plugin: {

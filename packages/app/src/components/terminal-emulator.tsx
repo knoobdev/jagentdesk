@@ -49,6 +49,7 @@ export interface TerminalEmulatorHandle {
   claimSize: () => void;
   showKeyboard: () => void;
   blur: () => void;
+  scrollToBottom?: () => void;
 }
 
 const HOST_DIV_STYLE: CSSProperties = {
@@ -147,6 +148,8 @@ interface TerminalEmulatorProps {
   pendingModifiers?: PendingTerminalModifiers;
   focusRequestToken?: number;
   resizeRequestToken?: number;
+  readOnly?: boolean;
+  onScrolledChange?: (scrolled: boolean) => void;
 }
 
 declare global {
@@ -184,6 +187,8 @@ export default function TerminalEmulator({
   pendingModifiers = { ctrl: false, shift: false, alt: false },
   focusRequestToken = 0,
   resizeRequestToken = 0,
+  readOnly = false,
+  onScrolledChange,
 }: TerminalEmulatorProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -213,6 +218,7 @@ export default function TerminalEmulator({
     onResolveLocalFileLink,
     onOpenLocalFileLink,
     onFilePaste,
+    onScrolledChange,
   });
   mountCallbacksRef.current = {
     onFindRequest,
@@ -225,7 +231,10 @@ export default function TerminalEmulator({
     onResolveLocalFileLink,
     onOpenLocalFileLink,
     onFilePaste,
+    onScrolledChange,
   };
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
   const pendingModifiersRef = useRef(pendingModifiers);
   pendingModifiersRef.current = pendingModifiers;
 
@@ -281,6 +290,9 @@ export default function TerminalEmulator({
       blur: () => {
         runtimeRef.current?.blur();
       },
+      scrollToBottom: () => {
+        runtimeRef.current?.scrollToBottom();
+      },
     }),
     [pasteText],
   );
@@ -312,6 +324,9 @@ export default function TerminalEmulator({
       },
       blur: () => {
         runtimeRef.current?.blur();
+      },
+      scrollToBottom: () => {
+        runtimeRef.current?.scrollToBottom();
       },
     }),
     [pasteText],
@@ -464,6 +479,7 @@ export default function TerminalEmulator({
     });
     runtime.setPendingModifiers({ pendingModifiers: pendingModifiersRef.current });
     runtime.setCharacterWidths({ widths: characterWidthsRef.current });
+    runtime.setReadOnly({ readOnly: readOnlyRef.current });
     runtime.mount({
       root,
       host,
@@ -496,12 +512,14 @@ export default function TerminalEmulator({
         onResolveLocalFileLink,
         onOpenLocalFileLink,
         onFilePaste,
+        onScrolledChange,
         onOpenExternalUrl: openExternalUrl,
       },
     });
   }, [
     onFindRequest,
     onFilePaste,
+    onScrolledChange,
     onFindResult,
     onInput,
     onInputModeChange,
@@ -515,6 +533,10 @@ export default function TerminalEmulator({
   useEffect(() => {
     runtimeRef.current?.setPendingModifiers({ pendingModifiers });
   }, [pendingModifiers]);
+
+  useEffect(() => {
+    runtimeRef.current?.setReadOnly({ readOnly });
+  }, [readOnly]);
 
   useEffect(() => {
     runtimeRef.current?.setFont({ fontFamily, fontSize });
@@ -566,6 +588,8 @@ export default function TerminalEmulator({
     (event: ReactPointerEvent) => {
       onFocus?.();
       touchFocusRef.current = null;
+      // A read-only viewer keeps text selection but never takes focus (no keyboard on touch).
+      if (readOnlyRef.current) return;
       if (event.pointerType !== "touch") {
         runtimeRef.current?.focus();
         return;

@@ -972,7 +972,40 @@ export const vi = {
       forked: "Đang train {{name}}",
     },
   },
-  message: { turnFooter: { workedFor: "Worked for {{duration}}" } },
+  message: {
+    turnFooter: { workedFor: "Worked for {{duration}}" },
+    backgroundWork: {
+      detail: {
+        back: "Quay lại danh sách việc nền",
+        open: "Xem chi tiết: {{label}}",
+        statusValue: {
+          running: "Đang chạy",
+          finished: "Đã xong",
+          failed: "Lỗi",
+          stopped: "Đã dừng",
+        },
+        copied: "Đã sao chép",
+        copyCommand: "Sao chép lệnh",
+        showMore: "Xem thêm",
+        showLess: "Thu gọn",
+        waitingForOutput: "Đang chờ output…",
+        startedAt: "bắt đầu {{time}}",
+        copyOutput: "Sao chép output",
+        output: "Output",
+        jumpToLatest: "Xuống mới nhất",
+        openInTab: "Mở thành tab",
+        outputUnavailable: "{{provider}} không có output để xem",
+        outputLoading: "Đang tải output…",
+        outputError: "Không đọc được output",
+        outputSkipped: "đã bỏ qua một phần output cũ",
+        updateHost: "Cập nhật host để xem output của việc này",
+        disconnected: "Mất kết nối host",
+        loading: "Đang tải chi tiết…",
+        notFound: "Host không còn biết việc nền này",
+        tabTitle: "Việc nền",
+      },
+    },
+  },
   workspace: {
     header: {
       actions: {

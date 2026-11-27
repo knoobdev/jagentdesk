@@ -36,6 +36,8 @@ export type WorkspaceTabTarget =
   | { kind: "draft"; draftId: string; setup?: WorkspaceDraftTabSetup }
   | { kind: "agent"; agentId: string }
   | { kind: "provider_subagent"; parentAgentId: string; subagentId: string }
+  /** ADR-0062: one background task's detail and output, read-only. */
+  | { kind: "background_work"; agentId: string; itemId: string }
   | { kind: "terminal"; terminalId: string }
   | { kind: "browser"; browserId: string }
   | { kind: "files" }

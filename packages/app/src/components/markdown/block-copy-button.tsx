@@ -27,6 +27,7 @@ interface BlockCopyButtonProps {
   /** The block's own reveal state. Keyboard focus shows the button regardless. */
   visible: boolean;
   label: string;
+  testID?: string;
 }
 
 /**
@@ -37,6 +38,7 @@ export const BlockCopyButton = memo(function BlockCopyButton({
   onCopy,
   visible,
   label,
+  testID,
 }: BlockCopyButtonProps) {
   const { t } = useTranslation();
   const toast = useToast();
@@ -84,6 +86,7 @@ export const BlockCopyButton = memo(function BlockCopyButton({
         onFocus={focus}
         onBlur={blur}
         style={shown ? styles.shown : styles.hidden}
+        testID={testID}
       >
         <Glyph size={paneContentToolbarIconSize(compact)} />
       </ToolbarButton>

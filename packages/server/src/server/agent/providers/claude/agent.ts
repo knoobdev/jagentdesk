@@ -4842,6 +4842,7 @@ class ClaudeAgentSession implements AgentSession {
       this.processingSdkMessages++;
       try {
         const backgroundWork = this.runtimeSafety.observe(message);
+        const backgroundWorkEnd = this.runtimeSafety.observeEnd(message);
         if (message.type === "system" && message.subtype === "task_notification")
           this.backgroundStops.get(message.task_id)?.(message.status);
         logRawMessage(message);
@@ -4853,6 +4854,10 @@ class ClaudeAgentSession implements AgentSession {
         if (backgroundWork && this.runtimeSafety.isCurrentInventory(backgroundWork))
           this.dispatchEvents([
             { type: "background_work", provider: "claude", items: backgroundWork },
+          ]);
+        if (backgroundWorkEnd)
+          this.dispatchEvents([
+            { type: "background_work_ended", provider: "claude", end: backgroundWorkEnd },
           ]);
         return false;
       } finally {

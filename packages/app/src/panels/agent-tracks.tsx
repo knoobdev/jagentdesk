@@ -67,6 +67,10 @@ export const AgentTracks = memo(function AgentTracks({
     },
     [openTab],
   );
+  const handleOpenBackgroundWork = useCallback(
+    (itemId: string) => openTab({ kind: "background_work", agentId, itemId }),
+    [agentId, openTab],
+  );
   const openFileExplorerForCheckout = usePanelStore((state) => state.openFileExplorerForCheckout);
   const setExplorerTabForCheckout = usePanelStore((state) => state.setExplorerTabForCheckout);
   const handleOpenChanges = useCallback(
@@ -80,7 +84,12 @@ export const AgentTracks = memo(function AgentTracks({
 
   return (
     <ComposerTrackBar>
-      <BackgroundWorkTrack serverId={serverId} agentId={agentId} count={backgroundWorkCount} />
+      <BackgroundWorkTrack
+        serverId={serverId}
+        agentId={agentId}
+        count={backgroundWorkCount}
+        onOpenInTab={handleOpenBackgroundWork}
+      />
       {parentAgentId ? <ParentAgentPill serverId={serverId} parentAgentId={parentAgentId} /> : null}
       <SubagentsTrack
         serverId={serverId}

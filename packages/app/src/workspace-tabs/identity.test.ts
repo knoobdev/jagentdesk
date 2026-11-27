@@ -132,3 +132,39 @@ describe("commit diff tab identity", () => {
     ).toBeNull();
   });
 });
+
+// ADR-0062: "Open in tab" for one background task.
+describe("background work tab identity", () => {
+  test("normalizes, compares and ids one task of one agent", () => {
+    const target = normalizeWorkspaceTabTarget({
+      kind: "background_work",
+      agentId: " agent-a ",
+      itemId: " b1 ",
+    });
+    expect(target).toEqual({ kind: "background_work", agentId: "agent-a", itemId: "b1" });
+    expect(
+      target &&
+        workspaceTabTargetsEqual(target, {
+          kind: "background_work",
+          agentId: "agent-a",
+          itemId: "b1",
+        }),
+    ).toBe(true);
+    expect(
+      target &&
+        workspaceTabTargetsEqual(target, {
+          kind: "background_work",
+          agentId: "agent-b",
+          itemId: "b1",
+        }),
+    ).toBe(false);
+    expect(
+      buildDeterministicWorkspaceTabId({ kind: "background_work", agentId: "a", itemId: "b1" }),
+    ).not.toBe(
+      buildDeterministicWorkspaceTabId({ kind: "background_work", agentId: "a", itemId: "b2" }),
+    );
+    expect(
+      normalizeWorkspaceTabTarget({ kind: "background_work", agentId: "a", itemId: " " }),
+    ).toBeNull();
+  });
+});
