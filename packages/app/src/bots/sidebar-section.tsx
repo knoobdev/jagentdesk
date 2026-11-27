@@ -74,6 +74,8 @@ import { openBot, openBotRoom } from "./navigation";
 import { openBotsDialog } from "./dialogs-store";
 import { useBotOwnedWorkspaces } from "./owned-workspaces-store";
 import { BotsDialogsHost } from "./dialogs/host";
+import { useIsCompactFormFactor } from "@/constants/layout";
+import { PhoneBotsEmpty, PhoneBotsNewButton } from "./phone/drawer-parts";
 import {
   SIDEBAR_BOTS_MAX_SHARE,
   clampBotsHeight,
@@ -127,6 +129,7 @@ export function SidebarBotsSection({
 
 function BotsSection({ serverId, onNavigate }: { serverId: string; onNavigate: () => void }) {
   const { t } = useTranslation();
+  const compact = useIsCompactFormFactor();
   const connection = useBotsConnection(serverId);
   useBotsPushes(serverId);
   const bots = useBots(serverId);
@@ -188,7 +191,14 @@ function BotsSection({ serverId, onNavigate }: { serverId: string; onNavigate: (
   if (!connection.orca && connection.connected && connection.supported)
     body = <Text style={styles.note}>{t("bots.jad.unsupported")}</Text>;
   else if (bots.isSuccess && list.length === 0 && groups.length === 0)
-    body = <SidebarBotsEmptyState onNewBot={openNewBot} onTemplates={openTemplates} />;
+    body = (
+      <BotsEmpty
+        serverId={serverId}
+        compact={compact}
+        onNewBot={openNewBot}
+        onTemplates={openTemplates}
+      />
+    );
   else if (bots.error) body = <Text style={styles.note}>{botErrorMessage(bots.error)}</Text>;
   else
     body = (
@@ -238,7 +248,12 @@ function BotsSection({ serverId, onNavigate }: { serverId: string; onNavigate: (
           )}
         </Pressable>
         {collapsed ? null : (
-          <BotsNewMenu serverId={serverId} botCount={list.length} onNewBot={openNewBot} />
+          <BotsNew
+            serverId={serverId}
+            compact={compact}
+            botCount={list.length}
+            onNewBot={openNewBot}
+          />
         )}
       </View>
       {collapsed ? (
@@ -274,6 +289,37 @@ function BotsSection({ serverId, onNavigate }: { serverId: string; onNavigate: (
       )}
     </View>
   );
+}
+
+/** A phone's drawer: `+` is New bot, an empty host one line (spec 37.6). */
+function BotsNew({
+  serverId,
+  compact,
+  botCount,
+  onNewBot,
+}: {
+  serverId: string;
+  compact: boolean;
+  botCount: number;
+  onNewBot: () => void;
+}) {
+  if (compact) return <PhoneBotsNewButton serverId={serverId} />;
+  return <BotsNewMenu serverId={serverId} botCount={botCount} onNewBot={onNewBot} />;
+}
+
+function BotsEmpty({
+  serverId,
+  compact,
+  onNewBot,
+  onTemplates,
+}: {
+  serverId: string;
+  compact: boolean;
+  onNewBot: () => void;
+  onTemplates: () => void;
+}) {
+  if (compact) return <PhoneBotsEmpty serverId={serverId} />;
+  return <SidebarBotsEmptyState onNewBot={onNewBot} onTemplates={onTemplates} />;
 }
 
 /** The `+` menu: "New bot" (its submenu: Start from scratch, Browse templates, From a link…) and "New group". */
@@ -538,11 +584,13 @@ function BotSidebarEntry({
     ? t("bots.chats.fold", { name: bot.name })
     : t("bots.chats.unfold", { name: bot.name });
   const line = botRowLineText(live.line, t, now);
+  // Long-press on a phone opens the same menu as a sheet.
+  const compact = useIsCompactFormFactor();
   return (
     <View>
       <ContextMenu>
         <ContextMenuTrigger
-          enabledOnMobile={false}
+          enabledOnMobile
           accessibilityRole="button"
           accessibilityLabel={bot.name}
           accessibilityState={selectedState}
@@ -597,7 +645,12 @@ function BotSidebarEntry({
             </Text>
           </View>
         </ContextMenuTrigger>
-        <ContextMenuContent align="start" width={220} testID={`sidebar-bot-menu-${bot.slug}`}>
+        <ContextMenuContent
+          align="start"
+          width={220}
+          mobileMode={compact ? "sheet" : "dropdown"}
+          testID={`sidebar-bot-menu-${bot.slug}`}
+        >
           <ContextMenuItem leading={SETTINGS_ICON} onSelect={openSettings}>
             {t("bots.row.settings")}
           </ContextMenuItem>

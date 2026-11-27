@@ -20,6 +20,8 @@ import { Shortcut } from "@/components/ui/shortcut";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { useHosts } from "@/runtime/host-runtime";
 import { isNative } from "@/constants/platform";
+import { useIsCompactFormFactor } from "@/constants/layout";
+import { PhoneNewBotSources } from "@/bots/phone/new-bot-sources";
 import type { Theme } from "@/styles/theme";
 import { BotAvatarTile, botPicture } from "@/bots/avatar";
 import { openBot } from "@/bots/navigation";
@@ -178,10 +180,14 @@ export function NewBotDialog({
   );
   // "Template" closes this dialog, so it shows only before anything is typed (`NewBotDialog.tsx:242`).
   const showTemplate = !handOver && !state.templateId && !state.name && !state.identity;
+  // A phone's sheet leads with Use template and From a link rows instead, kept while typing as Orca's
+  // (`MobileNewBotSheet.tsx:331`) (spec 37.6).
+  const compact = useIsCompactFormFactor();
+  const showSources = compact && !handOver && !state.templateId;
   const footer = useMemo(
     () => (
       <View style={styles.footer}>
-        {showTemplate ? (
+        {showTemplate && !compact ? (
           <Button
             variant="outline"
             size="sm"
@@ -206,7 +212,7 @@ export function NewBotDialog({
         </Button>
       </View>
     ),
-    [onOpenTemplates, press, showTemplate, state.creating, t],
+    [compact, onOpenTemplates, press, showTemplate, state.creating, t],
   );
   return (
     <AdaptiveModalSheet
@@ -220,6 +226,9 @@ export function NewBotDialog({
       testID="new-bot-dialog"
     >
       <View style={styles.body}>
+        {showSources ? (
+          <PhoneNewBotSources serverId={serverId} onTemplates={onOpenTemplates} />
+        ) : null}
         <NameRow model={model} state={state} />
         {state.pictureOpen ? <PictureSection model={model} state={state} /> : null}
         <IdentityField model={model} state={state} />
