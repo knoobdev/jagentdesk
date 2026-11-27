@@ -117,7 +117,7 @@ function BrowserTabsPopoverBody({ rows }: { rows: BrowserTabRow[] }) {
     void closeAllBrowserTabs(rows);
   }, [close, rows]);
   return (
-    <View>
+    <View style={styles.body}>
       <View style={styles.header}>
         <Text style={styles.title}>{t("browserTabs.title")}</Text>
         <Button
@@ -269,11 +269,13 @@ const styles = StyleSheet.create((theme: Theme) => ({
   },
   triggerHovered: { backgroundColor: theme.colors.surfaceSidebarHover },
   triggerLabel: { flex: 1, fontSize: 13, color: theme.colors.foregroundMuted },
+  // The menu measures its content, not the surface: padding on the surface would make the
+  // popover taller than placed and push it down over its trigger.
   popover: {
-    padding: theme.spacing[4],
     borderRadius: theme.borderRadius.xl,
     borderColor: theme.colors.border,
   },
+  body: { padding: theme.spacing[4] },
   header: {
     flexDirection: "row",
     alignItems: "center",
