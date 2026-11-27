@@ -11,13 +11,16 @@ import {
   type AgentScreenViewState,
   useAgentScreenStateMachine,
 } from "@/hooks/use-agent-screen-state-machine";
-import { useKeyboardShiftStyle } from "@/keyboard/shift";
 import { AgentCommandsProvider } from "@/agent-commands";
 import { ComposerEditingSession, useComposerFullscreen } from "@/composer/editing-session";
-import { ParentAgentCallout, ParentAgentPill, useParentAgentId } from "@/subagents/parent";
+import { ParentAgentCallout, useParentAgentId } from "@/subagents/parent";
+import { AgentTracks } from "@/panels/agent-tracks";
+import {
+  resolveComposerTrackControlClearance,
+  resolveComposerTrackTailClearance,
+} from "@/composer/pill-styles";
 import { useAgentDescriptor as useAgentPanelDescriptor } from "@/agent-presentation";
 import { useAgentStreamTail } from "@/agent-stream/use-agent-stream-tail";
-import type { AgentAddress } from "@jagentdesk/protocol/addresses";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { isGuestReadOnlyShare, isGuestShareMode } from "@/screens/share/guest-share-mode";
 import { type DaemonClient } from "@jagentdesk/client/internal/daemon-client";
@@ -34,7 +37,6 @@ import React, {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { StyleSheet as RNStyleSheet, Text, View } from "react-native";
-import ReanimatedAnimated from "react-native-reanimated";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import invariant from "tiny-invariant";
 import { shallow, useShallow } from "zustand/shallow";
@@ -97,14 +99,6 @@ import {
 import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
 import { buildWorkspaceTabPersistenceKey } from "@/workspace-tabs/model";
 import { type Theme } from "@/styles/theme";
-import {
-  useHideFinishedProviderSubagents,
-  useArchiveSubagent,
-  useDetachSubagent,
-  useSubagentsForParent,
-} from "@/subagents";
-import { BackgroundWorkTrack } from "@/background-work";
-import { SubagentsTrack } from "@/subagents/track";
 import type { PendingPermission } from "@/types/shared";
 import type { StreamItem } from "@/types/stream";
 import type { ViewedTimelineStatus, ViewedTimelineUiBridge } from "@/timeline/viewed-timeline-sync";
@@ -112,7 +106,6 @@ import { getInitDeferred, getInitKey } from "@/utils/agent-initialization";
 import { derivePendingPermissionKey, normalizeAgentSnapshot } from "@/utils/agent-snapshots";
 import { applyLegacyDaemonWorkspaceOwnership } from "@/workspace/legacy-daemon-workspaces";
 import { type WorkspaceFileOpenRequest } from "@/workspace/file-open";
-import { navigateToAgent } from "@/utils/navigate-to-agent";
 import { botIdFromLabels } from "@/bots/envelope";
 import { buildDraftAgentSetup, type ClientSlashCommand } from "@/client-slash-commands";
 import { OverlayDismissalScope } from "@/components/ui/overlay-dismissal";
@@ -844,10 +837,6 @@ function ChatAgentContent({
     onError: reportAttentionError,
   });
 
-  const { style: animatedKeyboardStyle } = useKeyboardShiftStyle({
-    mode: "translate",
-  });
-
   useEffect(() => {
     if (connectionStatus === "online") {
       if (reconnectToastArmedRef.current) {
@@ -1064,11 +1053,6 @@ function ChatAgentContent({
     visibilityCatchUpStatus,
   ]);
 
-  const animatedContentStyle = useMemo(
-    () => [animatedStaticStyles.content, animatedKeyboardStyle],
-    [animatedKeyboardStyle],
-  );
-
   const nonReadyView = renderChatAgentNonReadyView({
     viewState,
     effectiveAgent,
@@ -1101,7 +1085,6 @@ function ChatAgentContent({
       toast={toastState}
       dismiss={dismissToast}
       streamViewRef={streamViewRef}
-      animatedContentStyle={animatedContentStyle}
       handleComposerHeightChange={handleComposerHeightChange}
       handleMessageSent={handleMessageSent}
       showHistorySyncOverlay={showHistorySyncOverlay}
@@ -1129,7 +1112,6 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
   toast,
   dismiss,
   streamViewRef,
-  animatedContentStyle,
   handleComposerHeightChange,
   handleMessageSent,
   showHistorySyncOverlay,
@@ -1153,7 +1135,6 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
   toast: ToastState | null;
   dismiss: () => void;
   streamViewRef: React.RefObject<AgentStreamViewHandle | null>;
-  animatedContentStyle: object[];
   handleComposerHeightChange: (height: number) => void;
   handleMessageSent: () => void;
   showHistorySyncOverlay: boolean;
@@ -1195,6 +1176,9 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
       composerEditingSession,
     ],
   );
+  // The track rail floats over the transcript while the agent can still take a message.
+  const hasActiveComposer = !agentState.archivedAt && !isArchivingCurrentAgent;
+  const trackParentAgentId = useParentAgentId(serverId, agentId);
   const streamSection = (
     <RenderProfile id={`AgentStreamSection:${agentId}`}>
       <AgentStreamSection
@@ -1204,6 +1188,7 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
         agent={effectiveAgent}
         routeBottomAnchorRequest={routeBottomAnchorRequest}
         hasAppliedAuthoritativeHistory={hasAppliedAuthoritativeHistory}
+        hasActiveComposer={hasActiveComposer}
         toast={toastApi}
         onOpenWorkspaceFile={onOpenWorkspaceFile}
       />
@@ -1232,12 +1217,17 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
     return false;
   }, [onAttentionInputFocus]);
   const streamContent = (
-    <ReanimatedAnimated.View
-      style={animatedContentStyle}
+    // ComposerDock's KeyboardTranslateView already lifts this content with the composer.
+    // A second keyboard translation here moved the transcript off screen on iOS.
+    <View
+      style={animatedStaticStyles.content}
       onStartShouldSetResponderCapture={handleAttentionInteraction}
     >
       {streamSection}
-    </ReanimatedAnimated.View>
+      {hasActiveComposer ? (
+        <AgentTracks serverId={serverId} agentId={agentId} parentAgentId={trackParentAgentId} />
+      ) : null}
+    </View>
   );
   const contentContainer = <View style={styles.contentContainer}>{streamContent}</View>;
   const composerFullscreen = useComposerFullscreen(composerEditingSession);
@@ -1327,6 +1317,7 @@ const AgentStreamSection = memo(function AgentStreamSection({
   agent,
   routeBottomAnchorRequest,
   hasAppliedAuthoritativeHistory,
+  hasActiveComposer,
   toast,
   onOpenWorkspaceFile,
 }: {
@@ -1336,9 +1327,19 @@ const AgentStreamSection = memo(function AgentStreamSection({
   agent: AgentScreenAgent;
   routeBottomAnchorRequest: RouteBottomAnchorRequest;
   hasAppliedAuthoritativeHistory: boolean;
+  hasActiveComposer: boolean;
   toast: ReturnType<typeof useToastHost>["api"];
   onOpenWorkspaceFile?: (request: WorkspaceFileOpenRequest) => void;
 }) {
+  const isCompactFormFactor = useIsCompactFormFactor();
+  // The track bar's space is reserved whenever the bar is mounted, pills or not: pills come and go
+  // every turn, and the transcript must not jump with them.
+  const bottomOverlayTailClearance = hasActiveComposer
+    ? resolveComposerTrackTailClearance(isCompactFormFactor)
+    : 0;
+  const bottomOverlayControlClearance = hasActiveComposer
+    ? resolveComposerTrackControlClearance(isCompactFormFactor)
+    : 0;
   const streamItemsRaw = useAgentStreamTail(serverId, agentId);
   const pendingMessageSubmissions = useSessionStore(
     useShallow((state) =>
@@ -1392,6 +1393,8 @@ const AgentStreamSection = memo(function AgentStreamSection({
       pendingPermissions={pendingPermissions}
       routeBottomAnchorRequest={routeBottomAnchorRequest}
       isAuthoritativeHistoryReady={hasAppliedAuthoritativeHistory}
+      bottomOverlayTailClearance={bottomOverlayTailClearance}
+      bottomOverlayControlClearance={bottomOverlayControlClearance}
       toast={toast}
       pendingMessageSubmissions={pendingMessageSubmissions}
       turnPresentation={turnPresentation}
@@ -1485,7 +1488,6 @@ function ActiveAgentComposer({
   onMessageSent: () => void;
 }) {
   const hideComposer = usePaneHost() === "sheet";
-  const parentAgentId = useParentAgentId(serverId, agentId);
 
   const isCompactFormFactor = useIsCompactFormFactor();
   const { onLayout: onInputAreaLayout, isBelow: isCompactComposerLayout } = useContainerWidthBelow(
@@ -1495,7 +1497,7 @@ function ActiveAgentComposer({
   const client = useHostRuntimeClient(serverId);
   const { config: orchestrationConfig } = useOrchestration(serverId);
   const paneContext = usePaneContext();
-  const { workspaceId, tabId, retargetCurrentTab, openTab } = paneContext;
+  const { workspaceId, tabId, retargetCurrentTab } = paneContext;
   // Orchestration interaction model: the composer talks to the Supervisor; while a
   // run is active, Lead/Peer threads are observe-only so the human watches the bounded
   // work without racing the running turn. The Lead plan renders in the Supervisor thread.
@@ -1525,31 +1527,6 @@ function ActiveAgentComposer({
   const closeWorkspaceTab = useWorkspaceLayoutStore((state) => state.closeTab);
   const hideWorkspaceAgent = useWorkspaceLayoutStore((state) => state.hideAgent);
   const unpinWorkspaceAgent = useWorkspaceLayoutStore((state) => state.unpinAgent);
-  const backgroundWorkCount = useSessionStore(
-    (state) => state.sessions[serverId]?.agents.get(agentId)?.backgroundWork?.count ?? 0,
-  );
-  const subagentRows = useSubagentsForParent({
-    serverId,
-    parentAgentId: agentId,
-  });
-  const canDetachSubagents = useSessionStore(
-    (state) => state.sessions[serverId]?.serverInfo?.features?.agentDetach === true,
-  );
-  const handleOpenSubagent = useCallback((address: AgentAddress) => {
-    navigateToAgent(address);
-  }, []);
-  const handleOpenProviderSubagent = useCallback(
-    (ownerAgentId: string, subagentId: string) => {
-      openTab({ kind: "provider_subagent", parentAgentId: ownerAgentId, subagentId });
-    },
-    [openTab],
-  );
-  const handleArchiveSubagent = useArchiveSubagent();
-  const handleDetachSubagent = useDetachSubagent();
-  const handleHideFinishedProviderSubagents = useHideFinishedProviderSubagents({
-    serverId,
-    parentAgentId: agentId,
-  });
   const workspaceAttachmentScopeKey = useWorkspaceAttachmentScopeKey({
     serverId,
     cwd,
@@ -1695,17 +1672,6 @@ function ActiveAgentComposer({
       {isSupervisorThread ? (
         <OrchestrationLeadPlanCard serverId={serverId} workspaceId={workspaceId} />
       ) : null}
-      <BackgroundWorkTrack serverId={serverId} agentId={agentId} count={backgroundWorkCount} />
-      {parentAgentId ? <ParentAgentPill serverId={serverId} parentAgentId={parentAgentId} /> : null}
-      <SubagentsTrack
-        serverId={serverId}
-        rows={subagentRows}
-        onOpenSubagent={handleOpenSubagent}
-        onOpenProviderSubagent={handleOpenProviderSubagent}
-        onArchiveSubagent={handleArchiveSubagent}
-        onArchiveFinished={handleHideFinishedProviderSubagents}
-        onDetachSubagent={canDetachSubagents ? handleDetachSubagent : undefined}
-      />
       {hideComposer ? null : composerContent}
     </View>
   );

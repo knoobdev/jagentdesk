@@ -1,5 +1,7 @@
 import { useCallback, useMemo, useState, type ReactElement, type ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
+import { GestureDetector } from "react-native-gesture-handler";
+import Animated from "react-native-reanimated";
 import { StyleSheet } from "react-native-unistyles";
 import {
   MENU_ITEM_HEIGHT,
@@ -12,9 +14,15 @@ import {
   type MenuPageDefinition,
   type MenuTriggerState,
 } from "@/components/ui/menu";
+import {
+  HorizontalScrollBoundaryShades,
+  useHorizontalScrollBoundary,
+} from "@/components/ui/horizontal-scroll-boundary";
 import { StatusRing } from "@/components/status-ring";
 import { STATUS_RING_HALO_INSET } from "@/components/status-ring/geometry";
+import { CHAT_COLUMN_RAIL_DATASET } from "@/chat-rail";
 import { isWeb } from "@/constants/platform";
+import { usePanelAwareHorizontalScrollGesture } from "@/mobile-panels/gestures";
 import { getStatusDotColor } from "@/utils/status-dot-color";
 import { STATUS_INDICATOR_FILLED_DOT_SIZE } from "@/utils/status-indicator-geometry";
 import type { SidebarStateBucket } from "@/utils/sidebar-agent-state";
@@ -29,14 +37,46 @@ import { COMPOSER_PILL_CLEARANCE, composerPillStyles } from "./pill-styles";
  * on every platform.
  *
  * The bar floats over the transcript with no background, so content remains visible underneath.
- * Its host gives the scroll viewport a small bottom inset only when the bar exists; that keeps
- * the final footer clear without turning the overlay into a layout band.
+ * Its host gives the scroll viewport a small bottom inset for as long as the bar is mounted, with
+ * or without pills: that keeps the final footer clear, and pills that come and go every turn do not
+ * move the transcript.
  */
 export function ComposerTrackBar({ children }: { children: ReactNode }): ReactElement {
+  const scrollGesture = usePanelAwareHorizontalScrollGesture();
+  const scrollBoundary = useHorizontalScrollBoundary();
   return (
-    <View style={styles.bar} pointerEvents="box-none">
-      <View style={styles.track} pointerEvents="box-none">
-        {children}
+    <View
+      style={styles.bar}
+      dataSet={CHAT_COLUMN_RAIL_DATASET}
+      pointerEvents="box-none"
+      testID="composer-track-bar"
+    >
+      <View style={styles.trackViewport} pointerEvents="box-none">
+        <GestureDetector gesture={scrollGesture}>
+          <Animated.ScrollView
+            testID="composer-track-scroll"
+            style={styles.trackScroller}
+            horizontal
+            keyboardShouldPersistTaps="handled"
+            showsHorizontalScrollIndicator={false}
+            onLayout={scrollBoundary.onLayout}
+            onContentSizeChange={scrollBoundary.onContentSizeChange}
+            onScroll={scrollBoundary.onScroll}
+            scrollEventThrottle={16}
+          >
+            <View style={styles.track} pointerEvents="box-none">
+              {children}
+            </View>
+          </Animated.ScrollView>
+        </GestureDetector>
+        <HorizontalScrollBoundaryShades
+          visible
+          backdrop="surface"
+          testIDPrefix="composer-track-scroll-shade"
+          bottomInset={0}
+          leftStyle={scrollBoundary.leftShadeStyle}
+          rightStyle={scrollBoundary.rightShadeStyle}
+        />
       </View>
     </View>
   );
@@ -375,9 +415,21 @@ const styles = StyleSheet.create((theme) => {
         md: COMPOSER_PILL_CLEARANCE.wide,
       },
     },
-    track: {
+    trackViewport: {
       width: "100%",
       maxWidth: theme.contentMaxWidth,
+      minWidth: 0,
+      flexGrow: 0,
+      flexShrink: 1,
+    },
+    // Only as wide as its pills, so the rest of the row passes touches to the transcript. The
+    // scroller can't use box-none for that: Android's horizontal ScrollView won't scroll with it.
+    trackScroller: {
+      alignSelf: "flex-start",
+      // Web sizes a flex-start scroller to its content, so without a cap it overflows the bar.
+      maxWidth: "100%",
+    },
+    track: {
       flexDirection: "row",
       alignItems: "center",
       gap: theme.spacing[1],

@@ -99,11 +99,13 @@ import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { planTimelineTailFetch } from "@/timeline/timeline-sync-plan";
 import {
   CompletedTurnFooterRow,
+  TURN_FOOTER_BOTTOM_SPACING,
   TurnFooter,
   type AssistantTurnForkHandler,
   type InFlightTurnForkHandler,
   type TurnContentStrategy,
 } from "./turn-footer";
+import { resolveBottomOverlayTailInset } from "./bottom-overlay-inset";
 import { layoutStream, type StreamLayoutItem } from "./layout";
 import {
   type BottomAnchorLocalRequest,
@@ -134,8 +136,9 @@ import { useRetainedPanelActive } from "@/components/retained-panel";
 function renderLiveAuxiliaryNode(input: {
   pendingPermissions: ReactNode;
   turnFooter: ReactNode;
+  bottomOverlayInset: number;
 }): ReactNode {
-  if (!input.pendingPermissions && !input.turnFooter) {
+  if (!input.pendingPermissions && !input.turnFooter && input.bottomOverlayInset === 0) {
     return null;
   }
   return (
@@ -146,8 +149,20 @@ function renderLiveAuxiliaryNode(input: {
           <View style={stylesheet.listHeaderContent}>{input.pendingPermissions}</View>
         </View>
       ) : null}
+      {input.bottomOverlayInset > 0 ? (
+        <BottomOverlayInset height={input.bottomOverlayInset} />
+      ) : null}
     </>
   );
+}
+
+function BottomOverlayInset({ height }: { height: number }) {
+  const style = useMemo(() => ({ height }), [height]);
+  return <View style={style} />;
+}
+
+function resolveBottomOverlayControlOffset(clearance: number | undefined): number {
+  return Math.max(16, clearance ?? 0);
 }
 
 function renderPendingPermissionsNode(input: {
@@ -297,6 +312,10 @@ export interface AgentStreamViewProps {
   turnPresentation: TurnPresentation;
   routeBottomAnchorRequest?: BottomAnchorRouteRequest | null;
   isAuthoritativeHistoryReady?: boolean;
+  /** Tail space required by a transparent overlay rendered at the bottom edge. */
+  bottomOverlayTailClearance?: number;
+  /** Bottom offset required for controls floating above that overlay. */
+  bottomOverlayControlClearance?: number;
   toast?: ToastApi | null;
   onOpenWorkspaceFile?: (request: WorkspaceFileOpenRequest) => void;
   readOnly?: boolean;
@@ -354,6 +373,8 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       turnPresentation,
       routeBottomAnchorRequest = null,
       isAuthoritativeHistoryReady = true,
+      bottomOverlayTailClearance = 0,
+      bottomOverlayControlClearance,
       toast,
       onOpenWorkspaceFile,
       readOnly = false,
@@ -1246,11 +1267,23 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         }),
     );
     const renderLiveAuxiliary = useCallback<StreamSegmentRenderers["renderLiveAuxiliary"]>(() => {
+      const existingTailSpacing =
+        auxiliary.turnFooter && !auxiliary.pendingPermissions ? TURN_FOOTER_BOTTOM_SPACING : 0;
+      const bottomOverlayInset = resolveBottomOverlayTailInset({
+        requiredTailClearance: bottomOverlayTailClearance,
+        existingTailSpacing,
+      });
       return renderLiveAuxiliaryNode({
         pendingPermissions: auxiliary.pendingPermissions,
         turnFooter: auxiliary.turnFooter,
+        bottomOverlayInset,
       });
-    }, [auxiliary.pendingPermissions, auxiliary.turnFooter]);
+    }, [auxiliary.pendingPermissions, auxiliary.turnFooter, bottomOverlayTailClearance]);
+    const scrollToBottomOffset = resolveBottomOverlayControlOffset(bottomOverlayControlClearance);
+    const scrollToBottomContainerStyle = useMemo(
+      () => [stylesheet.scrollToBottomContainer, { bottom: scrollToBottomOffset }],
+      [scrollToBottomOffset],
+    );
 
     const renderers = useMemo<StreamSegmentRenderers>(
       () => ({
@@ -1350,7 +1383,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
               />
             ) : null}
             {(!isNearBottom || isTimelineDetached) && (
-              <View style={stylesheet.scrollToBottomContainer} pointerEvents="box-none">
+              <View style={scrollToBottomContainerStyle} pointerEvents="box-none">
                 <Animated.View entering={scrollIndicatorFadeIn} exiting={scrollIndicatorFadeOut}>
                   <Pressable
                     style={stylesheet.scrollToBottomButton}
@@ -1481,6 +1514,12 @@ function agentStreamViewPropsEqual(
   }
   if (left.isAuthoritativeHistoryReady !== right.isAuthoritativeHistoryReady) {
     reasons.push("isAuthoritativeHistoryReady");
+  }
+  if (left.bottomOverlayTailClearance !== right.bottomOverlayTailClearance) {
+    reasons.push("bottomOverlayTailClearance");
+  }
+  if (left.bottomOverlayControlClearance !== right.bottomOverlayControlClearance) {
+    reasons.push("bottomOverlayControlClearance");
   }
   if (left.toast !== right.toast) reasons.push("toast");
   if (left.onOpenWorkspaceFile !== right.onOpenWorkspaceFile) reasons.push("onOpenWorkspaceFile");

@@ -2006,6 +2006,13 @@ export const ru: TranslationResources = {
       backToParent: "Back to parent",
     },
 
+    pillLabelOne: "1 субагент",
+    pillLabelMany: "Субагентов: {{count}}",
+    pillLabelWorking: "{{count}} в работе",
+    pillLabelFailed: "{{count}} с ошибкой",
+    pillLabelNeedsInputOne: "1 ожидает ввода",
+    pillLabelNeedsInputMany: "{{count}} ожидают ввода",
+    pillLabelReadyToReview: "{{count}} на проверку",
     detachAction: "Отсоединить {{label}}",
     detachTooltip: "Отсоединить субагент",
     archiveAction: "Архив{{label}}",

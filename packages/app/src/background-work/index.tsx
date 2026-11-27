@@ -5,18 +5,14 @@ import {
   useState,
   useSyncExternalStore,
   type ReactElement,
-  type ReactNode,
 } from "react";
 import { Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { Activity, CircleDashed, SquareTerminal } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { ComposerTrackPill, ComposerTrackRow } from "@/composer/tracks";
-import { ComposerStackTrack } from "@/composer/stack-track";
 import { LiveElapsed } from "@/components/message";
-import { StatusRing } from "@/components/status-ring";
 import { Button } from "@/components/ui/button";
-import { useIsCompactFormFactor } from "@/constants/layout";
 import type { Theme } from "@/styles/theme";
 import type { JAgentDeskAgentBackgroundWorkItem } from "@jagentdesk/client";
 import { backgroundWorkText } from "./presentation";
@@ -83,8 +79,9 @@ export interface BackgroundWorkTrackProps {
 }
 
 /**
- * The agent's background work as one track in the stack above the composer (spec 38 §4.4b):
- * a stacked track on wide screens, a pill next to the subagents pill on compact ones.
+ * The agent's background work as one pill in the composer's track rail (spec 38 §4.4b, Paseo
+ * #6220): the running ring and the count; the panel lists each task with Stop, and work that ended
+ * with Dismiss. A popover on wide screens, a sheet on compact ones.
  */
 export function BackgroundWorkTrack({
   serverId,
@@ -92,52 +89,34 @@ export function BackgroundWorkTrack({
   count,
 }: BackgroundWorkTrackProps): ReactElement | null {
   const { t } = useTranslation();
-  const compact = useIsCompactFormFactor();
   const model = getBackgroundWorkModel(serverId, agentId);
   const { snapshot, rows, runningCount } = useTrackRows(model);
-  const [expanded, setExpanded] = useState(false);
-  const toggle = useCallback(() => setExpanded((value) => !value), []);
+  const [open, setOpen] = useState(false);
+  // A sidebar line asks for the track to open when it navigates here.
   const openRequest = useBackgroundWorkTrackOpenRequest(serverId, agentId);
   useEffect(() => {
     if (openRequest === 0) return;
-    setExpanded(true);
+    setOpen(true);
     consumeBackgroundWorkTrackOpen(serverId, agentId);
   }, [agentId, openRequest, serverId]);
 
   const running = runningCount ?? count;
-  const leading = useMemo(() => (running > 0 ? <StatusRing /> : null), [running]);
   if (running === 0 && rows.length === 0) return null;
 
-  let headerLabel = t("message.backgroundWork.finishedHeader", { count: rows.length });
-  if (running === 1) headerLabel = t("message.backgroundWork.pillOne");
-  else if (running > 1) headerLabel = t("message.backgroundWork.pillMany", { count: running });
+  let label = t("message.backgroundWork.finishedHeader", { count: rows.length });
+  if (running === 1) label = t("message.backgroundWork.pillOne");
+  else if (running > 1) label = t("message.backgroundWork.pillMany", { count: running });
 
-  const body = (
-    <BackgroundWorkRows model={model} rows={rows} status={snapshot.status} compact={compact} />
-  );
-  if (compact)
-    return (
-      <ComposerTrackPill
-        testID="background-work"
-        panelTitle={t("message.backgroundWork.title")}
-        segments={[{ bucket: running > 0 ? "running" : "done", text: headerLabel }]}
-        open={expanded}
-        onOpenChange={setExpanded}
-      >
-        {body}
-      </ComposerTrackPill>
-    );
   return (
-    <ComposerStackTrack
+    <ComposerTrackPill
       testID="background-work"
-      headerTestID="background-work-header"
-      headerLabel={headerLabel}
-      leading={leading}
-      expanded={expanded}
-      onToggle={toggle}
+      panelTitle={t("message.backgroundWork.title")}
+      segments={[{ bucket: running > 0 ? "running" : "done", text: label }]}
+      open={open}
+      onOpenChange={setOpen}
     >
-      {body}
-    </ComposerStackTrack>
+      <BackgroundWorkRows model={model} rows={rows} status={snapshot.status} />
+    </ComposerTrackPill>
   );
 }
 
@@ -145,54 +124,44 @@ function BackgroundWorkRows({
   model,
   rows,
   status,
-  compact,
 }: {
   model: BackgroundWorkModel;
   rows: TrackRow[];
   status: ReturnType<BackgroundWorkModel["getSnapshot"]>["status"];
-  compact: boolean;
 }): ReactElement {
   const { t } = useTranslation();
-  const Row = compact ? CompactRowFrame : StackRowFrame;
   return (
     <>
       {status === "loading" || status === "stale" ? (
-        <Row>
+        <ComposerTrackRow>
           <Text style={styles.facts}>{t("message.backgroundWork.waiting")}</Text>
-        </Row>
+        </ComposerTrackRow>
       ) : null}
       {status === "error" ? (
-        <Row>
-          <Text style={styles.facts} numberOfLines={1}>
-            {t("message.backgroundWork.error")}
-          </Text>
-          <Button variant="ghost" size="sm" onPress={model.retry}>
-            {t("message.backgroundWork.retry")}
-          </Button>
-        </Row>
+        <>
+          <ComposerTrackRow>
+            <Text style={styles.facts}>{t("message.backgroundWork.error")}</Text>
+          </ComposerTrackRow>
+          <ComposerTrackRow
+            onPress={model.retry}
+            closeOnSelect={false}
+            accessibilityLabel={t("message.backgroundWork.retry")}
+          >
+            <Text style={styles.label}>{t("message.backgroundWork.retry")}</Text>
+          </ComposerTrackRow>
+        </>
       ) : null}
       {rows.map((row) => (
-        <Row key={`${row.state}:${row.item.stopToken ?? row.item.id}`}>
-          <BackgroundWorkRowContent row={row} model={model} ready={status === "ready"} />
-        </Row>
+        <ComposerTrackRow
+          key={`${row.state}:${row.item.stopToken ?? row.item.id}`}
+          testID="background-work-row"
+        >
+          <View style={styles.row}>
+            <BackgroundWorkRowContent row={row} model={model} ready={status === "ready"} />
+          </View>
+        </ComposerTrackRow>
       ))}
     </>
-  );
-}
-
-function StackRowFrame({ children }: { children: ReactNode }): ReactElement {
-  return (
-    <View style={styles.row} testID="background-work-row">
-      {children}
-    </View>
-  );
-}
-
-function CompactRowFrame({ children }: { children: ReactNode }): ReactElement {
-  return (
-    <ComposerTrackRow testID="background-work-row">
-      <View style={styles.compactRow}>{children}</View>
-    </ComposerTrackRow>
   );
 }
 
@@ -266,32 +235,32 @@ function BackgroundWorkRowContent({
 }
 
 const styles = StyleSheet.create((theme) => ({
+  // `flexBasis: "auto"` so the row's text reaches the panel's measurement — see subagents/track.
   row: {
-    minHeight: 32,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[2],
-    paddingHorizontal: theme.spacing[3],
-  },
-  compactRow: {
-    flex: 1,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: "auto",
     minWidth: 0,
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
   },
   label: {
-    flex: 1,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: "auto",
     minWidth: 0,
-    fontSize: 13,
+    fontSize: theme.fontSize.sm,
     color: theme.colors.foreground,
   },
   commandLabel: {
-    flex: 1,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: "auto",
     minWidth: 0,
-    fontSize: 13,
+    fontSize: theme.fontSize.sm,
     fontFamily: theme.fontFamily.mono,
     color: theme.colors.foreground,
   },
-  facts: { fontSize: 13, color: theme.colors.foregroundMuted },
+  facts: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
 }));

@@ -1898,6 +1898,13 @@ export const zhCN: TranslationResources = {
       backToParent: "Back to parent",
     },
 
+    pillLabelOne: "1 个 subagent",
+    pillLabelMany: "{{count}} 个 subagent",
+    pillLabelWorking: "{{count}} 个运行中",
+    pillLabelFailed: "{{count}} 个失败",
+    pillLabelNeedsInputOne: "1 个需要输入",
+    pillLabelNeedsInputMany: "{{count}} 个需要输入",
+    pillLabelReadyToReview: "{{count}} 个待查看",
     detachAction: "分离 {{label}}",
     detachTooltip: "分离 subagent",
     archiveAction: "归档 {{label}}",

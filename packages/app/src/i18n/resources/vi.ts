@@ -26,6 +26,13 @@ export const vi = {
   memory: memoryStrings,
   subagents: {
     title: "Các tác tử con",
+    pillLabelOne: "1 tác tử con",
+    pillLabelMany: "{{count}} tác tử con",
+    pillLabelWorking: "{{count}} đang chạy",
+    pillLabelFailed: "{{count}} lỗi",
+    pillLabelNeedsInputOne: "1 cần nhập",
+    pillLabelNeedsInputMany: "{{count}} cần nhập",
+    pillLabelReadyToReview: "{{count}} chờ xem",
     parent: {
       openParent: "Open parent",
 
