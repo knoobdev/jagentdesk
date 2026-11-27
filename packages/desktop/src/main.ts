@@ -110,6 +110,7 @@ import {
   onDialogsChanged,
   openGuestPrompt,
 } from "./features/browser-automation/guest-dialogs.js";
+import { loadHeldGuestUrlAfterIdentity } from "./features/browser-guest-initial-load.js";
 import {
   applySessionIdentity,
   ELECTRON_USER_AGENT,
@@ -117,6 +118,7 @@ import {
   applyStealthToWebContents,
   installNavigationClientHints,
   getActiveFingerprintProfile,
+  isIdentityProtected,
   reapplyStealthToGuests,
   setActiveFingerprintProfile,
   setStealthEnabled,
@@ -1135,18 +1137,11 @@ async function createWindow(
     installGuestDialogHandler(contents);
     // Anti-detection: the guest's identity (UA, Client Hints, timezone, locale, init
     // scripts) is in place before its first request, then the held URL loads.
-    const initialUrl = takeInitialGuestLoad(contents);
-    void applyStealthToWebContents(contents).finally(() => {
-      if (initialUrl && !contents.isDestroyed()) {
-        contents.loadURL(initialUrl).catch((error: unknown) => {
-          // ERR_ABORTED: the page navigated again before the first load finished.
-          if (error instanceof Error && error.message.includes("ERR_ABORTED")) return;
-          log.warn("[browser-stealth] initial guest load failed", {
-            webContentsId: contents.id,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        });
-      }
+    loadHeldGuestUrlAfterIdentity({
+      contents,
+      initialUrl: takeInitialGuestLoad(contents),
+      identity: applyStealthToWebContents(contents),
+      identityProtected: isIdentityProtected,
     });
     contents.once("destroyed", () => {
       pendingBrowserWindowOpenRequests.delete(contents.id);
