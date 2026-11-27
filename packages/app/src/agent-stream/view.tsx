@@ -41,7 +41,6 @@ import {
 } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
-import { useMutation } from "@tanstack/react-query";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { Check, ChevronDown, X } from "lucide-react-native";
 import { usePanelStore } from "@/stores/panel-store";
@@ -73,6 +72,10 @@ import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
 import { useLoadOlderAgentHistory } from "@/hooks/use-load-older-agent-history";
 import { useSettings, resolveContentMaxWidth } from "@/hooks/use-settings";
 import { type ToastApi } from "@/components/toast-host";
+import { useOptionalToast } from "@/contexts/toast-api-context";
+import { Alert } from "@/components/ui/alert";
+import { usePermissionResponse } from "./use-permission-response";
+import { permissionRequestDetail } from "./permission-detail";
 import { returnToTimelineTail } from "./timeline-tail-navigation";
 import { type DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import { ToolCallDetailsContent } from "@/components/tool-call-details";
@@ -1638,12 +1641,7 @@ export function PermissionRequestCard({
     : (request.title ?? request.name ?? t("agentStream.permission.required"));
   const description = request.description ?? "";
   const resolvedToolCallDetail = useMemo(
-    () =>
-      request.detail ?? {
-        type: "unknown" as const,
-        input: request.input ?? null,
-        output: null,
-      },
+    () => permissionRequestDetail({ detail: request.detail, input: request.input }),
     [request.detail, request.input],
   );
   const resolvedActions = useMemo((): AgentPermissionAction[] => {
@@ -1688,64 +1686,38 @@ export function PermissionRequestCard({
     return undefined;
   }, [request]);
 
-  const permissionMutation = useMutation({
-    mutationFn: async (input: {
-      agentId: string;
-      requestId: string;
-      response: AgentPermissionResponse;
-    }) => {
-      if (!client) {
-        throw new Error(t("common.errors.daemonClientUnavailable"));
-      }
-      return client.respondToPermissionAndWait(
-        input.agentId,
-        input.requestId,
-        input.response,
-        15000,
-      );
-    },
-  });
+  const toast = useOptionalToast();
+  const handleExpired = useCallback(() => {
+    toast?.show(t("agentStream.permission.notPending"), { testID: "permission-not-pending-toast" });
+  }, [t, toast]);
   const {
-    reset: resetPermissionMutation,
-    mutateAsync: respondToPermission,
-    isPending: isResponding,
-  } = permissionMutation;
-
-  const [respondingActionId, setRespondingActionId] = useState<string | null>(null);
-
-  useEffect(() => {
-    resetPermissionMutation();
-    setRespondingActionId(null);
-  }, [permission.request.id, resetPermissionMutation]);
+    respond,
+    isResponding,
+    respondingActionId,
+    error: responseError,
+  } = usePermissionResponse({
+    client,
+    agentId: permission.agentId,
+    requestId: permission.request.id,
+    unavailableMessage: t("common.errors.daemonClientUnavailable"),
+    onExpired: handleExpired,
+  });
   const handleResponse = useCallback(
-    (response: AgentPermissionResponse) => {
-      respondToPermission({
-        agentId: permission.agentId,
-        requestId: permission.request.id,
-        response,
-      }).catch((error) => {
-        console.error("[PermissionRequestCard] Failed to respond to permission:", error);
-      });
-    },
-    [permission.agentId, permission.request.id, respondToPermission],
+    (response: AgentPermissionResponse) => respond(response),
+    [respond],
   );
   const handleActionPress = useCallback(
     (action: AgentPermissionAction) => {
-      setRespondingActionId(action.id);
       if (action.behavior === "allow") {
-        handleResponse({
-          behavior: "allow",
-          selectedActionId: action.id,
-        });
+        respond({ behavior: "allow", selectedActionId: action.id }, action.id);
         return;
       }
-      handleResponse({
-        behavior: "deny",
-        selectedActionId: action.id,
-        message: "Denied by user",
-      });
+      respond(
+        { behavior: "deny", selectedActionId: action.id, message: "Denied by user" },
+        action.id,
+      );
     },
-    [handleResponse],
+    [respond],
   );
 
   const optionsContainerStyle = useMemo(
@@ -1757,17 +1729,12 @@ export function PermissionRequestCard({
   );
 
   if (request.kind === "question") {
-    const responseFailed =
-      permissionMutation.isError &&
-      permissionMutation.variables?.agentId === permission.agentId &&
-      permissionMutation.variables?.requestId === permission.request.id;
-    const responseError = responseFailed ? t("message.question.responseFailed") : null;
     return (
       <QuestionFormCard
         permission={permission}
         onRespond={handleResponse}
         isResponding={isResponding}
-        responseError={responseError}
+        responseError={responseError ? t("message.question.responseFailed") : null}
       />
     );
   }
@@ -1777,6 +1744,15 @@ export function PermissionRequestCard({
       <Text testID="permission-request-question" style={permissionStyles.question}>
         {t("agentStream.permission.question")}
       </Text>
+
+      {responseError ? (
+        <Alert
+          variant="error"
+          title={t("message.question.responseFailed")}
+          description={responseError}
+          testID="permission-request-error"
+        />
+      ) : null}
 
       <View style={optionsContainerStyle}>
         {resolvedActions.map((action) => {
@@ -1834,7 +1810,7 @@ export function PermissionRequestCard({
         />
       ) : null}
 
-      {!isPlanRequest ? (
+      {!isPlanRequest && resolvedToolCallDetail ? (
         <ToolCallDetailsContent detail={resolvedToolCallDetail} maxHeight={200} />
       ) : null}
 

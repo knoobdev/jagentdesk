@@ -286,6 +286,7 @@ export const ar: TranslationResources = {
       implement: "ينفذ",
       question: "كيف تريد المتابعة؟",
       proposedPlan: "الخطة المقترحة",
+      notPending: "لم يعد هذا الطلب معلقًا",
     },
   },
   agentPanel: {

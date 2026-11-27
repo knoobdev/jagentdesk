@@ -2571,6 +2571,8 @@ export class Session {
               agentId: event.agentId,
               requestId: event.event.requestId,
               resolution: event.event.resolution,
+              // Undefined unless the provider no longer had the request; JSON drops it.
+              expired: event.event.expired,
             },
           });
         }

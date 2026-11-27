@@ -264,6 +264,7 @@ export const en = {
       implement: "Implement",
       question: "How would you like to proceed?",
       proposedPlan: "Proposed plan",
+      notPending: "This request is no longer pending",
     },
   },
   agentPanel: {

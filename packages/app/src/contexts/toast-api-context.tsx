@@ -11,6 +11,11 @@ export function useToast(): ToastApi {
   return value;
 }
 
+/** For surfaces that also render outside the app shell, where a toast has nowhere to go. */
+export function useOptionalToast(): ToastApi | null {
+  return useContext(ToastContext);
+}
+
 export function ToastApiProvider({ api, children }: { api: ToastApi; children: ReactNode }) {
   return <ToastContext.Provider value={api}>{children}</ToastContext.Provider>;
 }

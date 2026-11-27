@@ -271,6 +271,7 @@ export const zhCN: TranslationResources = {
       implement: "实施",
       question: "你想如何继续？",
       proposedPlan: "建议计划",
+      notPending: "此请求已不再等待处理",
     },
   },
   agentPanel: {

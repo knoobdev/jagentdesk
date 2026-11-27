@@ -63,6 +63,8 @@ import type { ProviderDefinition } from "./provider-registry.js";
 
 import { OpenCodeV2AgentClient } from "./providers/opencode/v2/agent.js";
 import { V2Harness } from "./providers/opencode/test-utils/v2-harness.js";
+import { OpenCodeHttpError } from "./providers/opencode/http-error.js";
+import { ClientError } from "@opencode/client";
 
 function identityLine(agentId: string, cwd: string): string {
   return agentIdentityInstruction({ agentId, title: undefined, cwd, agentTools: false });
@@ -665,6 +667,65 @@ function instructionPluginSessions(instructions: () => string[]): PluginSessions
     callTool: async () => ({ isError: true, text: "No plugin tools" }),
   };
 }
+
+test("an OpenCode permission the server no longer has is dropped instead of failing", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-permission-not-pending-"));
+  const harness = new V2Harness();
+  harness.info.location.directory = workdir;
+  harness.api.permission.list = async () => [
+    {
+      id: "per_stale",
+      sessionID: "session",
+      action: "external_directory",
+      resources: ["/private/var/folders/T/opencode/*"],
+    },
+  ];
+  // OpenCode 2.4.2 answers a reply for a request it no longer has with 404.
+  harness.api.permission.reply = async (input) => {
+    throw new ClientError("Transport", {
+      cause: new OpenCodeHttpError(
+        `/api/session/${input.sessionID}/permission/${input.requestID}/reply`,
+        404,
+        false,
+      ),
+    });
+  };
+  const client = new OpenCodeV2AgentClient({ logger, runtime: harness.runtime });
+  const manager = new AgentManager({ clients: { opencode: client }, logger });
+  const agent = await manager.createAgent({ provider: "opencode", cwd: workdir }, undefined, {
+    workspaceId: undefined,
+  });
+  const events: AgentManagerEvent[] = [];
+  manager.subscribe((event) => events.push(event), { replayState: false });
+  try {
+    expect([...manager.getAgent(agent.id)!.pendingPermissions.keys()]).toEqual(["per_stale"]);
+    await expect(
+      manager.respondToPermission(agent.id, "per_stale", {
+        behavior: "allow",
+        selectedActionId: "once",
+      }),
+    ).resolves.toBeUndefined();
+    expect(manager.getAgent(agent.id)!.pendingPermissions.size).toBe(0);
+    const resolved = events.flatMap((event) =>
+      event.type === "agent_stream" && event.event.type === "permission_resolved"
+        ? [event.event]
+        : [],
+    );
+    expect(resolved).toEqual([
+      {
+        type: "permission_resolved",
+        provider: "opencode",
+        requestId: "per_stale",
+        resolution: { behavior: "deny", message: "This request is no longer pending" },
+        expired: true,
+      },
+    ]);
+  } finally {
+    await manager.closeAgent(agent.id);
+    await client.shutdown();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
 
 test("OpenCode persistence excludes launch-only instructions from storage and clients", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-plugin-persistence-"));

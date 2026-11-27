@@ -16,6 +16,7 @@ import { DiffViewer } from "@/components/diff-viewer";
 import { ScrollableCodeSurface } from "@/components/ui/scrollable-code-surface";
 import { PermissionRequestCard } from "@/agent-stream/view";
 import { useSessionStore } from "@/stores/session-store";
+import type { PendingPermission } from "@/types/shared";
 import { useFetchQuery } from "@/data/query";
 import { parseUnifiedDiff } from "@/utils/tool-call-parsers";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
@@ -24,22 +25,19 @@ import { sortItems } from "./model";
 import { styles } from "./styles";
 import { Section, QueryNotice, ErrorNotice, Input } from "./ui";
 import { TabHint } from "./help";
-export function WorkerPermissions({
-  serverId,
-  bot,
-  items,
-  includeSupervisor = false,
-}: {
-  serverId: string;
-  bot: Bot;
-  items: readonly BotItem[];
-  includeSupervisor?: boolean;
-}) {
-  const { client } = useBotsConnection(serverId);
+/**
+ * Pending permission cards of the bot's workers, their subagents and its Supervisor. They are
+ * Needs you work, so they live at the top of the Items tab (spec 37.5), not above every tab.
+ */
+export function useBotPermissions(
+  serverId: string,
+  bot: Bot,
+  items: readonly BotItem[],
+): PendingPermission[] {
   const agents = useSessionStore((state) => state.sessions[serverId]?.agents);
-  const workerIds = useMemo(() => {
+  const agentIds = useMemo(() => {
     const ids = new Set(items.flatMap((item) => item.workerAgentIds));
-    if (includeSupervisor && bot.agentId) ids.add(bot.agentId);
+    if (bot.agentId) ids.add(bot.agentId);
     let changed = true;
     while (changed) {
       changed = false;
@@ -51,25 +49,32 @@ export function WorkerPermissions({
       }
     }
     return ids;
-  }, [agents, items, includeSupervisor, bot.agentId]);
-  const permissions = useSessionStore(
+  }, [agents, items, bot.agentId]);
+  return useSessionStore(
     useShallow((state) =>
       Array.from(state.sessions[serverId]?.pendingPermissions.values() ?? []).filter((permission) =>
-        workerIds.has(permission.agentId),
+        agentIds.has(permission.agentId),
       ),
     ),
   );
+}
+function NeedsYouPermissions({
+  serverId,
+  permissions,
+}: {
+  serverId: string;
+  permissions: readonly PendingPermission[];
+}) {
+  const { t } = useTranslation();
+  const { client } = useBotsConnection(serverId);
   if (!permissions.length) return null;
   return (
-    <ScrollView
-      style={styles.permissions}
-      contentContainerStyle={styles.card}
-      testID="bots-worker-permissions"
-    >
+    <View style={styles.needsYou} testID="bots-needs-you-permissions">
+      <Text style={styles.title}>{t("bots.needs_you")}</Text>
       {permissions.map((permission) => (
         <PermissionRequestCard key={permission.key} permission={permission} client={client} />
       ))}
-    </ScrollView>
+    </View>
   );
 }
 function AnswerOption({
@@ -533,6 +538,7 @@ export function BotItems({ serverId, bot }: { serverId: string; bot: Bot }) {
   const selectedId = params.itemId;
   const setSelectedId = useCallback((itemId: string) => router.setParams({ itemId }), []);
   const items = sortItems(query.data ?? []);
+  const permissions = useBotPermissions(serverId, bot, query.data ?? []);
   const visible = expanded ? items : items.slice(0, 5);
   const selected = items.find((item) => item.id === selectedId);
   const showMore = useCallback(
@@ -544,7 +550,8 @@ export function BotItems({ serverId, bot }: { serverId: string; bot: Bot }) {
   return (
     <ScrollView contentContainerStyle={styles.body} testID="bots-items">
       <QueryNotice query={query} />
-      {query.isSuccess && !items.length ? (
+      <NeedsYouPermissions serverId={serverId} permissions={permissions} />
+      {query.isSuccess && !items.length && !permissions.length ? (
         <TabHint i18nKey="bots.help.items" bot={bot} testID="bot-items-empty" />
       ) : null}
       {visible.length ? (

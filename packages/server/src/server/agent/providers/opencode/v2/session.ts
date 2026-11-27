@@ -29,7 +29,7 @@ import { V2_CAPABILITIES } from "./capabilities.js";
 import { controls } from "./configuration.js";
 import { commands } from "./commands.js";
 import { messages } from "./history.js";
-import { SessionPermissions } from "./permissions.js";
+import { SessionPermissions, ignoreNotPending } from "./permissions.js";
 import { SessionUsage } from "./usage.js";
 import {
   isInternalJAgentDeskMcpServer,
@@ -183,11 +183,13 @@ export class OpenCodeV2Session implements AgentSession {
         ),
       clearPermissions: async () => {
         for (const request of this.permissions.list())
-          await this.permissions.respondToPermission(request.id, {
-            behavior: "deny",
-            message:
-              "The user answered with a message instead of approving. Their message follows.",
-          });
+          await this.permissions
+            .respondToPermission(request.id, {
+              behavior: "deny",
+              message:
+                "The user answered with a message instead of approving. Their message follows.",
+            })
+            .catch(ignoreNotPending);
       },
     });
     this.usage = new SessionUsage({
@@ -514,7 +516,9 @@ export class OpenCodeV2Session implements AgentSession {
       if (value && !this.config.toolPolicy)
         for (const request of this.permissions.list())
           if (request.kind !== "question")
-            await this.respondToPermission(request.id, { behavior: "allow" });
+            await this.respondToPermission(request.id, { behavior: "allow" }).catch(
+              ignoreNotPending,
+            );
     } catch (error) {
       // A rejected apply stores nothing, so the running session keeps asking as it did.
       this.config.providerOptions = previous;

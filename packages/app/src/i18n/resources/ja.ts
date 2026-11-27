@@ -276,6 +276,7 @@ export const ja: TranslationResources = {
       implement: "実装",
       question: "どのように続けますか？",
       proposedPlan: "提案されたプラン",
+      notPending: "このリクエストはもう保留中ではありません",
     },
   },
   agentPanel: {

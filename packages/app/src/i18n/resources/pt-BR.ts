@@ -270,6 +270,7 @@ export const ptBR: TranslationResources = {
       implement: "Implementar",
       question: "Como você quer prosseguir?",
       proposedPlan: "Plano proposto",
+      notPending: "Esta solicitação não está mais pendente",
     },
   },
   agentPanel: {
