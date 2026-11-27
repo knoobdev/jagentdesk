@@ -138,6 +138,13 @@ class FakeGuestDebugger extends EventEmitter {
     this.pending = [];
     for (const command of pending) command.reject(new Error(message));
   }
+
+  /** Commands that waited for a renderer get their answer once one exists. */
+  public answerPending(): void {
+    const pending = this.pending;
+    this.pending = [];
+    for (const command of pending) command.resolve();
+  }
 }
 
 class FakeGuestContents extends EventEmitter {
@@ -146,6 +153,10 @@ class FakeGuestContents extends EventEmitter {
   public readonly loads: string[] = [];
   public readonly webRtcPolicies: string[] = [];
   public crashed = false;
+  /** No live renderer frame yet (a hidden tab): CDP commands wait until something navigates it. */
+  public frameless = false;
+  /** Errors the next loads fail with, without starting a renderer. */
+  public readonly failingLoads: string[] = [];
 
   public isDestroyed(): boolean {
     return false;
@@ -161,6 +172,16 @@ class FakeGuestContents extends EventEmitter {
 
   public async loadURL(url: string): Promise<void> {
     this.loads.push(url);
+    const failure = this.failingLoads.shift();
+    if (failure) {
+      throw new Error(`${failure} loading '${url}'`);
+    }
+    if (this.frameless) {
+      // A navigation gives the guest a live renderer; the commands waiting for it run.
+      this.frameless = false;
+      this.debugger.held.clear();
+      this.debugger.answerPending();
+    }
     if (this.crashed) {
       // A new renderer: commands sent to the dead one fail.
       this.crashed = false;
@@ -181,9 +202,9 @@ class FakeGuestContents extends EventEmitter {
 
 const nextMacrotask = () => new Promise<void>((resolve) => setImmediate(resolve));
 
-function applyTo(guest: FakeGuestContents) {
+function applyTo(guest: FakeGuestContents, options: { firstLoadHeld?: boolean } = {}) {
   setActiveFingerprintProfile(null);
-  return applyStealthToWebContents(guest as unknown as Electron.WebContents);
+  return applyStealthToWebContents(guest as unknown as Electron.WebContents, options);
 }
 
 describe("applyStealthToWebContents", () => {
@@ -196,6 +217,37 @@ describe("applyStealthToWebContents", () => {
     ]);
     expect(guest.debugger.commands).toContain("Target.setAutoAttach");
     expect(guest.webRtcPolicies).toEqual(["default"]);
+    expect(guest.loads).toEqual([]);
+  });
+
+  // Spec 04 §27d.3: a tab that is not the focused tab of its pane sits under `display: none`;
+  // its guest gets no renderer until something navigates it, and the held first URL waits for
+  // the identity, so every CDP command waited forever and the tab stayed blank.
+  it("starts a renderer for a held guest whose commands wait for one, then applies", async () => {
+    const guest = new FakeGuestContents();
+    guest.frameless = true;
+    guest.debugger.held.add("Network.enable");
+    const outcome = applyTo(guest, { firstLoadHeld: true });
+    await nextMacrotask();
+    await nextMacrotask();
+
+    expect(guest.loads).toEqual(["about:blank"]);
+    await expect(outcome).resolves.toBe("applied");
+    expect(guest.debugger.commands).toContain("Target.setAutoAttach");
+  });
+
+  it("never navigates a guest whose first load is not held (a popup opening its page)", async () => {
+    const guest = new FakeGuestContents();
+    guest.debugger.held.add("Network.enable");
+    const outcome = applyTo(guest);
+    await nextMacrotask();
+    await nextMacrotask();
+    expect(guest.loads).toEqual([]);
+
+    guest.debugger.held.clear();
+    guest.debugger.answerPending();
+    await expect(outcome).resolves.toBe("applied");
+    expect(guest.loads).toEqual([]);
   });
 
   it("stops touching a guest whose target closes while a command is pending", async () => {
@@ -230,6 +282,38 @@ describe("applyStealthToWebContents", () => {
       "Network.enable",
       "Network.setUserAgentOverride",
     ]);
+  });
+
+  // Seen live under CPU load: the blank page that restarts a killed renderer can fail while
+  // Chromium is still tearing the dead one down; nothing then started a renderer again.
+  it("tries again when the blank page that restarts the renderer fails", async () => {
+    const guest = new FakeGuestContents();
+    guest.debugger.held.add("Network.enable");
+    const outcome = applyTo(guest);
+    await nextMacrotask();
+
+    guest.failingLoads.push("ERR_FAILED (-2)");
+    guest.exitRenderer();
+    await nextMacrotask();
+    expect(guest.loads).toEqual(["about:blank"]);
+
+    await expect(outcome).resolves.toBe("applied");
+    expect(guest.loads).toEqual(["about:blank", "about:blank"]);
+  });
+
+  it("does not restart again when another navigation replaced the blank page", async () => {
+    const guest = new FakeGuestContents();
+    guest.debugger.held.add("Network.enable");
+    const outcome = applyTo(guest);
+    await nextMacrotask();
+
+    guest.failingLoads.push("ERR_ABORTED (-3)");
+    guest.exitRenderer();
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(guest.loads).toEqual(["about:blank"]);
+
+    guest.debugger.rejectPending("target closed while handling command");
+    await expect(outcome).resolves.toBe("closed");
   });
 
   it("reports the identity unavailable when the renderer keeps exiting", async () => {

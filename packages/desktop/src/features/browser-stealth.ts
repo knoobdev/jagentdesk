@@ -550,6 +550,8 @@ interface GuestLifecycle {
   /** Applies in flight. */
   applying: number;
   childTargetListener: boolean;
+  /** main.ts holds this guest's first URL until the identity is applied. */
+  firstLoadHeld: boolean;
 }
 
 const guestStates = new WeakMap<WebContents, GuestIdentityState>();
@@ -563,13 +565,21 @@ const guestLifecycles = new WeakMap<WebContents, GuestLifecycle>();
  * guest-teardown.ts). Attempts after a renderer exit start over; three is plenty.
  */
 const MAX_IDENTITY_ATTEMPTS = 3;
+/** Blank-page loads that start a held guest's renderer, and the wait before each retry. */
+const MAX_RENDERER_STARTS = 3;
+const RENDERER_START_RETRY_MS = 250;
 
 function watchGuest(contents: WebContents): GuestLifecycle {
   const existing = guestLifecycles.get(contents);
   if (existing) {
     return existing;
   }
-  const lifecycle: GuestLifecycle = { rendererExits: 0, applying: 0, childTargetListener: false };
+  const lifecycle: GuestLifecycle = {
+    rendererExits: 0,
+    applying: 0,
+    childTargetListener: false,
+    firstLoadHeld: false,
+  };
   guestLifecycles.set(contents, lifecycle);
   watchGuestTeardown(contents);
   contents.on("render-process-gone", () => {
@@ -582,15 +592,35 @@ function watchGuest(contents: WebContents): GuestLifecycle {
 }
 
 /**
- * A guest with nothing committed has its first URL held until the identity is applied, so
- * no navigation will start a new renderer after one exits. A blank page does, without any
- * request leaving the tab.
+ * A guest whose first URL is held until the identity is applied gets no navigation, so
+ * nothing gives it a working renderer: not after its renderer exits, and not at all when
+ * the tab is not the focused tab of its pane (its webview sits under `display: none`; the
+ * guest may even have a renderer process, but CDP commands still wait forever). The apply
+ * then never finished and the tab stayed blank. A blank page gives it one without any
+ * request leaving the tab; browser-guest-initial-load.ts drops that history entry once
+ * the held URL loads.
  */
-function startRendererForHeldGuest(contents: WebContents): void {
+function startRendererForHeldGuest(contents: WebContents, attempt = 1): void {
   runWhenGuestSettled(contents, () => {
-    if (contents.getURL() === "" && contents.isCrashed()) {
-      contents.loadURL("about:blank").catch(() => undefined);
+    const url = contents.getURL();
+    const crashedBeforeLoad = contents.isCrashed() && (url === "" || url === "about:blank");
+    const heldNeverNavigated = guestLifecycles.get(contents)?.firstLoadHeld === true && url === "";
+    if (!crashedBeforeLoad && !heldNeverNavigated) {
+      return;
     }
+    contents.loadURL("about:blank").catch((error: unknown) => {
+      // ERR_ABORTED: a newer navigation (another start, or the held URL) replaced this one.
+      // Anything else: under load the blank page can fail while the dead renderer is still
+      // being torn down, and then nothing would start one; try again shortly.
+      const aborted = error instanceof Error && error.message.includes("ERR_ABORTED");
+      if (aborted || attempt >= MAX_RENDERER_STARTS) {
+        return;
+      }
+      setTimeout(
+        () => startRendererForHeldGuest(contents, attempt + 1),
+        RENDERER_START_RETRY_MS * attempt,
+      ).unref?.();
+    });
   });
 }
 
@@ -615,12 +645,19 @@ export function isIdentityProtected(): boolean {
  * Apply the current identity to a guest (webview or popup) and resolve once it is in
  * place. Idempotent per identity: concurrent callers share one application, and a later
  * profile change replaces the previous overrides and init scripts. Never rejects.
+ * `firstLoadHeld`: the caller holds the guest's first URL until this resolves.
  */
-export function applyStealthToWebContents(contents: WebContents): Promise<IdentityOutcome> {
+export function applyStealthToWebContents(
+  contents: WebContents,
+  options: { firstLoadHeld?: boolean } = {},
+): Promise<IdentityOutcome> {
   if (isGuestGone(contents)) {
     return Promise.resolve("closed");
   }
-  watchGuest(contents);
+  const lifecycle = watchGuest(contents);
+  if (options.firstLoadHeld) {
+    lifecycle.firstLoadHeld = true;
+  }
   if (!identityResolved) {
     return waitForIdentity().then(() => {
       identityResolved = true;
@@ -690,7 +727,7 @@ async function applyGuestIdentity(
     return "closed";
   }
   const rendererExitsAtStart = lifecycle.rendererExits;
-  if (contents.isCrashed()) {
+  if (contents.isCrashed() || lifecycle.firstLoadHeld) {
     startRendererForHeldGuest(contents);
   }
   const profile = effectiveProfile();

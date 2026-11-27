@@ -29,6 +29,17 @@ class FakeGuest extends EventEmitter {
     this.loads.push(url);
   }
 
+  /** Electron's navigationHistory, fed by loadURL (every load adds an entry here). */
+  public readonly navigationHistory = {
+    length: () => this.loads.length,
+    getEntryAtIndex: (index: number) => ({ url: this.loads[index] ?? "" }),
+    removeEntryAtIndex: (index: number) => {
+      if (index >= this.loads.length - 1) return false;
+      this.loads.splice(index, 1);
+      return true;
+    },
+  };
+
   public closeTarget(): void {
     this.debugger.emit("detach", {}, "target closed");
   }
@@ -157,6 +168,24 @@ describe("loadHeldGuestUrlAfterIdentity", () => {
     identity.resolve("applied");
     await settle();
     expect(states).toEqual([true, false]);
+    expect(guest.loads).toEqual([URL]);
+  });
+
+  it("drops the blank page that started the guest's renderer from its history", async () => {
+    const guest = new FakeGuest();
+    // browser-stealth.ts loaded about:blank to give the held guest a renderer.
+    await guest.loadURL("about:blank");
+    hold(guest, Promise.resolve("applied"));
+    await settle();
+    await settle();
+    expect(guest.loads).toEqual([URL]);
+  });
+
+  it("keeps a history that does not start with that blank page", async () => {
+    const guest = new FakeGuest();
+    hold(guest, Promise.resolve("applied"));
+    await settle();
+    await settle();
     expect(guest.loads).toEqual([URL]);
   });
 
