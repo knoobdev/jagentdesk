@@ -119,7 +119,9 @@ test(
           bot: botInput("Release Pal"),
         })
       ).bot;
-      const home = join(sharer.daemon.jagentdeskHome, "bots", "pal");
+      // bt1 allocates the folder from the name: "release-pal".
+      const home = join(sharer.daemon.jagentdeskHome, "bots", "release-pal");
+      expect(bot.home).toBe(home);
       writeFileSync(join(home, "SOUL.md"), "# Release Pal\n\nShips releases and reviews PRs.\n");
       for (const skill of ["pr-review-checklist", "release-notes"]) {
         mkdirSync(join(home, "skills", skill), { recursive: true });
