@@ -6,8 +6,11 @@ import {
 } from "@jagentdesk/plugin/server";
 import {
   createExternalCommandProcessEnv,
+  stripAppImageRuntimeEnv,
   type ProcessEnvRecord,
 } from "../server/jagentdesk-env.js";
+
+export { stripAppImageRuntimeEnv };
 
 interface ExternalEnvOptions {
   baseEnv?: ProcessEnvRecord;
