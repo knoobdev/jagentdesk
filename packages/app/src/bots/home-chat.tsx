@@ -12,6 +12,7 @@ import type { Theme } from "@/styles/theme";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FilePanelView } from "@/file-panels/view";
 import { AgentTimeline, MessageComposer } from "./chat";
+import { BotAvatar } from "./avatar";
 import { useBotsConnection, useBotsMutation } from "./queries";
 import { useBotPanel, useBotPanelStore } from "./panel-store";
 import { useHomeChatFocus } from "./home-chat-draft";
@@ -104,22 +105,27 @@ export function BotHomeChat({ serverId, bot }: { serverId: string; bot: Bot }) {
         />
       </View>
     );
+  // `bot-chat-persona.tsx`: an empty Home Chat greets as the bot — picture, name, the Orca line.
+  const persona = homeAgentId ? null : (
+    <View style={styles.empty}>
+      <BotAvatar bot={bot} serverId={serverId} size={56} radius={14} />
+      <Text style={styles.personaName}>{bot.name}</Text>
+      <Text style={styles.emptyText} testID="bot-home-chat-empty">
+        {t("bots.chat.emptySubtitle", { name: bot.name })}
+      </Text>
+    </View>
+  );
   let conversation;
+  // `NativeChatBotHomeScope.tsx`: the first-run screen leads until the owner's first turn ends.
   if (bot.firstRun)
     conversation = (
       <ScrollView contentContainerStyle={styles.firstRun}>
         <BotFirstScreen serverId={serverId} bot={bot} />
+        {persona}
       </ScrollView>
     );
   else if (homeAgentId) conversation = <AgentTimeline serverId={serverId} agentId={homeAgentId} />;
-  else
-    conversation = (
-      <View style={styles.empty}>
-        <Text style={styles.emptyText} testID="bot-home-chat-empty">
-          {t("bots.chat.emptySubtitle", { name: bot.name })}
-        </Text>
-      </View>
-    );
+  else conversation = persona;
   return (
     <View style={styles.column} testID="bot-home-chat">
       {conversation}
@@ -164,6 +170,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
   tooltip: { fontSize: theme.fontSize.sm, color: theme.colors.popoverForeground },
   column: { flex: 1, minHeight: 0 },
   firstRun: { paddingHorizontal: 32, paddingVertical: 32 },
-  empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: 32 },
+  empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: 32, gap: 8 },
   emptyText: { fontSize: 16, color: theme.colors.foregroundMuted, textAlign: "center" },
+  personaName: { fontSize: 18, fontWeight: "600", color: theme.colors.foreground },
 }));
