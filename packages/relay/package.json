@@ -26,6 +26,10 @@
       "types": "./dist/hooks.d.ts",
       "default": "./dist/hooks.js"
     },
+    "./shares": {
+      "types": "./dist/shares.d.ts",
+      "default": "./dist/shares.js"
+    },
     "./ownership": {
       "types": "./dist/ownership.d.ts",
       "default": "./dist/ownership.js"
