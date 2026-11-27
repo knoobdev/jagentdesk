@@ -2425,6 +2425,30 @@ export const AgentBackgroundWorkStopRequestMessageSchema = z.object({
   requestId: z.string(),
 });
 
+// ADR-0062: one item's detail. The daemon answers only for that agent's own work.
+export const AgentBackgroundWorkDetailRequestMessageSchema = z.object({
+  type: z.literal("agent.background_work.get_detail.request"),
+  agentId: z.string(),
+  itemId: z.string(),
+  requestId: z.string(),
+});
+
+// ADR-0062: stream one item's output. There is no path parameter: the daemon reads only the
+// source the provider attached to that item.
+export const AgentBackgroundWorkOutputSubscribeRequestMessageSchema = z.object({
+  type: z.literal("agent.background_work.output.subscribe.request"),
+  agentId: z.string(),
+  itemId: z.string(),
+  subscriptionId: z.string(),
+  requestId: z.string(),
+});
+
+export const AgentBackgroundWorkOutputUnsubscribeRequestMessageSchema = z.object({
+  type: z.literal("agent.background_work.output.unsubscribe.request"),
+  subscriptionId: z.string(),
+  requestId: z.string(),
+});
+
 export const ProviderSubagentTimelineRequestMessageSchema = z.object({
   type: z.literal("agent.provider_subagents.timeline.get.request"),
   parentAgentId: z.string(),
@@ -4895,6 +4919,9 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ProviderSubagentListRequestMessageSchema,
   AgentBackgroundWorkListRequestMessageSchema,
   AgentBackgroundWorkStopRequestMessageSchema,
+  AgentBackgroundWorkDetailRequestMessageSchema,
+  AgentBackgroundWorkOutputSubscribeRequestMessageSchema,
+  AgentBackgroundWorkOutputUnsubscribeRequestMessageSchema,
   ProviderSubagentTimelineRequestMessageSchema,
   SetAgentTimelineSubscriptionRequestMessageSchema,
   AgentForkContextRequestMessageSchema,
@@ -5398,6 +5425,9 @@ export const ServerInfoStatusPayloadSchema = z
         agentBackgroundWork: z.boolean().optional(),
         // COMPAT(agentBackgroundWorkStop): added after v0.15.0, remove after 2027-05-03.
         agentBackgroundWorkStop: z.boolean().optional(),
+        // COMPAT(backgroundWorkOutput): added in v0.12.0, remove gate after 2027-05-27.
+        // agent.background_work.get_detail / .output.* (ADR-0062).
+        backgroundWorkOutput: z.boolean().optional(),
         // COMPAT(projectedSubagentTimeline): added after v0.8.0, remove gates after 2027-03-14; retain wire field.
         projectedSubagentTimeline: z.boolean().optional(),
         wholeTurnTimeline: z.boolean().optional(),
@@ -6428,6 +6458,80 @@ export const AgentBackgroundWorkUpdateMessageSchema = z.object({
     subscriptionId: z.string().optional(),
     agentId: z.string(),
     items: z.array(AgentBackgroundWorkItemSchema),
+  }),
+});
+
+export const AgentBackgroundWorkDetailSchema = z.object({
+  id: z.string(),
+  // Open string like the list item's kind.
+  kind: z.string(),
+  description: z.string().nullable(),
+  command: z.string().optional(),
+  startedAt: z.string(),
+  // Open string: "running", "finished", "failed", "stopped". Clients treat unknown values as
+  // ended work.
+  status: z.string(),
+  endedAt: z.string().nullable(),
+  exitCode: z.number().int().nullable(),
+  // The folder the work runs in, when the provider reports it.
+  cwd: z.string().nullable(),
+  provider: z.string(),
+  // False when the provider exposes no output for this work.
+  outputAvailable: z.boolean(),
+  canStop: z.boolean().optional(),
+  stopToken: z.string().optional(),
+});
+
+export type AgentBackgroundWorkDetailPayload = z.infer<typeof AgentBackgroundWorkDetailSchema>;
+
+export const AgentBackgroundWorkDetailResponseMessageSchema = z.object({
+  type: z.literal("agent.background_work.get_detail.response"),
+  payload: z.object({
+    requestId: z.string(),
+    agentId: z.string(),
+    itemId: z.string(),
+    detail: AgentBackgroundWorkDetailSchema.nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
+export const AgentBackgroundWorkOutputSubscribeResponseMessageSchema = z.object({
+  type: z.literal("agent.background_work.output.subscribe.response"),
+  payload: z.object({
+    requestId: z.string(),
+    subscriptionId: z.string(),
+    agentId: z.string(),
+    itemId: z.string(),
+    error: z.string().nullable(),
+  }),
+});
+
+export const AgentBackgroundWorkOutputUnsubscribeResponseMessageSchema = z.object({
+  type: z.literal("agent.background_work.output.unsubscribe.response"),
+  payload: z.object({
+    requestId: z.string(),
+    subscriptionId: z.string(),
+    error: z.string().nullable(),
+  }),
+});
+
+// Push for an output subscription; it has no .request/.response pair. The first push of a
+// subscription carries the tail (up to 256 KiB) with `reset: true`.
+export const AgentBackgroundWorkOutputMessageSchema = z.object({
+  type: z.literal("agent.background_work.output"),
+  payload: z.object({
+    subscriptionId: z.string(),
+    agentId: z.string(),
+    itemId: z.string(),
+    chunk: z.string(),
+    // Byte offset of the chunk in the output. A chunk that starts past the previous
+    // `nextOffset` means output was skipped to keep up.
+    offset: z.number().int().nonnegative(),
+    nextOffset: z.number().int().nonnegative().optional(),
+    // Drop what was shown: the stream restarted from the output's tail.
+    reset: z.boolean().optional(),
+    // The source stopped being readable; no more pushes follow.
+    error: z.string().optional(),
   }),
 });
 
@@ -9567,6 +9671,10 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   AgentBackgroundWorkListResponseMessageSchema,
   AgentBackgroundWorkStopResponseMessageSchema,
   AgentBackgroundWorkUpdateMessageSchema,
+  AgentBackgroundWorkDetailResponseMessageSchema,
+  AgentBackgroundWorkOutputSubscribeResponseMessageSchema,
+  AgentBackgroundWorkOutputUnsubscribeResponseMessageSchema,
+  AgentBackgroundWorkOutputMessageSchema,
   SetAgentTimelineSubscriptionResponseMessageSchema,
   AgentAttentionRequiredMessageSchema,
   AgentForkContextResponseMessageSchema,

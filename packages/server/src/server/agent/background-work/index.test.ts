@@ -131,3 +131,99 @@ test("publishes command changes without replacing a live item's identity", () =>
     stopToken: first.stopToken,
   });
 });
+
+// ADR-0062: detail and output source of live and ended work.
+describe("background work detail", () => {
+  const output = {
+    type: "reader" as const,
+    read: async () => ({ bytes: new Uint8Array(), nextCursor: 0, size: 0 }),
+  };
+
+  test("keeps the folder and output source off the list", () => {
+    const store = new AgentBackgroundWorkStore();
+    const [item] = store.apply(
+      "agent",
+      [{ id: "1", kind: "shell", description: null, cwd: "/repo", output }],
+      T0,
+    )!;
+    expect(item).toEqual({ id: "1", kind: "shell", description: null, startedAt: T0 });
+    expect(store.detail("agent", "1")).toMatchObject({
+      status: "running",
+      cwd: "/repo",
+      output,
+      exitCode: null,
+      endedAt: null,
+    });
+  });
+
+  test("an item that leaves the inventory stays readable as finished", () => {
+    const store = new AgentBackgroundWorkStore();
+    store.apply("agent", [{ id: "1", kind: "shell", description: null, output }], T0);
+    store.apply("agent", [], T1);
+    expect(store.list("agent")).toEqual([]);
+    expect(store.detail("agent", "1")).toMatchObject({
+      status: "finished",
+      endedAt: T1,
+      exitCode: null,
+      output,
+    });
+  });
+
+  test("applies an end notice that arrives before or after the item leaves", () => {
+    const store = new AgentBackgroundWorkStore();
+    store.apply(
+      "agent",
+      [
+        { id: "early", kind: "shell", description: null },
+        { id: "late", kind: "shell", description: null },
+      ],
+      T0,
+    );
+    store.end("agent", { id: "early", status: "failed", exitCode: 2 });
+    expect(store.detail("agent", "early")?.status).toBe("running");
+    store.apply("agent", [], T1);
+    store.end("agent", { id: "late", status: "finished", exitCode: 0, output });
+
+    expect(store.detail("agent", "early")).toMatchObject({ status: "failed", exitCode: 2 });
+    expect(store.detail("agent", "late")).toMatchObject({
+      status: "finished",
+      exitCode: 0,
+      output,
+    });
+  });
+
+  test("ended work drops its stop token and a reset marks it stopped", () => {
+    const store = new AgentBackgroundWorkStore();
+    store.apply("agent", [{ id: "1", kind: "shell", description: null, canStop: true }], T0);
+    store.clear("agent", T1);
+    const detail = store.detail("agent", "1");
+    expect(detail?.status).toBe("stopped");
+    expect(detail?.item.stopToken).toBeUndefined();
+    expect(detail?.item.canStop).toBeUndefined();
+  });
+
+  test("another agent's item id is unknown", () => {
+    const store = new AgentBackgroundWorkStore();
+    store.apply("agent-a", [{ id: "1", kind: "shell", description: null, output }], T0);
+    expect(store.detail("agent-b", "1")).toBeNull();
+    store.end("agent-b", { id: "1", status: "failed" });
+    expect(store.detail("agent-a", "1")?.status).toBe("running");
+  });
+
+  test("work listed again is live again", () => {
+    const store = new AgentBackgroundWorkStore();
+    const item = { id: "1", kind: "shell", description: null };
+    store.apply("agent", [item], T0);
+    store.clear("agent", T1);
+    store.apply("agent", [item], T1);
+    expect(store.detail("agent", "1")?.status).toBe("running");
+  });
+
+  test("forget drops what an agent's ended work left behind", () => {
+    const store = new AgentBackgroundWorkStore();
+    store.apply("agent", [{ id: "1", kind: "shell", description: null }], T0);
+    store.apply("agent", [], T1);
+    store.forget("agent");
+    expect(store.detail("agent", "1")).toBeNull();
+  });
+});

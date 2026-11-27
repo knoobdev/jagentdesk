@@ -514,6 +514,12 @@ export type AgentStreamEvent =
       type: "background_work";
       provider: AgentProvider;
       items: import("./background-work/index.js").AgentBackgroundWorkInput[] | null;
+    }
+  | {
+      /** How one background item ended (status, exit code); never forwarded to clients. */
+      type: "background_work_ended";
+      provider: AgentProvider;
+      end: import("./background-work/index.js").AgentBackgroundWorkEnd;
     };
 
 export function getAgentStreamEventTurnId(event: AgentStreamEvent): string | undefined {

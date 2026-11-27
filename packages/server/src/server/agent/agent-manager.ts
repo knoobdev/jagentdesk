@@ -169,6 +169,7 @@ import { withTimeout } from "../../utils/promise-timeout.js";
 import {
   AgentBackgroundWorkStore,
   isDaemonBackgroundWorkItem,
+  type AgentBackgroundWorkDetail,
   type AgentBackgroundWorkItem,
   type DaemonBackgroundWorkInput,
   type DaemonBackgroundWorkKey,
@@ -2181,6 +2182,17 @@ export class AgentManager {
     if (!session?.stopBackgroundWork) throw new Error("Background work cannot be stopped");
     const providerItemId = this.backgroundWork.authorizeProviderStop(agentId, itemId, stopToken);
     await session.stopBackgroundWork(providerItemId);
+    // The provider's own end notice, when it sends one, still wins.
+    this.backgroundWork.end(agentId, { id: providerItemId, status: "stopped" });
+  }
+
+  /**
+   * One item's detail, live or recently ended, for a public agent only (ADR-0062). The output
+   * source stays on the daemon: callers read it through the output stream, never by path.
+   */
+  getAgentBackgroundWorkDetail(agentId: string, itemId: string): AgentBackgroundWorkDetail | null {
+    if (this.agents.get(agentId)?.internal) return null;
+    return this.backgroundWork.detail(agentId, itemId);
   }
 
   getAgentBackgroundWorkSummary(agentId: string) {
@@ -6367,6 +6379,7 @@ export class AgentManager {
       this.dispatch({ type: "provider_subagent", event });
     }
     this.clearProviderBackgroundWork(agentId);
+    this.backgroundWork.forget(agentId);
   }
 
   private emitClosedAgent(agent: ManagedAgentClosed, options?: { persist?: boolean }): void {
@@ -6476,6 +6489,10 @@ export class AgentManager {
       const update = this.providerSubagents.apply(agent.id, event.provider, event.event);
       this.timelineSnapshots?.markChanged(agent.id);
       this.dispatch({ type: "provider_subagent", event: update });
+      return;
+    }
+    if (event.type === "background_work_ended") {
+      this.backgroundWork.end(agent.id, event.end);
       return;
     }
     if (event.type === "background_work") {
