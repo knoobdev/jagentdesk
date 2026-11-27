@@ -1494,7 +1494,8 @@ describe("plugin provider overrides and launch", () => {
     try {
       manager.replacePluginProviders([registration]);
       expect(await manager.getProvider({ provider: registration.id, wait: true })).toMatchObject({
-        status: "unavailable",
+        status: "error",
+        error: "Sign in to the provider",
       });
       expect((await manager.getProviderDiagnostic(registration.id)).diagnostic).toContain(
         "Sign in to the provider",
@@ -1552,7 +1553,8 @@ describe("plugin provider overrides and launch", () => {
       });
       expect(manager.getAgentManagerProviderState().clients[registration.id]).not.toBe(previous);
       expect(await manager.getProvider({ provider: registration.id, wait: true })).toMatchObject({
-        status: "unavailable",
+        status: "error",
+        error: "Sign in to the provider",
       });
       manager.applyMutableProviderConfig({
         [registration.id]: {

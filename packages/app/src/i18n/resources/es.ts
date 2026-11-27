@@ -2904,6 +2904,9 @@ export const es: TranslationResources = {
       },
       agentProfiles: {
         featureCountOne: "{{count}} característica",
+        systemPromptLabel: "Aviso del sistema",
+        systemPromptPlaceholder: "Enfócate en el diseño, la accesibilidad y los tokens de diseño.",
+        systemPromptHint: "Solo se aplica a agentes nuevos",
         featureCount: "{{count}} características",
         editProfileTitle: "Editar perfil de agente",
         addProfileTitle: "Agregar perfil de agente",

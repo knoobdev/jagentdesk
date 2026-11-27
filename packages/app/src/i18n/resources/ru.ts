@@ -2952,6 +2952,9 @@ export const ru: TranslationResources = {
       },
       agentProfiles: {
         featureCountOne: "{{count}} функция",
+        systemPromptLabel: "Системный промпт",
+        systemPromptPlaceholder: "Сосредоточься на вёрстке, доступности и дизайн-токенах.",
+        systemPromptHint: "Применяется только к новым агентам",
         featureCount: "Функции: {{count}}",
         editProfileTitle: "Изменить профиль агента",
         addProfileTitle: "Добавить профиль агента",

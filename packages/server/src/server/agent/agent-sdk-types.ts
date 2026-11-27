@@ -28,6 +28,7 @@ import {
   type ProviderInstallationInspection,
 } from "@jagentdesk/protocol/messages";
 import {
+  type ProviderCatalogRefreshMode,
   type ProviderInspection,
   type ProviderUpdateCheck,
   type ProviderUpdateReport,
@@ -1048,6 +1049,11 @@ export interface AgentClientDiagnosticContext {
   inspectInstallation(): Promise<ProviderInstallationInspection | undefined>;
 }
 
+export type AgentClientAvailability =
+  | { status: "available" }
+  | { status: "unavailable" }
+  | { status: "error"; message: string };
+
 export interface AgentClient {
   resolveUsageLaunch?(): Promise<
     import("@jagentdesk/plugin/server/provider").ProviderLaunch | undefined
@@ -1056,6 +1062,8 @@ export interface AgentClient {
   readonly provider: AgentProvider;
 
   readonly capabilities: AgentCapabilityFlags;
+  /** How ProviderSnapshotManager schedules and caches catalog discovery for this client. */
+  readonly catalogRefresh?: ProviderCatalogRefreshMode;
 
   /** Sessions honor `AgentLaunchContext.wrap`. The provider registry sets it from the provider contract. */
   supportsLaunchWrap?: boolean;
@@ -1076,6 +1084,15 @@ export interface AgentClient {
     options?: AgentResumeSessionOptions,
   ): Promise<AgentSession>;
 
+  /** Equal keys share catalogue discovery within this configured client, and key the persisted
+   * catalogue of an on-demand provider. Include the execution environment and effective
+   * configuration; omit to skip the persisted catalogue. force must not affect identity. */
+  getCatalogCacheKey?(options: FetchCatalogOptions): Promise<string | undefined>;
+  /**
+   * Optional fingerprint (`mtimeMs:size`) of the resolved provider binary, used to invalidate
+   * on-disk cached catalogs for `"on_demand"` providers when the CLI changes on disk.
+   */
+  getCatalogBinaryFingerprint?(options: FetchCatalogOptions): Promise<string | undefined>;
   /**
    * Discover models and modes together. Implementations may use one upstream
    * process, separate upstream calls, static modes, or private helpers; callers
@@ -1121,7 +1138,16 @@ export interface AgentClient {
    * Check if this provider is available (CLI binary is installed).
    * Returns true if available, false otherwise.
    */
-  isAvailable(signal?: AbortSignal): Promise<boolean>;
+  isAvailable(signal?: AbortSignal, options?: FetchCatalogOptions): Promise<boolean>;
+
+  /**
+   * Detailed availability check distinguishing a missing binary (`"unavailable"`) from an
+   * installed binary that fails readiness checks (`"error"` with an actionable message).
+   */
+  checkAvailability?(
+    signal?: AbortSignal,
+    options?: FetchCatalogOptions,
+  ): Promise<AgentClientAvailability>;
 
   getDiagnostic?(context?: AgentClientDiagnosticContext): Promise<{ diagnostic: string }>;
 

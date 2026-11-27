@@ -847,7 +847,10 @@ describe("ForgeService", () => {
       number: 526,
       baseRefName: "main",
       headRefName: "main",
-      checkoutRefs: [{ remoteName: "origin", remoteRef: "refs/pull/526/head" }],
+      checkoutRefs: [
+        { remoteName: "origin", remoteRef: "refs/pull/526/head" },
+        { remoteName: "upstream", remoteRef: "refs/pull/526/head" },
+      ],
       headOwnerLogin: "therainisme",
       headRepositorySshUrl: "git@github.com:therainisme/jagentdesk.git",
       headRepositoryUrl: "https://github.com/therainisme/jagentdesk",

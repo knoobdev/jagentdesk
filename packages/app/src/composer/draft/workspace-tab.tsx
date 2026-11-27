@@ -63,6 +63,7 @@ interface AutoSubmitConfig {
   model: string | null;
   thinkingOptionId: string | null;
   providerOptions: Record<string, unknown>;
+  systemPrompt: string | null;
 }
 
 function resolveAutoSubmitConfig(
@@ -72,6 +73,7 @@ function resolveAutoSubmitConfig(
     model?: string | null;
     thinkingOptionId?: string | null;
     providerOptions?: Record<string, unknown>;
+    systemPrompt?: string | null;
   } | null,
 ): AutoSubmitConfig | null {
   if (!pending) return null;
@@ -81,6 +83,7 @@ function resolveAutoSubmitConfig(
     model: pending.model ?? null,
     thinkingOptionId: pending.thinkingOptionId ?? null,
     providerOptions: pending.providerOptions ?? {},
+    systemPrompt: pending.systemPrompt ?? null,
   };
 }
 
@@ -112,6 +115,36 @@ function resolveDraftModeId(input: {
   return null;
 }
 
+function resolveDraftCreateConfig(input: {
+  provider: string;
+  cwd: string;
+  autoSubmitConfig: AutoSubmitConfig | null;
+  composerState: {
+    effectiveModeId: string;
+    effectiveModelId: string | null;
+    effectiveThinkingOptionId: string | null;
+    selectedSystemPrompt: string;
+    providerOptions: Record<string, unknown> | undefined;
+  };
+}) {
+  const { provider, cwd, autoSubmitConfig, composerState } = input;
+  const modeIdOverride = resolveDraftModeIdOverride({
+    autoSubmitConfig,
+    effectiveModeId: composerState.effectiveModeId,
+  });
+  return buildWorkspaceDraftAgentConfig({
+    provider,
+    cwd,
+    ...modeIdOverride,
+    model: autoSubmitConfig?.model ?? (composerState.effectiveModelId || undefined),
+    thinkingOptionId:
+      autoSubmitConfig?.thinkingOptionId ?? (composerState.effectiveThinkingOptionId || undefined),
+    providerOptions: autoSubmitConfig?.providerOptions ?? composerState.providerOptions,
+    systemPrompt:
+      autoSubmitConfig?.systemPrompt ?? (composerState.selectedSystemPrompt || undefined),
+  });
+}
+
 async function submitDraftCreateRequest(input: {
   draftId: string;
   attempt: { clientMessageId: string };
@@ -128,6 +161,7 @@ async function submitDraftCreateRequest(input: {
     effectiveModeId: string;
     effectiveModelId: string | null;
     effectiveThinkingOptionId: string | null;
+    selectedSystemPrompt: string;
     providerOptions: Record<string, unknown> | undefined;
     metadata: Record<string, import("@jagentdesk/protocol/agent-types").JsonValue>;
   };
@@ -157,18 +191,11 @@ async function submitDraftCreateRequest(input: {
   if (!provider) {
     throw new Error(input.selectModelMessage);
   }
-  const modeIdOverride = resolveDraftModeIdOverride({
-    autoSubmitConfig,
-    effectiveModeId: composerState.effectiveModeId,
-  });
-  const config = buildWorkspaceDraftAgentConfig({
+  const config = resolveDraftCreateConfig({
     provider,
     cwd,
-    ...modeIdOverride,
-    model: autoSubmitConfig?.model ?? (composerState.effectiveModelId || undefined),
-    thinkingOptionId:
-      autoSubmitConfig?.thinkingOptionId ?? (composerState.effectiveThinkingOptionId || undefined),
-    providerOptions: autoSubmitConfig?.providerOptions ?? composerState.providerOptions,
+    autoSubmitConfig,
+    composerState,
   });
 
   const result = await createDraftAgent({
@@ -289,6 +316,7 @@ function buildDraftInitialValues(input: {
     modeId: input.initialSetup.modeId,
     model: input.initialSetup.model,
     thinkingOptionId: input.initialSetup.thinkingOptionId,
+    systemPrompt: input.initialSetup.systemPrompt,
   };
 }
 

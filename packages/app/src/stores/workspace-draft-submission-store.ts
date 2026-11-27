@@ -38,6 +38,8 @@ export interface PendingWorkspaceDraftSubmission {
 
   providerOptions?: Record<string, unknown>;
 
+  systemPrompt?: string;
+
   allowEmptyText?: boolean;
 }
 
