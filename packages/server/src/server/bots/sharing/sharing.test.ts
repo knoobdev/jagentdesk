@@ -10,7 +10,6 @@ import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
 import pino from "pino";
 import { afterEach, describe, expect, it } from "vitest";
-import type { Bot, BotItem } from "@jagentdesk/protocol/bots/types";
 import {
   RelayShares,
   SHARE_SERVER_HEADER,
@@ -21,37 +20,12 @@ import {
 import { MemorySecretStore } from "../../database/secret-store.js";
 import { BotStorage } from "../storage.js";
 import { BotsService } from "../service.js";
-import type { BotRuntime, BotRuntimeEvent } from "../runtime.js";
+import { FakeBotRuntime } from "../test-utils/fake-runtime.js";
 import { BotsSharing } from "./service.js";
 import { newShareKey, openShare, parseShareLink, sealShare, ShareSealError } from "./seal.js";
 import { readBotPackageArchive, writeBotPackageArchive } from "./archive.js";
 import { BOT_PACKAGE_MANIFEST_PATH } from "./package.js";
 import { scanBotText } from "./text-scan.js";
-
-class Runtime implements BotRuntime {
-  async configure(): Promise<void> {}
-  async ensureSupervisor(bot: Bot): Promise<string> {
-    return `supervisor:${bot.id}`;
-  }
-  busy(): boolean {
-    return false;
-  }
-  async send(): Promise<void> {}
-  async startWorker(_bot: Bot, item: BotItem): Promise<string> {
-    return `worker:${item.id}`;
-  }
-  async review() {
-    return { agentId: "reviewer", coverage: "", findings: [] };
-  }
-  async diff(): Promise<string> {
-    return "";
-  }
-  async cancel(): Promise<void> {}
-  onEvent(_cb: (e: BotRuntimeEvent) => void) {
-    return () => {};
-  }
-  dispose(): void {}
-}
 
 class Bucket implements ShareBucket {
   readonly objects = new Map<string, { bytes: Uint8Array; meta?: Record<string, string> }>();
@@ -151,7 +125,9 @@ afterEach(async () => {
 async function daemon(worker: Awaited<ReturnType<typeof startWorker>>, serverId: string) {
   const home = mkdtempSync(join(tmpdir(), "jad-share-"));
   const storage = new BotStorage(home);
-  const service = new BotsService(storage, new Runtime(), { logger: pino({ level: "silent" }) });
+  const service = new BotsService(storage, new FakeBotRuntime(), {
+    logger: pino({ level: "silent" }),
+  });
   const secrets = new MemorySecretStore();
   const sharing = new BotsSharing(service, {
     logger: pino({ level: "silent" }),
@@ -174,11 +150,9 @@ async function daemon(worker: Awaited<ReturnType<typeof startWorker>>, serverId:
 
 async function makeBot(d: Awaited<ReturnType<typeof daemon>>, name: string) {
   const bot = await d.service.create({
-    slug: name.toLowerCase().replace(/\s+/g, "-"),
     name,
     provider: "claude",
     model: "claude-sonnet-4-5",
-    modeId: "default",
   });
   const home = d.storage.botHome(bot);
   writeFileSync(join(home, "SOUL.md"), `# ${name}\n\nReviews pull requests for the team.\n`);
@@ -325,6 +299,9 @@ describe("share -> receive between two daemons", () => {
     );
     writeFileSync(skill, original);
 
+    // The shared mascot becomes the copy's avatar on bt1's record.
+    await sharer.service.update(bot.id, { avatar: "mascot:A1" });
+
     // A37.13.1: SOUL, 2 skills, 1 automation, memory off.
     const prepared = await sharer.sharing.prepare(bot.id, {});
     expect(prepared.candidate.bot.memory).toEqual([]);
@@ -363,13 +340,12 @@ describe("share -> receive between two daemons", () => {
     );
 
     const made = await recipient.sharing.create(review.reviewId, {
-      slug: "release-pal",
       name: "Release Pal",
       provider: "codex",
       model: "gpt-5",
-      modeId: "auto",
     });
     expect(made.provider).toBe("codex");
+    expect(made.avatar).toBe("mascot:A1");
     expect(made.schedules.map((s) => [s.name, s.enabled])).toEqual([["Morning review", false]]);
     const madeHome = recipient.storage.botHome(made);
     expect(readFileSync(join(madeHome, "SOUL.md"), "utf8")).toContain("Reviews pull requests");
@@ -407,11 +383,9 @@ describe("share -> receive between two daemons", () => {
     expect(
       await errorOf(
         third.sharing.create(stale, {
-          slug: "release-pal",
           name: "Release Pal",
           provider: "claude",
           model: "claude-sonnet-4-5",
-          modeId: "default",
         }),
       ),
     ).toBe("bot_share_updated");

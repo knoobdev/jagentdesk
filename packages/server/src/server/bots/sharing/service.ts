@@ -18,7 +18,7 @@ import {
   type BotSharedFrom,
 } from "@jagentdesk/protocol/bots/share-schemas";
 import type { BotsRequest } from "@jagentdesk/protocol/bots/rpc-schemas";
-import type { Bot, BotInput } from "@jagentdesk/protocol/bots/types";
+import { BotAvatarSchema, type Bot, type BotInput } from "@jagentdesk/protocol/bots/types";
 import {
   MAX_SHARE_BYTES,
   SHARE_SERVER_HEADER,
@@ -28,7 +28,7 @@ import type { SecretStore } from "../../database/secret-store.js";
 import type { RelayControlHandler } from "../../relay-transport.js";
 import type { BotsService } from "../service.js";
 import { readBotPackageArchive } from "./archive.js";
-import { BOT_PACKAGE_AVATAR_PATH, botPackagePartOf, type BotPackageConnector } from "./package.js";
+import { botPackagePartOf, type BotPackageConnector } from "./package.js";
 import { buildBotPackageContent } from "./content.js";
 import { BotShareCandidates, candidatePartFiles, type Candidate } from "./candidates.js";
 import { readBotShareable } from "./sources.js";
@@ -476,6 +476,7 @@ export class BotsSharing implements RelayControlHandler {
     const bot = await this.bots.create(input);
     try {
       await this.writeHome(this.bots.storage.botHome(bot), recipient);
+      if (!input.avatar) await this.applyAvatar(bot.id, recipient);
       for (const schedule of recipient.bot.schedules)
         this.bots.saveSchedule(bot.id, {
           name: schedule.name,
@@ -521,8 +522,26 @@ export class BotsSharing implements RelayControlHandler {
         throw new BotShareError(BOT_SHARE_ERRORS.invalid);
       await write(file.path, file.text);
     }
-    if (recipient.avatarBase64)
-      await write(BOT_PACKAGE_AVATAR_PATH, Buffer.from(recipient.avatarBase64, "base64"));
+  }
+
+  /** The shared look on the new record (bt1): a mascot id, or the picture through bots.avatar.upload. */
+  private async applyAvatar(botId: string, recipient: BotRecipientContent): Promise<void> {
+    if (recipient.avatarBase64) {
+      // A picture bt1 would refuse (size, shape) leaves the recipient's default mascot.
+      await this.bots
+        .uploadAvatar(botId, recipient.avatarBase64)
+        .catch((err) =>
+          this.options.logger.warn(
+            { err, botId },
+            "Shared bot picture not usable; kept the default",
+          ),
+        );
+      return;
+    }
+    const shared = recipient.bot.avatar;
+    if (!shared || !("mascot" in shared)) return;
+    const avatar = BotAvatarSchema.safeParse(`mascot:${shared.mascot}`);
+    if (avatar.success) await this.bots.update(botId, { avatar: avatar.data });
   }
 
   async handle(msg: ShareRequest): Promise<Record<string, unknown>> {

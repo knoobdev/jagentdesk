@@ -100,12 +100,11 @@ async function startDaemon(listenPort: number) {
   return { daemon, client };
 }
 
-const botInput = (slug: string, name: string) => ({
-  slug,
+// The daemon allocates the folder from the name (bots contract): no slug, no modeId.
+const botInput = (name: string) => ({
   name,
   provider: "claude" as const,
   model: "sonnet",
-  modeId: "default",
 });
 
 test(
@@ -117,7 +116,7 @@ test(
     try {
       const bot = (
         await sharer.client.botsRequest("bots.create.request", {
-          bot: botInput("pal", "Release Pal"),
+          bot: botInput("Release Pal"),
         })
       ).bot;
       const home = join(sharer.daemon.jagentdeskHome, "bots", "pal");
@@ -198,7 +197,7 @@ test(
       const made = (
         await recipient.client.botsRequest("bots.share.create.request", {
           reviewId: review.reviewId,
-          bot: botInput("release-pal", "Release Pal"),
+          bot: botInput("Release Pal"),
         })
       ).bot;
       expect(made.schedules.map((s) => s.enabled)).toEqual([false]);
@@ -240,7 +239,7 @@ test(
         await expect(
           third.client.botsRequest("bots.share.create.request", {
             reviewId: pending.review?.reviewId ?? "",
-            bot: botInput("release-pal", "Release Pal"),
+            bot: botInput("Release Pal"),
           }),
         ).rejects.toThrow("bot_share_updated");
 
@@ -260,7 +259,7 @@ test(
       for (let index = 0; index < 21; index++) {
         const many = (
           await sharer.client.botsRequest("bots.create.request", {
-            bot: botInput(`many-${index}`, `Many ${index}`),
+            bot: botInput(`Many ${index}`),
           })
         ).bot;
         const candidate = await sharer.client.botsRequest("bots.share.prepare.request", {
