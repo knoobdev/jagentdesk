@@ -100,7 +100,7 @@ import { BotsDeviceSettingsSection } from "@/bots/settings/app-pane";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import { DesktopPermissionsSection } from "@/desktop/components/desktop-permissions-section";
+import { NotificationsSection } from "@/components/settings/notifications-section";
 import { BrowserDataSection } from "@/desktop/browser/settings/browser-data-section";
 import { IntegrationsSection } from "@/desktop/components/integrations-section";
 import { isElectronRuntime } from "@/desktop/host";
@@ -207,12 +207,7 @@ const SIDEBAR_SECTION_ITEMS: SidebarSectionItem[] = [
   { id: "sidebar", labelKey: "settings.sections.sidebar", icon: FolderGit2 },
   { id: "chat", labelKey: "settings.sections.chatAndPanes", icon: MessageSquare },
   { id: "shortcuts", labelKey: "settings.sections.shortcuts", icon: Keyboard, desktopOnly: true },
-  {
-    id: "notifications",
-    labelKey: "settings.sections.notifications",
-    icon: Bell,
-    desktopOnly: true,
-  },
+  { id: "notifications", labelKey: "settings.sections.notifications", icon: Bell },
   { id: "diagnostics", labelKey: "settings.sections.diagnostics", icon: Stethoscope },
 ];
 
@@ -1565,7 +1560,7 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
         case "shortcuts":
           return isDesktopApp ? <KeyboardShortcutsSection /> : null;
         case "notifications":
-          return isDesktopApp ? <DesktopPermissionsSection /> : null;
+          return <NotificationsSection />;
         case "diagnostics":
           return (
             <DiagnosticsSection

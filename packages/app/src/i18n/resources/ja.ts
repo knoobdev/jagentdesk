@@ -2148,6 +2148,48 @@ export const ja: TranslationResources = {
       editProject: "{{projectName}}を編集",
     },
     groupInfo: "{{title}}について",
+    notifications: {
+      title: "通知",
+      enabled: {
+        label: "通知を有効にする",
+        description: "このデバイスでエージェント、ターミナル、プラグインからの通知を受け取ります",
+        pausedDescription: "プラグインを含むすべての通知がこのデバイスで一時停止されています",
+      },
+      events: {
+        title: "イベント",
+        agentPermission: {
+          label: "エージェントが権限を要求",
+          description: "承認、プラン、質問",
+        },
+        agentError: {
+          label: "エージェントのエラー",
+          description: "エージェントがエラーで停止したとき",
+        },
+        agentFinished: {
+          label: "エージェントが完了",
+          description: "エージェントがターンを完了したとき",
+        },
+        terminalNeedsInput: {
+          label: "ターミナルが入力を待機",
+          description: "ターミナルコマンドが入力を待っているとき",
+        },
+        terminalFinished: {
+          label: "ターミナルが完了",
+          description: "ターミナルコマンドが完了したとき",
+        },
+      },
+      plugins: {
+        title: "プラグイン",
+        enabled: {
+          label: "プラグイン通知",
+          description: "インストール済みプラグインによる通知の送信を許可します",
+        },
+        empty: "インストールされたプラグインがここに表示され、個別にミュートできます",
+      },
+      legacyHostTitle: "プッシュ通知設定にはホストの更新が必要です",
+      legacyHostHint:
+        "このデバイスのカスタムプッシュ通知設定を同期するには、接続中のホストを更新してください",
+    },
     sections: {
       hosts: "ホスト",
       sidebar: "サイドバー",

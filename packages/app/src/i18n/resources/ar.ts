@@ -2160,6 +2160,47 @@ export const ar: TranslationResources = {
       editProject: "تحرير{{projectName}}",
     },
     groupInfo: "حول{{title}}",
+    notifications: {
+      title: "الإشعارات",
+      enabled: {
+        label: "تفعيل الإشعارات",
+        description: "تلقّي الإشعارات من الوكلاء والطرفيات والإضافات على هذا الجهاز",
+        pausedDescription: "جميع الإشعارات، بما في ذلك الإضافات، متوقفة مؤقتًا على هذا الجهاز",
+      },
+      events: {
+        title: "الأحداث",
+        agentPermission: {
+          label: "الوكيل يحتاج إلى إذن",
+          description: "الموافقات والخطط والأسئلة",
+        },
+        agentError: {
+          label: "تعطّل الوكيل بخطأ",
+          description: "عندما يتوقف الوكيل بسبب خطأ",
+        },
+        agentFinished: {
+          label: "انتهى الوكيل",
+          description: "عندما يكمل الوكيل دورة عمل",
+        },
+        terminalNeedsInput: {
+          label: "الطرفية تنتظر إدخالًا",
+          description: "عندما ينتظر أمر الطرفية إدخالًا",
+        },
+        terminalFinished: {
+          label: "انتهى أمر الطرفية",
+          description: "عندما ينتهي أمر في الطرفية",
+        },
+      },
+      plugins: {
+        title: "الإضافات",
+        enabled: {
+          label: "إشعارات الإضافات",
+          description: "السماح للإضافات المثبتة بإرسال إشعارات",
+        },
+        empty: "تظهر الإضافات المثبتة هنا لكتمها بشكل فردي",
+      },
+      legacyHostTitle: "حدّث المضيف لتفضيلات الإشعارات الفورية",
+      legacyHostHint: "حدّث المضيفين المتصلين لمزامنة تفضيلات الإشعارات المخصصة من هذا الجهاز",
+    },
     sections: {
       hosts: "المضيفون",
       sidebar: "الشريط الجانبي",

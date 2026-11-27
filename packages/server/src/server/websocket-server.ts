@@ -937,6 +937,7 @@ export class VoiceAssistantWebSocketServer {
     databaseRegistry?: DatabaseRegistry,
     sshService?: SshService | null,
     private readonly workspaceArchiveOperations: WorkspaceArchiveOperations = new WorkspaceArchiveOperations(),
+    pushNotifications?: PushNotifications,
   ) {
     this.logger = logger.child({ module: "websocket-server" });
     this.advertiseDaemonStatusRpc = wsConfig.daemonStatusRpc !== false;
@@ -1059,11 +1060,12 @@ export class VoiceAssistantWebSocketServer {
       unsubscribeConfig?.();
     };
 
-    const pushLogger = this.logger.child({ module: "push" });
-    this.pushNotifications = createPushNotifications({
-      logger: pushLogger,
-      filePath: join(jagentdeskHome, "push-tokens.json"),
-    });
+    this.pushNotifications =
+      pushNotifications ??
+      createPushNotifications({
+        logger: this.logger.child({ module: "push" }),
+        filePath: join(jagentdeskHome, "push-tokens.json"),
+      });
     this.pushNotificationSender = pushNotificationSender ?? this.pushNotifications;
 
     this.agentManager.setAgentAttentionCallback((params) => {
@@ -2738,6 +2740,8 @@ export class VoiceAssistantWebSocketServer {
         ...(this.advertiseDaemonStatusRpc ? { daemonStatusRpc: true } : {}),
         // COMPAT(pushTokenRevocation): added in v0.12.2, remove gate after 2027-05-27.
         pushTokenRevocation: true,
+        // COMPAT(pushNotificationPreferences): added in v0.12.2, remove gate after 2027-06-01.
+        pushNotificationPreferences: true,
         speechSettings: true,
         // ADR-0051: released v0.9.x apps require this flag to request ANSI restore; retain forever.
         "terminal-restore-modes": true,
@@ -2888,6 +2892,8 @@ export class VoiceAssistantWebSocketServer {
               pluginThemes: true,
               pluginSettings: true,
               pluginSubscriptions: true,
+              // COMPAT(pluginNotifications): added in v0.12.2, remove gate after 2027-06-01.
+              pluginNotifications: true,
               explicitEventSubscriptions: true,
             }
           : {}),
@@ -4211,9 +4217,11 @@ export class VoiceAssistantWebSocketServer {
     );
 
     if (plan.shouldPush) {
-      void this.pushNotificationSender.send(notification).catch((err) => {
-        this.logger.warn({ err, agentId: params.agentId }, "Failed to send push notification");
-      });
+      void this.pushNotificationSender
+        .send(notification, { kind: "agent", reason: params.reason })
+        .catch((err) => {
+          this.logger.warn({ err, agentId: params.agentId }, "Failed to send push notification");
+        });
     }
 
     for (const [clientIndex, { ws }] of clientEntries.entries()) {
@@ -4313,16 +4321,19 @@ export class VoiceAssistantWebSocketServer {
 
     if (plan.shouldPush) {
       void this.pushNotificationSender
-        .send({
-          title,
-          body,
-          data: {
-            serverId: this.serverId,
-            terminalId: params.terminalId,
-            cwd: params.cwd,
-            ...(workspaceId ? { workspaceId } : {}),
+        .send(
+          {
+            title,
+            body,
+            data: {
+              serverId: this.serverId,
+              terminalId: params.terminalId,
+              cwd: params.cwd,
+              ...(workspaceId ? { workspaceId } : {}),
+            },
           },
-        })
+          { kind: "terminal", reason: params.reason },
+        )
         .catch((err) => {
           this.logger.warn(
             { err, terminalId: params.terminalId },
@@ -4347,6 +4358,83 @@ export class VoiceAssistantWebSocketServer {
         },
       });
       this.sendToClient(ws, message);
+    }
+  }
+
+  public sendPluginNotification(params: {
+    pluginId: string;
+    notificationId: string;
+    title: string;
+    body: string;
+    open?: import("@jagentdesk/protocol/messages").PluginNotificationOpenTarget;
+    data?: Record<string, import("@jagentdesk/protocol/agent-types").JsonValue>;
+  }): void {
+    const clientEntries: Array<{
+      ws: WebSocketLike;
+      state: ClientPresenceState;
+    }> = [];
+
+    for (const [ws, connection] of this.sessions) {
+      if (connection.kind !== "trusted" || this.pluginSocketIds.has(ws)) {
+        continue;
+      }
+      if (!connection.session.wantsEvent("plugin.notification", ws)) continue;
+      clientEntries.push({
+        ws,
+        state: this.getClientActivityState(connection.session),
+      });
+    }
+
+    const plan = computeNotificationPlan({
+      allStates: clientEntries.map((entry) => entry.state),
+      focusTarget:
+        params.open?.type === "agent" ? { kind: "agent", id: params.open.agentId } : null,
+      pushEligible: true,
+      nowMs: Date.now(),
+    });
+
+    if (plan.shouldPush) {
+      void this.pushNotificationSender
+        .send(
+          {
+            title: params.title,
+            body: params.body,
+            data: {
+              kind: "plugin",
+              serverId: this.serverId,
+              pluginId: params.pluginId,
+              notificationId: params.notificationId,
+              ...(params.open ? { open: params.open } : {}),
+              ...(params.data ? { data: params.data } : {}),
+            },
+          },
+          { kind: "plugin", pluginId: params.pluginId },
+        )
+        .catch((err) => {
+          this.logger.warn(
+            { err, pluginId: params.pluginId, notificationId: params.notificationId },
+            "Failed to send plugin push notification",
+          );
+        });
+    }
+
+    for (const [clientIndex, { ws }] of clientEntries.entries()) {
+      this.sendToClient(
+        ws,
+        wrapSessionMessage({
+          type: "plugin.notification",
+          payload: {
+            serverId: this.serverId,
+            pluginId: params.pluginId,
+            notificationId: params.notificationId,
+            title: params.title,
+            body: params.body,
+            ...(params.open ? { open: params.open } : {}),
+            ...(params.data ? { data: params.data } : {}),
+            shouldNotify: clientIndex === plan.inAppRecipientIndex,
+          },
+        }),
+      );
     }
   }
 }

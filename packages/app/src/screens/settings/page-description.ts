@@ -12,7 +12,7 @@ const SECTION_DESCRIPTIONS: Record<string, string> = {
   sidebar: "What the sidebar shows and in which order.",
   chat: "Sending, files, terminals, the browser and Bots on this device.",
   shortcuts: "Keyboard shortcuts in this app.",
-  notifications: "Notifications and microphone access for this app.",
+  notifications: "Which alerts this device gets, and notification and microphone access.",
   diagnostics: "Logs and checks for troubleshooting.",
 };
 

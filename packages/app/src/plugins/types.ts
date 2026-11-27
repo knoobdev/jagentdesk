@@ -16,6 +16,7 @@ import {
   type PluginSettingsScreenContribution,
   type PluginTimelineRendererContribution,
   type PluginTimelineTransformerContribution,
+  type PluginNotificationOpenHandler,
   type PluginPanelLocation,
   type PluginWorkspacePanelContribution,
   type PluginComposerItemContribution,
@@ -66,6 +67,7 @@ export interface EvaluatedPlugin {
   timelineTransformers: PluginTimelineTransformerContribution[];
 
   timelineRenderers: PluginTimelineRendererContribution[];
+  notificationOpenHandlers: PluginNotificationOpenHandler[];
 }
 
 export interface InstalledPlugin extends EvaluatedPlugin {
@@ -92,6 +94,7 @@ export type {
   PluginThemeContribution,
   PluginTimelineRendererContribution,
   PluginTimelineTransformerContribution,
+  PluginNotificationOpenHandler,
   PluginWorkspacePanelContribution,
 };
 

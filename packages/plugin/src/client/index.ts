@@ -4,6 +4,7 @@ import { type ZodType } from "zod";
 
 export type {
   PluginHostProps,
+  PluginHostNavigationActions,
   PluginWorkspaceRowBadgeItemProps,
   PluginWorkspaceRowBadgeItemContribution,
   PluginAgentPanelContribution,
@@ -50,6 +51,11 @@ export type {
   PluginClientSlashCommandContribution,
   SettingsState,
 } from "./contracts.js";
+export type {
+  PluginNotificationOpenEvent,
+  PluginNotificationOpenContext,
+  PluginNotificationOpenHandler,
+} from "./notifications.js";
 
 export type {
   PluginButton,

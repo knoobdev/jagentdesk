@@ -208,6 +208,7 @@ import {
   type HostRouteFrame,
 } from "@jagentdesk/protocol/binary-frames/index";
 import type { HostAdd, HostUpdate, HostDirectory } from "@jagentdesk/protocol/hosts";
+import type { NotificationPreferences } from "@jagentdesk/protocol/notification-preferences";
 
 import { messageTooLargeError } from "./daemon-client-transport-utils.js";
 import { MAX_WEBSOCKET_MESSAGE_BYTES } from "@jagentdesk/protocol/websocket-message-limit";
@@ -3726,10 +3727,11 @@ export class DaemonClient {
     });
   }
 
-  registerPushToken(token: string): void {
+  registerPushToken(token: string, preferences?: NotificationPreferences): void {
     this.sendSessionMessage({
       type: "register_push_token",
       token,
+      ...(preferences !== undefined ? { preferences } : {}),
     });
   }
 

@@ -272,7 +272,7 @@ import {
   type NonceChallengeManager,
 } from "./pairing/nonce-challenge.js";
 import { createPairingCodeManager, type PairingCodeManager } from "./pairing/pairing-code.js";
-import type { PushNotificationSender } from "./push/index.js";
+import type { PushNotifications, PushNotificationSender } from "./push/index.js";
 import { getOrCreateServerId } from "./server-id.js";
 import { resolveDaemonVersion } from "./daemon-version.js";
 import type { AgentClient, AgentProvider } from "./agent/agent-sdk-types.js";
@@ -587,6 +587,7 @@ export interface JAgentDeskDaemonConfig {
   log?: PersistedConfig["log"];
   onLifecycleIntent?: (intent: DaemonLifecycleIntent) => void;
   pushNotificationSender?: PushNotificationSender;
+  pushNotifications?: PushNotifications;
   managedProcesses?: ManagedProcessRegistry;
 }
 
@@ -2464,6 +2465,7 @@ export async function createJAgentDeskDaemon(
               databaseRegistry,
               sshService,
               workspaceArchiveOperations,
+              config.pushNotifications,
             );
             wsServer.setHostDial(async (target) => {
               const proxy = tsnetListener?.getTailnetSocks();

@@ -98,6 +98,7 @@ describe("evaluatePluginClientBundle", () => {
           plugin.addTheme({ id: "night", name: "Night", appearance: "dark", colors: { background: "#000", foreground: "#fff", raised: "#111", control: "#222", border: "#333", mutedForeground: "#aaa", ring: "#555" } }),
           plugin.addTimelineTransformer({ id: "transformer", query: { itemType: "tool_call" }, transform() { return { items: [] }; } }),
           plugin.addTimelineRenderer({ kind: "card", version: 1, schema, Component }),
+          plugin.onNotificationOpen(function handleOpen() {}),
         ];
       `),
       {
@@ -127,6 +128,7 @@ describe("evaluatePluginClientBundle", () => {
         plugin.themes,
         plugin.timelineTransformers,
         plugin.timelineRenderers,
+        plugin.notificationOpenHandlers,
       ].every((items) => items.length === 1),
     ).toBe(true);
     expect(pillCount).toBe(1);
@@ -146,6 +148,7 @@ describe("evaluatePluginClientBundle", () => {
         plugin.themes,
         plugin.timelineTransformers,
         plugin.timelineRenderers,
+        plugin.notificationOpenHandlers,
       ].every((items) => items.length === 0),
     ).toBe(true);
     expect(pillCount).toBe(0);
@@ -764,4 +767,29 @@ it("binds imported getters to each originating installation across delayed callb
   ]);
   await first.cleanup();
   await second.cleanup();
+});
+
+it("keeps onNotificationOpen handlers callable", async () => {
+  const plugin = evaluatePluginClientBundle(
+    "notification-open",
+    `(function() {
+      return {
+        default: function(plugin) {
+          plugin.onNotificationOpen(function handleOpen(context) {
+            globalThis.__notificationOpenId = context.event.notificationId;
+          });
+          return function() {};
+        },
+      };
+    })`,
+  );
+
+  expect(plugin.notificationOpenHandlers).toHaveLength(1);
+  const [handler] = plugin.notificationOpenHandlers;
+  expect(typeof handler).toBe("function");
+  await handler!({
+    event: { type: "opened", notificationId: "n-1", data: undefined },
+  } as Parameters<NonNullable<typeof handler>>[0]);
+  expect(Reflect.get(globalThis, "__notificationOpenId")).toBe("n-1");
+  Reflect.deleteProperty(globalThis, "__notificationOpenId");
 });

@@ -8,7 +8,7 @@ import { UnistylesRuntime } from "react-native-unistyles";
 import { buildPluginSettingsRoute } from "./settings/routes";
 import { router } from "expo-router";
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
-import { buildPluginSurfaceRoute } from "./routes";
+import { buildPluginScreenRoute, buildPluginSurfaceRoute } from "./routes";
 import type { PluginNavigation } from "./actions";
 
 export function createPluginNavigation(owner: {
@@ -42,14 +42,7 @@ export function createPluginNavigation(owner: {
   }
   return {
     openScreen(pluginId, input) {
-      const query = new URLSearchParams(
-        Object.entries(input.params ?? {}).map(([key, value]) => [`pluginParam.${key}`, value]),
-      );
-      const path = buildPluginSurfaceRoute(serverId, pluginId, {
-        kind: "surface",
-        id: input.screenId,
-      });
-      router.push(query.size ? `${path}?${query}` : path);
+      router.push(buildPluginScreenRoute(serverId, pluginId, input.screenId, input.params));
     },
     openSettings(pluginId, screenId) {
       router.push(buildPluginSettingsRoute(serverId, pluginId, screenId));

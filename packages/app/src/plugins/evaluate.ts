@@ -13,6 +13,7 @@ import {
   type PluginSurfaceProps,
   type PluginTimelineRendererContribution,
   type PluginTimelineTransformerContribution,
+  type PluginNotificationOpenHandler,
   type PluginWorkspacePanelContribution,
   type PluginButtonRegistration,
 } from "@jagentdesk/plugin/client";
@@ -167,6 +168,7 @@ export function runPluginClientBundle(
     themes: [],
     timelineTransformers: [],
     timelineRenderers: [],
+    notificationOpenHandlers: [],
   };
   const surfaceIds = new Set<string>();
   const settingsScreenIds = new Set<string>();
@@ -594,6 +596,26 @@ export function runPluginClientBundle(
         timelineRendererIds.delete(rendererId),
       );
     },
+    onNotificationOpen(handler: PluginNotificationOpenHandler) {
+      if (typeof handler !== "function") {
+        throw new Error("onNotificationOpen takes a callback function");
+      }
+      // Not through `register`: localization would wrap the callback in an object.
+      const handlers = collector.notificationOpenHandlers;
+      handlers.push(handler);
+      notifyChange();
+      let active = true;
+      const remove = () => {
+        if (!active) return;
+        active = false;
+        const index = handlers.indexOf(handler);
+        if (index !== -1) handlers.splice(index, 1);
+        removals.delete(remove);
+        notifyChange();
+      };
+      removals.add(remove);
+      return remove;
+    },
     addComposerPill(contribution) {
       if (stopped) throw new Error("Plugin has stopped");
       return trackButton(
@@ -705,5 +727,6 @@ export function runPluginClientBundle(
     themes: collector.themes,
     timelineTransformers: collector.timelineTransformers,
     timelineRenderers: collector.timelineRenderers,
+    notificationOpenHandlers: collector.notificationOpenHandlers,
   };
 }

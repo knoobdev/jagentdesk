@@ -1,0 +1,8 @@
+{
+  "id": "notifications-example",
+  "name": "Build alerts",
+  "description": "Sends build and agent failure notifications and opens the alert screen on tap.",
+  "requirements": {
+    "jagentdesk": ">=0.12.1"
+  }
+}

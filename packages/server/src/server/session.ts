@@ -4175,7 +4175,7 @@ export class Session {
         await this.handleListCommandsRequest(msg);
         return;
       case "register_push_token":
-        this.handleRegisterPushToken(msg.token);
+        this.handleRegisterPushToken(msg.token, msg.preferences);
         return;
       case "push.unregister.request":
         this.pushNotifications.revoke(msg.token);
@@ -6114,9 +6114,12 @@ export class Session {
   /**
    * Handle push token registration
    */
-  private handleRegisterPushToken(token: string): void {
+  private handleRegisterPushToken(
+    token: string,
+    preferences?: Parameters<PushNotifications["renew"]>[1],
+  ): void {
     this.registeredPushToken = token;
-    this.pushNotifications.renew(token);
+    this.pushNotifications.renew(token, preferences);
     this.sessionLogger.info("Registered push token");
   }
 
@@ -10082,8 +10085,9 @@ export class Session {
     const capabilities = source
       ? this.clientCapabilitiesBySource.get(source)
       : this.clientCapabilities;
+    // Old apps parse outbound messages strictly and do not know these types.
     if (!capabilities?.has(CLIENT_CAPS.explicitEventSubscriptions))
-      return event !== "agent.background_work.update";
+      return event !== "agent.background_work.update" && event !== "plugin.notification";
     return [...this.eventSubscriptions.values()].some(
       ({ owner, events }) =>
         (!source || owner.source === source) && events.has(event as SessionEventSubscription),
