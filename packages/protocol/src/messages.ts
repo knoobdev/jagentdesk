@@ -5331,6 +5331,8 @@ export const ServerInfoStatusPayloadSchema = z
         botsHooks: z.boolean().optional(),
         // Bot sharing by link (spec 37.13): `bots.share.*`.
         botsSharing: z.boolean().optional(),
+        // The first-run screen reads the kickoff from Home Chat; `bots.kickoff.retry` (v0.12.2).
+        botsKickoff: z.boolean().optional(),
         binaryChunkingV1: z.boolean().optional(),
         backgroundAgents: z.boolean().optional(),
         // COMPAT(agentRequestReceipts): added in v0.8.0; remove gate after 2027-03-05.

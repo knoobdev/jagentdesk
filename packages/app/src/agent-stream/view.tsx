@@ -28,6 +28,7 @@ import React, {
   useRef,
   useState,
   type ComponentProps,
+  type ReactElement,
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
@@ -68,7 +69,13 @@ import type {
 } from "@jagentdesk/protocol/agent-types";
 import { type AgentScreenAgent } from "@/hooks/use-agent-screen-state-machine";
 import { useSessionStore } from "@/stores/session-store";
-import { isBotRestartWake, stripBotEnvelope, stripBotQuietMarker } from "@/bots/envelope";
+import {
+  isBotKickoffWake,
+  isBotRestartWake,
+  stripBotEnvelope,
+  stripBotQuietMarker,
+} from "@/bots/envelope";
+import { BotCreatedNotice } from "@/bots/created-notice";
 import { BotRestartNotice } from "@/bots/restart-notice";
 import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
 import { useLoadOlderAgentHistory } from "@/hooks/use-load-older-agent-history";
@@ -763,31 +770,50 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
 
     const setToolCallGroupExpanded = toolCallExpansion.setGroupExpanded;
 
+    // The first kickoff a bot's chat holds; a later one is the owner's Try again.
+    const firstKickoffId = useMemo(() => {
+      if (!context.botId) return null;
+      const first = effectiveStreamItems.find(
+        (item) => item.kind === "user_message" && isBotKickoffWake(item.text),
+      );
+      return first?.id ?? null;
+    }, [context.botId, effectiveStreamItems]);
+
     const renderUserMessageItem = useCallback(
       (layoutItem: StreamLayoutItem, item: Extract<StreamItem, { kind: "user_message" }>) => {
         const collapsedTurn = getCollapsedTurn(item.id);
-        const restart = Boolean(context.botId) && isBotRestartWake(item.text);
-        const message = restart ? (
-          <BotRestartNotice />
-        ) : (
-          <UserMessage
-            serverId={resolvedServerId}
-            agentId={agentId}
-            messageId={item.messageId}
-            message={context.botId ? stripBotEnvelope(item.text) : item.text}
-            images={item.images}
-            attachments={item.attachments}
-            timestamp={item.timestamp.getTime()}
-            capabilities={context.capabilities}
-            client={client}
-            isFirstInGroup={layoutItem.isFirstInUserGroup}
-            isLastInGroup={layoutItem.isLastInUserGroup}
-            isPending={
-              item.clientMessageId !== undefined &&
-              pendingClientMessageIds.has(item.clientMessageId)
-            }
-          />
-        );
+        const botId = context.botId;
+        let message: ReactElement;
+        if (botId && isBotRestartWake(item.text)) message = <BotRestartNotice />;
+        else if (botId && isBotKickoffWake(item.text))
+          message = (
+            <BotCreatedNotice
+              serverId={resolvedServerId}
+              botId={botId}
+              timestamp={item.timestamp.getTime()}
+              again={firstKickoffId !== null && firstKickoffId !== item.id}
+            />
+          );
+        else
+          message = (
+            <UserMessage
+              serverId={resolvedServerId}
+              agentId={agentId}
+              messageId={item.messageId}
+              message={context.botId ? stripBotEnvelope(item.text) : item.text}
+              images={item.images}
+              attachments={item.attachments}
+              timestamp={item.timestamp.getTime()}
+              capabilities={context.capabilities}
+              client={client}
+              isFirstInGroup={layoutItem.isFirstInUserGroup}
+              isLastInGroup={layoutItem.isLastInUserGroup}
+              isPending={
+                item.clientMessageId !== undefined &&
+                pendingClientMessageIds.has(item.clientMessageId)
+              }
+            />
+          );
         if (!collapsedTurn) {
           return message;
         }
@@ -803,6 +829,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         context.botId,
         agentId,
         client,
+        firstKickoffId,
         getCollapsedTurn,
         pendingClientMessageIds,
         resolvedServerId,

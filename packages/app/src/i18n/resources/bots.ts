@@ -134,6 +134,10 @@ const botsJadStrings = {
   // Orca dfdb4fda en.json `restartContinued` (the native chat's restart notice), "Orca" -> "JAgentDesk".
   restartContinued:
     "JAgentDesk asked this agent to continue after a restart. Your own prompt was not re-sent.",
+  // Orca dfdb4fda en.json `components.native-chat.botCreated` (the kickoff's row in the chat).
+  botCreated: "Bot created",
+  botCreatedAgain: "{{name}} started setting up again",
+  kickoffUpdateHost: "Update the host to try again.",
   slack: {
     title: "Slack",
     createApp: "Create Slack app",

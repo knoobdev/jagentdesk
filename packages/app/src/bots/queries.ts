@@ -130,12 +130,12 @@ export function useItems(serverId: string, botId: string) {
     { select: (payload) => payload.items },
   );
 }
-export function useBotHistory(serverId: string, botId: string) {
+export function useBotHistory(serverId: string, botId: string, enabled = true) {
   return useBotsRead(
     serverId,
     "bots.chat.history.request",
     { botId, limit: 200 },
-    { select: (payload) => payload.messages },
+    { select: (payload) => payload.messages, enabled },
   );
 }
 export function useNeedsYou(serverId: string, botId: string) {

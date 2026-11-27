@@ -436,6 +436,7 @@ export class BotStorage {
     text: string,
     source: string,
     place: Pick<BotMessage, "roomId" | "rootId" | "slack" | "connector"> = {},
+    createdAt_ms: number = Date.now(),
   ): BotMessage | null {
     const message: BotMessage = {
       id,
@@ -443,7 +444,7 @@ export class BotStorage {
       text,
       role: source === "chat" ? "user" : "system",
       source,
-      createdAt_ms: Date.now(),
+      createdAt_ms,
       ...place,
     };
     return this.append(message, true) ? message : null;
