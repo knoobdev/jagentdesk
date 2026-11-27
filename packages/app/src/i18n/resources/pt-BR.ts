@@ -470,6 +470,16 @@ export const ptBR: TranslationResources = {
         loading: "Carregando detalhes…",
         notFound: "O host não conhece mais esta tarefa em segundo plano",
         tabTitle: "Tarefa em segundo plano",
+        waitingForFile: "Aguardando {{file}}…",
+        scriptSummary: "Script · {{file}} · {{lines}} linhas",
+        showingFirst64Kb: "Mostrando os primeiros 64 KB",
+        copyScript: "Copiar script",
+        readByAgent: "Lido pelo agente {{time}}",
+        showWhatItRead: "Mostrar o que ele leu",
+        hideWhatItRead: "Ocultar o que ele leu",
+        copyWhatItRead: "Copiar o que ele leu",
+        printsNothing:
+          "Este comando não imprime nada; veja o script acima para saber o que ele aguarda.",
       },
     },
     todo: {

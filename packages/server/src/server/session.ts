@@ -69,6 +69,11 @@ import {
   type BackgroundWorkOutputChunk,
   type StopFollowing,
 } from "./agent/background-work/output-stream.js";
+import {
+  describeBackgroundWorkSources,
+  isOutputSourceAvailable,
+  resolveBackgroundWorkOutputSource,
+} from "./agent/background-work/sources.js";
 import equal from "fast-deep-equal";
 import { v4 as uuidv4 } from "uuid";
 import { lstat, mkdir, mkdtemp, rename, rm, stat } from "node:fs/promises";
@@ -9158,11 +9163,17 @@ export class Session {
       const detail = this.agentManager.getAgentBackgroundWorkDetail(msg.agentId, msg.itemId);
       if (!detail) throw new Error("Background work not found");
       const [item] = this.projectBackgroundWorkItems([detail.item]);
-      const output = detail.output;
-      const outputAvailable =
-        output?.type === "reader" ||
-        (output?.type === "file" && (await output.locate().catch(() => null)) !== null);
       const owner = target.agent ?? target.record;
+      const daemonItem = isDaemonBackgroundWorkItem(item);
+      // Provider work starts in the agent's folder unless the provider says otherwise.
+      const agentCwd = daemonItem ? null : (owner?.cwd ?? null);
+      const sources = daemonItem
+        ? undefined
+        : await describeBackgroundWorkSources({
+            detail,
+            agentCwd,
+            readTimeline: () => this.agentManager.readAgentTimelineRows(msg.agentId),
+          });
       reply({
         detail: {
           id: item.id,
@@ -9173,12 +9184,12 @@ export class Session {
           status: detail.status,
           endedAt: detail.endedAt,
           exitCode: detail.exitCode,
-          // Provider work starts in the agent's folder unless the provider says otherwise.
-          cwd: detail.cwd ?? (isDaemonBackgroundWorkItem(item) ? null : (owner?.cwd ?? null)),
+          cwd: detail.cwd ?? agentCwd,
           provider: owner?.provider ?? "",
-          outputAvailable,
+          outputAvailable: await isOutputSourceAvailable(detail.output),
           ...(item.canStop ? { canStop: true } : {}),
           ...(item.stopToken ? { stopToken: item.stopToken } : {}),
+          ...(sources ? { sources } : {}),
         },
         error: null,
       });
@@ -9190,7 +9201,7 @@ export class Session {
   private async handleAgentBackgroundWorkOutputSubscribeRequest(
     msg: Extract<SessionInboundMessage, { type: "agent.background_work.output.subscribe.request" }>,
   ): Promise<void> {
-    const { agentId, itemId, subscriptionId } = msg;
+    const { agentId, itemId, subscriptionId, sourceId } = msg;
     const respond = (error: string | null) =>
       this.emit({
         type: "agent.background_work.output.subscribe.response",
@@ -9211,6 +9222,7 @@ export class Session {
           subscriptionId,
           agentId,
           itemId,
+          ...(sourceId !== undefined ? { sourceId } : {}),
           chunk: chunk.chunk,
           offset: chunk.offset,
           nextOffset: chunk.nextOffset,
@@ -9225,9 +9237,18 @@ export class Session {
       // ADR-0062 §3: only the source attached to this agent's own item is read.
       const detail = this.agentManager.getAgentBackgroundWorkDetail(agentId, itemId);
       if (!detail) throw new Error("Background work not found");
-      if (!detail.output) throw new Error("Output isn't available for this background task");
+      // ADR-0064: a redirect source is re-derived from this item's own command.
+      const owner = target.agent ?? target.record;
+      const source = resolveBackgroundWorkOutputSource({
+        detail,
+        agentCwd: isDaemonBackgroundWorkItem(detail.item) ? null : (owner?.cwd ?? null),
+        sourceId,
+        isRunning: () =>
+          this.agentManager.getAgentBackgroundWorkDetail(agentId, itemId)?.status === "running",
+      });
+      if (!source) throw new Error("Output isn't available for this background task");
       const stop = await followBackgroundWorkOutput({
-        source: detail.output,
+        source,
         onChunk: (chunk) => {
           if (pending) pending.push(chunk);
           else push(chunk);
@@ -9241,6 +9262,7 @@ export class Session {
               subscriptionId,
               agentId,
               itemId,
+              ...(sourceId !== undefined ? { sourceId } : {}),
               chunk: "",
               offset: 0,
               error: "Output is no longer readable",

@@ -1,4 +1,12 @@
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
@@ -43,6 +51,7 @@ function createSessionForTest(options: {
     }),
     workspaceRegistry: createStub<SessionOptions["workspaceRegistry"]>({
       subscribeToMutations: () => () => {},
+      subscribeBeforePublish: () => () => {},
       initialize: async () => {},
       existsOnDisk: async () => true,
       list: async () => [],
@@ -150,6 +159,16 @@ describe("background work detail and output", () => {
             cwd: "/repo/sub",
             provider: "claude",
             outputAvailable: true,
+            sources: [
+              {
+                id: "provider",
+                kind: "provider",
+                label: "",
+                available: true,
+                size: 14,
+                modifiedAt: expect.any(String),
+              },
+            ],
           },
           error: null,
         },
@@ -273,5 +292,193 @@ describe("background work detail and output", () => {
     appendFileSync(path, "line-4\n");
     await new Promise((resolve) => setTimeout(resolve, 700));
     expect(outputPushes(messages)).toHaveLength(count);
+  });
+});
+
+// ADR-0064 / A4.27c.8: redirect files and the script, re-derived from the item's own command.
+describe("background work extra sources", () => {
+  const AGENT = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  let root: string;
+  let current: Session | null = null;
+
+  afterEach(async () => {
+    await current?.cleanup();
+    current = null;
+    if (root) rmSync(root, { recursive: true, force: true });
+  });
+
+  function setup(input: { command: string; rows?: unknown[] }) {
+    root = realpathSync(mkdtempSync(join(tmpdir(), "session-bg-sources-")));
+    const cwd = join(root, "repo");
+    mkdirSync(cwd);
+    const store = new AgentBackgroundWorkStore();
+    store.apply(
+      AGENT,
+      [
+        {
+          id: "b1",
+          kind: "shell",
+          description: null,
+          command: input.command.replaceAll("$ROOT", root),
+        },
+      ],
+      "2026-11-28T10:00:00.000Z",
+    );
+    const messages: SessionOutboundMessage[] = [];
+    const session = createSessionForTest({
+      messages,
+      agentManager: {
+        getAgent: vi.fn((id: string) =>
+          id === AGENT ? { id, provider: "codex", cwd, internal: false } : null,
+        ),
+        getAgentBackgroundWorkDetail: vi.fn((agentId: string, itemId: string) =>
+          store.detail(agentId, itemId),
+        ),
+        readAgentTimelineRows: vi.fn(async () => input.rows ?? []),
+      },
+    });
+    current = session;
+    return { session, messages, cwd, store };
+  }
+
+  async function detailOf(session: Session, messages: SessionOutboundMessage[]) {
+    await session.handleMessage({
+      type: "agent.background_work.get_detail.request",
+      agentId: AGENT,
+      itemId: "b1",
+      requestId: `d${messages.length}`,
+    });
+    const reply = messages.at(-1);
+    if (reply?.type !== "agent.background_work.get_detail.response") throw new Error("no reply");
+    return reply.payload.detail;
+  }
+
+  test("a redirect file is its own source and streams as it grows", async () => {
+    const { session, messages, cwd } = setup({
+      command: 'sh -c "npm test > $ROOT/repo/t.log 2>&1"',
+    });
+    const before = await detailOf(session, messages);
+    expect(before?.outputAvailable).toBe(false);
+    expect(before?.sources).toEqual([
+      { id: "provider", kind: "provider", label: "", available: false },
+      {
+        id: "redirect:0",
+        kind: "redirect",
+        label: "t.log",
+        path: join(cwd, "t.log"),
+        available: false,
+        size: 0,
+        modifiedAt: null,
+      },
+    ]);
+
+    await session.handleMessage({
+      type: "agent.background_work.output.subscribe.request",
+      agentId: AGENT,
+      itemId: "b1",
+      subscriptionId: "s1",
+      sourceId: "redirect:0",
+      requestId: "r1",
+    });
+    expect(messages.at(-2)).toMatchObject({
+      type: "agent.background_work.output.subscribe.response",
+      payload: { error: null },
+    });
+    writeFileSync(join(cwd, "t.log"), "PASS a\n");
+    await vi.waitFor(() =>
+      expect(messages.at(-1)).toMatchObject({
+        type: "agent.background_work.output",
+        payload: { sourceId: "redirect:0", chunk: "PASS a\n", offset: 0 },
+      }),
+    );
+    appendFileSync(join(cwd, "t.log"), "PASS b\n");
+    await vi.waitFor(() =>
+      expect(messages.at(-1)).toMatchObject({
+        type: "agent.background_work.output",
+        payload: { sourceId: "redirect:0", chunk: "PASS b\n", offset: 7 },
+      }),
+    );
+    const after = await detailOf(session, messages);
+    expect(after?.sources?.[1]).toMatchObject({ id: "redirect:0", available: true, size: 14 });
+  });
+
+  test("blocked targets get no source and cannot be subscribed", async () => {
+    const { session, messages, cwd } = setup({
+      command: "cmd > ~/.ssh/x 2> /dev/null > link.log > /etc/x.log",
+    });
+    // A symlink out of the allowed folders, to a file this test never reads.
+    symlinkSync("/etc/hosts", join(cwd, "link.log"));
+    const detail = await detailOf(session, messages);
+    expect(detail?.sources).toEqual([
+      { id: "provider", kind: "provider", label: "", available: false },
+    ]);
+    for (const sourceId of ["redirect:0", "redirect:1", "redirect:2", "redirect:3", "/etc/hosts"]) {
+      await session.handleMessage({
+        type: "agent.background_work.output.subscribe.request",
+        agentId: AGENT,
+        itemId: "b1",
+        subscriptionId: `s-${sourceId}`,
+        sourceId,
+        requestId: `r-${sourceId}`,
+      });
+    }
+    const errors = messages
+      .filter((message) => message.type === "agent.background_work.output.subscribe.response")
+      .map((message) => message.payload.error);
+    expect(errors).toEqual([
+      "Unknown output source",
+      "Unknown output source",
+      "Output file is outside the source's folders",
+      "Unknown output source",
+      "Unknown output source",
+    ]);
+    expect(messages.some((message) => message.type === "agent.background_work.output")).toBe(false);
+  });
+
+  test("the script and the agent's latest read of a redirect file", async () => {
+    const { session, messages, cwd } = setup({
+      command: "zsh $ROOT/repo/wait.sh > $ROOT/repo/w.log",
+      rows: [
+        {
+          seq: 1,
+          timestamp: "2026-11-28T10:05:00.000Z",
+          item: {
+            type: "tool_call",
+            callId: "c1",
+            name: "shell",
+            status: "completed",
+            error: null,
+            detail: { type: "shell", command: "tail -n 20 w.log", output: "waiting 3/10" },
+          },
+        },
+      ],
+    });
+    writeFileSync(join(cwd, "wait.sh"), "until [ -f done ]; do sleep 1; done\n");
+    writeFileSync(join(cwd, "w.log"), "");
+    const detail = await detailOf(session, messages);
+    expect(detail?.sources?.slice(1)).toEqual([
+      {
+        id: "redirect:0",
+        kind: "redirect",
+        label: "w.log",
+        path: join(cwd, "w.log"),
+        available: true,
+        size: 0,
+        modifiedAt: expect.any(String),
+        lastRead: { at: "2026-11-28T10:05:00.000Z", content: "waiting 3/10", truncated: false },
+      },
+      {
+        id: "script",
+        kind: "script",
+        label: "wait.sh",
+        path: join(cwd, "wait.sh"),
+        available: true,
+        script: {
+          content: "until [ -f done ]; do sleep 1; done\n",
+          truncated: false,
+          lineCount: 1,
+        },
+      },
+    ]);
   });
 });

@@ -471,6 +471,16 @@ export const es: TranslationResources = {
         loading: "Cargando detalles…",
         notFound: "El host ya no conoce esta tarea en segundo plano",
         tabTitle: "Tarea en segundo plano",
+        waitingForFile: "Esperando {{file}}…",
+        scriptSummary: "Script · {{file}} · {{lines}} líneas",
+        showingFirst64Kb: "Se muestran los primeros 64 KB",
+        copyScript: "Copiar script",
+        readByAgent: "Leído por el agente {{time}}",
+        showWhatItRead: "Mostrar lo que leyó",
+        hideWhatItRead: "Ocultar lo que leyó",
+        copyWhatItRead: "Copiar lo que leyó",
+        printsNothing:
+          "Este comando no imprime nada; consulta el script de arriba para ver qué espera.",
       },
     },
     todo: {

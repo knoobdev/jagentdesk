@@ -2101,6 +2101,7 @@ export type AgentBackgroundWorkItem = AgentBackgroundWorkListPayload["items"][nu
 export type AgentBackgroundWorkDetail = NonNullable<
   CorrelatedResponsePayload<"agent.background_work.get_detail.response">["detail"]
 >;
+export type AgentBackgroundWorkSource = NonNullable<AgentBackgroundWorkDetail["sources"]>[number];
 export type AgentBackgroundWorkOutputPayload = Extract<
   SessionOutboundMessage,
   { type: "agent.background_work.output" }
@@ -5081,10 +5082,19 @@ export class DaemonClient {
   async subscribeAgentBackgroundWorkOutput(input: {
     agentId: string;
     itemId: string;
+    /** ADR-0064: one of the detail's `sources`; the provider's output when absent. */
+    sourceId?: string;
     onOutput: (output: AgentBackgroundWorkOutputPayload) => void;
     timeout?: number;
   }): Promise<() => void> {
     this.assertBackgroundWorkOutputSupported();
+    // COMPAT(backgroundWorkSources): added in v0.12.3, remove gate after 2027-05-28.
+    if (
+      input.sourceId !== undefined &&
+      this.lastServerInfoMessage?.features?.backgroundWorkSources !== true
+    ) {
+      throw new Error("Update the host to see a background task's output files.");
+    }
     const subscriptionId = this.createRequestId();
     const release = this.on("agent.background_work.output", (message) => {
       if (message.payload.subscriptionId === subscriptionId) input.onOutput(message.payload);
@@ -5099,6 +5109,7 @@ export class DaemonClient {
               agentId: input.agentId,
               itemId: input.itemId,
               subscriptionId,
+              ...(input.sourceId !== undefined ? { sourceId: input.sourceId } : {}),
             },
           },
         );

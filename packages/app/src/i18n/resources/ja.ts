@@ -477,6 +477,16 @@ export const ja: TranslationResources = {
         loading: "詳細を読み込み中…",
         notFound: "このバックグラウンドタスクはホストにもう存在しません",
         tabTitle: "バックグラウンドタスク",
+        waitingForFile: "{{file}} を待っています…",
+        scriptSummary: "スクリプト · {{file}} · {{lines}} 行",
+        showingFirst64Kb: "先頭 64 KB を表示しています",
+        copyScript: "スクリプトをコピー",
+        readByAgent: "エージェントが読み取り: {{time}}",
+        showWhatItRead: "読み取った内容を表示",
+        hideWhatItRead: "読み取った内容を隠す",
+        copyWhatItRead: "読み取った内容をコピー",
+        printsNothing:
+          "このコマンドは何も出力しません。何を待っているかは上のスクリプトを確認してください。",
       },
     },
     todo: {
