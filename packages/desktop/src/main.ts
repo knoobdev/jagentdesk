@@ -76,6 +76,8 @@ import {
   unregisterJAgentDeskBrowserFromHost,
   registerAttachedJAgentDeskBrowser,
   setWorkspaceActiveJAgentDeskBrowserId,
+  listLiveJAgentDeskBrowserTabs,
+  trackJAgentDeskBrowserLiveTab,
   unregisterJAgentDeskBrowserHost,
 } from "./features/browser-webviews/index.js";
 import {
@@ -726,6 +728,10 @@ onDialogsChanged(({ contentsId, pendingDialog }) => {
   host.send(BROWSER_DIALOG_EVENT, { browserId, pendingDialog });
 });
 
+ipcMain.handle("jagentdesk:browser:list-live-tabs", (event) =>
+  listLiveJAgentDeskBrowserTabs(event.sender.id),
+);
+
 ipcMain.handle("jagentdesk:browser:clear-profile", async (_event, rawLegacyBrowserIds: unknown) => {
   const profileSessions = getJAgentDeskBrowserProfileSessions(
     session,
@@ -1131,6 +1137,7 @@ async function createWindow(
   });
   mainWindow.webContents.on("did-attach-webview", (_event, contents) => {
     prepareJAgentDeskBrowserWebContents(contents);
+    trackJAgentDeskBrowserLiveTab(contents);
     // alert/confirm/prompt wait for the agent or the tab's dialog bar, not a native box.
     installGuestDialogHandler(contents);
     // Anti-detection: the guest's identity (UA, Client Hints, timezone, locale, init

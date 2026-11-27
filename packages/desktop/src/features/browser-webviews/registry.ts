@@ -13,6 +13,22 @@ export class JAgentDeskBrowserWebviewRegistry {
   private readonly webContentsIdsByHostAndBrowserId = new Map<string, number>();
   private readonly workspaceIdsByBrowserId = new Map<string, string>();
   private readonly activeBrowserIdsByHostWindow = new Map<number, Map<string, string>>();
+  private readonly changeListeners = new Set<() => void>();
+
+  /** Called after any registration or workspace assignment changes. */
+  public subscribe(listener: () => void): () => void {
+    this.changeListeners.add(listener);
+    return () => {
+      this.changeListeners.delete(listener);
+    };
+  }
+
+  public listRegistrations(): Array<BrowserWebContentsRegistration & { webContentsId: number }> {
+    return Array.from(this.registrationsByWebContentsId, ([webContentsId, registration]) => ({
+      webContentsId,
+      ...registration,
+    }));
+  }
 
   public registerWebContents(input: {
     webContentsId: number;
@@ -41,6 +57,7 @@ export class JAgentDeskBrowserWebviewRegistry {
       hostWebContentsId: input.hostWebContentsId,
     });
     this.webContentsIdsByHostAndBrowserId.set(hostBrowserKey, input.webContentsId);
+    this.emitChange();
   }
 
   public unregisterWebContents(webContentsId: number): void {
@@ -79,7 +96,11 @@ export class JAgentDeskBrowserWebviewRegistry {
   }
 
   public registerWorkspace(input: BrowserWorkspaceRegistration): void {
+    if (this.workspaceIdsByBrowserId.get(input.browserId) === input.workspaceId) {
+      return;
+    }
     this.workspaceIdsByBrowserId.set(input.browserId, input.workspaceId);
+    this.emitChange();
   }
 
   public unregisterBrowser(browserId: string): void {
@@ -93,6 +114,7 @@ export class JAgentDeskBrowserWebviewRegistry {
     }
     this.workspaceIdsByBrowserId.delete(browserId);
     this.deleteActiveBrowserReferences(browserId);
+    this.emitChange();
   }
 
   public unregisterBrowserFromHost(hostWebContentsId: number, browserId: string): void {
@@ -151,8 +173,12 @@ export class JAgentDeskBrowserWebviewRegistry {
       }
       return;
     }
-    if (this.hasBrowser(input.browserId)) {
+    if (
+      this.hasBrowser(input.browserId) &&
+      this.workspaceIdsByBrowserId.get(input.browserId) !== input.workspaceId
+    ) {
       this.workspaceIdsByBrowserId.set(input.browserId, input.workspaceId);
+      this.emitChange();
     }
     const activeBrowserIdsByWorkspace =
       this.activeBrowserIdsByHostWindow.get(input.hostWebContentsId) ?? new Map<string, string>();
@@ -237,6 +263,13 @@ export class JAgentDeskBrowserWebviewRegistry {
       !this.hasBrowserInHostWindow(browserId, hostWebContentsId)
     ) {
       this.deleteActiveBrowserReferencesInHostWindow(browserId, hostWebContentsId);
+    }
+    this.emitChange();
+  }
+
+  private emitChange(): void {
+    for (const listener of this.changeListeners) {
+      listener();
     }
   }
 

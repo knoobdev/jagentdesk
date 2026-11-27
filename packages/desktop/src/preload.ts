@@ -123,6 +123,7 @@ contextBridge.exposeInMainWorld("jagentdeskDesktop", {
       ipcRenderer.invoke("jagentdesk:browser:register-attached", input),
     unregisterWorkspaceBrowser: (browserId: string) =>
       ipcRenderer.invoke("jagentdesk:browser:unregister-workspace-browser", browserId),
+    listLiveTabs: () => ipcRenderer.invoke("jagentdesk:browser:list-live-tabs"),
     setWorkspaceActiveBrowser: (input: { workspaceId: string; browserId: string | null }) =>
       ipcRenderer.invoke("jagentdesk:browser:set-workspace-active-browser", input),
     focus: (browserId: string) => ipcRenderer.invoke("jagentdesk:browser:focus", browserId),

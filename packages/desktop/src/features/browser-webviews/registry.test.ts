@@ -2,6 +2,41 @@ import { describe, expect, it } from "vitest";
 import { JAgentDeskBrowserWebviewRegistry } from "./registry.js";
 
 describe("JAgentDeskBrowserWebviewRegistry", () => {
+  it("notifies subscribers when registrations or workspaces change", () => {
+    const registry = new JAgentDeskBrowserWebviewRegistry();
+    let changes = 0;
+    const unsubscribe = registry.subscribe(() => {
+      changes += 1;
+    });
+
+    registry.registerWebContents({
+      webContentsId: 11,
+      browserId: "browser-a",
+      hostWebContentsId: 1,
+    });
+    registry.registerWebContents({
+      webContentsId: 11,
+      browserId: "browser-a",
+      hostWebContentsId: 1,
+    });
+    registry.registerWorkspace({ browserId: "browser-a", workspaceId: "workspace-a" });
+    registry.registerWorkspace({ browserId: "browser-a", workspaceId: "workspace-a" });
+    expect(changes).toBe(2);
+    expect(registry.listRegistrations()).toEqual([
+      { webContentsId: 11, browserId: "browser-a", hostWebContentsId: 1 },
+    ]);
+
+    registry.unregisterWebContents(11);
+    expect(changes).toBe(3);
+    unsubscribe();
+    registry.registerWebContents({
+      webContentsId: 12,
+      browserId: "browser-b",
+      hostWebContentsId: 1,
+    });
+    expect(changes).toBe(3);
+  });
+
   it("keeps one authoritative webContents target per host and browser", () => {
     const registry = new JAgentDeskBrowserWebviewRegistry();
 
