@@ -269,22 +269,38 @@ export function resolveRetainedSelection(
   return { start, end };
 }
 
-export type PrimaryActionKind = "send" | "active" | "none";
+export type PrimaryActionKind = "send" | "active" | "voiceMode" | "none";
 
 /**
- * Which disc holds the trailing slot. With nothing to send and the agent idle the primary
- * action is "none"; a disabled Send then stands in so the row does not shift when typing
- * starts. Classic themes keep Paseo's rule that a voice-mode button takes the slot instead;
- * Gumloop always shows Send there and voice mode sits before it (spec 38 §4.4, A38.6b).
+ * Which control holds the trailing slot (Paseo 0.18.0 `resolvePrimaryActionKind`). Send shows
+ * only with something to send; an empty composer offers voice mode there instead, and Stop takes
+ * it while the agent runs.
+ */
+export function resolvePrimaryActionKind(input: {
+  hasSendableContent: boolean;
+  allowEmptySubmit: boolean;
+  isAgentRunning: boolean;
+  isSubmitLoading: boolean;
+  offersVoiceMode: boolean;
+}): PrimaryActionKind {
+  if (input.hasSendableContent || input.allowEmptySubmit) return "send";
+  if (input.isAgentRunning) return "active";
+  if (input.isSubmitLoading) return "send";
+  return input.offersVoiceMode ? "voiceMode" : "none";
+}
+
+/**
+ * What the trailing slot presents. Fullscreen always shows Send, disabled until there is content.
+ * With nothing to send and no voice mode, classic themes keep Paseo's disabled stand-in Send so the
+ * row does not shift when typing starts; Gumloop leaves the slot empty until there is something
+ * to send (spec 38 §4.4, A38.6b).
  */
 export function resolvePresentedActionKind(input: {
   primaryActionKind: PrimaryActionKind;
   isFullscreen: boolean;
-  hasVoiceModeContent: boolean;
-  sendAlwaysPresent: boolean;
+  emptySlotStandsIn: boolean;
 }): { kind: PrimaryActionKind; sendStandsIn: boolean } {
   const sendStandsIn =
-    input.isFullscreen ||
-    (input.primaryActionKind === "none" && (input.sendAlwaysPresent || !input.hasVoiceModeContent));
+    input.isFullscreen || (input.primaryActionKind === "none" && input.emptySlotStandsIn);
   return { kind: sendStandsIn ? "send" : input.primaryActionKind, sendStandsIn };
 }

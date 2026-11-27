@@ -93,6 +93,7 @@ import {
   resolveAlternateSendAction,
   resolveMessageInputEnterAction,
   resolvePresentedActionKind,
+  resolvePrimaryActionKind,
   type PrimaryActionKind,
 } from "./state";
 import { useHardwareKeyboardPresent, useKeyboardFocusSurface } from "@/keyboard";
@@ -930,27 +931,18 @@ function hasSendableComposerContent(input: {
   return input.hasText || input.attachments.length > 0 || input.hasExternalContent;
 }
 
-function resolvePrimaryActionKind(input: {
-  hasSendableContent: boolean;
-  allowEmptySubmit: boolean;
-  isAgentRunning: boolean;
-  isSubmitLoading: boolean;
-}): PrimaryActionKind {
-  if (input.hasSendableContent || input.allowEmptySubmit) return "send";
-  if (input.isAgentRunning) return "active";
-  if (input.isSubmitLoading) return "send";
-  return "none";
-}
-
 function PrimaryAction({
   kind,
   activeActionContent,
+  voiceModeContent,
   ...sendButtonProps
 }: {
   kind: PrimaryActionKind;
   activeActionContent: React.ReactNode;
+  voiceModeContent: React.ReactNode;
 } & React.ComponentProps<typeof SendButtonTooltip>) {
   if (kind === "active") return activeActionContent;
+  if (kind === "voiceMode") return voiceModeContent;
   if (kind === "send") return <SendButtonTooltip {...sendButtonProps} />;
   return null;
 }
@@ -1936,6 +1928,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       allowEmptySubmit,
       isAgentRunning,
       isSubmitLoading,
+      offersVoiceMode: voiceModeContent != null,
     });
     const { canPressLoadingButton, isSendButtonDisabled, defaultActionQueues } =
       computeSendButtonState({
@@ -2081,12 +2074,10 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       () => [styles.textInput, mode.isMonospace && styles.textInputMonospace, styles.readOnlyText],
       [mode.isMonospace],
     );
-    // Fullscreen always shows Send; without content it is disabled, and looks it.
     const { kind: presentedActionKind, sendStandsIn } = resolvePresentedActionKind({
       primaryActionKind,
       isFullscreen,
-      hasVoiceModeContent: voiceModeContent != null,
-      sendAlwaysPresent: isGumloop,
+      emptySlotStandsIn: !isGumloop,
     });
     const isPresentedSendDisabled = resolvePresentationSendDisabled({
       standsIn: sendStandsIn,
@@ -2138,6 +2129,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
         <PrimaryAction
           kind={presentedActionKind}
           activeActionContent={activeActionContent}
+          voiceModeContent={voiceModeContent}
           shouldShow
           canPressLoadingButton={canPressLoadingButton}
           onSubmitLoadingPress={onSubmitLoadingPress}
@@ -2159,6 +2151,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       [
         presentedActionKind,
         activeActionContent,
+        voiceModeContent,
         canPressLoadingButton,
         onSubmitLoadingPress,
         handleDefaultSendAction,
@@ -2252,8 +2245,8 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       showsAttach: mode.showAttachments,
       showsAgentControls: leftContent != null,
     });
-    // The trailing control is always a disc: voice mode, then Send or Stop.
-    const trailingEdge = "disc";
+    // The trailing slot holds a disc (voice mode, Send or Stop) unless Gumloop leaves it empty.
+    const trailingEdge = presentedActionKind === "none" ? "dictation" : "disc";
     const buttonRowStyle = useMemo(
       () => [
         styles.buttonRow,
@@ -2298,7 +2291,6 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
               voiceMuteToggleKeys={voiceMuteToggleKeys}
               dictationToggleKeys={dictationToggleKeys}
             />
-            {voiceModeContent}
             {sendButton}
           </View>
         </View>
@@ -2324,7 +2316,6 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
         isRealtimeVoiceForCurrentAgent,
         voiceMuteToggleKeys,
         dictationToggleKeys,
-        voiceModeContent,
         sendButton,
       ],
     );
@@ -2588,7 +2579,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     alignItems: "center",
     justifyContent: "center",
   },
-  gumloopSendDisc: { width: 32, height: 32, backgroundColor: theme.colors.primary },
+  gumloopSendDisc: { backgroundColor: theme.colors.primary },
   sendButtonDisc: {
     width: TOOLBAR_DISC_SIZE,
     height: TOOLBAR_DISC_SIZE,
