@@ -161,6 +161,7 @@ export const fr: TranslationResources = {
       interruptAgent: "Interrompre l\u2019agent",
       queueMessage: "Mettre le message en file d\u2019attente",
       sendAndInterrupt: "Envoyer et interrompre",
+      sendAndSteer: "Envoyer et réorienter",
       sendMessage: "Envoyer le message",
       queue: "Mettre en file d\u2019attente",
       send: "Envoyer",

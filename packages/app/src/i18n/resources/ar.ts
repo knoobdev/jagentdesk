@@ -174,6 +174,7 @@ export const ar: TranslationResources = {
       interruptAgent: "عامل المقاطعة",
       queueMessage: "رسالة قائمة الانتظار",
       sendAndInterrupt: "إرسال ومقاطعة",
+      sendAndSteer: "إرسال وتوجيه",
       sendMessage: "أرسل رسالة",
       queue: "طابور",
       send: "يرسل",

@@ -177,6 +177,7 @@ export const ru: TranslationResources = {
       interruptAgent: "Агент прерываний",
       queueMessage: "Сообщение в очереди",
       sendAndInterrupt: "Отправить и прервать",
+      sendAndSteer: "Отправить и направить",
       sendMessage: "Отправить сообщение",
       queue: "Очередь",
       send: "Отправлять",

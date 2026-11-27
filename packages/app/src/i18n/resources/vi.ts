@@ -185,6 +185,7 @@ export const vi = {
       interruptAgent: "Ngắt agent",
       queueMessage: "Xếp hàng tin nhắn",
       sendAndInterrupt: "Gửi và ngắt",
+      sendAndSteer: "Gửi và điều hướng",
       sendMessage: "Gửi tin nhắn",
       queue: "Xếp hàng",
       send: "Gửi",

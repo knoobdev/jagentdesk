@@ -152,6 +152,7 @@ export const en = {
       interruptAgent: "Interrupt agent",
       queueMessage: "Queue message",
       sendAndInterrupt: "Send and interrupt",
+      sendAndSteer: "Send and steer",
       sendMessage: "Send message",
       queue: "Queue",
       send: "Send",
