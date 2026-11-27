@@ -33,6 +33,11 @@ export type BackgroundWorkOutputSource =
       type: "file";
       /** Resolves the file the provider wrote for this item, or null when it is not readable. */
       locate(): Promise<BackgroundWorkOutputFile | null>;
+      /**
+       * ADR-0064: a file the command has not created yet reads as empty while this returns
+       * true (the work still runs). Without it a missing file is unavailable.
+       */
+      waitWhile?: () => boolean;
     }
   | {
       type: "reader";
@@ -43,6 +48,8 @@ export interface BackgroundWorkOutputFile {
   path: string;
   /** The opened file must resolve inside one of these folders. */
   roots: readonly string[];
+  /** True refuses the file by its real path (ADR-0064's secret patterns). */
+  refuse?: (realPath: string) => boolean;
 }
 
 export type BackgroundWorkStatus = "running" | "finished" | "failed" | "stopped";

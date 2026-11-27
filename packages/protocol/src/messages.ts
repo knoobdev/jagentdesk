@@ -2452,6 +2452,9 @@ export const AgentBackgroundWorkOutputSubscribeRequestMessageSchema = z.object({
   agentId: z.string(),
   itemId: z.string(),
   subscriptionId: z.string(),
+  // ADR-0064: which of the detail's `sources` to follow. Absent means the provider's own
+  // output, as before. The daemon re-derives every source from the item's own command.
+  sourceId: z.string().optional(),
   requestId: z.string(),
 });
 
@@ -5456,6 +5459,9 @@ export const ServerInfoStatusPayloadSchema = z
         // COMPAT(backgroundWorkOutput): added in v0.12.0, remove gate after 2027-05-27.
         // agent.background_work.get_detail / .output.* (ADR-0062).
         backgroundWorkOutput: z.boolean().optional(),
+        // COMPAT(backgroundWorkSources): added in v0.12.3, remove gate after 2027-05-28.
+        // Detail `sources` and output.subscribe `sourceId` (ADR-0064).
+        backgroundWorkSources: z.boolean().optional(),
         // COMPAT(projectedSubagentTimeline): added after v0.8.0, remove gates after 2027-03-14; retain wire field.
         projectedSubagentTimeline: z.boolean().optional(),
         wholeTurnTimeline: z.boolean().optional(),
@@ -6491,6 +6497,40 @@ export const AgentBackgroundWorkUpdateMessageSchema = z.object({
   }),
 });
 
+// ADR-0064: one place a background item's output can be read. Every source comes from the
+// item's own command or provider; none comes from a client-sent path.
+export const AgentBackgroundWorkSourceSchema = z.object({
+  id: z.string(),
+  // Open string: "provider", "redirect" (a file the command writes its output to) or "script"
+  // (the file the command runs). Clients skip kinds they do not know.
+  kind: z.string(),
+  // File name for redirect and script sources.
+  label: z.string(),
+  path: z.string().optional(),
+  // Provider: output is readable. Redirect: the file exists yet (false while waiting for it).
+  available: z.boolean().optional(),
+  size: z.number().int().nonnegative().optional(),
+  modifiedAt: z.string().nullable().optional(),
+  // Script sources: the first 64 KiB of the file.
+  script: z
+    .object({
+      content: z.string(),
+      truncated: z.boolean(),
+      lineCount: z.number().int().nonnegative(),
+    })
+    .optional(),
+  // Redirect sources: the agent's latest read of this file, from its own timeline.
+  lastRead: z
+    .object({
+      at: z.string(),
+      content: z.string(),
+      truncated: z.boolean(),
+    })
+    .optional(),
+});
+
+export type AgentBackgroundWorkSourcePayload = z.infer<typeof AgentBackgroundWorkSourceSchema>;
+
 export const AgentBackgroundWorkDetailSchema = z.object({
   id: z.string(),
   // Open string like the list item's kind.
@@ -6510,6 +6550,9 @@ export const AgentBackgroundWorkDetailSchema = z.object({
   outputAvailable: z.boolean(),
   canStop: z.boolean().optional(),
   stopToken: z.string().optional(),
+  // ADR-0064, gated on features.backgroundWorkSources: the provider source plus redirect files
+  // and the script. Absent from older daemons.
+  sources: z.array(AgentBackgroundWorkSourceSchema).optional(),
 });
 
 export type AgentBackgroundWorkDetailPayload = z.infer<typeof AgentBackgroundWorkDetailSchema>;
@@ -6553,6 +6596,8 @@ export const AgentBackgroundWorkOutputMessageSchema = z.object({
     subscriptionId: z.string(),
     agentId: z.string(),
     itemId: z.string(),
+    // ADR-0064: the source this push belongs to, when the subscription named one.
+    sourceId: z.string().optional(),
     chunk: z.string(),
     // Byte offset of the chunk in the output. A chunk that starts past the previous
     // `nextOffset` means output was skipped to keep up.

@@ -237,15 +237,25 @@ function providerReader(
 }
 
 /**
- * Opens the provider's output file after checking that it is a regular file inside the
- * provider's own folders. A path that resolves elsewhere (a symlink, `..`) is refused.
+ * Opens the source's output file after checking that it is a regular file inside the
+ * source's folders. A path that resolves elsewhere (a symlink, `..`) is refused. A file source
+ * that may wait (ADR-0064: a redirect target the command has not created yet) reads as empty
+ * until the file appears, for as long as `waitWhile` says so.
  */
 async function openFileReader(
   source: Extract<BackgroundWorkOutputSource, { type: "file" }>,
 ): Promise<ByteReader> {
   const file = await source.locate();
   if (!file) throw new BackgroundWorkOutputUnavailableError("Output is not available");
-  const handle = await openVerifiedOutputFile(file);
+  if (source.waitWhile && (await isMissing(file.path))) {
+    if (!source.waitWhile())
+      throw new BackgroundWorkOutputUnavailableError("Output is not available");
+    return waitingFileReader(file, source.waitWhile);
+  }
+  return fileReader(file, await openVerifiedOutputFile(file));
+}
+
+function fileReader(file: BackgroundWorkOutputFile, handle: FileHandle): ByteReader {
   return {
     size: async () => (await handle.stat()).size,
     read: async (cursor, limit) => {
@@ -254,28 +264,98 @@ async function openFileReader(
       const { size } = await handle.stat();
       return { bytes: buffer.subarray(0, bytesRead), nextCursor: cursor + bytesRead, size };
     },
-    watch: (onChange) => {
-      let watcher: FSWatcher | null = null;
-      try {
-        watcher = watch(file.path, { persistent: false }, onChange);
-        watcher.on("error", () => watcher?.close());
-      } catch {
-        // The periodic check still follows the file.
-      }
-      return () => watcher?.close();
-    },
+    watch: (onChange) => watchFile(file.path, onChange),
     close: () => handle.close(),
   };
 }
 
+/** Reads as empty until the file exists, then as the verified file. */
+function waitingFileReader(file: BackgroundWorkOutputFile, waitWhile: () => boolean): ByteReader {
+  let opened: ByteReader | null = null;
+  let closed = false;
+  let onChange: (() => void) | null = null;
+  let unwatch: (() => void) | null = null;
+  const current = async (): Promise<ByteReader | null> => {
+    if (opened) return opened;
+    if (await isMissing(file.path)) {
+      if (!waitWhile()) throw new BackgroundWorkOutputUnavailableError("Output is not available");
+      return null;
+    }
+    const reader = fileReader(file, await openVerifiedOutputFile(file));
+    if (closed) {
+      await reader.close();
+      return null;
+    }
+    opened = reader;
+    if (onChange) unwatch = reader.watch?.(onChange) ?? null;
+    return reader;
+  };
+  return {
+    size: async () => (await (await current())?.size()) ?? 0,
+    read: async (cursor, limit) => {
+      const reader = await current();
+      if (!reader) return { bytes: new Uint8Array(), nextCursor: cursor, size: 0 };
+      return reader.read(cursor, limit);
+    },
+    // The periodic check notices the file appearing; its own watch starts once it is open.
+    watch: (listener) => {
+      onChange = listener;
+      return () => {
+        onChange = null;
+        unwatch?.();
+      };
+    },
+    close: async () => {
+      closed = true;
+      await opened?.close();
+    },
+  };
+}
+
+function watchFile(path: string, onChange: () => void): () => void {
+  let watcher: FSWatcher | null = null;
+  try {
+    watcher = watch(path, { persistent: false }, onChange);
+    watcher.on("error", () => watcher?.close());
+  } catch {
+    // The periodic check still follows the file.
+  }
+  return () => watcher?.close();
+}
+
+async function isMissing(path: string): Promise<boolean> {
+  try {
+    await lstat(path);
+    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT";
+  }
+}
+
+/**
+ * Opens `file.path` read-only without following a final symlink and without blocking on a
+ * FIFO, then checks again, on what was opened, that it is a regular file whose real path is
+ * still inside a root and is not refused by `file.refuse`.
+ */
 export async function openVerifiedOutputFile(file: BackgroundWorkOutputFile): Promise<FileHandle> {
   if (!(await isInsideOutputRoots(file))) {
-    throw new BackgroundWorkOutputUnavailableError("Output file is outside the provider's folder");
+    throw new BackgroundWorkOutputUnavailableError("Output file is outside the source's folders");
   }
-  const handle = await open(file.path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const handle = await open(
+    file.path,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  );
   try {
-    const [opened, resolved] = await Promise.all([handle.stat(), stat(await realpath(file.path))]);
-    if (!opened.isFile() || opened.ino !== resolved.ino || opened.dev !== resolved.dev) {
+    const opened = await handle.stat();
+    if (!opened.isFile()) throw new BackgroundWorkOutputUnavailableError("Not a regular file");
+    const real = await realpath(file.path);
+    const resolved = await stat(real);
+    if (
+      opened.ino !== resolved.ino ||
+      opened.dev !== resolved.dev ||
+      !(await isInsideOutputRoots(file)) ||
+      file.refuse?.(real)
+    ) {
       throw new BackgroundWorkOutputUnavailableError("Output file changed while opening");
     }
     return handle;
@@ -291,6 +371,7 @@ export async function isInsideOutputRoots(file: BackgroundWorkOutputFile): Promi
     const link = await lstat(file.path);
     if (!link.isFile()) return false;
     const resolved = await realpath(file.path);
+    if (file.refuse?.(resolved)) return false;
     for (const root of file.roots) {
       const realRoot = await realpath(root).catch(() => null);
       if (realRoot && resolved.startsWith(realRoot.endsWith(sep) ? realRoot : realRoot + sep))
