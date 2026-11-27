@@ -162,6 +162,7 @@ export function HandToBotFlow({
             {list.map((bot) => (
               <BotPickRow
                 key={bot.id}
+                serverId={serverId}
                 bot={bot}
                 selected={bot.id === picked}
                 hasIt={owner?.id === bot.id}
@@ -185,7 +186,7 @@ export function HandToBotFlow({
         </Field>
         {owner && pickedBot ? (
           <View style={styles.note}>
-            <BotAvatar bot={owner} size={16} />
+            <BotAvatar bot={owner} serverId={serverId} size={16} />
             <Text style={styles.detail}>
               {t("bots.handToBot.moveNote", { owner: owner.name, bot: pickedBot.name })}
             </Text>
@@ -202,11 +203,13 @@ export function HandToBotFlow({
 }
 
 function BotPickRow({
+  serverId,
   bot,
   selected,
   hasIt,
   onPick,
 }: {
+  serverId: string;
   bot: Bot;
   selected: boolean;
   hasIt: boolean;
@@ -224,7 +227,7 @@ function BotPickRow({
       style={[styles.row, selected && styles.rowSelected]}
       testID={`hand-to-bot-pick-${bot.id}`}
     >
-      <BotAvatar bot={bot} size={28} radius={8} />
+      <BotAvatar bot={bot} serverId={serverId} size={28} radius={8} />
       <View style={styles.rowText}>
         <Text style={styles.name} numberOfLines={1}>
           {bot.name}

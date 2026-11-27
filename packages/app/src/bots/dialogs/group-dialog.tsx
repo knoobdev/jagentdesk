@@ -165,6 +165,7 @@ export function BotGroupDialog({
           {list.map((bot) => (
             <MemberRow
               key={bot.id}
+              serverId={serverId}
               bot={bot}
               selected={members.includes(bot.id)}
               onToggle={toggle}
@@ -181,6 +182,7 @@ export function BotGroupDialog({
           {memberBots.map((bot) => (
             <ReplyRow
               key={bot.id}
+              serverId={serverId}
               value={`bot:${bot.id}`}
               label={bot.name}
               bot={bot}
@@ -189,12 +191,14 @@ export function BotGroupDialog({
             />
           ))}
           <ReplyRow
+            serverId={serverId}
             value="all"
             label={t("bots.groups.allBots")}
             selected={shownReply === "all"}
             onSelect={setReply}
           />
           <ReplyRow
+            serverId={serverId}
             value="mentions"
             label={t("bots.groups.onlyWhenMentioned")}
             selected={shownReply === "mentions"}
@@ -218,10 +222,12 @@ function MutationErrors({ errors }: { errors: readonly (Error | null)[] }) {
 }
 
 function MemberRow({
+  serverId,
   bot,
   selected,
   onToggle,
 }: {
+  serverId: string;
   bot: Bot;
   selected: boolean;
   onToggle: (id: string) => void;
@@ -235,7 +241,7 @@ function MemberRow({
       style={[styles.row, selected && styles.rowSelected]}
       testID={`bot-group-member-${bot.id}`}
     >
-      <BotAvatar bot={bot} size={20} />
+      <BotAvatar bot={bot} serverId={serverId} size={20} />
       <Text style={styles.rowLabel} numberOfLines={1}>
         {bot.name}
       </Text>
@@ -245,12 +251,14 @@ function MemberRow({
 }
 
 function ReplyRow({
+  serverId,
   value,
   label,
   bot,
   selected,
   onSelect,
 }: {
+  serverId: string;
   value: ReplyKey;
   label: string;
   bot?: Bot;
@@ -266,7 +274,7 @@ function ReplyRow({
       style={styles.row}
       testID={`bot-group-reply-${value}`}
     >
-      {bot ? <BotAvatar bot={bot} size={20} /> : null}
+      {bot ? <BotAvatar bot={bot} serverId={serverId} size={20} /> : null}
       <Text style={styles.rowLabel} numberOfLines={1}>
         {label}
       </Text>

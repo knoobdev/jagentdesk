@@ -59,7 +59,7 @@ export function BotFirstScreen({ serverId, bot }: { serverId: string; bot: Bot }
   ];
   return (
     <ScrollView contentContainerStyle={styles.screen} testID="bot-first-screen">
-      <BotAvatar bot={bot} size={80} radius={16} />
+      <BotAvatar bot={bot} serverId={serverId} size={80} radius={16} />
       <Text style={styles.name}>{bot.name}</Text>
       <Text style={styles.subtitle}>{t("bots.firstScreen.subtitle", { agent })}</Text>
       <View style={styles.card}>
