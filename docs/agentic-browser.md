@@ -53,6 +53,17 @@ agent launch, with or without browser tools, also gets shims (spec 04 §27b item
 - Windows: `explorer.cmd` and `BROWSER` only. `start` and `Start-Process` are shell built-ins that
   no PATH entry replaces; the instructions cover them.
 
+## Pane layout
+
+The browser pane shows the agent's steps in a 248 px column left of the page. Below 760 px of pane
+width the column folds into a toolbar toggle that opens it over the page, and the Stealth and logins
+pills drop their text (`pane/cockpit.tsx`). The inspector opens at 525 px, where the column left the
+page about 270 px. Drag the inspector wider, or use "Open in main pane", to see the page beside its
+steps.
+
+A tab moves between panes without reloading because its webview never changes parent; the pane
+only positions the webview's surface ([browser-capture-harness.md](browser-capture-harness.md#mechanism)).
+
 ## Desktop selection
 
 `browser_list_hosts` lists connected windows, including windows with no tabs. With multiple
@@ -82,8 +93,11 @@ Usage summary as easy to miss and crowding Usage.
   that have not attached yet and names each row from the tab that shows it.
 - A webview no tab owns still gets a row, "Not in a workspace". Show gives it a tab in the workspace
   that opened it, or the open workspace.
-- Agent tabs sit in the inspector pane, which only renders while the file explorer is open. Show opens
-  it and selects the tab again after the explorer's own effect has focused Files or Changes.
+- Show moves an inspector tab to the workspace's main pane (spec 38 §4.5), the same move as the
+  inspector's "Open in main pane" button. The tab keeps its browser id, so the main pane adopts the
+  same webview without a reload. Only a workspace with no main pane keeps the tab in the inspector,
+  which renders only while the file explorer is open: Show opens it and selects the tab again after
+  the explorer's own effect has focused Files or Changes.
 - A hung CDP command marks its row "Not responding" through `setJAgentDeskBrowserNotResponding`
   (`browser-webviews/index.ts`).
 

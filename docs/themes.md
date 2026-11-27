@@ -46,6 +46,11 @@ One 324px sidebar (`sidebar.tsx`) holds all app navigation.
 - **Footer, fixed:** the usage row, the connection card (Direct, Tailscale, or Relay), and the account
   row with Pair device, Settings, Notifications, and More as 32px icon buttons (`account-button.tsx`).
 
+The right inspector (the explorer pane) opens at 525px and resizes from its left edge like Paseo's
+explorer sidebar: the split `ResizeHandle`, at least 240px, and 360px always left for the workspace
+body (`components/explorer-sidebar-layout.ts`). Each client remembers its width (`inspectorWidth` in
+the panel store). A fixed width left browser tabs there too narrow to use.
+
 Destinations come from `useAppNavItems` and the plugin registries, so a plugin turned on or off on the
 host adds or removes its entry without a reload. A destination only shows while its plugin is
 enabled. Tools and Projects start open, and their folds persist per device (`sidebar-state.ts`). Keep
