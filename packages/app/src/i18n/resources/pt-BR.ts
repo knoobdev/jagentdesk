@@ -1948,6 +1948,13 @@ export const ptBR: TranslationResources = {
       backToParent: "Back to parent",
     },
 
+    pillLabelOne: "1 subagente",
+    pillLabelMany: "{{count}} subagentes",
+    pillLabelWorking: "{{count}} em execução",
+    pillLabelFailed: "{{count}} com falha",
+    pillLabelNeedsInputOne: "1 precisa de resposta",
+    pillLabelNeedsInputMany: "{{count}} precisam de resposta",
+    pillLabelReadyToReview: "{{count}} para revisar",
     detachAction: "Desanexar {{label}}",
     detachTooltip: "Desanexar subagente",
     archiveAction: "Arquivar {{label}}",

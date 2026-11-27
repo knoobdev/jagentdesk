@@ -152,7 +152,6 @@ import {
   resolveWorkspaceFileDrop,
   type WorkspaceFileDragPayload,
 } from "@/attachments/workspace-file-drag";
-import { PluginComposerTargetProvider } from "@/plugins/composer-items";
 import {
   useComposerEditingSession,
   useComposerFullscreen,
@@ -2449,10 +2448,6 @@ function ComposerContentImpl({
     [attachments, setSelectedAttachments, setGithubSearchQuery, setIsGithubPickerOpen],
   );
 
-  const legacyPluginTarget = useMemo(
-    () => (workspaceId ? { serverId, workspaceId, agentId } : null),
-    [serverId, workspaceId, agentId],
-  );
   const leftContent = useMemo(() => {
     const controls = renderLeftContent({
       agentControls,
@@ -2468,9 +2463,7 @@ function ComposerContentImpl({
         isActiveComposer={isActiveComposer}
         isInputFocused={isMessageInputFocused}
       >
-        <PluginComposerTargetProvider value={legacyPluginTarget}>
-          <ComposerInputProvider value={composerInput}>{controls}</ComposerInputProvider>
-        </PluginComposerTargetProvider>
+        <ComposerInputProvider value={composerInput}>{controls}</ComposerInputProvider>
       </ComposerKeyboardScopeProvider>
     ) : null;
   }, [
@@ -2483,7 +2476,6 @@ function ComposerContentImpl({
     isCompactLayout,
     mode.showAgentControls,
     serverId,
-    legacyPluginTarget,
   ]);
 
   const handleAttachButtonRef = useCallback((node: View | null) => {

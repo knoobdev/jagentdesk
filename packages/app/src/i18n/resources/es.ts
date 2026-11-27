@@ -1964,6 +1964,13 @@ export const es: TranslationResources = {
       backToParent: "Back to parent",
     },
 
+    pillLabelOne: "1 subagente",
+    pillLabelMany: "{{count}} subagentes",
+    pillLabelWorking: "{{count}} en ejecución",
+    pillLabelFailed: "{{count}} con error",
+    pillLabelNeedsInputOne: "1 necesita datos",
+    pillLabelNeedsInputMany: "{{count}} necesitan datos",
+    pillLabelReadyToReview: "{{count}} para revisar",
     detachAction: "Separar {{label}}",
     detachTooltip: "Separar subagente",
     archiveAction: "Archivo{{label}}",

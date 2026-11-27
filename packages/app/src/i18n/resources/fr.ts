@@ -1991,6 +1991,13 @@ export const fr: TranslationResources = {
       backToParent: "Back to parent",
     },
 
+    pillLabelOne: "1 sous-agent",
+    pillLabelMany: "{{count}} sous-agents",
+    pillLabelWorking: "{{count}} en cours",
+    pillLabelFailed: "{{count}} en échec",
+    pillLabelNeedsInputOne: "1 attend une réponse",
+    pillLabelNeedsInputMany: "{{count}} attendent une réponse",
+    pillLabelReadyToReview: "{{count}} à relire",
     detachAction: "Detacher {{label}}",
     detachTooltip: "Detacher le sous-agent",
     archiveAction: "Archiver{{label}}",
