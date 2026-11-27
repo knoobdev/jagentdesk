@@ -59,12 +59,38 @@ export function showBrowserTab(row: BrowserTabRow): boolean {
     workspaceId: destination.workspaceId,
     target: { kind: "browser", browserId },
   });
-  revealInspectorPane({ ...destination, browserId });
+  if (!showInMainPane({ ...destination, browserId })) {
+    revealInspectorPane({ ...destination, browserId });
+  }
   return true;
 }
 
+function findBrowserTabId(workspaceKey: string, browserId: string): string | null {
+  const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
+  if (!layout) return null;
+  const tab = collectAllTabs(layout.root).find(
+    (candidate) => candidate.target.kind === "browser" && candidate.target.browserId === browserId,
+  );
+  return tab?.tabId ?? null;
+}
+
 /**
- * Agent tabs live in the inspector pane (spec 04 §27b.3), which only shows while the file
+ * Agent tabs open in the inspector (spec 04 §27b.3); Show moves the same webview to the
+ * workspace's main pane when it has one (spec 38 §4.5), so the page gets the full width.
+ */
+function showInMainPane(input: {
+  serverId: string;
+  workspaceId: string;
+  browserId: string;
+}): boolean {
+  const workspaceKey = `${input.serverId}:${input.workspaceId}`;
+  const tabId = findBrowserTabId(workspaceKey, input.browserId);
+  if (!tabId) return false;
+  return useWorkspaceLayoutStore.getState().moveTabToMainPane(workspaceKey, tabId);
+}
+
+/**
+ * A workspace without a main pane keeps the tab in the inspector, which only shows while the file
  * explorer is open. Open it so the selected tab is on screen, as plugin navigation does.
  */
 function revealInspectorPane(input: { serverId: string; workspaceId: string; browserId: string }) {

@@ -40,6 +40,7 @@ import {
   getTreeDepth,
   insertSplit,
   moveTabToPaneInLayout,
+  resolveMainPaneId,
   normalizeLayout,
   openTabInLayoutBackground,
   openTabInLayoutFocused,
@@ -163,6 +164,11 @@ interface WorkspaceLayoutStore {
     },
   ) => string | null;
   moveTabToPane: (workspaceKey: string, tabId: string, toPaneId: string) => void;
+  /**
+   * Moves a tab out of the inspector into the main pane and focuses it there. Returns false when
+   * the tab is not in the inspector or the workspace has no main pane.
+   */
+  moveTabToMainPane: (workspaceKey: string, tabId: string) => boolean;
   focusPane: (workspaceKey: string, paneId: string) => void;
   hidePane: (workspaceKey: string, paneId: string) => void;
   showPane: (workspaceKey: string, paneId: string) => void;
@@ -1044,6 +1050,28 @@ export function createWorkspaceLayoutStore(
               ...withUpdatedWorkspaceLayout(state, normalizedWorkspaceKey, nextLayout),
             };
           });
+        },
+        moveTabToMainPane: (workspaceKey, tabId) => {
+          const normalizedWorkspaceKey = trimNonEmpty(workspaceKey);
+          const normalizedTabId = trimNonEmpty(tabId);
+          if (!normalizedWorkspaceKey || !normalizedTabId) {
+            return false;
+          }
+          const state = get();
+          const layout = state.layoutByWorkspace[normalizedWorkspaceKey];
+          const explorerPaneId = state.explorerPaneIdByWorkspace[normalizedWorkspaceKey] ?? null;
+          if (!layout || !explorerPaneId) {
+            return false;
+          }
+          if (findPaneContainingTab(layout.root, normalizedTabId)?.id !== explorerPaneId) {
+            return false;
+          }
+          const mainPaneId = resolveMainPaneId(layout, explorerPaneId);
+          if (!mainPaneId) {
+            return false;
+          }
+          state.moveTabToPane(normalizedWorkspaceKey, normalizedTabId, mainPaneId);
+          return true;
         },
         focusWorkspace: (workspaceKey) => {
           const state = get();

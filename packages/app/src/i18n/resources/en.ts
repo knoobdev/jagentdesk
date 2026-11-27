@@ -730,6 +730,7 @@ export const en = {
         open: "Open explorer",
         close: "Close explorer",
         toggle: "Toggle explorer",
+        openInMainPane: "Open in main pane",
         changes: "Changes",
         files: "Files",
       },

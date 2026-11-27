@@ -752,6 +752,7 @@ export const ar: TranslationResources = {
         open: "افتح المستكشف",
         close: "إغلاق المستكشف",
         toggle: "تبديل المستكشف",
+        openInMainPane: "فتح في اللوحة الرئيسية",
         changes: "التغييرات",
         files: "ملفات",
       },

@@ -739,6 +739,7 @@ export const ptBR: TranslationResources = {
         open: "Abrir explorador",
         close: "Fechar explorador",
         toggle: "Alternar explorador",
+        openInMainPane: "Abrir no painel principal",
         changes: "Alterações",
         files: "Arquivos",
       },

@@ -1062,6 +1062,20 @@ export function collectAllPanes(root: SplitNode): SplitPane[] {
   return internalRoot.group.children.flatMap((child) => collectAllPanes(child));
 }
 
+/**
+ * The workspace's main pane: the focused pane unless that is the inspector (explorer pane), else
+ * the first visible pane in layout order that is not the inspector. Null when only the inspector
+ * is visible.
+ */
+export function resolveMainPaneId(
+  layout: WorkspaceLayout,
+  explorerPaneId: string | null | undefined,
+): string | null {
+  const panes = collectAllPanes(layout.root).filter((pane) => pane.id !== explorerPaneId);
+  const focused = panes.find((pane) => pane.id === layout.focusedPaneId);
+  return (focused ?? panes[0])?.id ?? null;
+}
+
 function isEphemeralTab(tab: WorkspaceTab): boolean {
   // Commit diff tabs are ephemeral: their SHA may be rebased away before the next
   // load, so a restored tab could point at a dead commit.

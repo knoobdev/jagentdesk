@@ -734,6 +734,7 @@ export const zhCN: TranslationResources = {
         open: "打开 explorer",
         close: "关闭 explorer",
         toggle: "切换 explorer",
+        openInMainPane: "在主窗格中打开",
         changes: "变更",
         files: "文件",
       },

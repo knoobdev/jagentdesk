@@ -746,6 +746,7 @@ export const fr: TranslationResources = {
         open: "Ouvrir l'explorateur",
         close: "Fermer l'explorateur",
         toggle: "Basculer l'explorateur",
+        openInMainPane: "Ouvrir dans le panneau principal",
         changes: "Changements",
         files: "Fichiers",
       },

@@ -765,6 +765,7 @@ export const ru: TranslationResources = {
         open: "Открыть проводник",
         close: "Закрыть проводник",
         toggle: "Переключить проводник",
+        openInMainPane: "Открыть в основной панели",
         changes: "Изменения",
         files: "Файлы",
       },

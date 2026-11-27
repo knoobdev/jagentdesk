@@ -747,6 +747,7 @@ export const ja: TranslationResources = {
         open: "エクスプローラーを開く",
         close: "エクスプローラーを閉じる",
         toggle: "エクスプローラーを切り替え",
+        openInMainPane: "メインペインで開く",
         changes: "変更",
         files: "ファイル",
       },
