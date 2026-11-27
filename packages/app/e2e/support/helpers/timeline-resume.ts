@@ -48,6 +48,14 @@ export function expectOneTailCheckWithoutCatchUpPages(
   expect(gate.getTimelineRequestCount("after") - before.after).toBe(0);
 }
 
+export function expectResumeOverflowFallsBackToOneTail(
+  gate: DaemonWebSocketGate,
+  before: TimelineRequestCounts,
+): void {
+  expect(gate.getTimelineRequestCount("after") - before.after).toBe(1);
+  expect(gate.getTimelineRequestCount("tail") - before.tail).toBe(1);
+}
+
 export async function disconnectViewedTimeline(
   page: Page,
   gate: DaemonWebSocketGate,

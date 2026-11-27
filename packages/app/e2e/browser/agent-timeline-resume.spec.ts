@@ -14,6 +14,7 @@ import {
   commitTimelineTurnsWhileDisconnected,
   disconnectViewedTimeline,
   expectOneTailCheckWithoutCatchUpPages,
+  expectResumeOverflowFallsBackToOneTail,
   rememberTimelineRequestCounts,
   restoreViewedTimelineWithHeldTail,
 } from "../support/helpers/timeline-resume";
@@ -33,7 +34,7 @@ test.describe("Agent timeline resume", () => {
 
       await expectTimelinePromptVisible(page, background.newestPrompt);
       await expectTimelinePromptNotMounted(page, background.firstPrompt);
-      expectOneTailCheckWithoutCatchUpPages(gate, requests);
+      expectResumeOverflowFallsBackToOneTail(gate, requests);
       await scrollTimelineUntilOlderHistoryIsReachable(page, background.firstPrompt);
     } finally {
       gate.restore();
