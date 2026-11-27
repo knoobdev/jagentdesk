@@ -1,5 +1,6 @@
 // The read models the bot panels draw (spec 37.4.1, 37.4.4, 37.4.6), built from the daemon's state.
 // Pure: the service passes in the bot, its agents, items and run states.
+import { getJAgentDeskToolLabel } from "@jagentdesk/protocol/jagentdesk-tool-presentation/index";
 import type { Bot, BotItem } from "@jagentdesk/protocol/bots/types";
 import type {
   BotAutomation,
@@ -44,7 +45,10 @@ function approvalRow(
     tool: request.name,
     agentId: agent.id,
     requestId: request.id,
-    title: request.name ? `Permission · ${request.name}` : "Permission needed",
+    // A JAgentDesk tool by its label ("Start worker"), never its tool name.
+    title: request.name
+      ? `Permission · ${getJAgentDeskToolLabel(request.name) ?? request.name}`
+      : "Permission needed",
     at_ms: agent.updatedAt_ms,
   };
   const isWorker = agent.id !== bot.agentId && agent.labels[BOT_ROLE_LABEL] !== "side";

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAgentMessageDisplay,
   buildJAgentDeskToolDisplay,
+  getJAgentDeskToolLabel,
   getJAgentDeskToolTargetAgentId,
   MAX_SUMMARY_CHARS,
   JAGENTDESK_TOOL_NAMES,
@@ -61,6 +62,12 @@ describe("JAgentDesk tool display", () => {
         text: "Done",
       }),
     ).toEqual({ displayName: "Comment on item" });
+  });
+
+  it("names a tool by its label for permission rows, bare or namespaced", () => {
+    expect(getJAgentDeskToolLabel("bot_worker_start")).toBe("Start worker");
+    expect(getJAgentDeskToolLabel("mcp__jagentdesk__bot_handoff")).toBe("Message bot");
+    expect(getJAgentDeskToolLabel("Bash")).toBeNull();
   });
 
   it("recognizes every JAgentDesk namespace format", () => {

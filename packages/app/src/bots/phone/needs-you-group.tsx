@@ -6,6 +6,7 @@
 // Ported from Orca dfdb4fda (MIT) mobile/src/bots/items/MobileBotNeedsYouGroup.tsx:37-345, on the
 // JAgentDesk asks (`bots.needs_you.list`, contract §Approvals: one pending request, answered with
 // `agent_permission_response` on `row.agentId` + `row.requestId`).
+import { getJAgentDeskToolLabel } from "@jagentdesk/protocol/jagentdesk-tool-presentation/index";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
@@ -132,7 +133,9 @@ function AskRow({
 
 function approvalNeed(t: Translate, row: BotNeedsYouRow): string {
   return row.tool
-    ? t("bots.phone.bots.needs.permissionTool", { tool: row.tool })
+    ? t("bots.phone.bots.needs.permissionTool", {
+        tool: getJAgentDeskToolLabel(row.tool) ?? row.tool,
+      })
     : t("bots.phone.bots.needs.permission");
 }
 
