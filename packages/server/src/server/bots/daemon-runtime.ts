@@ -241,7 +241,9 @@ export class DaemonBotRuntime implements BotRuntime {
         providerOptions: undefined,
         parent: null,
       });
-      modeId = resolved.modeId ?? modes[0]?.id ?? "default";
+      // The provider's default for a new agent (its catalog's defaultModeId), not its first mode:
+      // Claude lists Plan Mode first.
+      modeId = resolved.modeId ?? provider.defaultModeId ?? modes[0]?.id ?? "default";
       // JAgentDesk never picks a mode that skips permission prompts for a bot (spec 37.3.3).
       if (await this.isBypass(bot, cwd, modeId)) {
         const attended = [];
