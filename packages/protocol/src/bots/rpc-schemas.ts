@@ -185,6 +185,9 @@ export const BotsRequestSchemas = [
   request("bots.automations.cancel_wait.request", { ...botId, itemId: z.string() }),
   request("bots.first_screen.scan.request", botId),
   request("bots.allowed.list.request", botId),
+  // Orca `bots.avatar.upload` / `.read`: a square PNG, 512-2000 px, at most 2 MB, base64.
+  request("bots.avatar.upload.request", { ...botId, png: z.string().min(1).max(2_800_000) }),
+  request("bots.avatar.read.request", botId),
 ] as const;
 export const BotsResponseSchemas = [
   response("bots.slack.manifest.response", { manifest: z.string(), requestUrl: z.string() }),
@@ -272,6 +275,8 @@ export const BotsResponseSchemas = [
   response("bots.automations.cancel_wait.response", { item: BotItemSchema }),
   response("bots.first_screen.scan.response", { scan: BotFirstScreenSchema }),
   response("bots.allowed.list.response", { people: z.array(BotAllowedPersonSchema) }),
+  response("bots.avatar.upload.response", { bot: BotSchema }),
+  response("bots.avatar.read.response", { png: z.string().nullable() }),
 ] as const;
 export const BotsPushSchemas = [
   z.object({

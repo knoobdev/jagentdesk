@@ -92,6 +92,34 @@ describe("bot record and home (spec 37.2.3, 37.2.4)", () => {
     ]);
   });
 
+  it("takes an uploaded square PNG as the picture and refuses anything else", async () => {
+    const { service } = setup();
+    const bot = await newBot(service);
+    const png = (size: number) => {
+      const bytes = Buffer.alloc(33);
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(bytes, 0);
+      bytes.writeUInt32BE(13, 8);
+      bytes.write("IHDR", 12, "ascii");
+      bytes.writeUInt32BE(size, 16);
+      bytes.writeUInt32BE(size, 20);
+      return bytes.toString("base64");
+    };
+    await expect(
+      rpc(service, { type: "bots.avatar.upload.request", botId: bot.id, png: png(256) }),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
+    const { bot: uploaded } = await rpc<{ bot: Bot }>(service, {
+      type: "bots.avatar.upload.request",
+      botId: bot.id,
+      png: png(512),
+    });
+    expect(uploaded.avatar).toMatch(/^upload:[0-9a-f]{16}$/);
+    const { png: read } = await rpc<{ png: string | null }>(service, {
+      type: "bots.avatar.read.request",
+      botId: bot.id,
+    });
+    expect(read).toBe(png(512));
+  });
+
   it("allocates <slug>, <slug>-2 and never hands a folder out again (A37.5.3c)", async () => {
     const { service } = setup();
     const first = await newBot(service);
@@ -214,6 +242,26 @@ describe("memory (spec 37.2.4, 37.4.9)", () => {
     expect(service.memory.history(bot)[0]?.by.kind).toBe("kept");
     await service.memory.forgetFact(bot, "Rule: never merge on red CI", "home-agent");
     expect(readFileSync(path, "utf8")).not.toContain("never merge");
+  });
+
+  it("pushes home_file_changed when SOUL.md changes on disk", async () => {
+    const { service } = setup();
+    const bot = await newBot(service);
+    const pushes: string[] = [];
+    service.onEvent((event) => {
+      if (event.type === "bots.home_file_changed") pushes.push(event.payload.file);
+    });
+    service.start();
+    await service.settled();
+    await service.tick();
+    await service.settled();
+    writeFileSync(join(service.storage.botHome(bot), "SOUL.md"), "# Edited elsewhere\n");
+    const later = new Date(Date.now() + 5000);
+    const { utimesSync } = await import("node:fs");
+    utimesSync(join(service.storage.botHome(bot), "SOUL.md"), later, later);
+    await service.tick();
+    await service.settled();
+    expect(pushes).toEqual(["SOUL.md"]);
   });
 
   it("writes SOUL.md only on the hash it read (A37.7.21)", async () => {

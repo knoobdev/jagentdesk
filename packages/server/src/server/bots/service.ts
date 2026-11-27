@@ -1,6 +1,6 @@
 import type { BotsSlack } from "./slack.js";
-import { randomUUID } from "node:crypto";
-import { appendFile, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { appendFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import type { Logger } from "pino";
@@ -61,7 +61,7 @@ import {
 } from "./items.js";
 import { mentionedSlugs, mentionsEveryone } from "./context.js";
 import { blockingFindingCount, reviewSummary, reviewWorker } from "./review.js";
-import { BotsError, seedSoul, writeBotHome } from "./home.js";
+import { BotsError, assertBotAvatarImage, seedSoul, writeBotHome } from "./home.js";
 import { BotMemory, writeHomeFile } from "./memory.js";
 import {
   BOT_QUIET_MARKER,
@@ -198,6 +198,8 @@ export class BotsService {
   private lastTickAt = 0;
   /** When the host last woke (or the daemon started): background runs wait 120 s after it. */
   private awakeSince = 0;
+  /** SOUL.md/MEMORY.md modification times, so an outside edit reaches open editors. */
+  private readonly homeFileTimes = new Map<string, number>();
   constructor(
     readonly storage: BotStorage,
     readonly runtime: BotRuntime,
@@ -770,6 +772,25 @@ export class BotsService {
       );
     }
     return canceled;
+  }
+
+  /** `bots.avatar.upload`: the picture is the home's avatar.png; the record names its hash. */
+  async uploadAvatar(botId: string, base64: string): Promise<Bot> {
+    const bot = this.storage.bot(botId);
+    const png = Buffer.from(base64, "base64");
+    assertBotAvatarImage(png);
+    await writeFile(join(this.storage.botHome(bot), "avatar.png"), png, { mode: 0o600 });
+    const hash = createHash("sha256").update(png).digest("hex").slice(0, 16);
+    const saved = this.storage.saveBot({ ...this.storage.bot(botId), avatar: `upload:${hash}` });
+    this.changed(botId);
+    return saved;
+  }
+
+  async readAvatar(botId: string): Promise<string | null> {
+    const bot = this.storage.bot(botId);
+    if (!bot.avatar?.startsWith("upload:")) return null;
+    const png = await readFile(join(this.storage.botHome(bot), "avatar.png")).catch(() => null);
+    return png ? png.toString("base64") : null;
   }
 
   markSeen(botId: string): Bot {
@@ -1412,6 +1433,9 @@ export class BotsService {
       .all(botId, started)
       .map((row) => (JSON.parse((row as { data: string }).data) as BotSuggestion).title);
     const startedTitles = this.storage.state(`look-started:${botId}`, z.array(z.string())) ?? [];
+    // The line shows at once (spec A37.7.36); it gains the run's conversation once that exists.
+    this.note(botId, "Looking around", { kind: "look_around", state: "running" }, noteId);
+    this.activity(botId, ["automations"]);
     try {
       const run = await this.runtime.runBackground(bot, this.storage.botHome(bot), {
         kind: "look_around",
@@ -1615,6 +1639,8 @@ export class BotsService {
     const files = await this.memoryFiles(bot);
     const chats = await this.tidyChats(bot, state.lastRunAt_ms ?? started - DAY_MS);
     this.storage.setState(`tidy:${botId}`, { ...state, running: true, error: undefined });
+    this.note(botId, "Tidying…", { kind: "tidy_up", state: "running" }, noteId);
+    this.activity(botId, ["automations", "tidy_up"]);
     try {
       const run = await this.runtime.runBackground(bot, this.storage.botHome(bot), {
         kind: "tidy_up",
@@ -2125,6 +2151,20 @@ export class BotsService {
     }
   }
 
+  /** Pushes `bots.home_file_changed` when SOUL.md or MEMORY.md changed on disk (spec 37.4.9). */
+  private async watchHomeFiles(entry: Bot): Promise<void> {
+    for (const file of ["SOUL.md", "MEMORY.md"] as const) {
+      const key = `${entry.id}:${file}`;
+      const info = await stat(join(this.storage.botHome(entry), file)).catch(() => null);
+      const mtime = info?.mtimeMs ?? 0;
+      const seen = this.homeFileTimes.get(key);
+      this.homeFileTimes.set(key, mtime);
+      if (seen === undefined || seen === mtime) continue;
+      const { hash } = await this.memory.readFile(entry, file);
+      this.emit({ type: "bots.home_file_changed", payload: { botId: entry.id, file, hash } });
+    }
+  }
+
   async tick(): Promise<void> {
     if (!this.enabled || this.ticking) return;
     this.ticking = true;
@@ -2139,6 +2179,7 @@ export class BotsService {
           const last = this.storage.state(`last-chat:${entry.id}`, z.number());
           if (last) this.storage.setState(`first-chat:${entry.id}`, last);
         }
+        this.launch(this.watchHomeFiles(entry));
         this.processSchedules(entry, now);
         this.processWaits(entry, now);
         this.processBackground(entry, now);
@@ -2390,6 +2431,12 @@ export class BotsService {
     },
     "bots.allowed.list.request": async (msg) => {
       return { people: await this.allowed(msg.botId) };
+    },
+    "bots.avatar.upload.request": async (msg) => {
+      return { bot: await this.uploadAvatar(msg.botId, msg.png) };
+    },
+    "bots.avatar.read.request": async (msg) => {
+      return { png: await this.readAvatar(msg.botId) };
     },
     "bots.rooms.list.request": async () => {
       return { rooms: this.storage.rooms() };

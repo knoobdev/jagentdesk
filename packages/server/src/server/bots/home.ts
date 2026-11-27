@@ -123,6 +123,35 @@ export async function writeBotHome(folder: string, bot: Bot, soul?: string): Pro
   }
 }
 
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+/** `shared/file-preview/raster-image-dimensions.ts` readPngDimensions. */
+export function pngDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  if (bytes.length < 24 || PNG_SIGNATURE.some((byte, index) => bytes[index] !== byte)) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (view.getUint32(8) !== 13 || String.fromCharCode(...bytes.slice(12, 16)) !== "IHDR")
+    return null;
+  const width = view.getUint32(16);
+  const height = view.getUint32(20);
+  return width > 0 && height > 0 ? { width, height } : null;
+}
+
+/** `shared/bot-avatar.ts` isBotAvatarImage: a square PNG of 512 to 2000 px and at most 2 MB. */
+export function assertBotAvatarImage(png: Uint8Array): void {
+  const size = pngDimensions(png);
+  if (
+    !size ||
+    size.width !== size.height ||
+    size.width < 512 ||
+    size.width > 2000 ||
+    png.byteLength > 2 * 1024 * 1024
+  )
+    throw new BotsError(
+      "invalid_argument",
+      "A picture is a square PNG of 512 to 2000 px, up to 2 MB",
+    );
+}
+
 export function contentHash(text: string): string {
   return createHash("sha256").update(text).digest("hex").slice(0, 32);
 }

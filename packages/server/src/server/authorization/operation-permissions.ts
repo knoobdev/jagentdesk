@@ -65,6 +65,8 @@ const INBOUND_PERMISSION = {
   "bots.automations.run_now.request": "daemon.manage",
   "bots.automations.cancel_wait.request": "daemon.manage",
   "bots.allowed.list.request": "daemon.manage",
+  "bots.avatar.upload.request": "daemon.manage",
+  "bots.avatar.read.request": "daemon.read",
   // Argo CD (spec 30.5): reads need daemon.read, writes daemon.manage.
   "argocd.instances.list.request": "daemon.read",
   "argocd.apps.list.request": "daemon.read",
@@ -800,6 +802,8 @@ const OUTBOUND_PERMISSION = {
   "bots.automations.run_now.response": "daemon.manage",
   "bots.automations.cancel_wait.response": "daemon.manage",
   "bots.allowed.list.response": "daemon.manage",
+  "bots.avatar.upload.response": "daemon.manage",
+  "bots.avatar.read.response": "daemon.read",
   "bots.items_changed": "daemon.read",
   "bots.suggestions_changed": "daemon.read",
   "bots.activity_changed": "daemon.read",
