@@ -138,6 +138,13 @@ class FakeGuestDebugger extends EventEmitter {
     this.pending = [];
     for (const command of pending) command.reject(new Error(message));
   }
+
+  /** Commands that waited for a renderer get their answer once one exists. */
+  public answerPending(): void {
+    const pending = this.pending;
+    this.pending = [];
+    for (const command of pending) command.resolve();
+  }
 }
 
 class FakeGuestContents extends EventEmitter {
@@ -146,6 +153,8 @@ class FakeGuestContents extends EventEmitter {
   public readonly loads: string[] = [];
   public readonly webRtcPolicies: string[] = [];
   public crashed = false;
+  /** 0 = no renderer yet: Electron's getOSProcessId() for a guest that never got one. */
+  public rendererPid = 4242;
 
   public isDestroyed(): boolean {
     return false;
@@ -159,8 +168,18 @@ class FakeGuestContents extends EventEmitter {
     return this.loads.at(-1) ?? "";
   }
 
+  public getOSProcessId(): number {
+    return this.crashed ? 0 : this.rendererPid;
+  }
+
   public async loadURL(url: string): Promise<void> {
     this.loads.push(url);
+    if (this.rendererPid === 0) {
+      // A navigation starts the guest's first renderer; the commands waiting for it run.
+      this.rendererPid = 4243;
+      this.debugger.held.clear();
+      this.debugger.answerPending();
+    }
     if (this.crashed) {
       // A new renderer: commands sent to the dead one fail.
       this.crashed = false;
@@ -196,6 +215,23 @@ describe("applyStealthToWebContents", () => {
     ]);
     expect(guest.debugger.commands).toContain("Target.setAutoAttach");
     expect(guest.webRtcPolicies).toEqual(["default"]);
+    expect(guest.loads).toEqual([]);
+  });
+
+  // Spec 04 §27d.3: a tab that is not the focused tab of its pane sits under `display: none`;
+  // its guest gets no renderer until something navigates it, and the held first URL waits for
+  // the identity, so every CDP command waited forever and the tab stayed blank.
+  it("starts a renderer for a held guest that has none, then applies", async () => {
+    const guest = new FakeGuestContents();
+    guest.rendererPid = 0;
+    guest.debugger.held.add("Network.enable");
+    const outcome = applyTo(guest);
+    await nextMacrotask();
+    await nextMacrotask();
+
+    expect(guest.loads).toEqual(["about:blank"]);
+    await expect(outcome).resolves.toBe("applied");
+    expect(guest.debugger.commands).toContain("Target.setAutoAttach");
   });
 
   it("stops touching a guest whose target closes while a command is pending", async () => {

@@ -9,6 +9,23 @@ export interface HeldGuestContents {
   readonly id: number;
   isDestroyed(): boolean;
   loadURL(url: string): Promise<void>;
+  readonly navigationHistory?: {
+    length(): number;
+    getEntryAtIndex(index: number): { url: string } | null | undefined;
+    removeEntryAtIndex(index: number): boolean;
+  };
+}
+
+/**
+ * browser-stealth.ts loads `about:blank` to give a held guest a renderer. Once the held URL
+ * has loaded, that entry goes, so Back from the agent's first page does not show a blank tab.
+ */
+function dropRendererStartEntry(contents: HeldGuestContents): void {
+  const history = contents.navigationHistory;
+  if (!history || history.length() < 2 || history.getEntryAtIndex(0)?.url !== "about:blank") {
+    return;
+  }
+  history.removeEntryAtIndex(0);
 }
 
 /**
@@ -45,14 +62,17 @@ export function loadHeldGuestUrlAfterIdentity(input: {
     settled = true;
     clearTimeout(timer);
     runWhenGuestSettled(contents, () => {
-      contents.loadURL(initialUrl).catch((error: unknown) => {
-        // ERR_ABORTED: the page navigated again before the first load finished.
-        if (error instanceof Error && error.message.includes("ERR_ABORTED")) return;
-        log.warn("[browser-stealth] initial guest load failed", {
-          webContentsId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
+      contents.loadURL(initialUrl).then(
+        () => runWhenGuestSettled(contents, () => dropRendererStartEntry(contents)),
+        (error: unknown) => {
+          // ERR_ABORTED: the page navigated again before the first load finished.
+          if (error instanceof Error && error.message.includes("ERR_ABORTED")) return;
+          log.warn("[browser-stealth] initial guest load failed", {
+            webContentsId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        },
+      );
     });
   };
   const timer = setTimeout(() => {

@@ -581,14 +581,23 @@ function watchGuest(contents: WebContents): GuestLifecycle {
   return lifecycle;
 }
 
+/** The guest has no live renderer: its last one exited, or it never got one. */
+function hasNoRenderer(contents: WebContents): boolean {
+  return contents.isCrashed() || contents.getOSProcessId() === 0;
+}
+
 /**
  * A guest with nothing committed has its first URL held until the identity is applied, so
- * no navigation will start a new renderer after one exits. A blank page does, without any
- * request leaving the tab.
+ * no navigation will start a renderer for it: not after one exits, and not at all for a
+ * guest that never got one (a tab that is not the focused tab of its pane sits under
+ * `display: none`, and its guest gets no renderer until something navigates it). CDP
+ * commands wait for a renderer, so the apply would wait forever and the tab stay blank.
+ * A blank page starts one without any request leaving the tab;
+ * browser-guest-initial-load.ts drops that entry from the history once the URL loads.
  */
 function startRendererForHeldGuest(contents: WebContents): void {
   runWhenGuestSettled(contents, () => {
-    if (contents.getURL() === "" && contents.isCrashed()) {
+    if (contents.getURL() === "" && hasNoRenderer(contents)) {
       contents.loadURL("about:blank").catch(() => undefined);
     }
   });
@@ -690,7 +699,7 @@ async function applyGuestIdentity(
     return "closed";
   }
   const rendererExitsAtStart = lifecycle.rendererExits;
-  if (contents.isCrashed()) {
+  if (hasNoRenderer(contents)) {
     startRendererForHeldGuest(contents);
   }
   const profile = effectiveProfile();
