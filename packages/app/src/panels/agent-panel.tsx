@@ -62,6 +62,7 @@ import { isWeb } from "@/constants/platform";
 import { useAgentAttentionClear } from "@/hooks/use-agent-attention-clear";
 import { useAgentInputDraft, type AgentInputDraft } from "@/composer/draft/input-draft";
 import { useArchiveAgent } from "@/hooks/use-archive-agent";
+import { useWorkspaceArchiveUndoRestoringAgent } from "@/workspace/archive-undo";
 import { useContainerWidthBelow } from "@/hooks/use-container-width";
 import { reconcileMissingAgentStateWithPresentAgent } from "@/panels/agent-panel-load-state";
 import { usePaneContext, usePaneFocus, usePaneHost } from "@/panels/pane-context";
@@ -1165,6 +1166,12 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
   onOpenWorkspaceFile?: (request: WorkspaceFileOpenRequest) => void;
 }) {
   const isSheet = usePaneHost() === "sheet";
+  const { workspaceId } = usePaneContext();
+  const isWorkspaceRestoring = useWorkspaceArchiveUndoRestoringAgent({
+    serverId,
+    workspaceId,
+    agentId,
+  });
   const facts = useAgentFactsLine(serverId, agentId);
   const composerEditingSession = useMemo(() => new ComposerEditingSession(), []);
   const active = useRetainedPanelActive();
@@ -1216,6 +1223,7 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
         serverId={serverId}
         isPaneFocused={isPaneFocused}
         isArchivingCurrentAgent={isArchivingCurrentAgent}
+        isWorkspaceRestoring={isWorkspaceRestoring}
         archivedAt={agentState.archivedAt}
         cwd={cwd}
         isSubmitLoading={false}
@@ -1405,6 +1413,7 @@ const AgentComposerSection = memo(function AgentComposerSection({
   serverId,
   isPaneFocused,
   isArchivingCurrentAgent,
+  isWorkspaceRestoring,
   archivedAt,
   cwd,
   isSubmitLoading,
@@ -1418,6 +1427,7 @@ const AgentComposerSection = memo(function AgentComposerSection({
   serverId: string;
   isPaneFocused: boolean;
   isArchivingCurrentAgent: boolean;
+  isWorkspaceRestoring: boolean;
   archivedAt: Date | null;
   cwd: string;
   isSubmitLoading: boolean;
@@ -1434,7 +1444,11 @@ const AgentComposerSection = memo(function AgentComposerSection({
   if (archivedAt) {
     return (
       <>
-        <ArchivedAgentCallout serverId={serverId} agentId={agentId} />
+        <ArchivedAgentCallout
+          serverId={serverId}
+          agentId={agentId}
+          isWorkspaceRestoring={isWorkspaceRestoring}
+        />
         {parentAgentId ? (
           <ParentAgentCallout serverId={serverId} parentAgentId={parentAgentId} />
         ) : null}

@@ -7,6 +7,7 @@ import { isWorkspaceArchivePending } from "@/contexts/session-workspace-upserts"
 import equal from "fast-deep-equal";
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
+import { clearUnarchiveAgentPendingForServer } from "./unarchive-agent-store";
 import { type DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import { type ViewedTimelineUiBridge } from "@/timeline/viewed-timeline-sync";
 import { type AgentDirectoryEntry } from "@/types/agent-directory";
@@ -1093,6 +1094,7 @@ export const useSessionStore = create<SessionStore>()(
       },
 
       clearSession: (serverId) => {
+        clearUnarchiveAgentPendingForServer(serverId);
         agentLastActivityCoalescer.flushNow();
         set((prev) => {
           const session = prev.sessions[serverId];

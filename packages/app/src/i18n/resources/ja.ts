@@ -305,6 +305,7 @@ export const ja: TranslationResources = {
     archived: {
       callout: "このエージェントはアーカイブされています",
       unarchive: "アーカイブ解除",
+      unarchiving: "アーカイブ解除中...",
     },
   },
   sessions: {

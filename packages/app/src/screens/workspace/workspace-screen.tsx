@@ -190,6 +190,10 @@ import {
   resolveWorkspaceRouteState,
   type WorkspaceRouteState,
 } from "@/screens/workspace/workspace-route-state";
+import {
+  canSyncVisibleAgents,
+  usePostRestoreWorkspaceRouteState,
+} from "@/screens/workspace/use-post-restore-handoff";
 import { renderWorkspaceRouteGate } from "@/screens/workspace/workspace-route-state-views";
 import { useWorkspaceRecovery } from "@/workspace-recovery/use-workspace-recovery";
 import type { WorkspaceRecoveryModel } from "@/workspace-recovery/model";
@@ -2515,7 +2519,7 @@ function WorkspaceScreenContent({
       ? (state.pinnedAgentIdsByWorkspace[persistenceKey] ?? EMPTY_PINNED_AGENT_IDS)
       : EMPTY_PINNED_AGENT_IDS,
   );
-  const _hiddenAgentIds = useWorkspaceLayoutStore((state) =>
+  const hiddenAgentIds = useWorkspaceLayoutStore((state) =>
     persistenceKey ? (state.hiddenAgentIdsByWorkspace[persistenceKey] ?? EMPTY_SET) : EMPTY_SET,
   );
   const pendingByDraftId = useCreateFlowStore((state) => state.pendingByDraftId);
@@ -2575,10 +2579,22 @@ function WorkspaceScreenContent({
       selectVisibleAgentIds({
         layout: workspaceLayout,
         tabs: uiTabs,
-        routeFocused: isRouteFocused,
+        routeFocused: canSyncVisibleAgents(
+          isRouteFocused,
+          workspaceRouteState.kind,
+          workspaceDescriptor !== null,
+        ),
         focusedPaneOnly: isMobile || isFocusModeEnabled || !supportsDesktopPaneSplits(),
       }),
-    [isFocusModeEnabled, isMobile, isRouteFocused, uiTabs, workspaceLayout],
+    [
+      isFocusModeEnabled,
+      isMobile,
+      isRouteFocused,
+      uiTabs,
+      workspaceDescriptor,
+      workspaceLayout,
+      workspaceRouteState.kind,
+    ],
   );
   useLayoutEffect(() => {
     if (!persistenceKey || !viewedTimelineSync) {
@@ -2609,8 +2625,29 @@ function WorkspaceScreenContent({
     return target.terminalId;
   }, [focusedPaneTabState.activeTab]);
 
+  const {
+    displayedRouteState: displayedWorkspaceRouteState,
+    isHoldingHandoff,
+    isPaneRouteFocused,
+  } = usePostRestoreWorkspaceRouteState({
+    serverId: normalizedServerId,
+    workspaceId: normalizedWorkspaceId,
+    persistenceKey,
+    hasActiveWorkspace: workspaceDescriptor !== null,
+    hasHydratedWorkspaceLayoutStore,
+    hasHydratedAgents,
+    autoOpenAgentIds: workspaceAgentVisibility.autoOpenAgentIds,
+    hiddenAgentIds,
+    uiTabs,
+    visibleAgentIds,
+    routeState: workspaceRouteState,
+    isRouteFocused,
+    // JAgentDesk has no pane focus suspension; the handoff hold is the only suspension.
+    paneFocusSuspended: false,
+  });
+
   useEffect(() => {
-    if (!isRouteFocused) {
+    if (!isPaneRouteFocused) {
       return;
     }
     setFocusedAgentId(normalizedServerId, focusedPaneAgentId);
@@ -2618,7 +2655,7 @@ function WorkspaceScreenContent({
   }, [
     focusedPaneAgentId,
     focusedPaneTerminalId,
-    isRouteFocused,
+    isPaneRouteFocused,
     normalizedServerId,
     setFocusedAgentId,
     setFocusedTerminalId,
@@ -3893,7 +3930,7 @@ function WorkspaceScreenContent({
     hasHydratedAgents,
     mountedFocusedPaneTabIds,
     focusedPaneTabDescriptorMap,
-    isRouteFocused: canFocusPaneUnderSheet(isRouteFocused, sheetOpen),
+    isRouteFocused: canFocusPaneUnderSheet(isPaneRouteFocused, sheetOpen),
     focusedPaneId,
     buildMobilePaneContentModel,
   });
@@ -4002,7 +4039,7 @@ function WorkspaceScreenContent({
   const menuCopyIcon = MENU_COPY_ICON;
   const menuSettingsIcon = MENU_SETTINGS_ICON;
   const workspaceScreenGate = renderWorkspaceRouteGate({
-    state: workspaceRouteState,
+    state: displayedWorkspaceRouteState,
     actions: {
       onRetryHost: handleRetryHost,
       onManageHost: handleManageHost,
@@ -4257,7 +4294,7 @@ function WorkspaceScreenContent({
       workspaceKey: persistenceKey,
       normalizedServerId: normalizedServerId,
       normalizedWorkspaceId: normalizedWorkspaceId,
-      isWorkspaceFocused: isRouteFocused,
+      isWorkspaceFocused: isPaneRouteFocused,
       uiTabs: uiTabs,
       hoveredCloseTabKey: hoveredCloseTabKey,
       setHoveredCloseTabKey: setHoveredCloseTabKey,
@@ -4295,7 +4332,7 @@ function WorkspaceScreenContent({
     toggleFocusMode,
     normalizedServerId,
     normalizedWorkspaceId,
-    isRouteFocused,
+    isPaneRouteFocused,
     uiTabs,
     hoveredCloseTabKey,
     closingTabIds,
@@ -4350,11 +4387,17 @@ function WorkspaceScreenContent({
             workspaceKey: persistenceKey,
             serverId: normalizedServerId,
             workspaceId: normalizedWorkspaceId,
-            isWorkspaceFocused: isRouteFocused,
+            isWorkspaceFocused: isPaneRouteFocused,
             buildContent: buildSheetContent,
           }
         : null,
-    [persistenceKey, normalizedServerId, normalizedWorkspaceId, isRouteFocused, buildSheetContent],
+    [
+      persistenceKey,
+      normalizedServerId,
+      normalizedWorkspaceId,
+      isPaneRouteFocused,
+      buildSheetContent,
+    ],
   );
   const compactWorkspaceActions = useMemo(
     () => (
@@ -4530,56 +4573,90 @@ function WorkspaceScreenContent({
     </View>
   );
 
+  const workspaceContent = (
+    <SheetPaneHostProvider value={sheetHost}>
+      <WorkspaceFocusProvider workspaceKey={persistenceKey}>
+        <RenderProfile id="WorkspaceScreenContent">
+          <View style={containerStyle}>
+            <WorkspaceDocumentTitleEffectSlot
+              tab={activeTabDescriptor}
+              serverId={normalizedServerId}
+              workspaceId={normalizedWorkspaceId}
+              isRouteFocused={isRouteFocused}
+            />
+            <DesktopWorkspaceChrome
+              paneProps={desktopPaneProps}
+              explorerPane={explorerPane}
+              portalHostName={workspaceFloatingPanelPortalHostName}
+              showExplorerSidebar={showExplorerSidebar}
+              explorerOpen={isExplorerOpen}
+              serverId={normalizedServerId}
+              workspaceId={normalizedWorkspaceId}
+              workspaceRoot={workspaceDirectory}
+              isGit={isGitCheckout}
+              onOpenFile={handleOpenFileFromExplorer}
+              leftDock={orchestrationLeftDock}
+            >
+              {workspaceCenterColumn}
+            </DesktopWorkspaceChrome>
+            <SheetTabs onCloseTab={handleCloseTabById} />
+            <ImportSessionSheet
+              visible={importSheetVisible}
+              client={client}
+              serverId={normalizedServerId}
+              cwd={workspaceDirectory}
+              workspaceId={normalizedWorkspaceId}
+              onClose={closeImportSheet}
+              onImportedAgent={handleImportedAgent}
+              onImported={navigateToImportedAgent}
+            />
+            <WorkspaceTabRenameModal
+              renamingTab={renameModalTab}
+              onSubmit={handleRenameModalSubmit}
+              onClose={handleRenameModalClose}
+            />
+            <AgentFailoverSheetHost serverId={normalizedServerId} />
+            <AgentDurableActionHost serverId={normalizedServerId} />
+          </View>
+        </RenderProfile>
+      </WorkspaceFocusProvider>
+    </SheetPaneHostProvider>
+  );
+
+  return renderPostRestoreOverlayShell({
+    isHoldingHandoff,
+    overlay: gatedWorkspaceScreen,
+    content: workspaceContent,
+  });
+}
+
+/** Keeps mounted workspace chrome hidden beneath the restoring gate during layout settle. */
+function renderPostRestoreOverlayShell({
+  isHoldingHandoff,
+  overlay,
+  content,
+}: {
+  isHoldingHandoff: boolean;
+  overlay: ReactNode;
+  content: ReactNode;
+}): ReactNode {
+  const showContent = !overlay || isHoldingHandoff;
   return (
-    gatedWorkspaceScreen ?? (
-      <SheetPaneHostProvider value={sheetHost}>
-        <WorkspaceFocusProvider workspaceKey={persistenceKey}>
-          <RenderProfile id="WorkspaceScreenContent">
-            <View style={containerStyle}>
-              <WorkspaceDocumentTitleEffectSlot
-                tab={activeTabDescriptor}
-                serverId={normalizedServerId}
-                workspaceId={normalizedWorkspaceId}
-                isRouteFocused={isRouteFocused}
-              />
-              <DesktopWorkspaceChrome
-                paneProps={desktopPaneProps}
-                explorerPane={explorerPane}
-                portalHostName={workspaceFloatingPanelPortalHostName}
-                showExplorerSidebar={showExplorerSidebar}
-                explorerOpen={isExplorerOpen}
-                serverId={normalizedServerId}
-                workspaceId={normalizedWorkspaceId}
-                workspaceRoot={workspaceDirectory}
-                isGit={isGitCheckout}
-                onOpenFile={handleOpenFileFromExplorer}
-                leftDock={orchestrationLeftDock}
-              >
-                {workspaceCenterColumn}
-              </DesktopWorkspaceChrome>
-              <SheetTabs onCloseTab={handleCloseTabById} />
-              <ImportSessionSheet
-                visible={importSheetVisible}
-                client={client}
-                serverId={normalizedServerId}
-                cwd={workspaceDirectory}
-                workspaceId={normalizedWorkspaceId}
-                onClose={closeImportSheet}
-                onImportedAgent={handleImportedAgent}
-                onImported={navigateToImportedAgent}
-              />
-              <WorkspaceTabRenameModal
-                renamingTab={renameModalTab}
-                onSubmit={handleRenameModalSubmit}
-                onClose={handleRenameModalClose}
-              />
-              <AgentFailoverSheetHost serverId={normalizedServerId} />
-              <AgentDurableActionHost serverId={normalizedServerId} />
-            </View>
-          </RenderProfile>
-        </WorkspaceFocusProvider>
-      </SheetPaneHostProvider>
-    )
+    <View style={styles.postRestoreOverlayHost}>
+      {showContent ? (
+        <View
+          style={
+            isHoldingHandoff ? styles.postRestoreHiddenContent : styles.postRestoreVisibleContent
+          }
+          pointerEvents={isHoldingHandoff ? "none" : "auto"}
+          accessibilityElementsHidden={isHoldingHandoff}
+          importantForAccessibility={isHoldingHandoff ? "no-hide-descendants" : "auto"}
+        >
+          {content}
+        </View>
+      ) : null}
+      {overlay ? <View style={styles.postRestoreOverlay}>{overlay}</View> : null}
+    </View>
   );
 }
 
@@ -4938,6 +5015,27 @@ const styles = StyleSheet.create((theme) => ({
   contentPlaceholder: {
     flex: 1,
     minHeight: 0,
+    backgroundColor: theme.colors.surface0,
+  },
+  postRestoreOverlayHost: {
+    flex: 1,
+    minHeight: 0,
+    position: "relative",
+    // Isolate the overlay stacking context so the left sidebar overlay stays above gated screens on web.
+    zIndex: 0,
+  },
+  postRestoreVisibleContent: {
+    flex: 1,
+    minHeight: 0,
+  },
+  postRestoreHiddenContent: {
+    flex: 1,
+    minHeight: 0,
+    ...(isWeb ? ({ visibility: "hidden" } as const) : { opacity: 0 }),
+  },
+  postRestoreOverlay: {
+    ...StyleSheet.absoluteFill,
+    zIndex: 1,
     backgroundColor: theme.colors.surface0,
   },
   emptyState: {

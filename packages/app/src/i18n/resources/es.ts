@@ -300,6 +300,7 @@ export const es: TranslationResources = {
     archived: {
       callout: "Este agente está archivado.",
       unarchive: "Desarchivar",
+      unarchiving: "Desarchivando...",
     },
   },
   sessions: {

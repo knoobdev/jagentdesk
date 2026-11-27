@@ -312,6 +312,7 @@ export const ar: TranslationResources = {
     archived: {
       callout: "تمت أرشفة هذا الوكيل",
       unarchive: "إلغاء الأرشفة",
+      unarchiving: "جارٍ إلغاء الأرشفة...",
     },
   },
   sessions: {
