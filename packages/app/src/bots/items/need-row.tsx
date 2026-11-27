@@ -187,14 +187,9 @@ export function BotNeedRow({
   row: BotNeedsYouRow;
 }) {
   const { t } = useTranslation();
-  const homeAgentId = bot.homeAgentId ?? bot.agentId;
   const openConnectors = useCallback(() => {
     useBotPanelStore.getState().setTab(bot.id, "connectors");
   }, [bot.id]);
-  const openChat = useCallback(() => {
-    if (row.agentId && row.agentId !== homeAgentId)
-      navigateToAgent({ serverId, agentId: row.agentId });
-  }, [row.agentId, homeAgentId, serverId]);
   if (row.kind === "approval") return <ApprovalNeedRow serverId={serverId} bot={bot} row={row} />;
   if (row.kind === "connector") {
     const name = botConnectorName(row.connector) || row.title;
@@ -208,15 +203,59 @@ export function BotNeedRow({
       />
     );
   }
-  // A question waiting in one of its chats (spec 37.4.4 b).
+  return <QuestionNeedRow serverId={serverId} bot={bot} row={row} />;
+}
+
+/**
+ * A question waiting in one of its chats (spec 37.4.4 b). Skip settles it here, as the chat's own
+ * question card dismisses it (Orca BotNeedsYouSection.tsx:89-111).
+ */
+function QuestionNeedRow({
+  serverId,
+  bot,
+  row,
+}: {
+  serverId: string;
+  bot: Bot;
+  row: BotNeedsYouRow;
+}) {
+  const { t } = useTranslation();
+  const client = useHostRuntimeClient(serverId);
+  const noop = useCallback(() => {}, []);
+  const permission = usePermissionResponse({
+    client,
+    agentId: row.agentId ?? "",
+    requestId: row.requestId ?? "",
+    unavailableMessage: t("common.errors.daemonClientUnavailable"),
+    onExpired: noop,
+  });
+  const homeAgentId = bot.homeAgentId ?? bot.agentId;
   const title = row.chatTitle ?? row.title ?? t("bots.needs.chat", { name: bot.name });
   const opensElsewhere = Boolean(row.agentId && row.agentId !== homeAgentId);
+  const canSkip = Boolean(row.agentId && row.requestId);
+  const actions = useMemo<NeedAction[]>(() => {
+    const list: NeedAction[] = [];
+    if (opensElsewhere)
+      list.push({
+        label: t("bots.needs.open"),
+        onPress: () => navigateToAgent({ serverId, agentId: row.agentId ?? "" }),
+      });
+    if (canSkip)
+      list.push({
+        label: t("bots.jad.items.skipQuestion"),
+        onPress: () =>
+          permission.respond({ behavior: "deny", message: "Dismissed by user" }, "skip"),
+        loading: permission.respondingActionId === "skip",
+        testID: "bot-need-skip",
+      });
+    return list;
+  }, [canSkip, opensElsewhere, permission, row.agentId, serverId, t]);
   return (
     <NeedRowView
       kind="question"
       title={title}
-      detail={row.detail ?? t("bots.needs.waiting")}
-      actions={opensElsewhere ? [{ label: t("bots.needs.open"), onPress: openChat }] : []}
+      detail={permission.error ?? row.detail ?? t("bots.needs.waiting")}
+      actions={actions}
       testID={`bot-need-${row.key}`}
     />
   );
