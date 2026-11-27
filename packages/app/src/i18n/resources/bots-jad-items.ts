@@ -9,6 +9,9 @@ export const botsJadItemsStrings = {
   // The Snooze until dialog's day field (Orca's picker draws a calendar).
   snoozeDate: "Date",
   snoozeRange: "Pick a time within the next 366 days.",
+  // Spec 37.4.2: a folded run of the bot's changes to one item, after its last change.
+  noteRunChanges_one: "· {{count}} change",
+  noteRunChanges_other: "· {{count}} changes",
   activity: {
     // A link whose worker or automation is gone and has no name: Orca leaves the name out.
     linkedUnnamed: "linked something to this item",
