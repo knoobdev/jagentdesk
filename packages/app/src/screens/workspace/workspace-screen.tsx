@@ -65,6 +65,7 @@ import {
   Settings,
   SquarePen,
   SquareTerminal,
+  Users,
   X,
 } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -258,6 +259,7 @@ import {
   OrchestrationAgentsColumn,
   useWorkspaceOrchestrationRosterCount,
 } from "@/screens/workspace/orchestration-agents-column";
+import { CompactWorkspaceAgents } from "@/screens/workspace/workspace-agents-sheet";
 
 const WORKSPACE_SETUP_AUTO_OPEN_WINDOW_MS = 30_000;
 const WORKSPACE_FLOATING_PANEL_PORTAL_HOST_PREFIX = "workspace-floating-panels";
@@ -318,6 +320,7 @@ const ThemedGlobe = withUnistyles(Globe);
 const ThemedImport = withUnistyles(ImportIcon);
 const ThemedSettings = withUnistyles(Settings);
 const ThemedPanelRight = withUnistyles(PanelRight);
+const ThemedUsers = withUnistyles(Users);
 const ThemedSourceControlPanelIcon = withUnistyles(SourceControlPanelIcon);
 
 interface DynamicProviderIconProps {
@@ -2258,6 +2261,9 @@ function WorkspaceScreenContent({
   const workspaceDirectory = workspaceDescriptor?.workspaceDirectory || null;
   const isMissingWorkspaceDirectory = Boolean(workspaceDescriptor) && !workspaceDirectory;
   const [isImportSheetVisible, setIsImportSheetVisible] = useState(false);
+  const [isWorkspaceAgentsSheetVisible, setIsWorkspaceAgentsSheetVisible] = useState(false);
+  const openWorkspaceAgentsSheet = useCallback(() => setIsWorkspaceAgentsSheetVisible(true), []);
+  const closeWorkspaceAgentsSheet = useCallback(() => setIsWorkspaceAgentsSheetVisible(false), []);
   const canOpenImportSheet = [client, isConnected, workspaceDirectory].every(Boolean);
   const openImportSheet = useCallback(() => {
     setIsImportSheetVisible(true);
@@ -4404,21 +4410,43 @@ function WorkspaceScreenContent({
   );
   const compactWorkspaceActions = useMemo(
     () => (
-      <CompactWorkspaceActions
-        serverId={normalizedServerId}
-        workspaceId={normalizedWorkspaceId}
-        scripts={workspaceScripts}
-        liveTerminalIds={liveTerminalIds}
-        onScriptTerminalStarted={handleScriptTerminalStarted}
-        onViewTerminal={handleViewScriptTerminal}
-        onOpenUrlInBrowserTab={handleOpenUrlInBrowserTab}
-        onImport={openImportSheet}
-        importDisabled={!canOpenImportSheet}
-        onCopyPath={handleCopyWorkspacePath}
-        copyPathDisabled={!workspaceDirectory}
-      />
+      <>
+        {/* Phones reach the workspace's Supervisor → Lead → Peer roster here (spec 37.4.2). */}
+        {isMobile && orchestrationRosterCount > 0 ? (
+          <Pressable
+            testID="workspace-agents-button"
+            onPress={openWorkspaceAgentsSheet}
+            accessibilityRole="button"
+            accessibilityLabel={t("bots.jad.panels.workspaceAgents.button")}
+            style={styles.workspaceAgentsButton}
+          >
+            <ThemedUsers
+              size={20}
+              uniProps={isWorkspaceAgentsSheetVisible ? foregroundColorMapping : mutedColorMapping}
+            />
+          </Pressable>
+        ) : null}
+        <CompactWorkspaceActions
+          serverId={normalizedServerId}
+          workspaceId={normalizedWorkspaceId}
+          scripts={workspaceScripts}
+          liveTerminalIds={liveTerminalIds}
+          onScriptTerminalStarted={handleScriptTerminalStarted}
+          onViewTerminal={handleViewScriptTerminal}
+          onOpenUrlInBrowserTab={handleOpenUrlInBrowserTab}
+          onImport={openImportSheet}
+          importDisabled={!canOpenImportSheet}
+          onCopyPath={handleCopyWorkspacePath}
+          copyPathDisabled={!workspaceDirectory}
+        />
+      </>
     ),
     [
+      isMobile,
+      orchestrationRosterCount,
+      openWorkspaceAgentsSheet,
+      isWorkspaceAgentsSheetVisible,
+      t,
       normalizedServerId,
       normalizedWorkspaceId,
       workspaceScripts,
@@ -4498,13 +4526,13 @@ function WorkspaceScreenContent({
 
       {isMobile || compactSinglePane ? (
         <>
-          {orchestrationRosterCount > 0 ? (
-            <OrchestrationAgentsColumn
-              serverId={normalizedServerId}
-              workspaceId={normalizedWorkspaceId}
-              compact
-            />
-          ) : null}
+          <CompactWorkspaceAgents
+            serverId={normalizedServerId}
+            workspaceId={normalizedWorkspaceId}
+            isMobile={isMobile}
+            sheetVisible={isWorkspaceAgentsSheetVisible && isRouteFocused}
+            onCloseSheet={closeWorkspaceAgentsSheet}
+          />
           <MobileWorkspaceTabSwitcher
             onCreateDraftTab={handleCreateDraftTab}
             onCreateTerminal={handleCreateTerminal}
@@ -4780,6 +4808,13 @@ const styles = StyleSheet.create((theme) => ({
     opacity: 0.25,
   },
   verticalHeaderRight: { flexDirection: "column" },
+  // The compact header's 44 px touch target, as the `⋯` workspace menu beside it.
+  workspaceAgentsButton: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   headerRight: {
     flexDirection: "row",
     alignItems: "center",

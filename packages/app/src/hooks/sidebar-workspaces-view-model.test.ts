@@ -961,3 +961,40 @@ it("keeps background workspaces in the replica while filtering sidebar placement
     buildSidebarWorkspacePlacementModel(input).workspaces.map((entry) => entry.workspaceId),
   ).toEqual(["visible", "background"]);
 });
+
+it("leaves out a project whose every workspace a bot owns, and keeps an empty project", () => {
+  // User report 2026-11-28: the bot's worker repo showed up as a project with only "New workspace".
+  const input = {
+    projects: [
+      project({
+        projectKey: "todo-web",
+        projectName: "todo-web",
+        iconWorkingDir: "/todo-web",
+        hosts: [{ serverId: "host-a", iconWorkingDir: "/todo-web", worktreeSupport: "supported" }],
+        workspaceKeys: ["host-a:worker"],
+      }),
+      project({
+        projectKey: "app",
+        projectName: "app",
+        iconWorkingDir: "/app",
+        hosts: [{ serverId: "host-a", iconWorkingDir: "/app", worktreeSupport: "supported" }],
+        workspaceKeys: ["host-a:main", "host-a:handed"],
+      }),
+      project({
+        projectKey: "fresh",
+        projectName: "fresh",
+        iconWorkingDir: "/fresh",
+        hosts: [{ serverId: "host-a", iconWorkingDir: "/fresh", worktreeSupport: "supported" }],
+        workspaceKeys: [],
+      }),
+    ],
+  };
+  const botOwned = new Set(["host-a:worker", "host-a:handed"]);
+  const model = buildSidebarWorkspacePlacementModel({
+    ...input,
+    hiddenWorkspaceKeys: botOwned,
+    botOwnedWorkspaceKeys: botOwned,
+  });
+  expect(model.projects.map((entry) => entry.projectName)).toEqual(["app", "fresh"]);
+  expect(model.workspaces.map((entry) => entry.workspaceId)).toEqual(["main"]);
+});

@@ -2,6 +2,8 @@ import { isBotCreatedKickoff } from "@jagentdesk/protocol/bots/rules";
 
 /** The label the daemon puts on a bot's supervisor agent (`server/bots/daemon-runtime.ts`). */
 export const BOT_ID_LABEL = "jagentdesk.bot.id";
+/** `home` on a bot's Home Chat agent (`server/bots/runtime.ts` `BOT_ROLE_LABEL`). */
+export const BOT_ROLE_LABEL = "jagentdesk.bot.role";
 
 export function botIdFromLabels(labels: Record<string, string> | undefined | null): string | null {
   return labels?.[BOT_ID_LABEL] ?? null;

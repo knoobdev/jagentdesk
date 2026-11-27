@@ -36,6 +36,15 @@ wakes the bot; on done it puts the result on the item and closes it. Every close
 journal line, written by the daemon. Worktree ids, review rounds and findings live on the item,
 not in MEMORY.md.
 
+A worker's worktree lists under the chat that started it in the Bots section, never in Projects;
+a project whose only workspaces belong to bots is left out of Projects too. The daemon builds the
+bot's chat tree from live agents and stored agent records
+([daemon-runtime.ts](../packages/server/src/server/bots/daemon-runtime.ts) `agents`): agents load
+on demand after a restart and idle runtimes are closed, so a tree of live agents alone loses its
+Home Chat and workers, and their worktrees fall back into Projects. In the worker's workspace the
+Workspace agents roster lists that chat as the Supervisor; phones open it from the header's
+Workspace agents button.
+
 Review before done is off by default. When a bot turns it on, a worker's done starts the BA,
 Tester and Pentester reviews on the frozen worktree diff
 ([shared rules](../packages/server/src/server/review/cross-review.ts)); blocking findings get two
