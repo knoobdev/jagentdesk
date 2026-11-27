@@ -11,7 +11,6 @@ import {
   type AgentScreenViewState,
   useAgentScreenStateMachine,
 } from "@/hooks/use-agent-screen-state-machine";
-import { useKeyboardShiftStyle } from "@/keyboard/shift";
 import { AgentCommandsProvider } from "@/agent-commands";
 import { ComposerEditingSession, useComposerFullscreen } from "@/composer/editing-session";
 import { ParentAgentCallout, useParentAgentId } from "@/subagents/parent";
@@ -38,7 +37,6 @@ import React, {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { StyleSheet as RNStyleSheet, Text, View } from "react-native";
-import ReanimatedAnimated from "react-native-reanimated";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import invariant from "tiny-invariant";
 import { shallow, useShallow } from "zustand/shallow";
@@ -839,10 +837,6 @@ function ChatAgentContent({
     onError: reportAttentionError,
   });
 
-  const { style: animatedKeyboardStyle } = useKeyboardShiftStyle({
-    mode: "translate",
-  });
-
   useEffect(() => {
     if (connectionStatus === "online") {
       if (reconnectToastArmedRef.current) {
@@ -1059,11 +1053,6 @@ function ChatAgentContent({
     visibilityCatchUpStatus,
   ]);
 
-  const animatedContentStyle = useMemo(
-    () => [animatedStaticStyles.content, animatedKeyboardStyle],
-    [animatedKeyboardStyle],
-  );
-
   const nonReadyView = renderChatAgentNonReadyView({
     viewState,
     effectiveAgent,
@@ -1096,7 +1085,6 @@ function ChatAgentContent({
       toast={toastState}
       dismiss={dismissToast}
       streamViewRef={streamViewRef}
-      animatedContentStyle={animatedContentStyle}
       handleComposerHeightChange={handleComposerHeightChange}
       handleMessageSent={handleMessageSent}
       showHistorySyncOverlay={showHistorySyncOverlay}
@@ -1124,7 +1112,6 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
   toast,
   dismiss,
   streamViewRef,
-  animatedContentStyle,
   handleComposerHeightChange,
   handleMessageSent,
   showHistorySyncOverlay,
@@ -1148,7 +1135,6 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
   toast: ToastState | null;
   dismiss: () => void;
   streamViewRef: React.RefObject<AgentStreamViewHandle | null>;
-  animatedContentStyle: object[];
   handleComposerHeightChange: (height: number) => void;
   handleMessageSent: () => void;
   showHistorySyncOverlay: boolean;
@@ -1231,15 +1217,17 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
     return false;
   }, [onAttentionInputFocus]);
   const streamContent = (
-    <ReanimatedAnimated.View
-      style={animatedContentStyle}
+    // ComposerDock's KeyboardTranslateView already lifts this content with the composer.
+    // A second keyboard translation here moved the transcript off screen on iOS.
+    <View
+      style={animatedStaticStyles.content}
       onStartShouldSetResponderCapture={handleAttentionInteraction}
     >
       {streamSection}
       {hasActiveComposer ? (
         <AgentTracks serverId={serverId} agentId={agentId} parentAgentId={trackParentAgentId} />
       ) : null}
-    </ReanimatedAnimated.View>
+    </View>
   );
   const contentContainer = <View style={styles.contentContainer}>{streamContent}</View>;
   const composerFullscreen = useComposerFullscreen(composerEditingSession);
