@@ -18,6 +18,12 @@ daemon. An explicit enabled override from the environment
 or a launch flag pins that setting for the run. Endpoint and TLS changes take
 effect at the next daemon launch.
 
+Bot share links (`/s/<shareId>`, [bots.md](bots.md#sharing)) need the R2 bucket bound as
+`SHARES` in `packages/relay/wrangler.toml`. Create it once with
+`wrangler r2 bucket create desk-relay-shares` before deploying; without the binding the Worker
+answers `503` and `share_create` fails with `unavailable`. `wrangler dev --local` simulates the
+bucket, so pass `--persist-to <temp dir>` in tests to keep its state out of the package.
+
 ## Trust boundaries
 
 Keep `daemon-keypair.json` private (0600) and preserve it with `server-id` when
