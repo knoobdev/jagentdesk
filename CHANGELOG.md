@@ -27,6 +27,7 @@ automations on Schedules; bot and Telegram fixes; Paseo 0.18.0. Full notes: [doc
   responding. Closing a tab no longer leaves an empty profile folder; empty ones are removed on start.
 - Bots: first-run screen leaves when the bot speaks, with Try again on failure; Telegram owner linking with a deep link and a
   live Linked state; clearer approval cards, Needs you rows and item activity.
+- Composer send button shows only with something to send and matches the size of the buttons next to it (Paseo 0.18.0).
 - Composer and sidebar: failed subagents first, one-line background rows with Dismiss all, steady command block on phones,
   Usage summary back after a window reload, spaced from the Connection card, with each provider's own icon.
 
