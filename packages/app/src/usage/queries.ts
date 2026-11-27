@@ -33,6 +33,7 @@ import {
   type UsageRefresh,
   upsertReport,
 } from "./model";
+import { hostUsageQueryKey, usageReportsQueryKey } from "./query-keys";
 import type { UsageReportEntry, UsageView } from "./types";
 
 // The daemon caches each report for five minutes, so re-reading it is cheap.
@@ -40,18 +41,13 @@ import type { UsageReportEntry, UsageView } from "./types";
 const REPORTS_STALE_TIME_MS = 60_000;
 const REPORTS_REFETCH_INTERVAL_MS = 5 * 60_000;
 
-/** Every report list of a host: its own and each agent's. */
-function hostUsageQueryKey(serverId: string) {
-  return ["usage", serverId] as const;
-}
+// The sidebar summary retries a failed list a few times within seconds, so one dropped request
+// during a reconnect does not leave it stale until the next poll.
+const SUMMARY_RETRY_COUNT = 3;
+const SUMMARY_RETRY_MAX_DELAY_MS = 4_000;
 
-/**
- * A host's own reports. The key differs only by host, so it is read with `dataShape: "value"`:
- * a list shape keeps the previous key's data while the next one loads, which would show one host's
- * reports as another's.
- */
-function usageReportsQueryKey(serverId: string) {
-  return [...hostUsageQueryKey(serverId), "reports"] as const;
+function summaryRetryDelay(attempt: number): number {
+  return Math.min(1_000 * 2 ** attempt, SUMMARY_RETRY_MAX_DELAY_MS);
 }
 
 function agentUsageQueryKey(serverId: string, agentId: string, usageScopeKey: string | undefined) {
@@ -203,28 +199,41 @@ const NO_REPORTS: UsageReportEntry[] = [];
 
 interface UsageHostReportsInput {
   serverId: string | null;
-  shouldPoll?: boolean;
+  /** The summary is on screen: fetch and poll. Otherwise only the cached reports are read. */
+  active?: boolean;
 }
 
-/** A host's reports, with periodic refresh enabled only by the visible sidebar summary. */
+/**
+ * A host's reports for the sidebar summary. The last reports stay while the host reconnects, its
+ * daemon config reloads, or a refetch fails; only usage turned off on the host hides them. The key
+ * is the host's, so another host never shows them.
+ */
 export function useUsageHostReports({
   serverId,
-  shouldPoll = false,
+  active = false,
 }: UsageHostReportsInput): UsageReportEntry[] {
   useUsageSourceUpdates(serverId);
   const setting = useUsageSetting(serverId);
+  const isConnected = useHostRuntimeIsConnected(serverId ?? "");
   const queryClient = useQueryClient();
   const query = useFetchQuery({
-    enabled: setting.enabled,
+    // A reconnect marks the reports stale (see the push router), so they refetch as soon as the
+    // host is back.
+    enabled: active && isConnected && !setting.off,
     queryKey: usageReportsQueryKey(serverId ?? ""),
     queryFn: serverId
       ? ({ signal }) => listReports(queryClient, serverId, false, signal)
       : skipToken,
     dataShape: "value",
     staleTimeMs: REPORTS_STALE_TIME_MS,
-    refetchInterval: shouldPoll ? REPORTS_REFETCH_INTERVAL_MS : false,
+    refetchInterval: active ? REPORTS_REFETCH_INTERVAL_MS : false,
+    retry: SUMMARY_RETRY_COUNT,
+    retryDelay: summaryRetryDelay,
+    // Kept while the sidebar is collapsed or unmounted, so it reopens with the last numbers.
+    gcTime: Infinity,
   });
-  return setting.enabled ? (query.data ?? NO_REPORTS) : NO_REPORTS;
+  if (setting.off) return NO_REPORTS;
+  return query.data ?? NO_REPORTS;
 }
 
 /**

@@ -5,6 +5,7 @@ import { createDefaultOrchestrationConfig } from "@jagentdesk/protocol/orchestra
 import { checkoutDiffQueryKey } from "@/git/query-keys";
 import { buildTerminalsQueryKey } from "@/screens/workspace/terminals/state";
 import { daemonConfigQueryKey } from "@/data/daemon-config";
+import { usageReportsQueryKey } from "@/usage/query-keys";
 import { daemonPairingOfferQueryKey } from "@/data/daemon-pairing";
 import { providersSnapshotQueryKey } from "@/data/providers-snapshot";
 import {
@@ -582,7 +583,11 @@ describe("server data push router", () => {
     const diffKey = checkoutDiffQueryKey(serverId, "/repo", "uncommitted", undefined, false);
     const terminalKey = buildTerminalsQueryKey(serverId, "/repo", "workspace-a");
     const otherProviderKey = providersSnapshotQueryKey(otherServerId);
+    const usageKey = usageReportsQueryKey(serverId);
+    const otherUsageKey = usageReportsQueryKey(otherServerId);
 
+    queryClient.setQueryData(usageKey, []);
+    queryClient.setQueryData(otherUsageKey, []);
     queryClient.setQueryData(providerKey, { entries: [], generatedAt: "now", requestId: "p" });
     queryClient.setQueryData(daemonConfigKey, daemonConfig);
     queryClient.setQueryData(pairingOfferKey, { tailnetEnabled: false, url: "" });
@@ -602,5 +607,8 @@ describe("server data push router", () => {
     expect(queryClient.getQueryState(diffKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(terminalKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(otherProviderKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(usageKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(usageKey)?.data).toEqual([]);
+    expect(queryClient.getQueryState(otherUsageKey)?.isInvalidated).toBe(false);
   });
 });

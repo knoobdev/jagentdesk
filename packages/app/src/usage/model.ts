@@ -224,6 +224,24 @@ export function resolveUsageHostId(choice: UsageHostChoice): string | null {
 }
 
 /**
+ * The host the sidebar summary reads. The host it already shows keeps its place while it
+ * reconnects (a daemon restart, a relay-to-local switch, the app returning from background), so
+ * its last numbers stay up instead of the summary vanishing. Another host takes the place only
+ * when the pick or the active workspace chooses it, and it then shows its own reports.
+ */
+export function resolveUsageSummaryHostId(
+  choice: UsageHostChoice,
+  shownServerId: string | null,
+): string | null {
+  const hosts = choice.hosts.map((host) =>
+    host.serverId === shownServerId && !host.isConnected
+      ? { ...host, isConnected: true, supportsUsage: true }
+      : host,
+  );
+  return resolveUsageHostId({ ...choice, hosts });
+}
+
+/**
  * The host the Usage modal shows: the picked host while it is connected, even one that cannot
  * report usage so the modal says to update it; else the sidebar row's host; else the first
  * connected host.
