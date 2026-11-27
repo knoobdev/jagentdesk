@@ -1,9 +1,32 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.11.1`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.12.0`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.12.0 — 2026-11-27
+
+Bots that work and look like Orca's, reachable from GitHub, GitLab and Telegram and shareable by link; background task details
+with live output; Paseo 0.17.6. Full notes: [docs/releases/v0.12.0.md](docs/releases/v0.12.0.md).
+
+### Changes
+
+- Bots: sidebar section with mascots, status and worker tree; bot page with Home Chat and Home/Connectors/Chats/Files panel;
+  workers in new worktrees; items with quick answers; Look around and Tidy memory; Soul and Memory editors; templates; Hand to
+  bot; optional Review before done; phone drawer, bot panel sheet and quick replies.
+- Bot connectors for GitHub (HMAC) and GitLab (secret token) webhooks and Telegram through the relay Worker; the gh polling is
+  removed.
+- Share a bot by an encrypted link (needs the relay's R2 bucket).
+- Background task detail with live output (Claude, OpenCode).
+- Composer trackers as one row of pills; Paseo 0.17.6 (Settings by device and host, model picker keys, archive restore, git
+  fetch without D-Bus, AppImage env).
+
+### Fixes
+
+- iPhone/Android: chat no longer goes blank when the keyboard opens.
+- Sidebar Usage summary stays through reconnects and reloads.
+- After a daemon restart a bot continues only the turn the restart cut.
 
 ## v0.11.1 — 2026-11-27
 
