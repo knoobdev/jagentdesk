@@ -84,10 +84,35 @@ Round-1 RPC names stay. A running Home Chat note is pushed again under the same 
 it finishes; replace messages by id. `bots.items_changed` and `bots.activity_changed` say which
 read to refetch. The Home Chat agent id is absent until the first delivered message.
 
+## Automations
+
+A bot's automation is a core schedule with `bot: { botId, runsIn, chatId? }`
+([schedule service](../packages/server/src/server/schedule/service.ts), ADR-0060). There is no
+second scheduler: the schedule service owns cadence, next run and run history, and hands each due
+bot schedule to the bots service's launcher, which runs it the way a bot runs: a Home Chat note
+(running, done, failed), the prompt in the Home Chat (`runsIn: "home"`), one of the bot's side
+chats (`"chat"`, the Home Chat when that chat is gone) or a new "Automation run" conversation in
+its home (`"new"`, in the bot's permission mode, its cards going to the owner). A reply ending in
+the quiet marker posts nothing.
+
+- Created and changed only in the bot's chat: `bot_automation_*`, or the core schedule tools,
+  which a bot's own chat may use for its own schedules only. `schedule/update` refuses a bot
+  schedule, and the Schedules screen offers "Edit in {{bot}}'s chat" instead of the form. Pause,
+  resume, Run now and Delete work from both places.
+- A paused bot's due slot is not claimed; resuming runs it once. The Schedules row shows
+  "Bot paused" meanwhile.
+- `target` is a new-agent target for the bot's provider in its home, so apps that don't read
+  `bot` still list it. It follows provider and model changes.
+- Round-1 bots kept `Bot.schedules` on the record. On start each one becomes a core schedule with
+  the same id, cron, prompt, on/off and next run; the record is cleared only after all of them
+  are in, and an id already present is kept, so a rerun makes no duplicates. `Bot.schedules` is
+  `[]` from then on.
+- Deleting a bot deletes its schedules. Templates and shared bots create theirs off.
+
 ## Triggers
 
-Cron automations, Look around slots and wait deadlines use persisted occurrence keys. Paused bots
-queue chat but run no turns or background work; resuming catches up one overdue cron occurrence.
+Look around slots and wait deadlines use persisted occurrence keys. Paused bots queue chat but run
+no turns or background work.
 A daemon restart wakes a bot only when it cut the bot's turn: one `[restart]` turn per cut
 message, in Orca's words, shown in the app as a notice row. Open items, waits and workers need no
 turn and stay as stored (ADR-0060 §6 allows no other model calls).
@@ -96,9 +121,10 @@ it was turned on, and never before the bot's first conversation. Tidy memory run
 window after a night with chat.
 
 Event automations run a prompt in the Home Chat when a GitHub, GitLab or Telegram event of the bot
-happens (`event-automations.ts`). The bot creates them only with its `bot_event_automation_save`
-tool; they list in `bots.automations.list` with `event` set. They live in the bots state table,
-not on `Bot.schedules`, because round-1 apps parse every schedule with a required `cron`. An event
+happens (`event-automations.ts`), through the same Home Chat launch as a scheduled run. The bot
+creates them only with its `bot_event_automation_save` tool; they list in `bots.automations.list`
+with `event` set. They live in the bots state table, not in core schedules, because a schedule
+needs a cadence and older apps parse every schedule's. An event
 runs every matching automation whoever caused it (Who can ask gates only asking the bot), once
 per automation and event key, and nothing while the bot is paused. Slack and Jira events do not
 reach them yet.

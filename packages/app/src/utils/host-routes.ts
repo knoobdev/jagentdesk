@@ -541,8 +541,16 @@ export function buildSessionsRoute() {
   return "/sessions" as const;
 }
 
-export function buildSchedulesRoute() {
-  return "/schedules" as const;
+/** Schedules; with a bot, filtered to that bot's automations (spec 37.4.4 "All {{count}} automations"). */
+export function buildSchedulesRoute(): "/schedules";
+export function buildSchedulesRoute(bot: {
+  serverId: string;
+  botId: string;
+}): `/schedules?${string}`;
+export function buildSchedulesRoute(bot?: { serverId: string; botId: string }) {
+  if (!bot) return "/schedules" as const;
+  const params = new URLSearchParams({ serverId: bot.serverId, botId: bot.botId });
+  return `/schedules?${params.toString()}` as const;
 }
 
 export function buildSharedSessionsRoute() {

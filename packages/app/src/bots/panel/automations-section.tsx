@@ -135,7 +135,10 @@ function AutomationRow({
       .getState()
       .openSettings(bot.id, row.kind === "tidy_up" ? "tidyUp" : "lookAround");
   }, [bot.id, row.kind]);
-  const openSchedules = useCallback(() => router.push(buildSchedulesRoute()), []);
+  const openSchedules = useCallback(
+    () => router.push(buildSchedulesRoute({ serverId, botId: bot.id })),
+    [bot.id, serverId],
+  );
   const runLabel =
     row.kind === "look_around" ? t("bots.upNext.lookNow") : t("bots.automations.runNow");
   return (
@@ -192,7 +195,7 @@ function AutomationRow({
                   {t("bots.upcoming.tidySettings")}
                 </DropdownMenuItem>
               ) : null}
-              {row.kind === "schedule" ? (
+              {row.kind === "schedule" && !row.event ? (
                 <DropdownMenuItem onSelect={openSchedules}>
                   {t("bots.automations.openOnPage")}
                 </DropdownMenuItem>
@@ -223,7 +226,11 @@ export function BotAutomationsSection({ serverId, bot }: { serverId: string; bot
     () => prefillHomeChat(serverId, bot.id, t("bots.automations.newDraft")),
     [bot.id, serverId, t],
   );
-  const openAll = useCallback(() => router.push(buildSchedulesRoute()), []);
+  // Schedules filtered by the bot (spec 37.4.4): its automations are core schedules.
+  const openAll = useCallback(
+    () => router.push(buildSchedulesRoute({ serverId, botId: bot.id })),
+    [bot.id, serverId],
+  );
   const actions = useMemo(
     () => (
       <Pressable
