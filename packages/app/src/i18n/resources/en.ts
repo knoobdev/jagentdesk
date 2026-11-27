@@ -3158,6 +3158,21 @@ export const en = {
     newWorkspace: "New",
     workspaces: "Workspaces",
   },
+  browserTabs: {
+    footerOne: "1 browser tab open",
+    footerMany: "{{count}} browser tabs open",
+    title: "Browser tabs",
+    closeAll: "Close all",
+    show: "Show",
+    close: "Close",
+    notInWorkspace: "Not in a workspace",
+    untitled: "New tab",
+    status: {
+      loading: "Loading",
+      notResponding: "Not responding",
+      crashed: "Crashed",
+    },
+  },
   marketplace: {
     title: "Plugin Marketplace",
     subtitle: "Discover and install community plugins for JAgentDesk.",

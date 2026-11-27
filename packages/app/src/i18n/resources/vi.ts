@@ -577,6 +577,21 @@ export const vi = {
     newWorkspace: "Mới",
     workspaces: "Workspace",
   },
+  browserTabs: {
+    footerOne: "1 tab trình duyệt đang mở",
+    footerMany: "{{count}} tab trình duyệt đang mở",
+    title: "Tab trình duyệt",
+    closeAll: "Đóng tất cả",
+    show: "Hiện",
+    close: "Đóng",
+    notInWorkspace: "Không thuộc workspace nào",
+    untitled: "Tab mới",
+    status: {
+      loading: "Đang tải",
+      notResponding: "Không phản hồi",
+      crashed: "Đã sập",
+    },
+  },
   marketplace: {
     title: "Chợ plugin",
     subtitle: "Khám phá và cài đặt plugin cộng đồng cho JAgentDesk.",

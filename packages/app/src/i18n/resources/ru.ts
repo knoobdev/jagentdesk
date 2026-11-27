@@ -3205,6 +3205,21 @@ export const ru: TranslationResources = {
     newWorkspace: "Новый",
     workspaces: "Рабочие пространства",
   },
+  browserTabs: {
+    footerOne: "Открыта 1 вкладка браузера",
+    footerMany: "Открыто вкладок браузера: {{count}}",
+    title: "Вкладки браузера",
+    closeAll: "Закрыть все",
+    show: "Показать",
+    close: "Закрыть",
+    notInWorkspace: "Вне рабочего пространства",
+    untitled: "Новая вкладка",
+    status: {
+      loading: "Загрузка",
+      notResponding: "Не отвечает",
+      crashed: "Сбой",
+    },
+  },
   marketplace: {
     title: "Plugin Marketplace",
     subtitle: "Discover and install community plugins for JAgentDesk.",

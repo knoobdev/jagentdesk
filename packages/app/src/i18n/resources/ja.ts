@@ -3145,6 +3145,21 @@ export const ja: TranslationResources = {
     newWorkspace: "新規",
     workspaces: "ワークスペース",
   },
+  browserTabs: {
+    footerOne: "ブラウザタブを1件開いています",
+    footerMany: "ブラウザタブを{{count}}件開いています",
+    title: "ブラウザタブ",
+    closeAll: "すべて閉じる",
+    show: "表示",
+    close: "閉じる",
+    notInWorkspace: "ワークスペース外",
+    untitled: "新しいタブ",
+    status: {
+      loading: "読み込み中",
+      notResponding: "応答なし",
+      crashed: "クラッシュ",
+    },
+  },
   marketplace: {
     title: "Plugin Marketplace",
     subtitle: "Discover and install community plugins for JAgentDesk.",

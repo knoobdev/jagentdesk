@@ -11,6 +11,80 @@ const RESIDENT_VIEWPORT_HEIGHT = 800;
 
 const residentWebviewsByBrowserId = new Map<string, HTMLElement>();
 const residentWebviewSizesByBrowserId = new Map<string, { width: number; height: number }>();
+const browserWebviewListeners = new Set<() => void>();
+
+/** Called when a browser webview is created or removed by this module or the pane. */
+export function subscribeBrowserWebviews(listener: () => void): () => void {
+  browserWebviewListeners.add(listener);
+  return () => {
+    browserWebviewListeners.delete(listener);
+  };
+}
+
+function notifyBrowserWebviewsChanged(): void {
+  for (const listener of browserWebviewListeners) {
+    listener();
+  }
+}
+
+export interface BrowserWebviewElementInfo {
+  browserId: string;
+  /** Null until the guest attaches. */
+  webContentsId: number | null;
+}
+
+/** Every browser webview element in this window, parked or in a pane. */
+export function listBrowserWebviewElements(): BrowserWebviewElementInfo[] {
+  const ownerDocument = readDocument();
+  if (!ownerDocument) {
+    return [];
+  }
+  const elements: BrowserWebviewElementInfo[] = [];
+  for (const element of ownerDocument.querySelectorAll(`webview[${BROWSER_ID_ATTRIBUTE}]`)) {
+    const browserId = element.getAttribute(BROWSER_ID_ATTRIBUTE);
+    if (!browserId) {
+      continue;
+    }
+    let webContentsId: number | null = null;
+    try {
+      webContentsId = (element as BrowserWebviewElement).getWebContentsId();
+    } catch {
+      webContentsId = null;
+    }
+    elements.push({ browserId, webContentsId });
+  }
+  return elements;
+}
+
+/** Removes a browser webview element wherever it is hosted, destroying its guest. */
+export function removeBrowserWebviewElement(input: {
+  browserId: string | null;
+  webContentsId: number | null;
+}): void {
+  const ownerDocument = readDocument();
+  if (!ownerDocument) {
+    return;
+  }
+  for (const element of ownerDocument.querySelectorAll(`webview[${BROWSER_ID_ATTRIBUTE}]`)) {
+    let webContentsId: number | null = null;
+    try {
+      webContentsId = (element as BrowserWebviewElement).getWebContentsId();
+    } catch {
+      webContentsId = null;
+    }
+    const matchesBrowser =
+      input.browserId !== null && element.getAttribute(BROWSER_ID_ATTRIBUTE) === input.browserId;
+    const matchesGuest = input.webContentsId !== null && webContentsId === input.webContentsId;
+    if (matchesBrowser || matchesGuest) {
+      element.remove();
+    }
+  }
+  if (input.browserId) {
+    residentWebviewsByBrowserId.delete(input.browserId);
+    residentWebviewSizesByBrowserId.delete(input.browserId);
+  }
+  notifyBrowserWebviewsChanged();
+}
 
 interface BrowserWebviewElement extends HTMLElement {
   src: string;
@@ -214,6 +288,7 @@ export function prepareBrowserWebview(
     webview.setAttribute("src", input.initialUrl);
   }
   registerBrowserWhenAttached(webview as BrowserWebviewElement, input, browser);
+  notifyBrowserWebviewsChanged();
 }
 
 export function ensureResidentBrowserWebview(input: {
@@ -334,6 +409,7 @@ export function removeResidentBrowserWebview(browserId: string): void {
   residentWebviewsByBrowserId.delete(normalizedBrowserId);
   residentWebviewSizesByBrowserId.delete(normalizedBrowserId);
   resident?.remove();
+  notifyBrowserWebviewsChanged();
 }
 
 export function clearResidentBrowserWebviewsForTests(): void {

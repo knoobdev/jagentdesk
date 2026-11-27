@@ -3148,6 +3148,21 @@ export const ar: TranslationResources = {
     newWorkspace: "جديد",
     workspaces: "مساحات العمل",
   },
+  browserTabs: {
+    footerOne: "علامة تبويب متصفح واحدة مفتوحة",
+    footerMany: "{{count}} علامات تبويب متصفح مفتوحة",
+    title: "علامات تبويب المتصفح",
+    closeAll: "إغلاق الكل",
+    show: "إظهار",
+    close: "إغلاق",
+    notInWorkspace: "ليست في مساحة عمل",
+    untitled: "علامة تبويب جديدة",
+    status: {
+      loading: "جارٍ التحميل",
+      notResponding: "لا يستجيب",
+      crashed: "تعطّل",
+    },
+  },
   marketplace: {
     title: "Plugin Marketplace",
     subtitle: "Discover and install community plugins for JAgentDesk.",

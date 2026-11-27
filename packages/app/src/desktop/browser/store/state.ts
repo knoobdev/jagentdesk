@@ -1,3 +1,10 @@
+/** The agent whose `browser_new_tab` opened the tab (spec 04 §27d.1); absent for user tabs. */
+export interface BrowserTabOpener {
+  serverId: string;
+  workspaceId: string;
+  agentId: string;
+}
+
 export interface BrowserRecord {
   browserId: string;
   url: string;
@@ -8,9 +15,12 @@ export interface BrowserRecord {
   faviconUrl: string | null;
   lastError: string | null;
   createdAt: number;
+  openedBy?: BrowserTabOpener;
 }
 
-export type BrowserRecordPatch = Partial<Omit<BrowserRecord, "browserId" | "createdAt">>;
+export type BrowserRecordPatch = Partial<
+  Omit<BrowserRecord, "browserId" | "createdAt" | "openedBy">
+>;
 
 export interface BrowserIndexState {
   browsersById: Record<string, BrowserRecord>;
@@ -45,6 +55,7 @@ export function createBrowserRecord(input: {
   browserId: string;
   initialUrl: string | null | undefined;
   now: number;
+  openedBy?: BrowserTabOpener;
 }): BrowserRecord {
   return {
     browserId: input.browserId,
@@ -56,6 +67,7 @@ export function createBrowserRecord(input: {
     faviconUrl: null,
     lastError: null,
     createdAt: input.now,
+    ...(input.openedBy ? { openedBy: input.openedBy } : {}),
   };
 }
 
