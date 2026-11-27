@@ -88,6 +88,9 @@ read to refetch. The Home Chat agent id is absent until the first delivered mess
 
 Cron automations, Look around slots and wait deadlines use persisted occurrence keys. Paused bots
 queue chat but run no turns or background work; resuming catches up one overdue cron occurrence.
+A daemon restart wakes a bot only when it cut the bot's turn: one `[restart]` turn per cut
+message, in Orca's words, shown in the app as a notice row. Open items, waits and workers need no
+turn and stay as stored (ADR-0060 §6 allows no other model calls).
 Look around catches up a slot the host slept through on the same day only, never one from before
 it was turned on, and never before the bot's first conversation. Tidy memory runs in the 3–8 AM
 window after a night with chat.
