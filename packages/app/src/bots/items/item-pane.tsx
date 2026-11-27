@@ -54,6 +54,8 @@ import { BotItemLinkChips } from "./link-chips";
 import { BotItemQuestionStep, MARK_DONE_ANYWAY } from "./question-step";
 import { SNOOZE_PAGE, botItemSnoozePage, useBotItemSnoozing, type BotItemSnoozing } from "./snooze";
 import { useNow } from "./use-now";
+import { useIsCompactFormFactor } from "@/constants/layout";
+import { PhoneItemAskCard } from "@/bots/phone/ask-card";
 
 const ThemedArrowLeft = withUnistyles(ArrowLeft);
 const ThemedLeft = withUnistyles(ChevronLeft);
@@ -109,6 +111,9 @@ export function BotItemPane({
   const retry = useCallback(() => void refetch(), [refetch]);
   const deleted = read.isError && botErrorCode(read.error) === "not_found";
   const item = read.data?.item ?? walk.listed;
+  // A phone's panel calls the list Items (Orca `bots.items.tab` on mobile); the desktop's tab is Home.
+  const compact = useIsCompactFormFactor();
+  const backLabel = compact ? t("bots.phone.bots.items.tab") : t("bots.items.tab");
   return (
     <View style={styles.pane} testID="bot-item-pane">
       <View style={styles.backRow}>
@@ -116,11 +121,11 @@ export function BotItemPane({
           onPress={back}
           style={styles.back}
           accessibilityRole="button"
-          accessibilityLabel={t("bots.items.tab")}
+          accessibilityLabel={backLabel}
           testID="bot-item-back"
         >
           <ThemedArrowLeft size={16} uniProps={foregroundColor} />
-          <Text style={styles.backText}>{t("bots.items.tab")}</Text>
+          <Text style={styles.backText}>{backLabel}</Text>
         </Pressable>
         {walk.index >= 0 && walk.total > 0 ? (
           <View
@@ -206,7 +211,6 @@ function BotItemBody({
   const [commentKey, setCommentKey] = useState(0);
   const chatTitle = botItemChatName(item.chat, t);
   const question = item.status === "needs_you" ? item.question : undefined;
-  const decisions = question?.decisions ?? [];
 
   const setStatus = useCallback(
     (status: BotItemStatus) => {
@@ -299,15 +303,19 @@ function BotItemBody({
           <Text style={styles.sectionTitle}>{t("bots.items.view.activity")}</Text>
           {events ? <BotItemActivityList bot={bot} item={item} events={events} /> : null}
         </View>
-        {question && decisions.length > 0 && !deleted ? (
-          <BotItemQuestionStep
-            key={question.eventId}
-            decisions={decisions}
-            disabled={actions.pending}
-            onSend={sendAnswers}
-          />
-        ) : null}
+        <ItemAsk
+          question={deleted ? undefined : question}
+          docked={false}
+          disabled={actions.pending}
+          onSend={sendAnswers}
+        />
       </ScrollView>
+      <ItemAsk
+        question={deleted ? undefined : question}
+        docked
+        disabled={actions.pending}
+        onSend={sendAnswers}
+      />
       {deleted ? null : (
         <View style={styles.commentBox}>
           <FormTextInput
@@ -341,6 +349,41 @@ function BotItemBody({
       <BotItemCancelDialog items={cancelItems} onCancel={confirmCancel} onClose={closeCancel} />
       {snoozing.dialog}
     </>
+  );
+}
+
+/**
+ * The waiting ask: the question steps in the item on a desktop, the quick-reply card docked over the
+ * comment box on a phone (spec 37.6). `docked` is the place this one renders in.
+ */
+function ItemAsk({
+  question,
+  docked,
+  disabled,
+  onSend,
+}: {
+  question: BotItem["question"];
+  docked: boolean;
+  disabled: boolean;
+  onSend: (text: string, answers: readonly (string | null)[]) => void;
+}) {
+  const compact = useIsCompactFormFactor();
+  const decisions = question?.decisions ?? [];
+  if (!question || decisions.length === 0 || compact !== docked) return null;
+  return docked ? (
+    <PhoneItemAskCard
+      key={question.eventId}
+      decisions={decisions}
+      disabled={disabled}
+      onSend={onSend}
+    />
+  ) : (
+    <BotItemQuestionStep
+      key={question.eventId}
+      decisions={decisions}
+      disabled={disabled}
+      onSend={onSend}
+    />
   );
 }
 
