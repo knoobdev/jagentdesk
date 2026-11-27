@@ -12,7 +12,7 @@ both screens and approve on both.
 > **📦 [Download the latest release →](https://github.com/knoobdev/jagentdesk/releases/latest)**
 
 JAgentDesk is an independently developed fork of [Paseo](https://github.com/getpaseo/paseo). It keeps
-up with Paseo (this release includes everything up to Paseo 0.17.3) and adds its own pieces: the relay
+up with Paseo (this release includes everything up to Paseo 0.17.5) and adds its own pieces: the relay
 next to Tailscale, application-level pairing, built-in tools for Docker, Kubernetes, databases, SSH,
 Jira, Argo CD, forges and devices, Bots, and connected hosts.
 
@@ -25,8 +25,14 @@ Jira, Argo CD, forges and devices, Bots, and connected hosts.
 - **Run and steer agents remotely** — start agents, send prompts, watch replies and tool calls stream
   in, interrupt, queue or steer, review diffs, all from desktop or phone.
 - **Many providers** — Claude Code, Codex, GitHub Copilot, OpenCode, Pi and OMP, ACP agents, bundled
-  provider plugins (Antigravity, Muse Code, Hoplite, fx, goose) and your own OpenAI- or
-  Anthropic-compatible model servers. Model, effort and permission controls sit in the composer.
+  provider plugins (Antigravity, Muse Code, Hoplite, fx, goose, Hermes) and your own OpenAI- or
+  Anthropic-compatible model servers. Model, effort and permission controls sit in the composer. Every
+  provider gets JAgentDesk's tools, and pages agents open stay in the app's own browser.
+- **Agents that keep their context** — switch an agent to another provider mid-conversation with a structured
+  handoff, fail over automatically when a provider hits its usage limit, start child agents on other providers, and
+  re-ground agents after compaction so long sessions stay on task.
+- **Memory** — project and global memories your agents save and recall (local search, no extra model calls), with
+  cited lessons that can become project rules once you approve them.
 - **Workspaces** — projects, Git worktrees, branches and pull requests; a Changes view with diffs,
   commit and push; files with Preview and an editable Source view; terminals that keep 10,000 rows and
   survive daemon restarts.
