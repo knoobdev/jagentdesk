@@ -695,8 +695,9 @@ function useBotOwnedPublisher(serverId: string, bot: Bot) {
     useBotOwnedWorkspaces.getState().publish(serverId, bot.id, {
       workspaceIds: [...new Set(workspaceIds)].sort(),
       workerAgentIds: [...new Set(workerAgentIds)].sort(),
+      home: bot.home,
     });
-  }, [serverId, bot.id, bot.handedWorkspaces, tree.data]);
+  }, [serverId, bot.id, bot.home, bot.handedWorkspaces, tree.data]);
 }
 
 function workerDotStyle(state: BotChatWorker["state"]) {

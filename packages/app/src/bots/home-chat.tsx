@@ -121,7 +121,10 @@ export function BotHomeChat({ serverId, bot }: { serverId: string; bot: Bot }) {
     conversation = (
       <ScrollView contentContainerStyle={styles.firstRun}>
         <BotFirstScreen serverId={serverId} bot={bot} />
-        {persona}
+        {/* The first-run screen already shows the picture and name. */}
+        <Text style={styles.firstRunLine} testID="bot-home-chat-empty">
+          {t("bots.chat.emptySubtitle", { name: bot.name })}
+        </Text>
       </ScrollView>
     );
   else if (homeAgentId) conversation = <AgentTimeline serverId={serverId} agentId={homeAgentId} />;
@@ -129,7 +132,10 @@ export function BotHomeChat({ serverId, bot }: { serverId: string; bot: Bot }) {
   return (
     <View style={styles.column} testID="bot-home-chat">
       {conversation}
-      <BotHomeChatCards serverId={serverId} bot={bot} />
+      {/* The cards line up with the composer column (`theme.contentMaxWidth`, its inset). */}
+      <View style={styles.cards}>
+        <BotHomeChatCards serverId={serverId} bot={bot} />
+      </View>
       <MessageComposer
         serverId={serverId}
         draftId={`bot:${bot.id}`}
@@ -169,8 +175,20 @@ const styles = StyleSheet.create((theme: Theme) => ({
   close: { width: 20, height: 20, alignItems: "center", justifyContent: "center" },
   tooltip: { fontSize: theme.fontSize.sm, color: theme.colors.popoverForeground },
   column: { flex: 1, minHeight: 0 },
+  cards: {
+    width: "100%",
+    maxWidth: theme.contentMaxWidth,
+    alignSelf: "center",
+    paddingHorizontal: 28,
+  },
   firstRun: { paddingHorizontal: 32, paddingVertical: 32 },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: 32, gap: 8 },
   emptyText: { fontSize: 16, color: theme.colors.foregroundMuted, textAlign: "center" },
+  firstRunLine: {
+    marginTop: 24,
+    fontSize: 16,
+    color: theme.colors.foregroundMuted,
+    textAlign: "center",
+  },
   personaName: { fontSize: 18, fontWeight: "600", color: theme.colors.foreground },
 }));

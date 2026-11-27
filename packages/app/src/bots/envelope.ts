@@ -13,3 +13,14 @@ const BOT_ENVELOPE = /^\[[^\]\n]{1,64}\]\n/;
 export function stripBotEnvelope(text: string): string {
   return text.replace(BOT_ENVELOPE, "");
 }
+
+/** `BOT_QUIET_MARKER` (`server/bots/look-around.ts`): a bot ends a reply with it to post nothing. */
+const BOT_QUIET_MARKER = "[[quiet]]";
+
+/** A bot reply without its quiet marker; empty when the bot chose to say nothing (Orca shows none). */
+export function stripBotQuietMarker(text: string): string {
+  const trimmed = text.trimEnd();
+  return trimmed.endsWith(BOT_QUIET_MARKER)
+    ? trimmed.slice(0, -BOT_QUIET_MARKER.length).trimEnd()
+    : text;
+}

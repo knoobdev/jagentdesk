@@ -1,5 +1,9 @@
 import { useShallow } from "zustand/react/shallow";
-import { botOwnedWorkspaceKeys, useBotOwnedWorkspaces } from "@/bots/owned-workspaces-store";
+import {
+  botOwnedWorkspaceKeys,
+  isInBotHome,
+  useBotOwnedWorkspaces,
+} from "@/bots/owned-workspaces-store";
 import { useCallback, useEffect, useMemo } from "react";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import { useCreateFlowStore } from "@/stores/create-flow-store";
@@ -145,6 +149,7 @@ export function useSidebarWorkspacesList(options?: {
       const keys = botOwnedWorkspaceKeys(
         botOwned,
         (serverId, agentId) => state.sessions[serverId]?.agents.get(agentId)?.workspaceId,
+        (serverId) => state.sessions[serverId]?.workspaces.values() ?? [],
       );
       if (showBackground) return keys;
       for (const serverId of hydratedServerIds) {
@@ -156,13 +161,27 @@ export function useSidebarWorkspacesList(options?: {
     }),
   );
 
+  // A bot's home folder is the project its Home Chat runs in; it lists under the bot instead.
+  const botHomes = useMemo(
+    () => Object.values(botOwned).flatMap((owned) => (owned.home ? [owned.home] : [])),
+    [botOwned],
+  );
+  const listedProjects = useMemo(
+    () =>
+      botHomes.length === 0
+        ? hostProjects
+        : hostProjects.filter(
+            (project) => !botHomes.some((home) => isInBotHome(project.iconWorkingDir, home)),
+          ),
+    [botHomes, hostProjects],
+  );
   const sidebarModel = useMemo(
     () =>
       buildSidebarWorkspacePlacementModel({
-        projects: hostProjects,
+        projects: listedProjects,
         hiddenWorkspaceKeys,
       }),
-    [hostProjects, hiddenWorkspaceKeys],
+    [listedProjects, hiddenWorkspaceKeys],
   );
 
   const projects = sidebarModel.projects.length > 0 ? sidebarModel.projects : EMPTY_PROJECTS;
