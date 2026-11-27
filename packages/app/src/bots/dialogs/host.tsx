@@ -31,7 +31,12 @@ export function BotsDialogsHost() {
 }
 
 function OpenDialog({ dialog }: { dialog: BotsDialog }) {
-  const close = useBotsDialogs((state) => state.close);
+  // A sheet reports its dismiss after its animation, by when the next dialog may be open: closing
+  // applies to this dialog only.
+  const close = useCallback(() => {
+    const store = useBotsDialogs.getState();
+    if (store.dialog === dialog) store.close();
+  }, [dialog]);
   const open = useBotsDialogs((state) => state.open);
   const serverId = dialog.serverId;
   const openTemplates = useCallback(() => open({ kind: "templates", serverId }), [open, serverId]);
