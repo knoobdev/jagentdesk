@@ -166,13 +166,23 @@ export function ignoreNotPending(error: unknown): void {
 }
 
 function isNoLongerPending(error: unknown): boolean {
-  return (
-    (error instanceof OpenCodeHttpError && error.status === 404) ||
-    isPermissionNotFoundError(error) ||
-    isFormNotFoundError(error) ||
-    isFormAlreadySettledError(error) ||
-    isSessionNotFoundError(error)
-  );
+  // The OpenCode client wraps what its fetch throws as ClientError("Transport", { cause }), so
+  // the 404 from validateOpenCodeResponse arrives as the cause, not as the error itself.
+  for (let current: unknown = error; current; current = causeOf(current)) {
+    if (
+      (current instanceof OpenCodeHttpError && current.status === 404) ||
+      isPermissionNotFoundError(current) ||
+      isFormNotFoundError(current) ||
+      isFormAlreadySettledError(current) ||
+      isSessionNotFoundError(current)
+    )
+      return true;
+  }
+  return false;
+}
+
+function causeOf(error: unknown): unknown {
+  return error instanceof Error ? error.cause : undefined;
 }
 
 const TOOL_PERMISSION_TITLES: Record<string, string> = {

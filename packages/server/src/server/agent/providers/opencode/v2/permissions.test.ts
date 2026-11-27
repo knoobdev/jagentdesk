@@ -7,6 +7,7 @@ import { V2Harness } from "../test-utils/v2-harness.js";
 import type { AgentPermissionResponse, AgentStreamEvent } from "../../../agent-sdk-types.js";
 import { PermissionNotPendingError } from "../../../permission-not-pending-error.js";
 import { OpenCodeHttpError } from "../http-error.js";
+import { ClientError } from "@opencode/client";
 
 describe("OpenCode v2 denial reasons", () => {
   test.each<{
@@ -418,11 +419,14 @@ describe("OpenCode v2 permissions OpenCode no longer has", () => {
     const harness = new V2Harness();
     const { session, events } = await pendingExternalDirectory(harness);
     harness.api.permission.reply = async (input) => {
-      throw new OpenCodeHttpError(
-        `/api/session/${input.sessionID}/permission/${input.requestID}/reply`,
-        404,
-        false,
-      );
+      // What @opencode/client throws when validateOpenCodeResponse rejects the 404.
+      throw new ClientError("Transport", {
+        cause: new OpenCodeHttpError(
+          `/api/session/${input.sessionID}/permission/${input.requestID}/reply`,
+          404,
+          false,
+        ),
+      });
     };
     try {
       expect(session.getPendingPermissions().map((request) => request.id)).toEqual([

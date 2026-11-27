@@ -59,6 +59,7 @@ import type { ProviderDefinition } from "./provider-registry.js";
 import { OpenCodeV2AgentClient } from "./providers/opencode/v2/agent.js";
 import { V2Harness } from "./providers/opencode/test-utils/v2-harness.js";
 import { OpenCodeHttpError } from "./providers/opencode/http-error.js";
+import { ClientError } from "@opencode/client";
 
 function identityLine(agentId: string, cwd: string): string {
   return agentIdentityInstruction({ agentId, title: undefined, cwd, agentTools: false });
@@ -658,11 +659,13 @@ test("an OpenCode permission the server no longer has is dropped instead of fail
   ];
   // OpenCode 2.4.2 answers a reply for a request it no longer has with 404.
   harness.api.permission.reply = async (input) => {
-    throw new OpenCodeHttpError(
-      `/api/session/${input.sessionID}/permission/${input.requestID}/reply`,
-      404,
-      false,
-    );
+    throw new ClientError("Transport", {
+      cause: new OpenCodeHttpError(
+        `/api/session/${input.sessionID}/permission/${input.requestID}/reply`,
+        404,
+        false,
+      ),
+    });
   };
   const client = new OpenCodeV2AgentClient({ logger, runtime: harness.runtime });
   const manager = new AgentManager({ clients: { opencode: client }, logger });
