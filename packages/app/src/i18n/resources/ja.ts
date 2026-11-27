@@ -2846,6 +2846,10 @@ export const ja: TranslationResources = {
       },
       agentProfiles: {
         featureCountOne: "{{count}}個の機能",
+        systemPromptLabel: "システムプロンプト",
+        systemPromptPlaceholder:
+          "レイアウト、アクセシビリティ、デザイントークンに集中してください。",
+        systemPromptHint: "新しいエージェントにのみ適用されます",
         featureCount: "{{count}}個の機能",
         editProfileTitle: "エージェントプロファイルを編集",
         addProfileTitle: "エージェントプロファイルを追加",

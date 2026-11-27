@@ -2851,6 +2851,9 @@ export const ar: TranslationResources = {
       },
       agentProfiles: {
         featureCountOne: "{{count}} سمة",
+        systemPromptLabel: "موجه النظام",
+        systemPromptPlaceholder: "ركز على التخطيط وإمكانية الوصول ورموز التصميم.",
+        systemPromptHint: "ينطبق على الوكلاء الجدد فقط",
         featureCount: "{{count}} سمة",
         editProfileTitle: "تعديل ملف تعريف الوكيل",
         addProfileTitle: "إضافة ملف تعريف وكيل",

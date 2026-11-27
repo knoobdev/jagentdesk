@@ -72,16 +72,23 @@ function matchesProfileQuery(
   normalizedQuery: string,
   entries: readonly ProviderSnapshotEntry[] | undefined,
   formatFeatureCount: (count: number) => string,
+  systemPromptLabel: string,
 ): boolean {
   if (
     profile.name.toLowerCase().includes(normalizedQuery) ||
+    profile.systemPrompt?.toLowerCase().includes(normalizedQuery) ||
     profile.notes?.toLowerCase().includes(normalizedQuery) ||
     profile.model?.toLowerCase().includes(normalizedQuery) ||
     profile.provider.toLowerCase().includes(normalizedQuery)
   ) {
     return true;
   }
-  const tags = buildAgentProfileTags({ profile, entries, formatFeatureCount });
+  const tags = buildAgentProfileTags({
+    profile,
+    entries,
+    formatFeatureCount,
+    systemPromptLabel,
+  });
   return tags.some((tag) => tag.label.toLowerCase().includes(normalizedQuery));
 }
 
@@ -860,6 +867,7 @@ export function AgentProfilesPage({
     [t],
   );
 
+  const systemPromptLabel = t("settings.host.agentProfiles.systemPromptLabel");
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const isFiltering = normalizedQuery.length > 0;
 
@@ -871,9 +879,9 @@ export function AgentProfilesPage({
       return profiles;
     }
     return profiles.filter((profile) =>
-      matchesProfileQuery(profile, normalizedQuery, entries, formatFeatureCount),
+      matchesProfileQuery(profile, normalizedQuery, entries, formatFeatureCount, systemPromptLabel),
     );
-  }, [entries, formatFeatureCount, normalizedQuery, profiles]);
+  }, [entries, formatFeatureCount, normalizedQuery, profiles, systemPromptLabel]);
 
   const totalCount = profiles?.length ?? 0;
   const selectedProfileId = activeProfile?.id ?? null;

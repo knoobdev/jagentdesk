@@ -419,6 +419,9 @@ export const vi = {
       },
       agentProfiles: {
         featureCountOne: "{{count}} feature",
+        systemPromptLabel: "Lời nhắc hệ thống",
+        systemPromptPlaceholder: "Tập trung vào bố cục, khả năng truy cập và design token.",
+        systemPromptHint: "Chỉ áp dụng cho agent mới",
         featureCount: "{{count}} features",
         editProfileTitle: "Edit agent profile",
         addProfileTitle: "Add agent profile",

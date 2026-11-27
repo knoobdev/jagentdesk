@@ -2898,6 +2898,10 @@ export const fr: TranslationResources = {
       },
       agentProfiles: {
         featureCountOne: "{{count}} fonctionnalité",
+        systemPromptLabel: "Prompt système",
+        systemPromptPlaceholder:
+          "Concentre-toi sur la mise en page, l’accessibilité et les jetons de design.",
+        systemPromptHint: "S’applique uniquement aux nouveaux agents",
         featureCount: "{{count}} fonctionnalités",
         editProfileTitle: "Modifier le profil d’agent",
         addProfileTitle: "Ajouter un profil d’agent",

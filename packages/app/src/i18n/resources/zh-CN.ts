@@ -2774,6 +2774,9 @@ export const zhCN: TranslationResources = {
       },
       agentProfiles: {
         featureCountOne: "{{count}} 个 Feature",
+        systemPromptLabel: "System prompt",
+        systemPromptPlaceholder: "专注于布局、无障碍和设计 token。",
+        systemPromptHint: "仅适用于新 Agent",
         featureCount: "{{count}} 个 Feature",
         editProfileTitle: "编辑 Agent 配置",
         addProfileTitle: "添加 Agent 配置",

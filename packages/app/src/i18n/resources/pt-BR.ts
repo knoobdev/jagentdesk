@@ -2840,6 +2840,9 @@ export const ptBR: TranslationResources = {
       },
       agentProfiles: {
         featureCountOne: "{{count}} recurso",
+        systemPromptLabel: "Prompt do sistema",
+        systemPromptPlaceholder: "Foque em layout, acessibilidade e tokens de design.",
+        systemPromptHint: "Aplica-se apenas a novos agentes",
         featureCount: "{{count}} recursos",
         editProfileTitle: "Editar perfil de agente",
         addProfileTitle: "Adicionar perfil de agente",

@@ -42,7 +42,10 @@ import {
   type AgentProvider,
   type AgentPermissionAction,
   type AgentPermissionResponse,
+  type AgentSessionConfig,
 } from "../agent-sdk-types.js";
+import { AgentProfileSchema } from "@jagentdesk/protocol/messages";
+import type { DaemonConfigStore } from "../../daemon-config-store.js";
 import {
   AgentFeatureSchema,
   AgentPermissionRequestPayloadSchema,
@@ -172,6 +175,8 @@ export interface JAgentDeskToolHostDependencies {
   getDaemonTcpPort?: () => number | null;
   scheduleService?: ScheduleService | null;
   providerSnapshotManager: ProviderSnapshotManager;
+  /** Read for `list_profiles`: the agent profiles a human configured. */
+  daemonConfigStore?: Pick<DaemonConfigStore, "get">;
   github?: ForgeService;
   workspaceGitService?: Pick<
     WorkspaceGitService,
@@ -955,6 +960,7 @@ function createToolCatalog(
     workspaceScripts,
     scheduleService,
     providerSnapshotManager,
+    daemonConfigStore,
     callerAgentId,
     resolveSpeakHandler,
     resolveCallerContext,
@@ -1197,6 +1203,13 @@ function createToolCatalog(
       background: inheritWorkspaceBackground(background, caller),
       callerWorkspaceId: caller?.workspaceId,
     };
+  };
+
+  const resolveCreateAgentConfig = (
+    rawSystemPrompt?: string,
+  ): Partial<AgentSessionConfig> | undefined => {
+    const systemPrompt = rawSystemPrompt?.trim();
+    return systemPrompt ? { systemPrompt } : undefined;
   };
 
   const resolveScopedCwd = (requestedCwd?: string, opts?: { required?: boolean }): string => {
@@ -1442,6 +1455,10 @@ function createToolCatalog(
         .record(z.string(), z.unknown())
         .optional()
         .describe("Provider-specific feature values, for example { fast_mode: true } for Codex."),
+      systemPrompt: z
+        .string()
+        .optional()
+        .describe("Optional system prompt applied to the new agent."),
     })
     .strict();
   const UpdateAgentSettingsInputSchema = z
@@ -2284,6 +2301,7 @@ function createToolCatalog(
         requestedBackground = resolvedArgs.parsedArgs.background;
         notifyOnFinish = resolvedArgs.parsedArgs.notifyOnFinish ?? false;
       }
+      const createConfig = resolveCreateAgentConfig(parsedArgs.settings?.systemPrompt);
       const {
         snapshot,
         background: createdInBackground,
@@ -2307,6 +2325,7 @@ function createToolCatalog(
           provider: parsedArgs.provider,
           title: parsedArgs.title,
           initialPrompt,
+          config: createConfig,
           cwd: resolvedArgs.cwd,
           workspaceId: resolvedArgs.workspaceId,
           thinking: parsedArgs.settings?.thinkingOptionId,
@@ -4073,6 +4092,31 @@ function createToolCatalog(
           provider,
           models,
         }),
+      };
+    },
+  );
+
+  registerTool(
+    "list_profiles",
+    {
+      title: "List agent profiles",
+      description:
+        "List agent profiles: named provider/model/mode bundles a human configured for specific " +
+        "kinds of work. Read each profile's `notes` to pick the one that fits the task you're " +
+        "delegating, then copy its `provider`, `model`, `modeId`, `thinkingOptionId`, " +
+        "`systemPrompt` (as `settings.systemPrompt`), and `options` (as `settings.features`) " +
+        "into create_agent (there is no `profile` parameter). " +
+        "Returns an empty list if none are configured.",
+      inputSchema: {},
+      outputSchema: {
+        profiles: z.array(AgentProfileSchema),
+      },
+    },
+    async () => {
+      const profiles = daemonConfigStore?.get().agentProfiles ?? [];
+      return {
+        content: [],
+        structuredContent: ensureValidJson({ profiles }),
       };
     },
   );

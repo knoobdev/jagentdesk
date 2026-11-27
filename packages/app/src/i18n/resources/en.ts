@@ -2861,6 +2861,9 @@ export const en = {
       },
       agentProfiles: {
         featureCountOne: "{{count}} feature",
+        systemPromptLabel: "System prompt",
+        systemPromptPlaceholder: "Focus on layout, accessibility, and design tokens.",
+        systemPromptHint: "Applies to new agents only",
         featureCount: "{{count}} features",
         editProfileTitle: "Edit agent profile",
         addProfileTitle: "Add agent profile",

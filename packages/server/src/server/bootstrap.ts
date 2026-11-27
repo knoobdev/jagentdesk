@@ -2023,6 +2023,7 @@ export async function createJAgentDeskDaemon(
     runtime: JAgentDeskToolRuntimeContext,
   ): JAgentDeskToolHostDependencies => ({
     changeRequestWatches,
+    daemonConfigStore,
     builtinPlugins: pluginRuntime.builtin.forAgent(runtime.callerAgentId),
     builtinDaemon,
     callerAgentLabels: runtime.callerAgentLabels,

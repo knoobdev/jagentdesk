@@ -394,6 +394,71 @@ describe("DaemonConfigStore", () => {
     expect(persisted.daemon?.appendSystemPrompt).toBe("Prefer terse replies.");
   });
 
+  test("preserves stored profile systemPrompt when omitted by an older client and clears on empty string", () => {
+    const jagentdeskHome = mkdtempSync(path.join(tmpdir(), "jagentdesk-daemon-config-store-"));
+    tempDirs.push(jagentdeskHome);
+    const store = new DaemonConfigStore(
+      jagentdeskHome,
+      {
+        mcp: { injectIntoAgents: false },
+        browserTools: { enabled: false },
+        providers: {},
+        metadataGeneration: { providers: [] },
+        autoArchiveAfterMerge: false,
+        enableTerminalAgentHooks: false,
+        appendSystemPrompt: "",
+      },
+      undefined,
+    );
+
+    store.patch({
+      agentProfiles: [
+        {
+          id: "profile_ui",
+          name: "UI work",
+          provider: "claude",
+          model: "claude-opus-5",
+          systemPrompt: "  Focus on layout and design tokens.  ",
+        },
+      ],
+    });
+    expect(loadPersistedConfig(jagentdeskHome).daemon?.agentProfiles?.[0]?.systemPrompt).toBe(
+      "Focus on layout and design tokens.",
+    );
+
+    // An older client edits the profile without sending `systemPrompt`.
+    store.patch({
+      agentProfiles: [
+        {
+          id: "profile_ui",
+          name: "UI work updated",
+          provider: "claude",
+          model: "claude-opus-5",
+        },
+      ],
+    });
+    expect(loadPersistedConfig(jagentdeskHome).daemon?.agentProfiles?.[0]).toMatchObject({
+      name: "UI work updated",
+      systemPrompt: "Focus on layout and design tokens.",
+    });
+
+    // A newer client explicitly clears `systemPrompt` by sending an empty string.
+    store.patch({
+      agentProfiles: [
+        {
+          id: "profile_ui",
+          name: "UI work updated",
+          provider: "claude",
+          model: "claude-opus-5",
+          systemPrompt: "",
+        },
+      ],
+    });
+    expect(loadPersistedConfig(jagentdeskHome).daemon?.agentProfiles?.[0]).not.toHaveProperty(
+      "systemPrompt",
+    );
+  });
+
   test("patch persists browser tools opt-in into config.json", () => {
     const jagentdeskHome = mkdtempSync(path.join(tmpdir(), "jagentdesk-daemon-config-store-"));
     tempDirs.push(jagentdeskHome);
