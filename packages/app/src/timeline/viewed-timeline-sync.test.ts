@@ -84,6 +84,18 @@ class TimelineWorld {
       this.releaseFetchWaiters();
       return result.promise;
     },
+    fetchLatestTail: async (agentId) => {
+      const result = deferred<{
+        hasNewer: boolean;
+        endCursor: { epoch: string; seq: number } | null;
+      }>();
+      this.latestTails.push({
+        agentId,
+        respond: (seq) =>
+          result.resolve({ hasNewer: false, endCursor: { epoch: `epoch-${agentId}`, seq } }),
+      });
+      return result.promise;
+    },
     reportError: (error) => {
       this.errors.push(error instanceof Error ? error.message : String(error));
       const waiter = this.errorWaiters.shift();
@@ -104,6 +116,7 @@ class TimelineWorld {
     },
   });
 
+  readonly latestTails: Array<{ agentId: string; respond(seq: number): void }> = [];
   private readonly memberships: MembershipRequest[] = [];
   private readonly membershipWaiters: Array<(request: MembershipRequest) => void> = [];
   private readonly fetches: TimelineFetch[] = [];
@@ -872,3 +885,84 @@ test.each(["resume", "reconnect"] as const)(
     world.sync.dispose();
   },
 );
+
+test("a resume that overflows one page installs the latest tail instead of replaying the backlog", async () => {
+  const world = new TimelineWorld();
+  world.freshnessEnabled = true;
+  world.cursors.set("a", { epoch: "epoch-a", endSeq: 4 });
+  world.sync.setConnected(true);
+  world.sync.replaceVisibleAgentIds("pane", ["a"]);
+  (await world.nextMembership()).succeed({ timelines: { a: "behind" } });
+  const firstPage = await world.nextFetch("a");
+  expect(firstPage.request).toMatchObject({ direction: "after", cursor: { seq: 4 } });
+
+  firstPage.respond({ hasNewer: true, seq: 44 });
+
+  await vi.waitFor(() => expect(world.latestTails.map((tail) => tail.agentId)).toEqual(["a"]));
+  world.expectNoPendingFetch();
+  expect(world.sync.getAgentTimelineStatus("a")).toBe("pending");
+  world.latestTails[0].respond(900);
+  await vi.waitFor(() => expect(world.sync.getAgentTimelineStatus("a")).toBe("ready"));
+  world.expectNoPendingFetch();
+  world.sync.dispose();
+});
+
+test("a resume after the unsubscribe grace is bounded to one page and the latest tail", async () => {
+  const world = new TimelineWorld();
+  world.freshnessEnabled = true;
+  world.cursors.set("a", { epoch: "epoch-a", endSeq: 4 });
+  world.sync.setConnected(true);
+  world.sync.replaceVisibleAgentIds("pane", ["a"]);
+  (await world.nextMembership()).succeed({ timelines: { a: "current" } });
+  await vi.waitFor(() => expect(world.sync.getAgentTimelineStatus("a")).toBe("ready"));
+
+  world.sync.setActive(false);
+  world.runUnsubscribeGrace();
+  (await world.nextMembership()).succeed();
+  world.sync.setActive(true);
+  (await world.nextMembership()).succeed({ timelines: { a: "behind" } });
+  const firstPage = await world.nextFetch("a");
+  firstPage.respond({ hasNewer: true, seq: 44 });
+
+  await vi.waitFor(() => expect(world.latestTails).toHaveLength(1));
+  world.expectNoPendingFetch();
+  world.latestTails[0].respond(900);
+  await vi.waitFor(() => expect(world.sync.getAgentTimelineStatus("a")).toBe("ready"));
+  world.sync.dispose();
+});
+
+test("a retried resume keeps the bounded policy", async () => {
+  const world = new TimelineWorld();
+  world.cursors.set("a", { epoch: "epoch-a", endSeq: 4 });
+  world.sync.setConnected(true);
+  world.sync.replaceVisibleAgentIds("pane", ["a"]);
+  (await world.nextMembership()).succeed();
+  (await world.nextFetch("a")).fail("timeline timed out");
+  (await world.nextRetry())();
+  const retried = await world.nextFetch("a");
+  expect(retried.request).toMatchObject({ direction: "after", cursor: { seq: 4 } });
+
+  retried.respond({ hasNewer: true, seq: 44 });
+
+  await vi.waitFor(() => expect(world.latestTails).toHaveLength(1));
+  world.expectNoPendingFetch();
+  world.sync.dispose();
+});
+
+test("live gap recovery still pages forward until current", async () => {
+  const world = new TimelineWorld();
+  world.sync.setConnected(true);
+  world.sync.replaceVisibleAgentIds("pane", ["a"]);
+  (await world.nextMembership()).succeed();
+  (await world.nextFetch("a")).respond({ hasNewer: false, seq: 10 });
+
+  world.sync.recoverGap("a", { epoch: "epoch-a", endSeq: 10 });
+  const gapPage = await world.nextFetch("a");
+  gapPage.respond({ hasNewer: true, seq: 50 });
+  const nextPage = await world.nextFetch("a");
+
+  expect(nextPage.request).toMatchObject({ direction: "after", cursor: { seq: 50 } });
+  expect(world.latestTails).toEqual([]);
+  nextPage.respond({ hasNewer: false, seq: 60 });
+  world.sync.dispose();
+});

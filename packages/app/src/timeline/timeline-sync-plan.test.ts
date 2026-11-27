@@ -3,6 +3,8 @@ import { TIMELINE_FETCH_PAGE_SIZE } from "@/timeline/timeline-fetch-policy";
 import {
   isTimelineCatchUpComplete,
   isTimelineResumeSnapshotAuthoritative,
+  planTimelineCatchUpAfter,
+  planTimelineCatchUpPastApplied,
   planTimelineOlderFetch,
   planTimelinePromptJump,
   planTimelineTailFetch,
@@ -74,5 +76,21 @@ describe("timeline sync planning", () => {
         error: null,
       }),
     ).toBe(false);
+  });
+});
+
+describe("parked catch-up requests", () => {
+  const parked = planTimelineCatchUpAfter({ epoch: "e1", seq: 10 });
+
+  test("start after rows applied while they waited", () => {
+    expect(planTimelineCatchUpPastApplied(parked, { epoch: "e1", endSeq: 900 })).toEqual(
+      planTimelineCatchUpAfter({ epoch: "e1", seq: 900 }),
+    );
+  });
+
+  test("keep their cursor when nothing newer was applied or the epoch changed", () => {
+    expect(planTimelineCatchUpPastApplied(parked, { epoch: "e1", endSeq: 10 })).toBe(parked);
+    expect(planTimelineCatchUpPastApplied(parked, { epoch: "e2", endSeq: 900 })).toBe(parked);
+    expect(planTimelineCatchUpPastApplied(parked, undefined)).toBe(parked);
   });
 });
