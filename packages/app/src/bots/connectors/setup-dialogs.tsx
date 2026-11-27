@@ -2,7 +2,7 @@
 // (spec 37.8.1); GitHub, GitLab and Telegram follow spec 37.10.1, 37.11.1 and 37.12.1 and call the
 // bt4 RPCs through `hooks-rpc.ts`. Orca's own setup dialogs (bots/slack/*, bots/github/*) talk to its
 // cloud connector, so only their layout and strings carry over.
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
@@ -22,6 +22,8 @@ import {
   type HookManualSetup,
 } from "./hooks-rpc";
 import type { BotConnectorId } from "./connector-rows";
+import { telegramLinkView, type TelegramLinkCode } from "./telegram-link";
+import type { TelegramStatus } from "./hooks-rpc";
 
 function Line({ children, tone }: { children: ReactNode; tone?: "danger" | "muted" }) {
   return (
@@ -424,6 +426,76 @@ function GitLabSetup({ serverId, bot }: { serverId: string; bot: Bot }) {
   );
 }
 
+/**
+ * Spec 37.12.1 item 3: "Open in Telegram" first, then the code to send by hand, then "Linked ·
+ * {{name}}" when the daemon's `bots.changed` push brings a status naming who sent this code.
+ */
+function TelegramLinkPanel({
+  code,
+  status,
+}: {
+  code: TelegramLinkCode | undefined;
+  status: TelegramStatus;
+}) {
+  const { t } = useTranslation();
+  const [now, setNow] = useState(() => Date.now());
+  const [copied, setCopied] = useState(false);
+  const view = telegramLinkView(code, status, now);
+  const expiresAt = view.kind === "pending" ? view.expiresAt_ms : null;
+  useEffect(() => {
+    setCopied(false);
+    setNow(Date.now());
+    if (expiresAt === null) return;
+    // Hide the code when it stops working; the button makes a new one.
+    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, expiresAt - Date.now()));
+    return () => clearTimeout(timer);
+  }, [expiresAt]);
+  const url = view.kind === "pending" ? view.url : null;
+  const value = view.kind === "pending" ? view.code : null;
+  const open = useCallback(() => {
+    if (url) void openExternalUrl(url);
+  }, [url]);
+  const copy = useCallback(async () => {
+    if (!value) return;
+    await copyToClipboard(value);
+    setCopied(true);
+  }, [value]);
+  if (view.kind === "none") return null;
+  if (view.kind === "linked")
+    return (
+      <View style={styles.linkBox} testID="bot-telegram-linked">
+        <Text style={styles.linked}>
+          {t("bots.jad.panels.connectors.telegram.linked", { name: view.name })}
+        </Text>
+      </View>
+    );
+  return (
+    <View style={styles.linkBox} testID="bot-telegram-link">
+      <Button size="sm" variant="default" onPress={open} testID="bot-telegram-open">
+        {t("bots.jad.panels.connectors.telegram.openInTelegram")}
+      </Button>
+      <Text style={styles.muted}>
+        {t("bots.jad.panels.connectors.telegram.sendCode", { username: view.username })}
+      </Text>
+      <View style={styles.codeRow}>
+        <Text style={styles.code} selectable testID="bot-telegram-link-code">
+          {view.code}
+        </Text>
+        <Button size="sm" variant="ghost" onPress={copy} testID="bot-telegram-copy-code">
+          {copied
+            ? t("bots.jad.panels.connectors.copied")
+            : t("bots.jad.panels.connectors.telegram.copyCode")}
+        </Button>
+      </View>
+      <Text style={styles.muted}>
+        {t("bots.jad.panels.connectors.telegram.expiresAt", {
+          time: new Date(view.expiresAt_ms).toLocaleTimeString(),
+        })}
+      </Text>
+    </View>
+  );
+}
+
 function TelegramSetup({ serverId, bot }: { serverId: string; bot: Bot }) {
   const { t } = useTranslation();
   const status = useHooksRead(serverId, "bots.telegram.status.request", { botId: bot.id });
@@ -467,18 +539,17 @@ function TelegramSetup({ serverId, bot }: { serverId: string; bot: Bot }) {
             })}
           </Line>
           <View style={styles.actions}>
-            <Button size="sm" variant="outline" onPress={link} loading={linkCode.isPending}>
+            <Button
+              size="sm"
+              variant="outline"
+              onPress={link}
+              loading={linkCode.isPending}
+              testID="bot-telegram-link-account"
+            >
               {t("bots.jad.panels.connectors.telegram.linkAccount")}
             </Button>
           </View>
-          {code ? (
-            <Line>
-              {t("bots.jad.panels.connectors.telegram.linkCode", {
-                code: code.code,
-                time: new Date(code.expiresAt_ms).toLocaleTimeString(),
-              })}
-            </Line>
-          ) : null}
+          <TelegramLinkPanel code={code} status={current} />
           <Text style={styles.subtitle}>{t("bots.jad.panels.connectors.telegram.allowed")}</Text>
           {current.allowedUsers.length === 0 ? (
             <Line tone="muted">{t("bots.jad.panels.connectors.telegram.noUsers")}</Line>
@@ -589,4 +660,22 @@ const styles = StyleSheet.create((theme) => ({
   rowTitle: { fontSize: 14, color: theme.colors.foreground },
   personName: { flex: 1, minWidth: 0, fontSize: 14, color: theme.colors.foreground },
   textButton: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  linkBox: {
+    gap: 8,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  codeRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  code: {
+    flex: 1,
+    fontSize: 28,
+    lineHeight: 36,
+    letterSpacing: 4,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foreground,
+  },
+  linked: { fontSize: 14, lineHeight: 20, fontWeight: "600", color: theme.colors.foreground },
 }));

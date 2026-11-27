@@ -280,7 +280,8 @@ export class BotsService {
   private emit(event: BotsPush): void {
     for (const listener of this.listeners) listener(event);
   }
-  private changed(botId: string): void {
+  /** `bots.changed`: the bot or something shown about it changed (a connector links a person). */
+  changed(botId: string): void {
     this.emit({ type: "bots.changed", payload: { botId } });
   }
   private activity(

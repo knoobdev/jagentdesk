@@ -100,6 +100,8 @@ export const TelegramStatusSchema = z.object({
   requestUrl: z.string().optional(),
   botUsername: z.string().optional(),
   allowedUsers: z.array(AllowedUserSchema),
+  /** The last link code someone sent the bot, and who: the open dialog shows "Linked · {{name}}". */
+  linked: z.object({ code: z.string(), user: AllowedUserSchema }).optional(),
 });
 export type TelegramStatus = z.infer<typeof TelegramStatusSchema>;
 const botId = { botId: z.string() };
