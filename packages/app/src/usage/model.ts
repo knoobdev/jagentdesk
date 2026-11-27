@@ -121,6 +121,15 @@ export function settleReports(
   return [...settled, ...remaining.values()];
 }
 
+/** Whether a settled list leaves out any report that was shown before it. */
+export function dropsReports(
+  shown: readonly UsageReportEntry[],
+  settled: readonly UsageReportEntry[],
+): boolean {
+  const kept = new Set(settled.map((report) => report.id));
+  return shown.some((report) => !kept.has(report.id));
+}
+
 export interface UsageQueryState {
   data: UsageReportEntry[] | undefined;
   error: unknown;

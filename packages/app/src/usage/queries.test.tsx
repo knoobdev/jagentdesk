@@ -1,11 +1,11 @@
 /** @vitest-environment jsdom */
 import { createElement, type ReactNode } from "react";
-import { cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MutableDaemonConfig } from "@jagentdesk/protocol/messages";
 import { useSessionStore } from "@/stores/session-store";
-import { useUsageHostReports } from "./queries";
+import { useHostUsage, useUsageHostReports } from "./queries";
 import { usageReportsQueryKey } from "./query-keys";
 import type { UsageReportEntry } from "./types";
 
@@ -146,6 +146,49 @@ describe("useUsageHostReports", () => {
     expect(state.listUsageReports).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps the shown reports while a restarted host's usage sources start", async () => {
+    // A restarted daemon answers before its usage-source plugins have registered.
+    state.listUsageReports.mockResolvedValueOnce({ reports: [] }).mockResolvedValue({
+      reports: fresh,
+    });
+    seedShownReports();
+    const seen: UsageReportEntry[][] = [];
+
+    const { result } = renderHook(
+      () => {
+        const reports = useUsageHostReports({ serverId: HOST, active: true });
+        seen.push(reports);
+        return reports;
+      },
+      { wrapper: Wrapper },
+    );
+
+    await waitFor(() => expect(result.current).toEqual(fresh), { timeout: 3_000 });
+    expect(seen.some((reports) => reports.length === 0)).toBe(false);
+  });
+
+  it("drops reports the host no longer lists once its retries agree", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      state.listUsageReports.mockResolvedValue({ reports: [] });
+      seedShownReports();
+
+      const { result } = renderReports({ active: true });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3_500);
+      });
+      expect(result.current).toEqual(shown);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(result.current).toEqual([]);
+      expect(state.listUsageReports).toHaveBeenCalledTimes(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps the shown reports while the summary is off screen, without polling", () => {
     seedShownReports();
 
@@ -163,5 +206,20 @@ describe("useUsageHostReports", () => {
 
     expect(result.current).toEqual([]);
     expect(state.listUsageReports).not.toHaveBeenCalled();
+  });
+});
+
+describe("useHostUsage", () => {
+  it("settles an explicit refresh at once, even when it drops reports", async () => {
+    // Disconnected, so the settings view itself does not fetch; only the refresh asks.
+    state.connected = false;
+    state.listUsageReports.mockResolvedValue({ reports: [] });
+    seedShownReports();
+    const { result } = renderHook(() => useHostUsage(HOST), { wrapper: Wrapper });
+
+    act(() => result.current.refresh());
+
+    await waitFor(() => expect(queryClient.getQueryData(usageReportsQueryKey(HOST))).toEqual([]));
+    expect(state.listUsageReports).toHaveBeenCalledTimes(1);
   });
 });

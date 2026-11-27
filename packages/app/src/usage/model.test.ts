@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { i18n } from "@/i18n/i18next";
 import {
+  dropsReports,
   resolveUsageReport,
   markUsageRefreshFailure,
   displayPercent,
@@ -149,6 +150,21 @@ describe("resolveUsageHostId", () => {
         hosts: hosts.slice(0, 2),
       }),
     ).toBeNull();
+  });
+});
+
+describe("dropsReports", () => {
+  const claude = entry({ sourceId: "claude" });
+  const codex = entry({ sourceId: "codex" });
+
+  it("is true when a shown report is missing from the settled list", () => {
+    expect(dropsReports([claude, codex], [claude])).toBe(true);
+    expect(dropsReports([claude], [])).toBe(true);
+  });
+
+  it("is false when every shown report is still listed, or nothing was shown", () => {
+    expect(dropsReports([claude], [codex, claude])).toBe(false);
+    expect(dropsReports([], [])).toBe(false);
   });
 });
 

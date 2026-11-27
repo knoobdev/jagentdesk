@@ -21,6 +21,7 @@ import { useSessionStore, type SessionState } from "@/stores/session-store";
 import { useUsageSetting } from "./setting";
 import { usageCopy } from "./copy";
 import {
+  dropsReports,
   markUsageRefreshFailure,
   replaceReport,
   resolveAgentUsageView,
@@ -41,13 +42,13 @@ import type { UsageReportEntry, UsageView } from "./types";
 const REPORTS_STALE_TIME_MS = 60_000;
 const REPORTS_REFETCH_INTERVAL_MS = 5 * 60_000;
 
-// The sidebar summary retries a failed list a few times within seconds, so one dropped request
-// during a reconnect does not leave it stale until the next poll.
-const SUMMARY_RETRY_COUNT = 3;
-const SUMMARY_RETRY_MAX_DELAY_MS = 4_000;
+// A failed list is retried a few times within seconds (1 s, 2 s, 4 s), so one dropped request
+// during a reconnect does not leave the reports stale until the next poll.
+const REPORTS_RETRY_COUNT = 3;
+const REPORTS_RETRY_MAX_DELAY_MS = 4_000;
 
-function summaryRetryDelay(attempt: number): number {
-  return Math.min(1_000 * 2 ** attempt, SUMMARY_RETRY_MAX_DELAY_MS);
+function reportsRetryDelay(attempt: number): number {
+  return Math.min(1_000 * 2 ** attempt, REPORTS_RETRY_MAX_DELAY_MS);
 }
 
 function agentUsageQueryKey(serverId: string, agentId: string, usageScopeKey: string | undefined) {
@@ -95,6 +96,12 @@ async function streamReports(input: {
   return settleReports(queryClient.getQueryData<UsageReportEntry[]>(queryKey), reports);
 }
 
+/**
+ * Lists a host's own reports. A restarted daemon answers before its usage sources have started,
+ * with fewer reports than it had, so a list that drops shown reports does not settle at once: it
+ * fails, keeping them, and the retries ask again. The last retry, or an explicit refresh, settles
+ * whatever the host then lists. A source turned off leaves at once (`useUsageSourceUpdates`).
+ */
 async function listReports(
   queryClient: QueryClient,
   serverId: string,
@@ -103,12 +110,18 @@ async function listReports(
 ): Promise<UsageReportEntry[]> {
   const queryKey = usageReportsQueryKey(serverId);
   const attempted = queryClient.getQueryData<UsageReportEntry[]>(queryKey) ?? [];
+  let reports: UsageReportEntry[];
   try {
-    return await streamReports({ queryClient, queryKey, serverId, forceRefresh, signal });
+    reports = await streamReports({ queryClient, queryKey, serverId, forceRefresh, signal });
   } catch (error) {
     recordUsageRefreshFailure(queryClient, queryKey, attempted);
     throw error;
   }
+  const failures = queryClient.getQueryState(queryKey)?.fetchFailureCount ?? 0;
+  if (!forceRefresh && failures < REPORTS_RETRY_COUNT && dropsReports(attempted, reports)) {
+    throw new Error("The host listed fewer usage reports than it had; asking again.");
+  }
+  return reports;
 }
 
 function recordUsageRefreshFailure(
@@ -172,6 +185,8 @@ export function useHostUsage(serverId: string): { view: UsageView; refresh: () =
     enabled: isConnected && isSupported && setting.enabled,
     dataShape: "value",
     staleTimeMs: REPORTS_STALE_TIME_MS,
+    retry: REPORTS_RETRY_COUNT,
+    retryDelay: reportsRetryDelay,
   });
   const mutation = useMutation({
     mutationKey: [...usageReportsQueryKey(serverId), "refresh"],
@@ -227,8 +242,8 @@ export function useUsageHostReports({
     dataShape: "value",
     staleTimeMs: REPORTS_STALE_TIME_MS,
     refetchInterval: active ? REPORTS_REFETCH_INTERVAL_MS : false,
-    retry: SUMMARY_RETRY_COUNT,
-    retryDelay: summaryRetryDelay,
+    retry: REPORTS_RETRY_COUNT,
+    retryDelay: reportsRetryDelay,
     // Kept while the sidebar is collapsed or unmounted, so it reopens with the last numbers.
     gcTime: Infinity,
   });
