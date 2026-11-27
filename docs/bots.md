@@ -84,6 +84,15 @@ Round-1 RPC names stay. A running Home Chat note is pushed again under the same 
 it finishes; replace messages by id. `bots.items_changed` and `bots.activity_changed` say which
 read to refetch. The Home Chat agent id is absent until the first delivered message.
 
+The first-run screen reads Home Chat history with `botFirstScreenState` (`bots/rules`), as Orca
+does: it leads from the kickoff until the bot speaks or the owner writes. A kickoff turn that ends
+without words, or that the host cannot start, gets an `assistant` row with `source: "error"`; the
+screen shows it with Try again (`bots.kickoff.retry`, gated on `features.botsKickoff`). The drain
+never resends a failed kickoff on its own. `firstRun` is a different thing: it lasts until the
+owner's first turn ends, because the first-run rules steer that turn too, so never use it alone to
+decide whether to show the screen. In the agent timeline the kickoff is a notice row, not a user
+bubble.
+
 ## Triggers
 
 Cron automations, Look around slots and wait deadlines use persisted occurrence keys. Paused bots

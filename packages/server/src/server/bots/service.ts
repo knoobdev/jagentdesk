@@ -38,10 +38,14 @@ import type {
 import { BotTidyUpSummarySchema } from "@jagentdesk/protocol/bots/views";
 import type { BotsPush, BotsRequest } from "@jagentdesk/protocol/bots/rpc-schemas";
 import {
+  BOT_CREATED_KICKOFF,
   BOT_ITEM_STATUS_LABELS,
+  BOT_KICKOFF_NO_REPLY,
   LOOK_AROUND_LIMITS,
   TIDY_UP_LIMITS,
+  botFirstScreenState,
   botLookAround,
+  isBotKickoffMessage,
   lookAroundSupported,
 } from "@jagentdesk/protocol/bots/rules";
 import { computeNextRunAt, validateScheduleCadence } from "../schedule/cron.js";
@@ -126,7 +130,7 @@ export interface BotTriggerSource {
 export type BotAllowedSource = (bot: Bot) => Promise<BotAllowedPerson[]>;
 
 /** Orca's turn to a bot it just created (`shared/bot-created-kickoff.ts`). */
-export const BOT_CREATED_KICKOFF = "JAgentDesk: you were just created. Start your first-run setup.";
+export { BOT_CREATED_KICKOFF };
 /** Orca dfdb4fda (MIT) src/shared/agent-session/lifecycle/stopping/agent-session-restart-continuation.ts:7,
  *  "Orca" → "JAgentDesk". Sent as `[restart]`; the app shows its own notice instead of this text. */
 export const RESTART_CONTINUATION_PROMPT =
@@ -453,7 +457,8 @@ export class BotsService {
     place: Pick<BotMessage, "roomId" | "rootId" | "slack" | "connector"> = {},
   ): BotMessage | null {
     this.storage.bot(botId);
-    const message = this.storage.enqueue(botId, `${botId}:${key}`, text, source, place);
+    // The service clock, as replies and notes use, so Home Chat reads in the order it happened.
+    const message = this.storage.enqueue(botId, `${botId}:${key}`, text, source, place, this.now());
     if (message) {
       this.emit({ type: "bots.chat.message", payload: { message } });
       if (source === "chat") this.storage.setState(`last-chat:${botId}`, message.createdAt_ms);
@@ -497,27 +502,73 @@ export class BotsService {
       if (bot.paused || (bot.agentId && (await this.runtime.busy(bot.agentId)))) return;
       const message = this.storage.pending(botId)[0];
       if (!message) return;
-      const agentId = await this.runtime.ensureSupervisor(bot, this.storage.botHome(bot));
-      this.storage.saveBot({ ...this.storage.bot(botId), agentId });
-      if (bot.agentId !== agentId) {
-        this.changed(botId);
-        this.activity(botId, ["chats"]);
-      }
-      if (!this.enabled || this.storage.bot(botId).paused) return;
-      const activate = () => this.storage.setState(`active:${botId}`, message);
-      const senderId = externalSenderId(message);
-      if (!senderId) activate();
-      await this.runtime.send(
-        agentId,
-        `[${message.source}]\n${message.text}`,
-        message.id,
-        undefined,
-        senderId ? { senderId, title: message.source, beforeDispatch: activate } : undefined,
-      );
-      this.storage.delivered(message.id);
+      if (isBotKickoffMessage(message)) await this.dispatchKickoff(bot, message);
+      else await this.dispatch(bot, message);
     } finally {
       this.dispatching.delete(botId);
     }
+  }
+
+  /**
+   * Orca's `kickoffNeedsRetry` "refused": a kickoff the host could not start (no agent, a failed
+   * send) ends the first-run screen with why, for Try again; the tick never resends it on its own.
+   */
+  private async dispatchKickoff(bot: Bot, message: BotMessage): Promise<void> {
+    try {
+      await this.dispatch(bot, message);
+    } catch (err) {
+      this.storage.delivered(message.id);
+      this.storage.setState(`active:${bot.id}`, null);
+      const text = err instanceof Error && err.message.trim() ? err.message : String(err);
+      this.options.logger.warn({ err, botId: bot.id }, "Bot kickoff could not start");
+      this.kickoffFailed(bot.id, `${message.id}:refused`, text);
+    }
+  }
+
+  private kickoffFailed(botId: string, key: string, text: string): void {
+    const message: BotMessage = {
+      id: `reply:${botId}:${key}`,
+      botId,
+      role: "assistant",
+      text,
+      source: "error",
+      createdAt_ms: this.now(),
+    };
+    if (this.storage.append(message))
+      this.emit({ type: "bots.chat.message", payload: { message } });
+  }
+
+  /** Orca `bots.kickoff.retry`: the first-run screen's Try again, only after its kickoff failed. */
+  retryKickoff(botId: string): void {
+    const bot = this.storage.bot(botId);
+    const messages = this.storage.history(botId, 200);
+    const state = bot.firstRun ? botFirstScreenState(messages) : null;
+    if (state?.phase !== "failed")
+      throw new BotsError("invalid_argument", "The first turn has not failed");
+    const kickoff = messages.find((message) => message.id === state.kickoffId)!;
+    this.wake(botId, kickoff.text, "jagentdesk", `created:${botId}:retry:${randomUUID()}`);
+  }
+
+  private async dispatch(bot: Bot, message: BotMessage): Promise<void> {
+    const botId = bot.id;
+    const agentId = await this.runtime.ensureSupervisor(bot, this.storage.botHome(bot));
+    this.storage.saveBot({ ...this.storage.bot(botId), agentId });
+    if (bot.agentId !== agentId) {
+      this.changed(botId);
+      this.activity(botId, ["chats"]);
+    }
+    if (!this.enabled || this.storage.bot(botId).paused) return;
+    const activate = () => this.storage.setState(`active:${botId}`, message);
+    const senderId = externalSenderId(message);
+    if (!senderId) activate();
+    await this.runtime.send(
+      agentId,
+      `[${message.source}]\n${message.text}`,
+      message.id,
+      undefined,
+      senderId ? { senderId, title: message.source, beforeDispatch: activate } : undefined,
+    );
+    this.storage.delivered(message.id);
   }
 
   // ── Items (spec 37.2.5) ─────────────────────────────────────────────────
@@ -1167,7 +1218,10 @@ export class BotsService {
   /** The Home Chat's turn ended: post its reply where it was asked, end first run, keep memory. */
   private async homeTurnEnded(bot: Bot, event: BotRuntimeEvent): Promise<void> {
     const active = this.storage.state(`active:${bot.id}`, BotMessageSchema.nullable());
-    if (!quiet(event.text)) this.postReply(bot, event, active);
+    // A kickoff turn that ends without words fails the first-run screen (Orca `kickoffNeedsRetry`).
+    if (active && isBotKickoffMessage(active) && (quiet(event.text) || !event.text.trim()))
+      this.kickoffFailed(bot.id, event.key, event.kind === "error" ? "" : BOT_KICKOFF_NO_REPLY);
+    else if (!quiet(event.text)) this.postReply(bot, event, active);
     // First run ends with the owner's first turn (spec 37.4.2).
     if (bot.firstRun && active?.source === "chat") {
       this.storage.saveBot({ ...this.storage.bot(bot.id), firstRun: false });
@@ -2520,6 +2574,10 @@ export class BotsService {
     "bots.first_screen.scan.request": async (msg) => {
       this.storage.bot(msg.botId);
       return { scan: await this.runtime.firstScreen() };
+    },
+    "bots.kickoff.retry.request": async (msg) => {
+      this.retryKickoff(msg.botId);
+      return {};
     },
     "bots.allowed.list.request": async (msg) => {
       return { people: await this.allowed(msg.botId) };

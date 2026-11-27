@@ -3,7 +3,14 @@
 // bots/bot-avatar-outfit.ts:5-15, bots/bot-items.ts:6-24,272-345, bots/bot-item-groups.ts:15-35,
 // bots/bot-item-snooze.ts:5, bots/needs-you-fold.ts, bots/bot-look-around.ts:10-50,
 // bots/bot-tidy-up.ts:7-21, bot-types.ts:395-410. Times are Unix milliseconds.
-import type { Bot, BotItem, BotItemStatus, BotItemsStale, LookAroundEvery } from "./types.js";
+import type {
+  Bot,
+  BotItem,
+  BotItemStatus,
+  BotItemsStale,
+  BotMessage,
+  LookAroundEvery,
+} from "./types.js";
 
 export const BOT_MASCOT_IDS = [
   "A1",
@@ -301,4 +308,68 @@ export function botLookAround(bot: Pick<Bot, "lookAround">): {
     weekdaysOnly: bot.lookAround.weekdaysOnly ?? true,
     focus: bot.lookAround.focus ?? "",
   };
+}
+
+// ── First run (Orca src/shared/bot-created-kickoff.ts, src/shared/bots/bot-first-screen.ts:21-55) ──
+
+/** The daemon's turn to a bot it just created; a template's kickoff starts with it too. */
+export const BOT_CREATED_KICKOFF = "JAgentDesk: you were just created. Start your first-run setup.";
+
+/** What the daemon puts in Home Chat when the kickoff turn ended without the bot's words. */
+export const BOT_KICKOFF_NO_REPLY = "The first turn ended without a reply.";
+
+/** `BOT_QUIET_MARKER` (`server/bots/look-around.ts`): a reply ending with it posts nothing. */
+const QUIET_MARKER = "[[quiet]]";
+
+export function isBotCreatedKickoff(text: string): boolean {
+  return text.trim().startsWith(BOT_CREATED_KICKOFF);
+}
+
+/** A Home Chat line that is the daemon's kickoff (not its envelope-wrapped agent prompt). */
+export function isBotKickoffMessage(
+  message: Pick<BotMessage, "role" | "source" | "text">,
+): boolean {
+  return (
+    message.role === "system" &&
+    message.source === "jagentdesk" &&
+    isBotCreatedKickoff(message.text)
+  );
+}
+
+/**
+ * `starting`: the kickoff waits or runs and the bot has not spoken. `failed`: its turn ended, or never
+ * started, without the bot's words; `failure` is the daemon's or the agent's line about why.
+ */
+export interface BotFirstScreenState {
+  phase: "starting" | "failed";
+  kickoffId: string;
+  failure?: string;
+}
+
+/**
+ * The first-run screen read from Home Chat: from the latest kickoff until the bot speaks or the owner
+ * writes; null for any other chat. Try again sends another kickoff, so the latest one counts.
+ */
+export function botFirstScreenState(messages: readonly BotMessage[]): BotFirstScreenState | null {
+  const notice = messages.findLastIndex(
+    (message) => !message.roomId && isBotKickoffMessage(message),
+  );
+  if (notice === -1) return null;
+  const kickoffId = messages[notice]!.id;
+  const turn = messages.slice(notice + 1).filter((message) => !message.roomId);
+  if (turn.some((message) => message.role === "user")) return null;
+  const replies = turn.filter((message) => message.role === "assistant");
+  const spoke = replies.some(
+    (message) => message.source !== "error" && withoutQuiet(message.text) !== "",
+  );
+  if (spoke) return null;
+  const failure = replies.findLast((message) => message.source === "error");
+  if (!failure) return { phase: "starting", kickoffId };
+  const text = failure.text.trim();
+  return { phase: "failed", kickoffId, ...(text ? { failure: text } : {}) };
+}
+
+function withoutQuiet(text: string): string {
+  const trimmed = text.trim();
+  return trimmed.endsWith(QUIET_MARKER) ? trimmed.slice(0, -QUIET_MARKER.length).trim() : trimmed;
 }
