@@ -112,6 +112,8 @@ test("A37.7.6/A37.7.33/A37.7.34: dispatches a worker in a new ORC worktree, answ
     daemon!.daemon.agentManager.listAgents().reduce((n, a) => n + a.pendingPermissions.size, 0),
   ).toBe(0);
   expect(provider.created.filter((c) => c.config.title?.startsWith("Bot review"))).toHaveLength(6);
+  // A worker is named by its task (the item's title), never by the item's id.
+  expect(provider.created.filter((c) => c.config.title === "Fix sum")).toHaveLength(1);
 }, 60000);
 
 test("A37.7.27: attended bots raise a card for starting a worker, item bookkeeping needs none; plugin off rejects RPC", async () => {

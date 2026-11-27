@@ -544,6 +544,8 @@ export class OrchestrationRuntime {
     assignment: string;
     profile: OrchestrationProfile;
     itemId: string;
+    /** The worker's name: its item's title, as Orca names a worker by its task. */
+    title: string;
     onCreated: (agentId: string) => void;
   }): Promise<string> {
     const caller = this.requireContext(input.supervisorAgentId, "supervisor");
@@ -557,7 +559,7 @@ export class OrchestrationRuntime {
         caller: context,
         cwd: input.cwd,
         profile: input.profile,
-        title: `Bot worker · ${input.itemId}`,
+        title: input.title,
         initialPrompt: formatLeadRelay({
           assignment: input.assignment,
           briefId: input.briefId,
