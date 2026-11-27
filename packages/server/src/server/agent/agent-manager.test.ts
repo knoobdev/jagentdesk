@@ -5,6 +5,8 @@ import {
 } from "./providers/codex-app-server-agent.js";
 import { spawnProcess } from "../../utils/spawn.js";
 import { createFakeCodexAppServer } from "./providers/codex/test-utils/fake-app-server.js";
+import { PiRpcAgentClient } from "./providers/pi/agent.js";
+import { FakePi } from "./providers/pi/test-utils/fake-pi.js";
 import { expect, test, vi, onTestFinished } from "vitest";
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -1574,6 +1576,51 @@ test("steers a tracked autonomous turn without creating a replacement run", asyn
         clientMessageId: "autonomous-follow-up-client",
       }),
     );
+  } finally {
+    if (agentId) await manager.closeAgent(agentId).catch(() => undefined);
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("steers a run Pi started by itself instead of aborting it", async () => {
+  const runtime = new FakePi();
+  const manager = new AgentManager({
+    clients: {
+      pi: new PiRpcAgentClient({
+        runtime,
+        logger,
+        runtimeSettings: { command: { mode: "replace", argv: [process.execPath] } },
+      }),
+    },
+    logger,
+  });
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-pi-autonomous-steer-"));
+  let agentId: string | null = null;
+
+  try {
+    const agent = await manager.createAgent({ provider: "pi", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    agentId = agent.id;
+    const fakeSession = runtime.latestSession();
+    // An extension message or a process exit notice starts a run without a JAgentDesk prompt.
+    fakeSession.emit({ type: "agent_start" });
+    fakeSession.emit({ type: "turn_start" });
+    await vi.waitFor(() =>
+      expect(manager.getAgent(agent.id)?.activeTurnId).toEqual(expect.any(String)),
+    );
+
+    const result = await startAgentRun(manager, agent.id, "message from another agent", logger, {
+      activeTurnBehavior: "steer",
+      replaceRunning: true,
+    });
+
+    expect(result).toEqual({ disposition: "steered" });
+    expect(fakeSession.steerCalls).toEqual([
+      { message: "message from another agent", imageCount: 0 },
+    ]);
+    expect(fakeSession.controlRequests).toEqual([]);
+    expect(fakeSession.prompts).toEqual([]);
   } finally {
     if (agentId) await manager.closeAgent(agentId).catch(() => undefined);
     rmSync(workdir, { recursive: true, force: true });
