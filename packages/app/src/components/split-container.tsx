@@ -38,6 +38,7 @@ import { View, Text, Pressable } from "react-native";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { ResizeHandle } from "@/components/resize-handle";
+import { InspectorOpenInMainPaneButton } from "@/components/inspector-open-in-main-pane-button";
 import { RetainedPanel } from "@/components/retained-panel";
 import { resolveSplitContainerRoot } from "@/components/split-container-focus";
 import { shouldFocusPaneFromEventTarget } from "@/components/split-container-pane-focus";
@@ -1050,21 +1051,6 @@ const SplitPaneView = memo(function SplitPaneView({
   recordRenderProfileReasons(`SplitPaneView:${pane.id}`, ["render"]);
   const { theme: _theme } = useUnistyles();
   const { t } = useTranslation();
-  const trailingAccessory = useMemo(
-    () =>
-      onCloseHost ? (
-        <Pressable
-          testID="explorer-close"
-          accessibilityLabel={t("workspace.tabs.explorer.close")}
-          accessibilityRole="button"
-          onPress={onCloseHost}
-          style={styles.closeHost}
-        >
-          <X size={16} color={styles.closeHost.color} />
-        </Pressable>
-      ) : undefined,
-    [onCloseHost, t],
-  );
   const paneRef = useRef<View | null>(null);
   const stableOnFocusPane = useStableEvent(onFocusPane);
   const paneState = useMemo(
@@ -1084,6 +1070,33 @@ const SplitPaneView = memo(function SplitPaneView({
   });
   const tabDescriptorMap = useStableTabDescriptorMap(paneTabs);
   const activeTabDescriptor = paneState.activeTab?.descriptor ?? null;
+  const inspectorBrowserTabId =
+    host === "explorer" && activeTabDescriptor?.target.kind === "browser"
+      ? activeTabDescriptor.tabId
+      : null;
+  const trailingAccessory = useMemo(
+    () =>
+      onCloseHost ? (
+        <View style={styles.hostActions}>
+          {inspectorBrowserTabId ? (
+            <InspectorOpenInMainPaneButton
+              workspaceKey={`${normalizedServerId}:${normalizedWorkspaceId}`}
+              tabId={inspectorBrowserTabId}
+            />
+          ) : null}
+          <Pressable
+            testID="explorer-close"
+            accessibilityLabel={t("workspace.tabs.explorer.close")}
+            accessibilityRole="button"
+            onPress={onCloseHost}
+            style={styles.closeHost}
+          >
+            <X size={16} color={styles.closeHost.color} />
+          </Pressable>
+        </View>
+      ) : undefined,
+    [inspectorBrowserTabId, normalizedServerId, normalizedWorkspaceId, onCloseHost, t],
+  );
   const { mountedTabIds } = useMountedTabSet({
     activeTabId: activeTabDescriptor?.tabId ?? null,
     allTabIds: paneTabIds,
@@ -1289,6 +1302,7 @@ function wrapRootPaneForStableMount(node: SplitNode): SplitNode {
 
 const styles = StyleSheet.create((theme) => ({
   closeHost: { padding: 8, color: theme.colors.foregroundMuted },
+  hostActions: { flexDirection: "row", alignItems: "center", gap: 2 },
   group: {
     flex: 1,
     minWidth: 0,

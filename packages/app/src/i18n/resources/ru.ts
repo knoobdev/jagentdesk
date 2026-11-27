@@ -668,6 +668,8 @@ export const ru: TranslationResources = {
         screenshotCopied: "Снимок скопирован в буфер обмена",
         elementCopied: "Элемент скопирован в буфер обмена",
         screenshotFailed: "Не удалось скопировать снимок",
+        showSteps: "Показать шаги браузера",
+        hideSteps: "Скрыть шаги браузера",
       },
       annotate: {
         title: "Аннотировать элемент",
@@ -765,6 +767,7 @@ export const ru: TranslationResources = {
         open: "Открыть проводник",
         close: "Закрыть проводник",
         toggle: "Переключить проводник",
+        openInMainPane: "Открыть в основной панели",
         changes: "Изменения",
         files: "Файлы",
       },

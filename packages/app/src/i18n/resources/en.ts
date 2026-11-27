@@ -634,6 +634,8 @@ export const en = {
         screenshotCopied: "Copied screenshot to clipboard",
         elementCopied: "Copied element to clipboard",
         screenshotFailed: "Couldn't copy screenshot",
+        showSteps: "Show browser steps",
+        hideSteps: "Hide browser steps",
       },
       annotate: {
         title: "Annotate element",
@@ -730,6 +732,7 @@ export const en = {
         open: "Open explorer",
         close: "Close explorer",
         toggle: "Toggle explorer",
+        openInMainPane: "Open in main pane",
         changes: "Changes",
         files: "Files",
       },

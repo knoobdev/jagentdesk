@@ -645,6 +645,8 @@ export const es: TranslationResources = {
         screenshotCopied: "Captura copiada al portapapeles",
         elementCopied: "Elemento copiado al portapapeles",
         screenshotFailed: "No se pudo copiar la captura",
+        showSteps: "Mostrar pasos del navegador",
+        hideSteps: "Ocultar pasos del navegador",
       },
       annotate: {
         title: "Anotar elemento",
@@ -742,6 +744,7 @@ export const es: TranslationResources = {
         open: "Explorador abierto",
         close: "Cerrar explorador",
         toggle: "Alternar explorador",
+        openInMainPane: "Abrir en el panel principal",
         changes: "Cambios",
         files: "Archivos",
       },

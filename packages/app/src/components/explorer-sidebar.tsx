@@ -45,6 +45,12 @@ import { useHasOwnedWindowChromeObstruction, WindowChromeSafeArea } from "@/util
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { RetainedPanelActivity } from "@/components/retained-panel";
 import { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
+import { ResizeHandle } from "@/components/resize-handle";
+import { OverlayPlaneLayer } from "@/components/overlay-plane-layer";
+import {
+  resolveExplorerSidebarDockSizes,
+  resolveExplorerSidebarWidth,
+} from "@/components/explorer-sidebar-layout";
 import { buildWorkspaceAttachmentScopeKey } from "@/attachments/workspace-attachments-store";
 import { resolveDesktopExplorerWidth } from "@/components/desktop-sidebar-layout";
 import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
@@ -62,6 +68,8 @@ interface ExplorerSidebarProps {
   workspaceRoot: string;
   isGit: boolean;
   onOpenFile?: (filePath: string) => void;
+  /** Width of the row the inspector shares with the workspace body; bounds its resize. */
+  containerWidth?: number;
 }
 
 interface ExplorerSidebarSharedState {
@@ -164,6 +172,7 @@ export function ExplorerSidebar({
   workspaceRoot,
   isGit,
   onOpenFile,
+  containerWidth = 0,
 }: ExplorerSidebarProps) {
   const insets = useSafeAreaInsets();
   const explorerWidth = usePanelStore((state) => state.explorerWidth);
@@ -178,11 +187,12 @@ export function ExplorerSidebar({
   const { width: viewportWidth } = useWindowDimensions();
   const gumloop = useGumloopDesktopShell(true);
   const sheetInspector = gumloop && viewportWidth < 992;
+  const inspector = useInspectorResize(containerWidth);
   const visibleExplorerWidth = useMemo(() => {
     if (sheetInspector) return viewportWidth;
-    if (gumloop) return 525;
+    if (gumloop) return inspector.width;
     return resolveDesktopExplorerWidth({ requestedWidth: explorerWidth, viewportWidth });
-  }, [sheetInspector, gumloop, explorerWidth, viewportWidth]);
+  }, [sheetInspector, gumloop, inspector.width, explorerWidth, viewportWidth]);
   const startWidthRef = useRef(visibleExplorerWidth);
   const resizeWidth = useSharedValue(visibleExplorerWidth);
 
@@ -244,6 +254,7 @@ export function ExplorerSidebar({
               testID="explorer-sidebar-resize-handle"
             />
           )}
+          {gumloop && !sheetInspector && containerWidth > 0 ? inspector.handle : null}
 
           {children ?? (
             <ExplorerSidebarContent
@@ -263,6 +274,63 @@ export function ExplorerSidebar({
     </RetainedPanelActivity>
   );
   return sheetInspector ? <Portal hostName={GUMLOOP_INSPECTOR_HOST}>{content}</Portal> : content;
+}
+
+/**
+ * The Gumloop inspector resizes like Paseo's explorer sidebar (v0.18.0
+ * `screens/workspace/explorer-sidebar/geometry.web.tsx`): the split `ResizeHandle` on its left
+ * edge, Paseo's minimum and workspace-body reserve, and the width this client last chose.
+ */
+function useInspectorResize(containerWidth: number): { width: number; handle: ReactNode } {
+  const storedWidth = usePanelStore((state) => state.inspectorWidth);
+  const setInspectorWidth = usePanelStore((state) => state.setInspectorWidth);
+  const [previewWidth, setPreviewWidth] = useState<number | null>(null);
+  const width = resolveExplorerSidebarWidth({
+    requestedWidth: previewWidth ?? storedWidth,
+    containerWidth,
+  });
+  const sizes = useMemo(
+    () => resolveExplorerSidebarDockSizes({ requestedWidth: width, containerWidth }),
+    [containerWidth, width],
+  );
+  const preview = useCallback(
+    (_id: string, next: number[]) => {
+      setPreviewWidth(
+        resolveExplorerSidebarWidth({ requestedWidth: next[1] * containerWidth, containerWidth }),
+      );
+    },
+    [containerWidth],
+  );
+  const commit = useCallback(
+    (_id: string, next: number[]) => {
+      setPreviewWidth(null);
+      setInspectorWidth(
+        resolveExplorerSidebarWidth({ requestedWidth: next[1] * containerWidth, containerWidth }),
+      );
+    },
+    [containerWidth, setInspectorWidth],
+  );
+  const handle = useMemo(
+    () => (
+      <OverlayPlaneLayer style={explorerStaticStyles.inspectorResize}>
+        <View style={explorerStaticStyles.inspectorResizeRow}>
+          <ResizeHandle
+            testID="workspace-explorer-sidebar-resize-handle"
+            direction="horizontal"
+            hitAreaAlignment="end"
+            groupId="explorer-sidebar"
+            index={0}
+            sizes={sizes}
+            containerSize={containerWidth}
+            onPreviewResizeSplit={preview}
+            onResizeSplit={commit}
+          />
+        </View>
+      </OverlayPlaneLayer>
+    ),
+    [commit, containerWidth, preview, sizes],
+  );
+  return { width, handle };
 }
 
 interface ExplorerBuiltinTabState {
@@ -691,6 +759,16 @@ const explorerStaticStyles = RNStyleSheet.create({
   desktopSidebar: {
     position: "relative" as const,
   },
+  // The handle's 10 px hit area inside the left edge. It renders in the overlay plane: a browser
+  // tab in the inspector paints its page above the app's DOM and would cover it.
+  inspectorResize: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 10,
+  },
+  inspectorResizeRow: { flex: 1, flexDirection: "row" },
 });
 
 const styles = StyleSheet.create((theme) => ({

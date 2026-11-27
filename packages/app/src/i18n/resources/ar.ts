@@ -655,6 +655,8 @@ export const ar: TranslationResources = {
         screenshotCopied: "تم نسخ لقطة الشاشة إلى الحافظة",
         elementCopied: "تم نسخ العنصر إلى الحافظة",
         screenshotFailed: "تعذّر نسخ لقطة الشاشة",
+        showSteps: "إظهار خطوات المتصفح",
+        hideSteps: "إخفاء خطوات المتصفح",
       },
       annotate: {
         title: "التعليق على العنصر",
@@ -752,6 +754,7 @@ export const ar: TranslationResources = {
         open: "افتح المستكشف",
         close: "إغلاق المستكشف",
         toggle: "تبديل المستكشف",
+        openInMainPane: "فتح في اللوحة الرئيسية",
         changes: "التغييرات",
         files: "ملفات",
       },

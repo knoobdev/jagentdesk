@@ -649,6 +649,8 @@ export const fr: TranslationResources = {
         screenshotCopied: "Capture d\u2019\u00E9cran copi\u00E9e dans le presse-papiers",
         elementCopied: "Élément copié dans le presse-papiers",
         screenshotFailed: "Impossible de copier la capture d\u2019\u00E9cran",
+        showSteps: "Afficher les étapes du navigateur",
+        hideSteps: "Masquer les étapes du navigateur",
       },
       annotate: {
         title: "Annoter l\u2019\u00E9l\u00E9ment",
@@ -746,6 +748,7 @@ export const fr: TranslationResources = {
         open: "Ouvrir l'explorateur",
         close: "Fermer l'explorateur",
         toggle: "Basculer l'explorateur",
+        openInMainPane: "Ouvrir dans le panneau principal",
         changes: "Changements",
         files: "Fichiers",
       },

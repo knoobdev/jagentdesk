@@ -4,6 +4,7 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { startResizeHandleDrag, type ResizeHandleDrag } from "@/components/resize-handle-drag";
 import { useHasFinePointer } from "@/hooks/use-fine-pointer";
+import { suspendBrowserSurfacePointerEvents } from "@/desktop/browser/resident-webviews";
 import {
   SIDEBAR_RESIZE_ACTIVATION_OFFSET,
   SIDEBAR_RESIZE_FAIL_OFFSET,
@@ -25,6 +26,8 @@ interface PointerState {
   containerSize: number;
   pointerStart: number;
   drag: ResizeHandleDrag;
+  /** Ends the agentic browser pages' pointer suspension for this drag. */
+  resumeBrowserPointer: () => void;
 }
 
 function resetWindowHorizontalScroll() {
@@ -84,6 +87,7 @@ export function ResizeHandle({
           preview: (nextSizes) => onPreviewResizeSplit(groupId, nextSizes),
           commit: (nextSizes) => onResizeSplit(groupId, nextSizes),
         }),
+        resumeBrowserPointer: suspendBrowserSurfacePointerEvents(),
       });
 
       if (pointerStatesRef.current.size === 1) {
@@ -98,6 +102,7 @@ export function ResizeHandle({
       resetWindowHorizontalScroll();
 
       function cleanup() {
+        pointerStatesRef.current.get(pointerId)?.resumeBrowserPointer();
         pointerStatesRef.current.delete(pointerId);
         setDragging(pointerStatesRef.current.size > 0);
         if (pointerStatesRef.current.size === 0) {
@@ -162,6 +167,7 @@ export function ResizeHandle({
             preview: (nextSizes) => onPreviewResizeSplit(groupId, nextSizes),
             commit: (nextSizes) => onResizeSplit(groupId, nextSizes),
           }),
+          resumeBrowserPointer: () => {},
         };
       })
       .onUpdate((event) => {

@@ -42,7 +42,7 @@ import {
 } from "react";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import { useIsFocused } from "expo-router/react-navigation";
-import { BackHandler, Keyboard, Pressable, Text, View } from "react-native";
+import { BackHandler, Keyboard, Pressable, Text, View, type LayoutChangeEvent } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, type Href } from "expo-router";
 import * as Clipboard from "expo-clipboard";
@@ -1971,6 +1971,16 @@ function WorkspaceChromeRow({
 }: WorkspaceChromeRowProps) {
   const explorerRendered = showExplorerSidebar && explorerOpen && workspaceRoot !== null;
   const leftRendered = leftDock != null;
+  // The inspector resizes within the row it shares with the workspace body (left dock excluded).
+  const [rowWidth, setRowWidth] = useState(0);
+  const [leftDockWidth, setLeftDockWidth] = useState(0);
+  const handleRowLayout = useCallback((event: LayoutChangeEvent) => {
+    setRowWidth(event.nativeEvent.layout.width);
+  }, []);
+  const handleLeftDockLayout = useCallback((event: LayoutChangeEvent) => {
+    setLeftDockWidth(event.nativeEvent.layout.width);
+  }, []);
+  const explorerContainerWidth = Math.max(0, rowWidth - (leftRendered ? leftDockWidth : 0));
   let centerCorners: "none" | "top-right" | "top-left" | "both";
   if (leftRendered) {
     centerCorners = explorerRendered ? "none" : "top-right";
@@ -1979,8 +1989,14 @@ function WorkspaceChromeRow({
   }
 
   return (
-    <View style={styles.threePaneRow}>
-      {leftRendered ? <WindowChromeRegion corners="top-left">{leftDock}</WindowChromeRegion> : null}
+    <View style={styles.threePaneRow} onLayout={handleRowLayout}>
+      {leftRendered ? (
+        <WindowChromeRegion corners="top-left">
+          <View style={styles.leftDockSlot} onLayout={handleLeftDockLayout}>
+            {leftDock}
+          </View>
+        </WindowChromeRegion>
+      ) : null}
 
       <WindowChromeRegion corners={centerCorners}>
         <FloatingPanelPortalHostNameProvider hostName={portalHostName}>
@@ -1992,7 +2008,11 @@ function WorkspaceChromeRow({
 
       {showExplorerSidebar && workspaceRoot ? (
         <WindowChromeRegion corners="top-right">
-          <ExplorerSidebar {...explorerProps} workspaceRoot={workspaceRoot}>
+          <ExplorerSidebar
+            {...explorerProps}
+            workspaceRoot={workspaceRoot}
+            containerWidth={explorerContainerWidth}
+          >
             {explorerContent}
           </ExplorerSidebar>
         </WindowChromeRegion>
@@ -4711,6 +4731,10 @@ const styles = StyleSheet.create((theme) => ({
     minHeight: 0,
     flexDirection: "row",
     alignItems: "stretch",
+  },
+  leftDockSlot: {
+    flexDirection: "row",
+    flexShrink: 0,
   },
   centerColumn: {
     flex: 1,
