@@ -95,7 +95,7 @@ export function NewBotDialog({
   const bots = useBots(serverId);
   const hosts = useHosts();
   const hostLabel = hosts.find((host) => host.serverId === serverId)?.label ?? serverId;
-  const folder = botFolderPreview(state.name || t("bots.new.name"), bots.data ?? []);
+  const folder = botFolderPreview(state.name, bots.data ?? []);
 
   const create = useBotsMutation(serverId, "bots.create.request");
   const createFromTemplate = useBotsMutation(serverId, "bots.create_from_template.request");

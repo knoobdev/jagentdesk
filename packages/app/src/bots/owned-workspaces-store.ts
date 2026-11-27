@@ -7,6 +7,8 @@ import { create } from "zustand";
 interface BotOwned {
   workspaceIds: readonly string[];
   workerAgentIds: readonly string[];
+  /** The bot's home folder: its Home Chat runs there, so the host lists it as a project. */
+  home?: string;
 }
 
 interface OwnedWorkspacesState {
@@ -33,17 +35,28 @@ export const useBotOwnedWorkspaces = create<OwnedWorkspacesState>()((set) => ({
       if (
         previous &&
         sameList(previous.workspaceIds, owned.workspaceIds) &&
-        sameList(previous.workerAgentIds, owned.workerAgentIds)
+        sameList(previous.workerAgentIds, owned.workerAgentIds) &&
+        previous.home === owned.home
       )
         return state;
       return { byBot: { ...state.byBot, [key]: owned } };
     }),
 }));
 
-/** `<serverId>:<workspaceId>` of every workspace the bots own; worker agents resolve through `agentWorkspace`. */
+/** `path` is `home` or inside it. */
+export function isInBotHome(path: string, home: string): boolean {
+  const root = home.replace(/[\\/]+$/, "");
+  return path === root || path.startsWith(`${root}/`) || path.startsWith(`${root}\\`);
+}
+
+/**
+ * `<serverId>:<workspaceId>` of every workspace the bots own: handed ones, the ones their worker
+ * agents run in (`agentWorkspace`), and any workspace inside a bot home (`workspaces`).
+ */
 export function botOwnedWorkspaceKeys(
   byBot: Record<string, BotOwned>,
   agentWorkspace: (serverId: string, agentId: string) => string | undefined,
+  workspaces: (serverId: string) => Iterable<{ id: string; workspaceDirectory: string }> = () => [],
 ): Set<string> {
   const keys = new Set<string>();
   for (const [key, owned] of Object.entries(byBot)) {
@@ -53,6 +66,10 @@ export function botOwnedWorkspaceKeys(
       const workspaceId = agentWorkspace(serverId, agentId);
       if (workspaceId) keys.add(`${serverId}:${workspaceId}`);
     }
+    if (owned.home)
+      for (const workspace of workspaces(serverId))
+        if (isInBotHome(workspace.workspaceDirectory, owned.home))
+          keys.add(`${serverId}:${workspace.id}`);
   }
   return keys;
 }

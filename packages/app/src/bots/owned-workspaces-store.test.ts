@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { botOwnedWorkspaceKeys, useBotOwnedWorkspaces } from "./owned-workspaces-store";
+import {
+  botOwnedWorkspaceKeys,
+  isInBotHome,
+  useBotOwnedWorkspaces,
+} from "./owned-workspaces-store";
 
 describe("bot-owned workspaces", () => {
   it("keys handed workspaces and the workspaces its worker agents run in", () => {
@@ -20,5 +24,18 @@ describe("bot-owned workspaces", () => {
     expect(useBotOwnedWorkspaces.getState().byBot).toBe(first);
     store.publish("host", "b1", null);
     expect(useBotOwnedWorkspaces.getState().byBot["host:b1"]).toBeUndefined();
+  });
+  it("hides workspaces inside a bot's home folder, not a sibling with the same prefix", () => {
+    const keys = botOwnedWorkspaceKeys(
+      { "host:b1": { workspaceIds: [], workerAgentIds: [], home: "/h/bots/bot-test" } },
+      () => undefined,
+      () => [
+        { id: "home", workspaceDirectory: "/h/bots/bot-test" },
+        { id: "inner", workspaceDirectory: "/h/bots/bot-test/skills" },
+        { id: "sibling", workspaceDirectory: "/h/bots/bot-test-2" },
+      ],
+    );
+    expect([...keys].sort()).toEqual(["host:home", "host:inner"]);
+    expect(isInBotHome("/h/bots/bot-test-2", "/h/bots/bot-test/")).toBe(false);
   });
 });

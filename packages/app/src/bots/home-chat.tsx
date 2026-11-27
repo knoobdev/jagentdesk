@@ -106,15 +106,17 @@ export function BotHomeChat({ serverId, bot }: { serverId: string; bot: Bot }) {
       </View>
     );
   // `bot-chat-persona.tsx`: an empty Home Chat greets as the bot — picture, name, the Orca line.
-  const persona = homeAgentId ? null : (
-    <View style={styles.empty}>
-      <BotAvatar bot={bot} serverId={serverId} size={56} radius={14} />
-      <Text style={styles.personaName}>{bot.name}</Text>
-      <Text style={styles.emptyText} testID="bot-home-chat-empty">
-        {t("bots.chat.emptySubtitle", { name: bot.name })}
-      </Text>
-    </View>
-  );
+  // A new bot greets this way under its first-run screen even once its Home Chat agent exists.
+  const persona =
+    homeAgentId && !bot.firstRun ? null : (
+      <View style={styles.empty}>
+        <BotAvatar bot={bot} serverId={serverId} size={56} radius={14} />
+        <Text style={styles.personaName}>{bot.name}</Text>
+        <Text style={styles.emptyText} testID="bot-home-chat-empty">
+          {t("bots.chat.emptySubtitle", { name: bot.name })}
+        </Text>
+      </View>
+    );
   let conversation;
   // `NativeChatBotHomeScope.tsx`: the first-run screen leads until the owner's first turn ends.
   if (bot.firstRun)
