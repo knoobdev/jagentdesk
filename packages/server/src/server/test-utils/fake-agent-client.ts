@@ -1,3 +1,4 @@
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync, rmSync, readdirSync } from "node:fs";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
@@ -350,6 +351,15 @@ function buildLargeTimelineItem(input: {
   };
 }
 
+function killGroup(child: ChildProcess): void {
+  if (child.pid === undefined) return;
+  try {
+    process.kill(-child.pid, "SIGTERM");
+  } catch {
+    // Already gone.
+  }
+}
+
 class FakeAgentSession implements AgentSession {
   readonly capabilities: AgentCapabilityFlags;
 
@@ -386,6 +396,11 @@ class FakeAgentSession implements AgentSession {
   private readonly beforeTurnComplete: TestAgentClientOptions["beforeTurnComplete"];
 
   private readonly historyEvents: readonly AgentStreamEvent[] | undefined;
+
+  /** "Start background shell: <command>" runs the command for real, listed like Codex's terminals. */
+  private readonly backgroundShells = new Map<string, { child: ChildProcess; command: string }>();
+
+  private backgroundOrdinal = 0;
 
   constructor(options: FakeAgentSessionOptions) {
     this.capabilities = {
@@ -822,7 +837,13 @@ class FakeAgentSession implements AgentSession {
         return;
       }
 
-      const tool = buildToolCallForPrompt(this.providerName, textPrompt);
+      const backgroundShell = /^Start background shell: ([\s\S]+)$/.exec(textPrompt);
+      if (backgroundShell) this.startBackgroundShell(backgroundShell[1]);
+      const shellCall = /^Run shell: ([\s\S]+)$/.exec(textPrompt);
+      if (shellCall) await this.emitShellCall(shellCall[1]);
+
+      const tool =
+        backgroundShell || shellCall ? null : buildToolCallForPrompt(this.providerName, textPrompt);
       if (tool) {
         const returnedEarly = await this.emitToolCallTurn(tool, textPrompt);
         if (returnedEarly) {
@@ -941,7 +962,95 @@ class FakeAgentSession implements AgentSession {
   }
 
   async close(): Promise<void> {
+    for (const { child } of this.backgroundShells.values()) killGroup(child);
     await this.closeSession?.();
+  }
+
+  async stopBackgroundWork(id: string): Promise<void> {
+    const shell = this.backgroundShells.get(id);
+    if (!shell) throw new Error("Background work is no longer running");
+    killGroup(shell.child);
+  }
+
+  private startBackgroundShell(command: string): void {
+    this.backgroundOrdinal += 1;
+    const id = `fake-bg-${this.backgroundOrdinal}`;
+    // Its own process group, so stopping it also stops what it started (`sleep`, `seq`).
+    const child = spawn("/bin/sh", ["-c", command], {
+      cwd: this.config.cwd,
+      stdio: "ignore",
+      detached: true,
+    });
+    this.backgroundShells.set(id, { child, command });
+    child.on("exit", (code, signal) => {
+      this.backgroundShells.delete(id);
+      let status: "finished" | "failed" | "stopped" = "finished";
+      if (signal) status = "stopped";
+      else if (code) status = "failed";
+      this.notifySubscribers({
+        type: "background_work_ended",
+        provider: this.providerName,
+        end: { id, status, exitCode: code },
+      });
+      this.publishBackgroundShells();
+    });
+    this.publishBackgroundShells();
+  }
+
+  private publishBackgroundShells(): void {
+    this.notifySubscribers({
+      type: "background_work",
+      provider: this.providerName,
+      items: [...this.backgroundShells].map(([id, { command }]) => ({
+        id,
+        kind: "shell",
+        description: null,
+        command,
+        canStop: true,
+        cwd: this.config.cwd,
+      })),
+    });
+  }
+
+  /** "Run shell: <command>" runs the command and reports it as a completed shell call. */
+  private async emitShellCall(command: string): Promise<void> {
+    const callId = randomUUID();
+    const cwd = this.config.cwd;
+    const running: AgentStreamEvent = {
+      type: "timeline",
+      provider: this.providerName,
+      item: {
+        type: "tool_call",
+        name: "shell",
+        callId,
+        status: "running",
+        detail: { type: "shell", command, cwd },
+        error: null,
+      },
+    };
+    await this.appendHistoryEvent(running);
+    this.notifySubscribers(running);
+    const result = await new Promise<{ output: string; exitCode: number }>((resolve) => {
+      execFile("/bin/sh", ["-c", command], { cwd }, (error, stdout, stderr) => {
+        let exitCode = 0;
+        if (error) exitCode = typeof error.code === "number" ? error.code : 1;
+        resolve({ output: `${stdout}${stderr}`, exitCode });
+      });
+    });
+    const completed: AgentStreamEvent = {
+      type: "timeline",
+      provider: this.providerName,
+      item: {
+        type: "tool_call",
+        name: "shell",
+        callId,
+        status: "completed",
+        detail: { type: "shell", command, cwd, output: result.output, exitCode: result.exitCode },
+        error: null,
+      },
+    };
+    await this.appendHistoryEvent(completed);
+    this.notifySubscribers(completed);
   }
 
   async listCommands(): Promise<AgentSlashCommand[]> {
