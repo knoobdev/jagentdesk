@@ -109,6 +109,22 @@ export const BotSlackThreadSchema = z.object({
   threadTs: z.string(),
   userId: z.string(),
 });
+/** A GitHub, GitLab or Telegram thread a bot was asked in; its final reply goes back there (spec 37.10–37.12). */
+export const BotConnectorThreadSchema = z.object({
+  /** "github" | "gitlab" | "telegram"; a string so a newer daemon's kinds still parse. */
+  kind: z.string(),
+  hookId: z.string(),
+  /** "owner/repo#12", "group/project!3" or "<chat id>:<root message id>[:<topic id>]". */
+  thread: z.string(),
+  userId: z.string(),
+  userName: z.string().optional(),
+  /** GitLab host the thread lives on. */
+  host: z.string().optional(),
+  /** Telegram chat, the asker's message to reply to, and the forum topic. */
+  chatId: z.string().optional(),
+  messageId: z.string().optional(),
+  topicId: z.string().optional(),
+});
 export const BotMessageSchema = z.object({
   id: z.string(),
   botId: z.string(),
@@ -119,6 +135,7 @@ export const BotMessageSchema = z.object({
   roomId: z.string().optional(),
   rootId: z.string().optional(),
   slack: BotSlackThreadSchema.optional(),
+  connector: BotConnectorThreadSchema.optional(),
 });
 export const BotRoomSchema = z.object({
   id: z.string(),
@@ -133,6 +150,7 @@ export type BotItem = z.infer<typeof BotItemSchema>;
 export type BotItemPatch = z.infer<typeof BotItemPatchSchema>;
 export type BotQuestion = z.infer<typeof BotQuestionSchema>;
 export type BotMessage = z.infer<typeof BotMessageSchema>;
+export type BotConnectorThread = z.infer<typeof BotConnectorThreadSchema>;
 export type BotRoom = z.infer<typeof BotRoomSchema>;
 export type BotSchedule = z.infer<typeof BotScheduleSchema>;
 export type BotScheduleInput = z.infer<typeof BotScheduleInputSchema>;

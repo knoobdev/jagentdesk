@@ -23,7 +23,86 @@ export const SlackStatusSchema = z.object({
   allowedUsers: z.array(z.object({ id: z.string(), name: z.string() })),
 });
 export type SlackStatus = z.infer<typeof SlackStatusSchema>;
+const AllowedUserSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  username: z.string().optional(),
+});
+/** Repository or organization hook state: waiting for GitHub's ping, connected, or made by hand. */
+const HookTargetStateSchema = z.enum(["waiting", "connected", "manual"]);
+export const GitHubStatusSchema = z.object({
+  relayConnected: z.boolean(),
+  /** `gh auth status` succeeded on the host; otherwise the UI shows the sign-in line. */
+  signedIn: z.boolean(),
+  host: z.string(),
+  requestUrl: z.string().optional(),
+  ownerLogin: z.string().optional(),
+  targets: z.array(
+    z.object({
+      target: z.string(),
+      state: HookTargetStateSchema,
+      lastEventAt_ms: z.number().optional(),
+    }),
+  ),
+  allowedUsers: z.array(AllowedUserSchema),
+});
+export type GitHubStatus = z.infer<typeof GitHubStatusSchema>;
+/** Shown once when the hook must be made by hand; the secret is never returned again. */
+export const HookManualSetupSchema = z.object({
+  payloadUrl: z.string(),
+  contentType: z.string().optional(),
+  secret: z.string(),
+  events: z.array(z.string()),
+  settingsUrl: z.string().optional(),
+});
+export type HookManualSetup = z.infer<typeof HookManualSetupSchema>;
+export const GitLabStatusSchema = z.object({
+  relayConnected: z.boolean(),
+  signedIn: z.boolean(),
+  host: z.string(),
+  requestUrl: z.string().optional(),
+  ownerUsername: z.string().optional(),
+  targets: z.array(
+    z.object({
+      host: z.string(),
+      path: z.string(),
+      scope: z.enum(["project", "group"]),
+      state: HookTargetStateSchema,
+      lastEventAt_ms: z.number().optional(),
+    }),
+  ),
+  allowedUsers: z.array(AllowedUserSchema),
+});
+export type GitLabStatus = z.infer<typeof GitLabStatusSchema>;
+export const TelegramStatusSchema = z.object({
+  connected: z.boolean(),
+  relayConnected: z.boolean(),
+  requestUrl: z.string().optional(),
+  botUsername: z.string().optional(),
+  allowedUsers: z.array(AllowedUserSchema),
+});
+export type TelegramStatus = z.infer<typeof TelegramStatusSchema>;
+export const BotAllowedEntrySchema = AllowedUserSchema.extend({ connector: z.string() });
+export type BotAllowedEntry = z.infer<typeof BotAllowedEntrySchema>;
 const botId = { botId: z.string() };
+const githubTarget = z
+  .string()
+  .trim()
+  .regex(
+    /^(?:org:[A-Za-z0-9][A-Za-z0-9-]{0,38}|[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100})$/,
+  );
+const gitlabTarget = {
+  host: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z0-9.-]+(?::\d{1,5})?$/)
+    .max(253),
+  path: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/)
+    .max(255),
+};
 export const BotsRequestSchemas = [
   request("bots.slack.manifest.request", botId),
   request("bots.slack.connect.request", {
@@ -35,6 +114,42 @@ export const BotsRequestSchemas = [
   request("bots.slack.link_code.request", botId),
   request("bots.slack.allowed.remove.request", { ...botId, userId: z.string().min(1) }),
   request("bots.slack.disconnect.request", botId),
+  request("bots.github.add_repo.request", { ...botId, target: githubTarget }),
+  request("bots.github.status.request", botId),
+  request("bots.github.rotate_secret.request", { ...botId, target: githubTarget }),
+  request("bots.github.remove.request", { ...botId, target: githubTarget }),
+  request("bots.github.allowed.add.request", {
+    ...botId,
+    login: z
+      .string()
+      .trim()
+      .regex(/^[A-Za-z0-9-]{1,39}$/),
+  }),
+  request("bots.github.allowed.remove.request", { ...botId, login: z.string().min(1) }),
+  request("bots.gitlab.add_project.request", { ...botId, ...gitlabTarget }),
+  request("bots.gitlab.status.request", { ...botId, host: gitlabTarget.host.optional() }),
+  request("bots.gitlab.rotate_secret.request", { ...botId, ...gitlabTarget }),
+  request("bots.gitlab.remove.request", { ...botId, ...gitlabTarget }),
+  request("bots.gitlab.allowed.add.request", {
+    ...botId,
+    username: z
+      .string()
+      .trim()
+      .regex(/^[A-Za-z0-9_.-]{1,255}$/),
+  }),
+  request("bots.gitlab.allowed.remove.request", { ...botId, username: z.string().min(1) }),
+  request("bots.telegram.connect.request", {
+    ...botId,
+    token: z
+      .string()
+      .trim()
+      .regex(/^\d{1,20}:[A-Za-z0-9_-]{20,100}$/),
+  }),
+  request("bots.telegram.status.request", botId),
+  request("bots.telegram.link_code.request", botId),
+  request("bots.telegram.allowed.remove.request", { ...botId, userId: z.string().min(1) }),
+  request("bots.telegram.disconnect.request", botId),
+  request("bots.allowed.list.request", botId),
   request("bots.list.request", {}),
   request("bots.create.request", { bot: BotInputSchema }),
   request("bots.update.request", { ...botId, patch: BotPatchSchema }),
@@ -94,6 +209,36 @@ export const BotsResponseSchemas = [
   response("bots.slack.link_code.response", { code: z.string(), expiresAt_ms: z.number() }),
   response("bots.slack.allowed.remove.response", { status: SlackStatusSchema }),
   response("bots.slack.disconnect.response", { status: SlackStatusSchema }),
+  response("bots.github.add_repo.response", {
+    status: GitHubStatusSchema,
+    manual: HookManualSetupSchema.optional(),
+  }),
+  response("bots.github.status.response", { status: GitHubStatusSchema }),
+  response("bots.github.rotate_secret.response", {
+    status: GitHubStatusSchema,
+    manual: HookManualSetupSchema.optional(),
+  }),
+  response("bots.github.remove.response", { status: GitHubStatusSchema }),
+  response("bots.github.allowed.add.response", { status: GitHubStatusSchema }),
+  response("bots.github.allowed.remove.response", { status: GitHubStatusSchema }),
+  response("bots.gitlab.add_project.response", {
+    status: GitLabStatusSchema,
+    manual: HookManualSetupSchema.optional(),
+  }),
+  response("bots.gitlab.status.response", { status: GitLabStatusSchema }),
+  response("bots.gitlab.rotate_secret.response", {
+    status: GitLabStatusSchema,
+    manual: HookManualSetupSchema.optional(),
+  }),
+  response("bots.gitlab.remove.response", { status: GitLabStatusSchema }),
+  response("bots.gitlab.allowed.add.response", { status: GitLabStatusSchema }),
+  response("bots.gitlab.allowed.remove.response", { status: GitLabStatusSchema }),
+  response("bots.telegram.connect.response", { status: TelegramStatusSchema }),
+  response("bots.telegram.status.response", { status: TelegramStatusSchema }),
+  response("bots.telegram.link_code.response", { code: z.string(), expiresAt_ms: z.number() }),
+  response("bots.telegram.allowed.remove.response", { status: TelegramStatusSchema }),
+  response("bots.telegram.disconnect.response", { status: TelegramStatusSchema }),
+  response("bots.allowed.list.response", { allowed: z.array(BotAllowedEntrySchema) }),
   response("bots.list.response", { bots: z.array(BotSchema) }),
   response("bots.create.response", { bot: BotSchema }),
   response("bots.update.response", { bot: BotSchema }),
