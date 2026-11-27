@@ -565,6 +565,9 @@ const guestLifecycles = new WeakMap<WebContents, GuestLifecycle>();
  * guest-teardown.ts). Attempts after a renderer exit start over; three is plenty.
  */
 const MAX_IDENTITY_ATTEMPTS = 3;
+/** Blank-page loads that start a held guest's renderer, and the wait before each retry. */
+const MAX_RENDERER_STARTS = 3;
+const RENDERER_START_RETRY_MS = 250;
 
 function watchGuest(contents: WebContents): GuestLifecycle {
   const existing = guestLifecycles.get(contents);
@@ -597,14 +600,27 @@ function watchGuest(contents: WebContents): GuestLifecycle {
  * request leaving the tab; browser-guest-initial-load.ts drops that history entry once
  * the held URL loads.
  */
-function startRendererForHeldGuest(contents: WebContents): void {
+function startRendererForHeldGuest(contents: WebContents, attempt = 1): void {
   runWhenGuestSettled(contents, () => {
     const url = contents.getURL();
     const crashedBeforeLoad = contents.isCrashed() && (url === "" || url === "about:blank");
     const heldNeverNavigated = guestLifecycles.get(contents)?.firstLoadHeld === true && url === "";
-    if (crashedBeforeLoad || heldNeverNavigated) {
-      contents.loadURL("about:blank").catch(() => undefined);
+    if (!crashedBeforeLoad && !heldNeverNavigated) {
+      return;
     }
+    contents.loadURL("about:blank").catch((error: unknown) => {
+      // ERR_ABORTED: a newer navigation (another start, or the held URL) replaced this one.
+      // Anything else: under load the blank page can fail while the dead renderer is still
+      // being torn down, and then nothing would start one; try again shortly.
+      const aborted = error instanceof Error && error.message.includes("ERR_ABORTED");
+      if (aborted || attempt >= MAX_RENDERER_STARTS) {
+        return;
+      }
+      setTimeout(
+        () => startRendererForHeldGuest(contents, attempt + 1),
+        RENDERER_START_RETRY_MS * attempt,
+      ).unref?.();
+    });
   });
 }
 
