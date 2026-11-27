@@ -20,6 +20,8 @@ import { SettingsControlsOffContext } from "./rows";
 import { BotSettingsRoot } from "./settings-root";
 import { BotSoulEditor } from "./soul-editor";
 import { TidyUpPage } from "./tidy-up-page";
+import { useIsCompactFormFactor } from "@/constants/layout";
+import { PhoneSoulPage } from "@/bots/phone/soul-page";
 
 const foreground = (theme: Theme) => ({ color: theme.colors.foreground });
 const ThemedChevronLeft = withUnistyles(ChevronLeft);
@@ -63,13 +65,19 @@ function Subpage({
   bot: Bot;
   page: Exclude<BotSettingsPage, "root">;
 }) {
+  // A phone reads SOUL.md and changes it through the Home Chat (spec 37.6).
+  const compact = useIsCompactFormFactor();
   switch (page) {
     case "lookAround":
       return <LookAroundPage serverId={serverId} bot={bot} />;
     case "tidyUp":
       return <TidyUpPage serverId={serverId} bot={bot} />;
     case "soul":
-      return <BotSoulEditor serverId={serverId} bot={bot} />;
+      return compact ? (
+        <PhoneSoulPage serverId={serverId} bot={bot} />
+      ) : (
+        <BotSoulEditor serverId={serverId} bot={bot} />
+      );
     case "memory":
       return <BotMemoryPanel serverId={serverId} bot={bot} />;
     case "whoCanAsk":

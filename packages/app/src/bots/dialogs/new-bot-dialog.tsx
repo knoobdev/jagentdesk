@@ -25,6 +25,8 @@ import { Shortcut } from "@/components/ui/shortcut";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { useHosts } from "@/runtime/host-runtime";
 import { isNative } from "@/constants/platform";
+import { useIsCompactFormFactor } from "@/constants/layout";
+import { PhoneNewBotSources } from "@/bots/phone/new-bot-sources";
 import type { Theme } from "@/styles/theme";
 import { BotAvatarTile, botPicture } from "@/bots/avatar";
 import { openBot } from "@/bots/navigation";
@@ -276,10 +278,14 @@ export function NewBotDialog({
     !state.name &&
     !state.identity;
   const back = fromShare?.onBack;
+  // A phone's sheet leads with Use template and From a link rows instead, kept while typing as Orca's
+  // (`MobileNewBotSheet.tsx:331`) (spec 37.6). A copy made from a link has neither.
+  const compact = useIsCompactFormFactor();
+  const showSources = compact && !handOver && !fromShare && !state.templateId;
   const footer = useMemo(
     () => (
       <View style={styles.footer}>
-        {showTemplate ? (
+        {showTemplate && !compact ? (
           <Button
             variant="outline"
             size="sm"
@@ -315,7 +321,7 @@ export function NewBotDialog({
         </Button>
       </View>
     ),
-    [back, onOpenTemplates, press, showTemplate, state.creating, t],
+    [back, compact, onOpenTemplates, press, showTemplate, state.creating, t],
   );
   return (
     <AdaptiveModalSheet
@@ -329,6 +335,9 @@ export function NewBotDialog({
       testID="new-bot-dialog"
     >
       <View style={styles.body}>
+        {showSources && onOpenTemplates ? (
+          <PhoneNewBotSources serverId={serverId} onTemplates={onOpenTemplates} />
+        ) : null}
         <NameRow model={model} state={state} />
         {state.pictureOpen ? <PictureSection model={model} state={state} /> : null}
         {fromShare ? null : <IdentityField model={model} state={state} />}

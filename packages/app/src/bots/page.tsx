@@ -3,12 +3,12 @@
 // `/h/<serverId>/bots?botId=<id>` and lays the same parts out itself. Round-1 links
 // (`?botId=…&tab=items|soulMemory|schedules|settings`, `&itemId=…`) land on the matching panel.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, Text, View, useWindowDimensions } from "react-native";
 import { router, useLocalSearchParams, type Href } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { PanelRight } from "lucide-react-native";
-import type { Bot } from "@jagentdesk/protocol/bots/types";
+import type { Bot, BotRoom } from "@jagentdesk/protocol/bots/types";
 import type { Theme } from "@/styles/theme";
 import { Alert } from "@/components/ui/alert";
 import { PageHeader } from "@/components/headers/page-header";
@@ -27,6 +27,7 @@ import { BotRightPanel } from "./panel/right-panel";
 import { RoomChat } from "./rooms";
 import { openBotsDialog } from "./dialogs-store";
 import { Button } from "@/components/ui/button";
+import { PhoneBotPage } from "./phone/bot-page";
 
 const ThemedPanelRight = withUnistyles(PanelRight);
 const muted = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
@@ -45,6 +46,8 @@ function HostBotsScreen({ serverId }: { serverId: string }) {
     tab?: string;
   }>();
   const connection = useBotsConnection(serverId);
+  // A phone's compact header names the bot or group; the page has no header of its own (spec 37.6).
+  const compact = useIsCompactFormFactor();
   useBotsPushes(serverId);
   const bots = useBots(serverId);
   const rooms = useRooms(serverId);
@@ -79,36 +82,84 @@ function HostBotsScreen({ serverId }: { serverId: string }) {
   if (connection.supported && !connection.orca) return <Notice text={t("bots.jad.unsupported")} />;
   if (room)
     return (
-      <View style={styles.screen}>
-        <PageHeader icon={BotIcon} title={room.name} description={t("bots.jad.mention")} />
-        <RoomChat
-          key={room.id}
-          serverId={serverId}
-          room={room}
-          bots={bots.data ?? []}
-          onDeleted={backToBots}
-        />
-      </View>
+      <RoomScreen
+        serverId={serverId}
+        room={room}
+        bots={bots.data ?? []}
+        compact={compact}
+        onDeleted={backToBots}
+      />
     );
-  if (bot) return <BotPage key={bot.id} serverId={serverId} bot={bot} />;
+  if (bot) return <BotPageFor key={bot.id} serverId={serverId} bot={bot} compact={compact} />;
   if ((params.botId || params.roomId) && bots.isSuccess && rooms.isSuccess)
     return <Notice text={t("bots.jad.missing")} />;
   if (bots.isSuccess && bots.data.length === 0)
-    return (
-      <View style={styles.screen} testID="bots-screen">
-        <PageHeader icon={BotIcon} title={t("bots.section.title")} />
-        <View style={styles.emptyPage}>
-          <Text style={styles.emptyTitle}>{t("bots.section.emptyCardTitle")}</Text>
-          <View style={styles.emptyActions}>
-            <Button onPress={openNewBot}>{t("bots.section.newBot")}</Button>
-            <Button variant="outline" onPress={openTemplates}>
-              {t("bots.section.emptyTemplates")}
-            </Button>
-          </View>
+    return <EmptyBotsScreen compact={compact} onNewBot={openNewBot} onTemplates={openTemplates} />;
+  return null;
+}
+
+/** Under this width the inspector is a full-screen sheet, as the workspace's (`explorer-sidebar.tsx`). */
+const SHEET_INSPECTOR_BELOW = 992;
+
+/** A phone's page (spec 37.6); a narrow desktop shell's, its own header over it; else the desktop's. */
+function BotPageFor({ serverId, bot, compact }: { serverId: string; bot: Bot; compact: boolean }) {
+  const { width } = useWindowDimensions();
+  if (compact) return <PhoneBotPage serverId={serverId} bot={bot} />;
+  if (width < SHEET_INSPECTOR_BELOW) return <PhoneBotPage serverId={serverId} bot={bot} header />;
+  return <BotPage serverId={serverId} bot={bot} />;
+}
+
+function RoomScreen({
+  serverId,
+  room,
+  bots,
+  compact,
+  onDeleted,
+}: {
+  serverId: string;
+  room: BotRoom;
+  bots: Bot[];
+  compact: boolean;
+  onDeleted: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <View style={styles.screen}>
+      {compact ? null : (
+        <PageHeader icon={BotIcon} title={room.name} description={t("bots.jad.mention")} />
+      )}
+      <RoomChat key={room.id} serverId={serverId} room={room} bots={bots} onDeleted={onDeleted} />
+    </View>
+  );
+}
+
+/** No bot yet. A phone's header already says Bots, so the page says "No bots yet" (spec 37.6). */
+function EmptyBotsScreen({
+  compact,
+  onNewBot,
+  onTemplates,
+}: {
+  compact: boolean;
+  onNewBot: () => void;
+  onTemplates: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <View style={styles.screen} testID="bots-screen">
+      {compact ? null : <PageHeader icon={BotIcon} title={t("bots.section.title")} />}
+      <View style={styles.emptyPage}>
+        <Text style={styles.emptyTitle}>
+          {compact ? t("bots.phone.home.bots.noBotsTitle") : t("bots.section.emptyCardTitle")}
+        </Text>
+        <View style={styles.emptyActions}>
+          <Button onPress={onNewBot}>{t("bots.section.newBot")}</Button>
+          <Button variant="outline" onPress={onTemplates}>
+            {t("bots.section.emptyTemplates")}
+          </Button>
         </View>
       </View>
-    );
-  return null;
+    </View>
+  );
 }
 
 function Notice({ text }: { text: string }) {
