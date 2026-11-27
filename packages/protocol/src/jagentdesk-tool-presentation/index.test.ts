@@ -41,12 +41,26 @@ describe("JAgentDesk tool display", () => {
       "/a.png +1",
     ],
     ["browser_resize", { width: 800, height: 600 }, "Resize browser", "800×600"],
+    ["bot_item_comment", { itemId: "#3", text: "Tests pass" }, "Comment on item", "#3"],
+    ["bot_item_done", { itemId: "12" }, "Mark item done", "#12"],
+    ["bot_item_add", { title: "Fix login", doneMeans: "It works" }, "Add item", "Fix login"],
+    ["bot_worker_start", { itemId: "#1", assignment: "Fix it" }, "Start worker", "#1"],
+    ["bot_memory_forget", { fact: "Prefers: tabs" }, "Forget memory", "Prefers: tabs"],
   ])("presents %s with a fixed label and its context", (tool, input, label, summary) => {
     expect(display(`mcp__jagentdesk__${tool}`, input)).toEqual({ displayName: label, summary });
   });
 
   it("omits the summary when a call has no context", () => {
     expect(display("mcp__jagentdesk__list_agents", {})).toEqual({ displayName: "List agents" });
+  });
+
+  it("never shows a bot item's id as its context", () => {
+    expect(
+      display("mcp__jagentdesk__bot_item_comment", {
+        itemId: "1af7e410-1c2d-4e5f-8a9b-0c1d2e3f4a5b",
+        text: "Done",
+      }),
+    ).toEqual({ displayName: "Comment on item" });
   });
 
   it("recognizes every JAgentDesk namespace format", () => {
