@@ -203,6 +203,12 @@ for each signature.
 - State that another feature or core drives stays in core and is exported through the host API:
   the cluster navigation and view stores (Argo CD's "Open in Clusters"), the cluster and database
   chat stores, and `KindIcon`.
+- A screen that shows an agent conversation (the Devices, Data, Clusters, Workbench, Jira and Forge
+  chat docks) wraps `AgentConversationPanel` in `EmbeddedAgentPaneProvider`. Pane components read
+  workspace contexts (pane, focus, sheet host) that a feature screen does not have, and a missing one
+  fails as a production `Invariant failed` boundary. Add any new workspace context the panel needs
+  to that provider, not to each dock. `embedded-agent-pane.browser.test.tsx` renders the panel
+  through it with only the app-root providers.
 
 `BuiltinClientRegistry.visible` filters every contribution against live per-host state. Toggling
 one host leaves another host's contributions alone. A disabled screen keeps its route; removing the

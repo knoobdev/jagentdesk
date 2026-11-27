@@ -61,12 +61,7 @@ export {
 export type { ClusterChatPendingAsk } from "@/stores/cluster-chat-store";
 export { formatTimeAgo } from "@/utils/time";
 export { AgentConversationPanel } from "@/panels/agent-panel";
-export {
-  PaneProvider,
-  PaneFocusProvider,
-  createPaneFocusContextValue,
-} from "@/panels/pane-context";
-export type { PaneContextValue } from "@/panels/pane-context";
+export { EmbeddedAgentPaneProvider } from "@/panels/embedded-agent-pane";
 export { dispatchComposerAgentMessage } from "@/composer/actions";
 export { createMessageSubmissionWriter } from "@/composer/submission/writer";
 export { prepareBuiltinTurn } from "@/plugins/builtin/surfaces";
