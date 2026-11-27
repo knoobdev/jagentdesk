@@ -17,7 +17,7 @@ import { useRetainedPanelActive } from "@/components/retained-panel";
 import { useAppVisible } from "@/hooks/use-app-visible";
 import { useUsageDisplay } from "./display";
 import { useUsageInSidebar } from "./in-sidebar";
-import { useUsageHostId } from "./hosts";
+import { useUsageSummaryHostId } from "./hosts";
 import { useUsageHostReports } from "./queries";
 import { UsageSourceIcon } from "./source-icon";
 import { UsageMeter } from "./meter";
@@ -41,10 +41,12 @@ export function useUsageSummary(): readonly PinnedUsageSource[] {
   const active = useRetainedPanelActive();
   const isAppVisible = useAppVisible();
   const { inSidebar } = useUsageInSidebar();
-  const serverId = useUsageHostId();
+  const serverId = useUsageSummaryHostId();
+  // The host's query stays observed while the summary is off screen, so its reports are still
+  // cached when it comes back; only fetching and polling wait for it to show.
   const reports = useUsageHostReports({
-    serverId: active && inSidebar && isAppVisible ? serverId : null,
-    shouldPoll: active && inSidebar && isAppVisible,
+    serverId,
+    active: active && inSidebar && isAppVisible,
   });
   const { preferences } = useUsageDisplay(reports);
   return useMemo(() => resolvePinnedUsage(reports, preferences, t), [preferences, reports, t]);

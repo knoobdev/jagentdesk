@@ -20,6 +20,8 @@ export function useUsageSetting(serverId: string | null) {
     // COMPAT(usageSetting): added in v0.14, remove after 2027-05-01.
     enabled: !supported || (config !== null && config.usage?.enabled !== false),
     ready: !supported || config !== null,
+    /** The host has usage turned off. A config not loaded yet is not off. */
+    off: supported && config?.usage?.enabled === false,
     setEnabled,
     turnOn,
   };

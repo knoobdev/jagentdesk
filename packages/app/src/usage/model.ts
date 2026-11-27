@@ -121,6 +121,15 @@ export function settleReports(
   return [...settled, ...remaining.values()];
 }
 
+/** Whether a settled list leaves out any report that was shown before it. */
+export function dropsReports(
+  shown: readonly UsageReportEntry[],
+  settled: readonly UsageReportEntry[],
+): boolean {
+  const kept = new Set(settled.map((report) => report.id));
+  return shown.some((report) => !kept.has(report.id));
+}
+
 export interface UsageQueryState {
   data: UsageReportEntry[] | undefined;
   error: unknown;
@@ -221,6 +230,24 @@ export function resolveUsageHostId(choice: UsageHostChoice): string | null {
   return (
     (find(choice.pickedServerId) ?? find(choice.activeServerId) ?? reporting[0])?.serverId ?? null
   );
+}
+
+/**
+ * The host the sidebar summary reads. The host it already shows keeps its place while it
+ * reconnects (a daemon restart, a relay-to-local switch, the app returning from background), so
+ * its last numbers stay up instead of the summary vanishing. Another host takes the place only
+ * when the pick or the active workspace chooses it, and it then shows its own reports.
+ */
+export function resolveUsageSummaryHostId(
+  choice: UsageHostChoice,
+  shownServerId: string | null,
+): string | null {
+  const hosts = choice.hosts.map((host) =>
+    host.serverId === shownServerId && !host.isConnected
+      ? { ...host, isConnected: true, supportsUsage: true }
+      : host,
+  );
+  return resolveUsageHostId({ ...choice, hosts });
 }
 
 /**
