@@ -5,15 +5,18 @@
 // Ported from Orca dfdb4fda (MIT) mobile/src/bots/MobileBotPanel.tsx:62-432 and
 // MobileBotPanelHeader.tsx:16-104. Portalled above the compact header like the workspace inspector
 // (docs/mobile-panels.md, `GUMLOOP_INSPECTOR_HOST`).
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { Portal } from "@gorhom/portal";
+import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { Check, ListFilter, Settings, X } from "lucide-react-native";
 import type { Bot } from "@jagentdesk/protocol/bots/types";
 import { AdaptiveModalSheet } from "@/components/adaptive-modal-sheet";
+import { systemBackPress } from "@/components/ui/isolated-bottom-sheet-modal";
+import { useKeyboardShiftStyle } from "@/keyboard/shift";
 import { FileExplorerPane } from "@/components/file-explorer-pane";
 import { GUMLOOP_INSPECTOR_HOST } from "@/components/gumloop-shell/sidebar-state";
 import { HostRouteProvider } from "@/navigation/host-route-context";
@@ -68,6 +71,26 @@ function PanelSurface({ serverId, bot, live }: { serverId: string; bot: Bot; liv
     () => [styles.surface, { paddingTop: insets.top, paddingBottom: insets.bottom }],
     [insets.top, insets.bottom],
   );
+  // The item's comment box and Settings' fields stay above the keyboard, as the workspace inspector's.
+  const { style: keyboardStyle } = useKeyboardShiftStyle({ mode: "padding" });
+  const keyboardBodyStyle = useMemo(() => [styles.body, keyboardStyle], [keyboardStyle]);
+  // Android's Back leaves a page first, then closes the panel.
+  useEffect(
+    () =>
+      systemBackPress.subscribe(() => {
+        const store = useBotPanelStore.getState();
+        const current = store.byBot[bot.id];
+        if (current?.view.kind === "settings" && current.view.page !== "root")
+          store.openSettings(bot.id, "root");
+        else if (current?.tab === "connectors") {
+          store.setTab(bot.id, "home");
+          store.openSettings(bot.id, "root");
+        } else if (current && current.view.kind !== "activity") store.backToActivity(bot.id);
+        else closePhoneBotPanel(bot.id);
+        return true;
+      }),
+    [bot.id],
+  );
   let body;
   if (panel.view.kind === "item")
     body = <BotItemPane serverId={serverId} bot={bot} itemId={panel.view.itemId} />;
@@ -77,7 +100,7 @@ function PanelSurface({ serverId, bot, live }: { serverId: string; bot: Bot; liv
   else body = <PanelMain serverId={serverId} bot={bot} live={live} />;
   return (
     <View style={surfaceStyle} testID="phone-bot-panel">
-      {body}
+      <Animated.View style={keyboardBodyStyle}>{body}</Animated.View>
     </View>
   );
 }
