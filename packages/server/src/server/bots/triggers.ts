@@ -30,6 +30,33 @@ export const runGh: GhCommand = async (args) =>
       env: { ...process.env, GH_PROMPT_DISABLED: "1" },
     })
   ).stdout;
+/** The first-run screen's `"GitHub: {{count}} open PRs of yours"`; null when `gh` is not signed in. */
+export async function countOwnOpenPullRequests(gh: GhCommand = runGh): Promise<number | null> {
+  try {
+    await gh(["auth", "status"]);
+  } catch {
+    return null;
+  }
+  const rows = z
+    .array(z.object({ number: z.number() }))
+    .parse(
+      JSON.parse(
+        await gh([
+          "search",
+          "prs",
+          "--author",
+          "@me",
+          "--state",
+          "open",
+          "--json",
+          "number",
+          "--limit",
+          "100",
+        ]),
+      ),
+    );
+  return rows.length;
+}
 export class LocalBotTriggers implements BotTriggerSource {
   private readonly polling = new Set<string>();
   constructor(

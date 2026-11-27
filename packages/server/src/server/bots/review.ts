@@ -4,6 +4,7 @@ import type { Review } from "@jagentdesk/protocol/review/types";
 import {
   deriveReviewVerdict,
   REQUIRED_REVIEW_ROLES,
+  REVIEW_ROLE_DIMENSIONS,
   renderReviewMarkdown,
 } from "../review/cross-review.js";
 import type { BotRuntime, BotReviewRole } from "./runtime.js";
@@ -48,4 +49,20 @@ export function reviewSummary(reviews: Review[]): string {
   return reviews
     .map((r) => `### ${r.role}\n${renderReviewMarkdown(r.verdict, r.findings, r.coverage)}`)
     .join("\n\n");
+}
+
+/** Spec 37.3.7 step 2: critical/high always block; medium blocks in the role's own dimension. */
+export function blockingFindingCount(reviews: Review[]): number {
+  return reviews.reduce(
+    (sum, review) =>
+      sum +
+      review.findings.filter(
+        (finding) =>
+          finding.severity === "critical" ||
+          finding.severity === "high" ||
+          (finding.severity === "medium" &&
+            (REVIEW_ROLE_DIMENSIONS[review.role]?.has(finding.category) ?? false)),
+      ).length,
+    0,
+  );
 }
