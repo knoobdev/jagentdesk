@@ -14,6 +14,7 @@ import {
   ArrowRight,
   Camera,
   ChevronDown,
+  ListChecks,
   Maximize,
   Monitor,
   MousePointer2,
@@ -56,6 +57,8 @@ import {
   CockpitControls,
   AntiDetectionStrip,
   useAgentDriving,
+  useBrowserStepsLayout,
+  type BrowserStepsLayout,
 } from "@/desktop/browser/pane/cockpit";
 import {
   prepareBrowserWebview,
@@ -597,6 +600,41 @@ function DeviceSizeMenu({
   );
 }
 
+const ThemedListChecks = withUnistyles(ListChecks);
+
+/** Narrow pane: opens the folded steps panel over the page. */
+function BrowserStepsToggle({
+  steps,
+  style,
+}: {
+  steps: BrowserStepsLayout;
+  style: (state: { hovered?: boolean; pressed?: boolean }) => StyleProp<ViewStyle>;
+}) {
+  const { t } = useTranslation();
+  if (!steps.compact) return null;
+  return (
+    <ToolbarButton
+      label={
+        steps.overlayOpen
+          ? t("workspace.browser.controls.hideSteps")
+          : t("workspace.browser.controls.showSteps")
+      }
+      active={steps.overlayOpen}
+      onPress={steps.toggleOverlay}
+      style={style}
+    >
+      <ThemedListChecks
+        size={16}
+        uniProps={steps.overlayOpen ? stepsToggleActiveMapping : iconForegroundMutedMapping}
+      />
+    </ToolbarButton>
+  );
+}
+
+const stepsToggleActiveMapping = (theme: { colors: { accent: string } }) => ({
+  color: theme.colors.accent,
+});
+
 // eslint-disable-next-line complexity
 export function BrowserPane({
   browserId,
@@ -618,6 +656,7 @@ export function BrowserPane({
   const browser = useBrowserStore((state) => state.browsersById[browserId] ?? null);
   const updateBrowser = useBrowserStore((state) => state.updateBrowser);
   const isAgentDriving = useAgentDriving(browserId);
+  const steps = useBrowserStepsLayout();
   // Stealth state lives in the stealth store (read inside the cockpit controls).
   // Connected-logins count comes from the vault (Phase 5); 0 until saved.
   const connectedLogins = 0;
@@ -1534,6 +1573,14 @@ export function BrowserPane({
     ],
     [selectorMode],
   );
+  const stepsToggleButtonStyle = useCallback(
+    ({ hovered, pressed }: { hovered?: boolean; pressed?: boolean }) => [
+      styles.iconButton,
+      steps.overlayOpen && styles.selectorActiveButton,
+      (hovered || pressed) && styles.iconButtonHovered,
+    ],
+    [steps.overlayOpen],
+  );
   const screenshotIconButtonStyle = useCallback(
     ({ hovered, pressed }: { hovered?: boolean; pressed?: boolean }) => [
       styles.iconButton,
@@ -1594,12 +1641,15 @@ export function BrowserPane({
   }
 
   return (
-    <View style={styles.container}>
+    <View style={styles.container} onLayout={steps.onLayout}>
       <View style={styles.bodyRow}>
-        <BrowserTaskPanel browserId={browserId} title={browser?.title ?? draftUrl} />
+        {steps.inline ? (
+          <BrowserTaskPanel browserId={browserId} title={browser?.title ?? draftUrl} />
+        ) : null}
         <View style={styles.rightCol}>
           <View style={styles.chromeRow}>
             <View style={styles.chromeLeft}>
+              <BrowserStepsToggle steps={steps} style={stepsToggleButtonStyle} />
               <ToolbarButton
                 label={t("workspace.browser.controls.back")}
                 disabled={!browser?.canGoBack}
@@ -1692,7 +1742,7 @@ export function BrowserPane({
                   }
                 />
               </ToolbarButton>
-              <CockpitControls connectedLogins={connectedLogins} />
+              <CockpitControls connectedLogins={connectedLogins} compact={steps.compact} />
             </View>
           </View>
           {browser?.lastError ? (
@@ -1714,6 +1764,9 @@ export function BrowserPane({
               </View>
             ) : null}
             <BrowserDialogBar browserId={browserId} />
+            {steps.overlayOpen ? (
+              <BrowserTaskPanel browserId={browserId} title={browser?.title ?? draftUrl} overlay />
+            ) : null}
             {pendingSelection ? (
               <BrowserElementAnnotationCard
                 selection={pendingSelection}

@@ -650,6 +650,8 @@ export const ja: TranslationResources = {
         screenshotCopied: "スクリーンショットをクリップボードにコピーしました",
         elementCopied: "要素をクリップボードにコピーしました",
         screenshotFailed: "スクリーンショットをコピーできませんでした",
+        showSteps: "ブラウザの手順を表示",
+        hideSteps: "ブラウザの手順を隠す",
       },
       annotate: {
         title: "要素に注釈を付ける",

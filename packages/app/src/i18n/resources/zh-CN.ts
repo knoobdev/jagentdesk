@@ -638,6 +638,8 @@ export const zhCN: TranslationResources = {
         screenshotCopied: "已将截图复制到剪贴板",
         elementCopied: "已将元素复制到剪贴板",
         screenshotFailed: "无法复制截图",
+        showSteps: "显示浏览器步骤",
+        hideSteps: "隐藏浏览器步骤",
       },
       annotate: {
         title: "标注元素",

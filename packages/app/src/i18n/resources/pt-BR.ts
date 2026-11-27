@@ -643,6 +643,8 @@ export const ptBR: TranslationResources = {
         screenshotCopied: "Captura copiada para a área de transferência",
         elementCopied: "Elemento copiado para a área de transferência",
         screenshotFailed: "Não foi possível copiar a captura",
+        showSteps: "Mostrar etapas do navegador",
+        hideSteps: "Ocultar etapas do navegador",
       },
       annotate: {
         title: "Anotar elemento",
