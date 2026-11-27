@@ -24,6 +24,7 @@ const capabilities = [
   "prompt.image",
   "prompt.steer",
   "session.configure",
+  "session.launch_wrap",
   "session.persistence",
   "permission",
   "session.list",
@@ -35,6 +36,8 @@ export function createMuseProvider(usage: Usage): ProviderRegistration {
     label: "Muse Code",
     icon: "icon.svg",
     command: ["muse"],
+    // Each session starts its own `muse serve`, so it can run behind that session's wrap.
+    launchWrap: true,
     async getCatalogCacheKey(options) {
       return launchKey(requireLaunch(options.launch));
     },

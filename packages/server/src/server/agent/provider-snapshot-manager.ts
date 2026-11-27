@@ -1062,6 +1062,7 @@ export class ProviderSnapshotManager {
         iconSvg: definition.iconSvg,
         docsUrl: definition.docsUrl,
         defaultModeId: definition.defaultModeId,
+        ...launchWrapEntry(definition),
         error: toErrorMessage(error),
       };
     }
@@ -1116,6 +1117,7 @@ export class ProviderSnapshotManager {
         iconSvg: definition?.iconSvg,
         docsUrl: definition?.docsUrl,
         defaultModeId: definition?.defaultModeId ?? null,
+        ...launchWrapEntry(definition),
       });
     }
     return entries;
@@ -1148,6 +1150,7 @@ export class ProviderSnapshotManager {
         iconSvg: definition?.iconSvg,
         docsUrl: definition?.docsUrl,
         defaultModeId: definition?.defaultModeId ?? null,
+        ...launchWrapEntry(definition),
       };
 
       if (!definition?.enabled) {
@@ -1322,6 +1325,7 @@ export class ProviderSnapshotManager {
       iconSvg: definition.iconSvg,
       docsUrl: definition.docsUrl,
       defaultModeId: definition.defaultModeId,
+      ...launchWrapEntry(definition),
     };
     const setEntry = (entry: ProviderSnapshotEntry) => {
       if (
@@ -1643,4 +1647,11 @@ function formatProviderStatus(entry: ProviderSnapshotEntry): string {
   if (entry.status === "error") return `Error: ${entry.error ?? "Unknown error"}`;
   if (entry.status === "unavailable") return "Unavailable";
   return "Loading";
+}
+
+/** Snapshot entries name launch-wrap support only when the provider has it; absent means unsupported. */
+function launchWrapEntry(definition: Pick<ProviderDefinition, "supportsLaunchWrap"> | undefined): {
+  launchWrap?: true;
+} {
+  return definition?.supportsLaunchWrap ? { launchWrap: true } : {};
 }

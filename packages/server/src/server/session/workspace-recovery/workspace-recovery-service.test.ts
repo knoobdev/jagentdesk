@@ -23,12 +23,14 @@ import {
 } from "../../../utils/worktree-metadata.js";
 import { createWorktree, deleteJAgentDeskWorktree } from "../../../utils/worktree.js";
 import {
+  FileBackedProjectRegistry,
   FileBackedWorkspaceRegistry,
   createPersistedProjectRecord,
   createPersistedWorkspaceRecord,
   type PersistedProjectRecord,
   type PersistedWorkspaceRecord,
 } from "../../workspace-registry.js";
+import { createWorkspaceProvisioningService } from "../workspace-provisioning/workspace-provisioning-service.js";
 import { createWorkspaceRecoveryService } from "./workspace-recovery-service.js";
 
 const NOW = "2026-07-11T10:12:30.752Z";
@@ -723,4 +725,135 @@ test("restores a user-created worktree at its recorded path outside JAgentDesk's
     }).trim(),
   ).toBe("external-feature");
   expect(unarchived).toEqual([workspace.workspaceId]);
+});
+
+describe("recovery approval ownership for shared archived history", () => {
+  async function setupSlugReuseHistory(options: { keepLatestCheckoutOnDisk: boolean }) {
+    const { tempDir, repoDir } = createGitRepository();
+    const jagentdeskHome = join(tempDir, "jagentdesk-home");
+    const workspaceRegistry = new FileBackedWorkspaceRegistry(
+      join(jagentdeskHome, "workspaces.json"),
+      pino({ level: "silent" }),
+    );
+    const projectRegistry = new FileBackedProjectRegistry(
+      join(jagentdeskHome, "projects.json"),
+      pino({ level: "silent" }),
+    );
+    const provisioning = createWorkspaceProvisioningService({
+      unarchiveWorkspaceAgents: async () => {},
+      workspaceRegistry,
+      projectRegistry,
+      workspaceGitService: {
+        getCheckout: async (cwd) => getCheckoutStatus(cwd),
+        getSnapshot: async () => ({
+          checkout: null,
+          forge: { pullRequest: null, checkedAt: null, error: null },
+        }),
+      },
+      isDirectory: async (target) => existsSync(target) && statSync(target).isDirectory(),
+      logger: pino({ level: "silent" }),
+    });
+
+    const firstWorktree = await createWorktree({
+      cwd: repoDir,
+      worktreeSlug: "shared-slug",
+      source: { kind: "branch-off", branchName: "feature/older-approved", baseBranch: "main" },
+      jagentdeskHome,
+    });
+    const olderApproved = await provisioning.createWorkspaceForWorktree({
+      sourceCwd: repoDir,
+      repoRoot: repoDir,
+      cwd: firstWorktree.worktreePath,
+      worktreeRoot: firstWorktree.worktreePath,
+      branch: firstWorktree.branchName,
+      baseBranch: firstWorktree.baseRef,
+      title: null,
+      isJAgentDeskOwnedWorktree: true,
+    });
+    await workspaceRegistry.archive(olderApproved.workspaceId, "2026-04-01T00:00:00.000Z");
+    await deleteJAgentDeskWorktree({
+      cwd: repoDir,
+      worktreePath: firstWorktree.worktreePath,
+      jagentdeskHome,
+    });
+
+    const untrustedSource = {
+      kind: "change_request" as const,
+      forge: "github",
+      number: 72,
+      headRepository: "contributor/repo",
+    };
+    const secondWorktree = await createWorktree({
+      cwd: repoDir,
+      worktreeSlug: "shared-slug",
+      source: { kind: "branch-off", branchName: "contributor/pr-72", baseBranch: "main" },
+      jagentdeskHome,
+    });
+    await writeJAgentDeskWorktreeMetadata(secondWorktree.worktreePath, {
+      baseRefName: "main",
+      untrustedSource,
+    });
+    const laterUntrusted = await provisioning.createWorkspaceForWorktree({
+      sourceCwd: repoDir,
+      repoRoot: repoDir,
+      cwd: secondWorktree.worktreePath,
+      worktreeRoot: secondWorktree.worktreePath,
+      branch: secondWorktree.branchName,
+      baseBranch: secondWorktree.baseRef,
+      title: null,
+      isJAgentDeskOwnedWorktree: true,
+      untrustedSource,
+    });
+    await workspaceRegistry.archive(laterUntrusted.workspaceId, "2026-04-02T00:00:00.000Z");
+    if (!options.keepLatestCheckoutOnDisk) {
+      await deleteJAgentDeskWorktree({
+        cwd: repoDir,
+        worktreePath: secondWorktree.worktreePath,
+        jagentdeskHome,
+      });
+    }
+
+    const recovery = createWorkspaceRecoveryService({
+      jagentdeskHome,
+      getWorkspace: (id) => workspaceRegistry.get(id),
+      getProject: (id) => projectRegistry.get(id),
+      isDirectory: async (target) => existsSync(target) && statSync(target).isDirectory(),
+      unarchiveWorkspace: async (workspace) => {
+        await provisioning.ensureWorkspaceRecordUnarchived(workspace);
+      },
+    });
+
+    return {
+      olderApproved,
+      untrustedSource,
+      worktreePath: firstWorktree.worktreePath,
+      workspaceRegistry,
+      recovery,
+    };
+  }
+
+  test("restoring a deleted approved workspace after slug reuse keeps the recreated worktree approved", async () => {
+    const { olderApproved, worktreePath, workspaceRegistry, recovery } =
+      await setupSlugReuseHistory({ keepLatestCheckoutOnDisk: false });
+
+    const result = await recovery.restore(olderApproved.workspaceId);
+
+    expect(result).toEqual({ workspaceId: olderApproved.workspaceId, action: "restore" });
+    const restored = await workspaceRegistry.get(olderApproved.workspaceId);
+    expect(restored?.archivedAt).toBeNull();
+    expect(restored?.untrustedSource).toBeUndefined();
+    expect((await readJAgentDeskWorktreeMetadata(worktreePath))?.untrustedSource).toBeUndefined();
+  });
+
+  test("unarchiving onto a retained unapproved checkout inherits untrustedSource from worktree metadata", async () => {
+    const { olderApproved, untrustedSource, workspaceRegistry, recovery } =
+      await setupSlugReuseHistory({ keepLatestCheckoutOnDisk: true });
+
+    const result = await recovery.restore(olderApproved.workspaceId);
+
+    expect(result).toEqual({ workspaceId: olderApproved.workspaceId, action: "unarchive" });
+    const restored = await workspaceRegistry.get(olderApproved.workspaceId);
+    expect(restored?.archivedAt).toBeNull();
+    expect(restored?.untrustedSource).toEqual(untrustedSource);
+  });
 });

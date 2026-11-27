@@ -36,7 +36,7 @@ import { type ManagedProcessRegistry } from "../../../../managed-processes/manag
 import { importSessionFromPersistence } from "../../../provider-session-import.js";
 import { type OpenCodeBridge } from "../bridge.js";
 import { resolveOpenCodeHomeDir } from "../paths.js";
-import { V2Runtime, type V2Connection } from "./runtime.js";
+import { V2Runtime, type V2Connection, type V2RuntimeAcquireOptions } from "./runtime.js";
 import { type OpenCodeProviderInjection } from "../../../../custom-providers/materialization.js";
 import { type OpenCodeServiceSelection } from "./service-selection.js";
 import { modelRef, modesFromV2, modelsFromV2 } from "./mapping.js";
@@ -51,6 +51,23 @@ interface PreparedLaunch {
 }
 
 type V2AgentRuntime = Pick<V2Runtime, "acquire" | "shutdown"> & Partial<Pick<V2Runtime, "retire">>;
+
+/**
+ * A wrapped launch gets a server of its own, started behind the wrap with the launch's environment,
+ * so it never shares a server that runs outside its wrap.
+ */
+function wrappedServer(
+  launch: AgentLaunchContext | undefined,
+): V2RuntimeAcquireOptions | undefined {
+  return launch?.wrap ? { dedicated: true, env: launch.env, wrap: launch.wrap } : undefined;
+}
+
+interface ResumeTarget {
+  handle: AgentPersistenceHandle;
+  overrides: Partial<AgentSessionConfig> | undefined;
+  launch: AgentLaunchContext | undefined;
+  historyOnly: boolean;
+}
 
 interface V2AgentOptions {
   logger: Logger;
@@ -161,6 +178,20 @@ export class OpenCodeV2AgentClient implements AgentClient {
     launch?: AgentLaunchContext,
     options?: AgentResumeSessionOptions,
   ): Promise<AgentSession> {
+    return this.resumeOn(
+      // A live connection may run outside this launch's wrap, so a wrapped resume starts its own.
+      () =>
+        launch?.wrap
+          ? undefined
+          : this.connections.get(handle.nativeHandle ?? handle.sessionId)?.retain(),
+      { handle, overrides, launch, historyOnly: options?.purpose === "history" },
+    );
+  }
+
+  private async resumeOn(
+    existing: () => V2Connection | undefined,
+    { handle, overrides, launch, historyOnly }: ResumeTarget,
+  ): Promise<AgentSession> {
     const cwd = overrides?.cwd ?? handle.metadata?.cwd;
     if (typeof cwd !== "string")
       throw new Error("OpenCode resume requires the original working directory");
@@ -170,12 +201,11 @@ export class OpenCodeV2AgentClient implements AgentClient {
       provider: "opencode",
       cwd,
     };
-    const historyOnly = options?.purpose === "history";
     const { connection, prepared } = await this.connectLaunch(
       config,
       launch,
       historyOnly,
-      this.connections.get(handle.nativeHandle ?? handle.sessionId)?.retain(),
+      existing(),
     );
     try {
       const info = await connection.client.session.get({
@@ -193,7 +223,8 @@ export class OpenCodeV2AgentClient implements AgentClient {
    * Spec 33.7. An agent with its own MCP servers or process env runs on the shared server when
    * that server reports `features.mcpTools` (session path). Otherwise it keeps the legacy path:
    * a server of its own, with its MCP servers attached through `mcp.add`. The shared server
-   * decides once; a session already open on a connection stays on it.
+   * decides once; a session already open on a connection stays on it. A wrapped launch always
+   * runs on a server of its own behind the wrap, which then decides the path the same way.
    */
   private async connectLaunch(
     config: AgentSessionConfig,
@@ -201,11 +232,11 @@ export class OpenCodeV2AgentClient implements AgentClient {
     historyOnly: boolean,
     existing?: V2Connection,
   ): Promise<{ connection: V2Connection; prepared: PreparedLaunch }> {
-    let connection = existing ?? (await this.runtime.acquire());
+    let connection = existing ?? (await this.runtime.acquire(wrappedServer(launch)));
     try {
       const isolated = !historyOnly && requiresDedicatedV2Server(config, launch);
       if (isolated && (await connection.mcpPath(config.cwd)) === "legacy") {
-        if (!existing) {
+        if (!existing && !launch?.wrap) {
           const dedicated = await this.runtime.acquire({ env: launch?.env, dedicated: true });
           const shared = connection;
           connection = dedicated;
@@ -249,6 +280,7 @@ export class OpenCodeV2AgentClient implements AgentClient {
       servers,
       cwd: config.cwd,
       env: environment ?? createProviderEnv({ runtimeSettings: this.options.settings }),
+      wrap: launch?.wrap,
     });
     return { launch, environment, mcp };
   }
@@ -311,7 +343,9 @@ export class OpenCodeV2AgentClient implements AgentClient {
       unbind: releaseBindings,
       bindChild,
       acquire: () =>
-        this.runtime.acquire(legacy ? { env: launch?.env, dedicated: true } : undefined),
+        this.runtime.acquire(
+          wrappedServer(launch) ?? (legacy ? { env: launch?.env, dedicated: true } : undefined),
+        ),
       moved,
       historyOnly,
     });
@@ -367,14 +401,25 @@ export class OpenCodeV2AgentClient implements AgentClient {
     }
   }
   async importSession(input: ImportProviderSessionInput, context: ImportProviderSessionContext) {
-    const connection = await this.runtime.acquire();
+    // The lookup and the resume share one connection, so a wrapped import never starts a server
+    // outside its wrap.
+    const launch = context.launchContext;
+    const connection = await this.runtime.acquire(wrappedServer(launch));
     try {
       const info = await connection.client.session.get({ sessionID: input.providerHandleId });
       return await importSessionFromPersistence({
         provider: "opencode",
         request: input,
         context,
-        resumeSession: this.resumeSession.bind(this),
+        resumeSession: (handle, overrides, resumeLaunch) =>
+          launch?.wrap
+            ? this.resumeOn(() => connection.retain(), {
+                handle,
+                overrides,
+                launch: resumeLaunch,
+                historyOnly: false,
+              })
+            : this.resumeSession(handle, overrides, resumeLaunch),
         config: {
           title: info.title,
           modeId: info.agent,

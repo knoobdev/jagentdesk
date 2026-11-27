@@ -243,10 +243,14 @@ import {
   type ActiveWorkspaceRef,
 } from "./workspace-archive-service.js";
 import { setupAutoArchiveOnMerge } from "./auto-archive-on-merge/index.js";
-import { isCheckoutUntrusted } from "./workspace-automation-gate.js";
+import {
+  assertWorkspaceAutomationAllowedForWorkspace,
+  isCheckoutUntrusted,
+} from "./workspace-automation-gate.js";
 import { wrapSessionMessage, type SessionOutboundMessage } from "./messages.js";
 import type { TerminalManager } from "../terminal/terminal-manager.js";
 import { startWorkerTerminalManager } from "../terminal/worker-terminal-manager.js";
+import { withTerminalCreateHook } from "../terminal/terminal-create-hook.js";
 import { createSshTerminalManager } from "../terminal/ssh-terminal-manager.js";
 import { SshService } from "./ssh/ssh-service.js";
 import { removeRetiredFigmaData } from "./retired-figma-data.js";
@@ -857,7 +861,12 @@ export async function createJAgentDeskDaemon(
     logger,
     getTerminalActivityUrl: () => createTerminalActivityUrl(boundListenTarget),
   });
-  const terminalManager = createSshTerminalManager(localTerminalManager, () => sshService);
+  // SSH terminals run on the remote host, where a plugin's launch wrap does not exist; only local
+  // terminals run through terminal.create.before.
+  const terminalManager = createSshTerminalManager(
+    withTerminalCreateHook(localTerminalManager, pluginRuntime),
+    () => sshService,
+  );
   applyTerminalAgentHookSetting({ store: daemonConfigStore, logger });
 
   const serviceProxyPublicBaseUrl = config.serviceProxy?.publicBaseUrl
@@ -1206,7 +1215,7 @@ export async function createJAgentDeskDaemon(
       resolveSnapshotContextWindow(providerSnapshotManager.getSnapshot(), provider, model),
     resolveJAgentDeskToolPolicy: (provider) =>
       resolveJAgentDeskToolPolicy(provider, daemonConfigStore.get().providers),
-    pluginAgentTools: pluginRuntime,
+    pluginSessions: pluginRuntime,
     clients: initialAgentManagerState.clients,
     providerDefinitions: initialAgentManagerState.providerDefinitions,
     registry: agentStorage,
@@ -1252,10 +1261,6 @@ export async function createJAgentDeskDaemon(
     agentManager.updateProviderRegistry(
       providerSnapshotManager.replacePluginProviders(pluginRuntime.getProviderRegistrations()),
     );
-  });
-
-  const unsubscribePluginSessionChanges = pluginRuntime.subscribeSessionOpenChanges(() => {
-    agentManager.invalidatePluginSessions();
   });
 
   const detachAgentStoragePersistence = attachAgentStoragePersistence(
@@ -1470,6 +1475,7 @@ export async function createJAgentDeskDaemon(
   });
 
   setupAutoArchiveOnMerge({
+    lifecycle: pluginRuntime,
     jagentdeskHome: config.jagentdeskHome,
     jagentdeskWorktreesBaseRoot: config.worktreesRoot,
     worktreeManagers: pluginRuntime,
@@ -1483,6 +1489,8 @@ export async function createJAgentDeskDaemon(
     logger,
     findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
     getWorkspace: (workspaceId) => workspaceRegistry.get(workspaceId),
+    assertWorkspaceAutomationAllowed: (guardedWorkspaceId) =>
+      assertWorkspaceAutomationAllowedForWorkspace(workspaceRegistry, guardedWorkspaceId),
     isCheckoutUntrusted: (checkoutPath) => isCheckoutUntrusted(workspaceRegistry, checkoutPath),
     listActiveWorkspaces: listActiveWorkspacesExternal,
     getAutoArchivedChangeRequestUrl: async (workspaceId) =>
@@ -1499,6 +1507,7 @@ export async function createJAgentDeskDaemon(
   ) => {
     return createJAgentDeskWorktreeWorkflow(
       {
+        lifecycle: pluginRuntime,
         jagentdeskHome: config.jagentdeskHome,
         worktreesRoot: config.worktreesRoot,
         createJAgentDeskWorktree: async (workflowInput, workflowOptions) => {
@@ -1559,6 +1568,7 @@ export async function createJAgentDeskDaemon(
   const archiveWorkspaceByIdExternal = (workspaceId: string, requestId: string) =>
     archiveByScope(
       {
+        lifecycle: pluginRuntime,
         jagentdeskHome: config.jagentdeskHome,
         jagentdeskWorktreesBaseRoot: config.worktreesRoot,
         worktreeManagers: pluginRuntime,
@@ -1569,6 +1579,8 @@ export async function createJAgentDeskDaemon(
         agentStorage,
         findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
         getWorkspace: (workspaceIdToRead) => workspaceRegistry.get(workspaceIdToRead),
+        assertWorkspaceAutomationAllowed: (guardedWorkspaceId) =>
+          assertWorkspaceAutomationAllowedForWorkspace(workspaceRegistry, guardedWorkspaceId),
         isCheckoutUntrusted: (checkoutPath) => isCheckoutUntrusted(workspaceRegistry, checkoutPath),
         listActiveWorkspaces: listActiveWorkspacesExternal,
         archiveWorkspaceRecord: (workspaceIdToArchive, archivedAt) =>
@@ -1583,11 +1595,14 @@ export async function createJAgentDeskDaemon(
       { scope: { kind: "workspace", workspaceId }, requestId },
     );
   const hubAgentLifecycle = new CreateAgentLifecycleDispatch({
+    lifecycle: pluginRuntime,
     jagentdeskHome: config.jagentdeskHome,
     worktreesRoot: config.worktreesRoot,
     worktreeManagers: pluginRuntime,
     workspaceArchiveOperations,
     getWorkspace: (workspaceId) => workspaceRegistry.get(workspaceId),
+    assertWorkspaceAutomationAllowed: (guardedWorkspaceId) =>
+      assertWorkspaceAutomationAllowedForWorkspace(workspaceRegistry, guardedWorkspaceId),
     isCheckoutUntrusted: (checkoutPath) => isCheckoutUntrusted(workspaceRegistry, checkoutPath),
     agentManager,
     agentStorage,
@@ -1722,6 +1737,7 @@ export async function createJAgentDeskDaemon(
   const archiveScheduleWorkspaceExternal = async (workspaceId: string) => {
     await archiveByScope(
       {
+        lifecycle: pluginRuntime,
         jagentdeskHome: config.jagentdeskHome,
         jagentdeskWorktreesBaseRoot: config.worktreesRoot,
         worktreeManagers: pluginRuntime,
@@ -1732,6 +1748,8 @@ export async function createJAgentDeskDaemon(
         agentStorage,
         findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
         getWorkspace: (workspaceIdToRead) => workspaceRegistry.get(workspaceIdToRead),
+        assertWorkspaceAutomationAllowed: (guardedWorkspaceId) =>
+          assertWorkspaceAutomationAllowedForWorkspace(workspaceRegistry, guardedWorkspaceId),
         isCheckoutUntrusted: (checkoutPath) => isCheckoutUntrusted(workspaceRegistry, checkoutPath),
         listActiveWorkspaces: listActiveWorkspacesExternal,
         archiveWorkspaceRecord: (workspaceIdToArchive, archivedAt) =>
@@ -1981,11 +1999,14 @@ export async function createJAgentDeskDaemon(
     workspaceGitService,
     worktreeManagers: pluginRuntime,
     workspaceArchiveOperations,
+    assertWorkspaceAutomationAllowed: (guardedWorkspaceId) =>
+      assertWorkspaceAutomationAllowedForWorkspace(workspaceRegistry, guardedWorkspaceId),
     isCheckoutUntrusted: (checkoutPath) => isCheckoutUntrusted(workspaceRegistry, checkoutPath),
     findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
     listActiveWorkspaces: listActiveWorkspacesExternal,
     archiveWorkspaceRecord: (workspaceId, archivedAt) =>
       archiveWorkspaceRecordExternal(workspaceId, undefined, archivedAt),
+    lifecycle: pluginRuntime,
     emitWorkspaceUpdatesForWorkspaceIds: emitWorkspaceUpdatesExternal,
     workspaceRegistry,
     projectRegistry,
@@ -2090,6 +2111,7 @@ export async function createJAgentDeskDaemon(
     // state is retained between requests, matching the previous
     // `sessionIdGenerator: undefined` transport.
     const createAgentMcpSession = async (callerAgentId?: string) => {
+      if (callerAgentId) await agentManager.refreshPluginTools(callerAgentId);
       const agentMcpServer = await createAgentMcpServer(
         createAgentToolHostDependencies({ callerAgentId }),
       );
@@ -2515,7 +2537,6 @@ export async function createJAgentDeskDaemon(
       scriptHealthMonitor.start();
     } catch (error) {
       unsubscribePluginProviders();
-      unsubscribePluginSessionChanges();
       await pluginRuntime.stopAllPlugins().catch(() => undefined);
       await serviceProxy.stopStandalone().catch(() => undefined);
       await agentProviderRuntime.shutdown().catch(() => undefined);
@@ -2531,7 +2552,6 @@ export async function createJAgentDeskDaemon(
     const keepTerminals = options?.keepTerminals === true;
     let terminalShutdownError: unknown = null;
     unsubscribePluginProviders();
-    unsubscribePluginSessionChanges();
     await hubRelationships.stop();
     workspaceReconciliation.dispose();
     scriptHealthMonitor.stop();

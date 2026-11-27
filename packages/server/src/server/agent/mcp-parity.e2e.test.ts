@@ -1134,6 +1134,7 @@ describe("Suite E: Worktree Tools", () => {
       });
       ownedWorkspaces.push(str(inheritedWorkspace.workspaceId));
       expect(inheritedWorkspace.background).toBe(true);
+      expect(inheritedWorkspace.parentWorkspaceId).toBe(workspaceId);
     } finally {
       await scoped.close();
       await archiveAgentIfPresent(callerId);

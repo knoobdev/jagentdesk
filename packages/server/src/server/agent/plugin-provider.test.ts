@@ -11,6 +11,7 @@ import { relative } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import type {
+  ProviderCapability,
   ProviderConnection,
   ProviderLaunch,
   ProviderEvent,
@@ -287,6 +288,7 @@ function createRewindProviderHarness(
     reuseAnswerId?: boolean;
     forkOnRevert?: boolean;
     handleInput?: ProviderHarnessOptions["handleInput"];
+    extraCapabilities?: ProviderCapability[];
   } = {},
 ) {
   const nativeMessages: string[] = [];
@@ -298,6 +300,7 @@ function createRewindProviderHarness(
       "session.revert.conversation",
       "session.revert.files",
       "session.revert.both",
+      ...(options.extraCapabilities ?? []),
     ],
     async handleInput(input, emit) {
       if (await options.handleInput?.(input, emit)) return true;
@@ -2608,4 +2611,55 @@ describe("plugin provider tool policy", () => {
     expect(result.opened).toHaveLength(1);
     expect(result.opened[0]).toMatchObject({ config: { toolPolicy } });
   });
+});
+
+test("a declared launch wrap still needs session.launch_wrap on the live connection", async () => {
+  const harness = createProviderHarness();
+  const registry = new PluginAgentClientRegistry(createTestLogger());
+  registry.replace([{ ...harness.registration, launchWrap: true }]);
+  expect(registry.definitions()[harness.registration.id]?.supportsLaunchWrap).toBe(true);
+  const client = registry.clients()[harness.registration.id]!;
+  expect(client.supportsLaunchWrap).toBe(true);
+
+  await expect(client.requireLaunchWrap?.()).rejects.toMatchObject({
+    code: "launch_wrap_unsupported",
+  });
+  await expect(
+    client.createSession(
+      { provider: harness.registration.id, cwd: tmpdir() },
+      { wrap: ["/opt/sandbox/bin/run"] },
+    ),
+  ).rejects.toThrow("session.launch_wrap");
+  expect(harness.inputs.some((input) => input.type === "session.open")).toBe(false);
+  await registry.shutdown();
+});
+
+test("a provider that declares no launch wrap is not marked as supporting it", () => {
+  const harness = createProviderHarness();
+  const registry = new PluginAgentClientRegistry(createTestLogger());
+  registry.replace([harness.registration]);
+  expect(registry.definitions()[harness.registration.id]?.supportsLaunchWrap).toBe(false);
+  expect(registry.clients()[harness.registration.id]!.supportsLaunchWrap).toBe(false);
+});
+
+test("a plugin session reopen sends the wrap the session opened with", async () => {
+  const harness = createRewindProviderHarness({ extraCapabilities: ["session.launch_wrap"] });
+  const registry = new PluginAgentClientRegistry(createTestLogger());
+  registry.replace([{ ...harness.registration, launchWrap: true }]);
+  const client = registry.clients()[harness.registration.id]!;
+  await expect(client.requireLaunchWrap?.()).resolves.toBeUndefined();
+  const wrap: [string, ...string[]] = ["/opt/sandbox/bin/run", "--profile", "a b"];
+  const session = await client.createSession(
+    { provider: harness.registration.id, cwd: tmpdir() },
+    { wrap },
+  );
+  await session.run("A");
+
+  await session.revertConversation!({ messageId: "user-A" });
+
+  const opens = harness.inputs.filter((input) => input.type === "session.open");
+  expect(opens.length).toBeGreaterThanOrEqual(2);
+  for (const open of opens) expect(open.config.wrap).toEqual(wrap);
+  await session.close();
+  await registry.shutdown();
 });

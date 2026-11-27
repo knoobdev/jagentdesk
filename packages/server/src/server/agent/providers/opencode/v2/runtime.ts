@@ -5,6 +5,7 @@ import type { V2Api } from "./api.js";
 import { randomBytes } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import type { Logger } from "pino";
+import type { LaunchWrap } from "../../../../../utils/launch-wrap.js";
 import { spawnProcess } from "../../../../../utils/spawn.js";
 import { terminateWithTreeKill } from "../../../../../utils/tree-kill.js";
 import {
@@ -86,6 +87,8 @@ export interface V2RuntimeAcquireOptions {
    */
   dedicated?: boolean;
   env?: Record<string, string>;
+  /** Start a server for this caller alone, behind this wrap. Other callers never share it. */
+  wrap?: LaunchWrap;
   signal?: AbortSignal;
 }
 
@@ -122,6 +125,7 @@ export class V2Runtime {
     input.signal?.throwIfAborted();
     this.assertBridgePort();
     const selected = await raceProviderRefreshAbort(input.signal, this.selection);
+    assertWrappable(input, selected);
     const pending = this.pendingGeneration(input, selected);
     let generation: Generation;
     try {
@@ -162,8 +166,10 @@ export class V2Runtime {
     input: V2RuntimeAcquireOptions,
     selected: OpenCodeServiceSelection,
   ): Promise<Generation> {
-    // Spec 33.7 legacy path: a server of the agent's own, never the shared one.
-    if (input.env || input.dedicated) return this.startTracked({ kind: "owned" }, input.env ?? {});
+    // Spec 33.7 legacy path, and a launch wrap: a server of the caller's own, never the shared one.
+    // A discovered server is only a preference; a wrapped caller gets a server JAgentDesk starts.
+    if (input.env || input.dedicated || input.wrap)
+      return this.startTracked({ kind: "owned" }, input.env ?? {}, input.wrap);
     this.current ??= this.startTracked(
       this.requiresOwnedServer(selected) ? { kind: "owned" } : selected,
     );
@@ -242,8 +248,9 @@ export class V2Runtime {
   private startTracked(
     selection: OpenCodeServiceSelection,
     dedicatedEnv?: Record<string, string>,
+    wrap?: LaunchWrap,
   ): Promise<Generation> {
-    const pending = this.start(selection, dedicatedEnv);
+    const pending = this.start(selection, dedicatedEnv, wrap);
     this.starts.add(pending);
     void pending.then(
       (generation) =>
@@ -263,6 +270,7 @@ export class V2Runtime {
   private async start(
     selection: OpenCodeServiceSelection,
     dedicatedEnv?: Record<string, string>,
+    wrap?: LaunchWrap,
   ): Promise<Generation> {
     if (selection.kind !== "owned") {
       const generation: Generation = {
@@ -325,6 +333,7 @@ export class V2Runtime {
       cwd,
       detached: globalThis.process.platform !== "win32",
       stdio: ["ignore", "pipe", "pipe"],
+      wrap,
       ...createProviderEnvSpec({
         runtimeSettings: settings,
         overlays: [{ ...decorated, OPENCODE_PASSWORD: password }],
@@ -431,4 +440,14 @@ export class V2Runtime {
       throw error;
     }
   }
+}
+
+function assertWrappable(
+  input: V2RuntimeAcquireOptions,
+  selection: OpenCodeServiceSelection,
+): void {
+  if (input.wrap && selection.kind === "explicit")
+    throw new Error(
+      "OpenCode is configured to use an existing server, so JAgentDesk cannot start it behind a launch wrap",
+    );
 }

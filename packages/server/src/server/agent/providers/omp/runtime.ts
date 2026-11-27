@@ -19,6 +19,8 @@ export interface OmpRuntimeLaunch {
   cwd: string;
   argv: string[];
   env?: Record<string, string>;
+  /** Start OMP as `[...wrap, ...argv]`. */
+  wrap?: readonly [string, ...string[]];
   protocolMode?: "rpc" | "rpc-ui";
   model?: string;
   thinkingOptionId?: string;
@@ -33,6 +35,8 @@ export interface OmpStartSessionInput {
   cwd: string;
   signal?: AbortSignal;
   env?: Record<string, string>;
+  /** The agent's launch wrap; every OMP process started for the agent runs behind it. */
+  wrap?: readonly [string, ...string[]];
   protocolMode?: "rpc" | "rpc-ui";
   model?: string;
   thinkingOptionId?: string;
@@ -111,6 +115,7 @@ export function buildOmpLaunch(input: {
             ...input.session.env,
           }
         : undefined,
+    wrap: input.session.wrap,
     model: input.session.model,
     thinkingOptionId: input.session.thinkingOptionId,
     protocolMode,

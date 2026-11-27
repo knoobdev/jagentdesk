@@ -12,9 +12,14 @@ import {
   statSync,
 } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
-import { basename, delimiter, dirname, extname, join, resolve as resolvePath } from "node:path";
+import { basename, delimiter, dirname, join, resolve as resolvePath } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import {
+  isWindowsCommandScript,
+  windowsCommandLine,
+  windowsCommandShell,
+} from "@jagentdesk/plugin/internal/windows-command";
 import { createExternalProcessEnv } from "../server/jagentdesk-env.js";
 import {
   resolveExternalProcessPath,
@@ -35,6 +40,7 @@ import {
 import type { TerminalReplayOptions, TerminalReplayMetadata } from "./terminal-replay.js";
 import { TerminalInputModeTracker } from "@jagentdesk/protocol/terminal-input-mode";
 import { TerminalActivityTracker } from "./activity/terminal-activity-tracker.js";
+import { resolveDefaultTerminalShell } from "./default-terminal-shell.js";
 import type {
   TerminalActivity,
   TerminalActivityState,
@@ -264,22 +270,19 @@ export function ensureNodePtySpawnHelperExecutableForCurrentPlatform(
   }
 }
 
-export function resolveDefaultTerminalShell(
-  options: { platform?: NodeJS.Platform; env?: NodeJS.ProcessEnv } = {},
-): string {
-  const platform = options.platform ?? process.platform;
-  const env = options.env ?? process.env;
-
-  if (platform === "win32") {
-    return env.ComSpec || env.COMSPEC || "C:\\Windows\\System32\\cmd.exe";
-  }
-
-  return env.SHELL || "/bin/sh";
-}
-
 export interface ResolvedTerminalCommand {
   command: string;
-  args: string[];
+  // `.cmd`/`.bat` targets resolve to a single pre-escaped `cmd.exe` command line (string) instead
+  // of an argv array. node-pty's own array quoting only produces MSVCRT/CommandLineToArgvW-safe
+  // quoting; cmd.exe re-parses that whole line with its own tokenizer first.
+  args: string[] | string;
+}
+
+// cmd.exe ends a command at a line break whatever the quoting, so the shared line builder refuses
+// one. A terminal agent's initial prompt arrives as an argument and often spans lines; it still
+// starts, with each line break as a space.
+function joinPromptLines(argument: string): string {
+  return argument.replace(/\r\n|\r|\n/g, " ");
 }
 
 export interface ResolveTerminalSpawnCommandOptions {
@@ -322,14 +325,15 @@ export async function resolveTerminalSpawnCommand(
 
   // `.cmd`/`.bat` shims are batch scripts that conpty's CreateProcess cannot
   // launch directly; they must run through cmd.exe (node-pty has no `shell`
-  // option, so build the `cmd /c` invocation ourselves). Checked by extension
-  // rather than isWindowsCommandScript() because that helper gates on the live
-  // process.platform, which is wrong once we're already on the win32 branch.
-  const extension = extname(resolved).toLowerCase();
-  if (extension === ".cmd" || extension === ".bat") {
-    const env = options.env ?? process.env;
-    const comSpec = env.ComSpec || env.COMSPEC || "C:\\Windows\\System32\\cmd.exe";
-    return { command: comSpec, args: ["/c", resolved, ...args] };
+  // option, so build the `cmd /c` invocation ourselves).
+  if (isWindowsCommandScript(resolved, platform)) {
+    // node-pty quotes an argv array for a program's own parser, which cmd.exe does not use, so the
+    // `/c` line goes to it as one string that the shared cmd.exe dialect has already quoted.
+    const line = windowsCommandLine(resolved, args.map(joinPromptLines), { commandScript: true });
+    return {
+      command: windowsCommandShell(options.env ?? process.env),
+      args: `/d /s /c ${line}`,
+    };
   }
 
   return { command: resolved, args };

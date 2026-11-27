@@ -1,3 +1,5 @@
+import { commandRunHook } from "./command-run-hook.js";
+import type { PluginLifecycle } from "./plugins/lifecycle/index.js";
 import { resolve } from "node:path";
 
 import type { Logger } from "pino";
@@ -20,6 +22,14 @@ import type {
   WorkspaceRegistry,
 } from "./workspace-registry.js";
 import { createRealpathAwarePathMatcher, isRealpathInsideRoot } from "../utils/path.js";
+import {
+  readJAgentDeskWorktreeMetadata,
+  setJAgentDeskWorktreeUntrustedSource,
+} from "../utils/worktree-metadata.js";
+import {
+  WorkspaceAutomationBlockedError,
+  type UntrustedWorkspaceSource,
+} from "./workspace-automation-gate.js";
 import type { PluginWorktreeManagerRuntime } from "./plugins/runtime.js";
 import type { WorkspaceArchiveOperations } from "./workspace-archive-operations.js";
 
@@ -56,8 +66,11 @@ export interface ArchiveDependencies {
   markWorkspaceArchiving: (workspaceIds: Iterable<string>, archivingAt: string) => void;
   clearWorkspaceArchiving: (workspaceIds: Iterable<string>) => void;
   killTerminalsForWorkspace: (workspaceId: string) => Promise<void>;
-  isCheckoutUntrusted?: (checkoutPath: string) => Promise<boolean>;
+  assertWorkspaceAutomationAllowed: (workspaceId: string) => Promise<void>;
+  isCheckoutUntrusted: (checkoutPath: string) => Promise<boolean>;
   sessionLogger?: Logger;
+  /** Plugins' lifecycle, for `command.run.before` on teardown commands. */
+  lifecycle: Pick<PluginLifecycle, "before"> | null;
 }
 
 export interface KillTerminalsForWorkspaceDependencies {
@@ -124,12 +137,17 @@ interface BackingDirectory {
   mainRepoRoot: string | null;
   jagentdeskWorktreesRoot: string | null;
   worktreeManagerPluginId: string | null;
-  untrusted: boolean;
+  untrustedSource: UntrustedWorkspaceSource | null;
 }
 
 interface ArchiveTarget {
   backing: BackingDirectory | null;
-  teardownTargets: Array<{ workspaceId: string | null; cwd: string }>;
+  teardownTargets: Array<{ workspaceId: string; cwd: string }>;
+  // Active workspaces sharing the resolved backing checkout when archive starts
+  // (including the records being archived and any active siblings). Keeps
+  // teardown approval scoped to the live checkout rather than historical
+  // archived records that previously occupied the same path.
+  checkoutWorkspaceIds: string[];
   workspaceIds: string[];
 }
 
@@ -262,6 +280,33 @@ async function resolveArchiveCheckoutPath(
   return (await resolveBackingDirectory(scope.targetPath, dependencies)).path;
 }
 
+async function listActiveWorkspacesOnBacking(
+  activeWorkspaces: ActiveWorkspaceRef[],
+  backingPath: string,
+  dependencies: Pick<ArchiveDependencies, "jagentdeskHome" | "jagentdeskWorktreesBaseRoot">,
+): Promise<ActiveWorkspaceRef[]> {
+  const matchesBackingDirectory = createRealpathAwarePathMatcher(backingPath);
+  return (
+    await Promise.all(
+      activeWorkspaces.map(async (workspace) => {
+        const backingDirectory = await resolveWorkspaceBackingDirectory(workspace, dependencies);
+        return matchesBackingDirectory(backingDirectory.path) ? workspace : null;
+      }),
+    )
+  ).filter((workspace): workspace is ActiveWorkspaceRef => workspace !== null);
+}
+
+function firstUntrustedSource(
+  primary: UntrustedWorkspaceSource | null,
+  workspaces: ActiveWorkspaceRef[],
+): UntrustedWorkspaceSource | null {
+  return (
+    primary ??
+    workspaces.find((workspace) => Boolean(workspace.untrustedSource))?.untrustedSource ??
+    null
+  );
+}
+
 async function resolveArchiveTarget(
   dependencies: ArchiveDependencies,
   scope: ArchiveScope,
@@ -276,25 +321,35 @@ async function resolveArchiveTarget(
         { workspaceId },
         "Workspace not found for archive-by-scope; skipping",
       );
-      return { backing: null, teardownTargets: [], workspaceIds: [] };
+      return { backing: null, teardownTargets: [], checkoutWorkspaceIds: [], workspaceIds: [] };
     }
+    const backing = await resolveWorkspaceBackingDirectory(record, dependencies);
+    const activeOnCheckout = await listActiveWorkspacesOnBacking(
+      activeWorkspaces,
+      backing.path,
+      dependencies,
+    );
+    const checkoutWorkspaceIds = Array.from(
+      new Set([workspaceId, ...activeOnCheckout.map((workspace) => workspace.workspaceId)]),
+    );
     return {
-      backing: await resolveWorkspaceBackingDirectory(record, dependencies),
+      backing: {
+        ...backing,
+        untrustedSource: firstUntrustedSource(backing.untrustedSource, activeOnCheckout),
+      },
       teardownTargets: [{ workspaceId, cwd: record.cwd }],
+      checkoutWorkspaceIds,
       workspaceIds: [workspaceId],
     };
   }
 
   const backing = await resolveBackingDirectory(scope.targetPath, dependencies);
   const matchesBackingDirectory = createRealpathAwarePathMatcher(backing.path);
-  const targetWorkspaces = (
-    await Promise.all(
-      activeWorkspaces.map(async (workspace) => {
-        const backingDirectory = await resolveWorkspaceBackingDirectory(workspace, dependencies);
-        return matchesBackingDirectory(backingDirectory.path) ? workspace : null;
-      }),
-    )
-  ).filter((workspace): workspace is ActiveWorkspaceRef => workspace !== null);
+  const targetWorkspaces = await listActiveWorkspacesOnBacking(
+    activeWorkspaces,
+    backing.path,
+    dependencies,
+  );
   const recordedId = await dependencies.findWorkspaceIdForCwd(backing.path);
   const recorded = recordedId ? await dependencies.getWorkspace?.(recordedId) : null;
   const record =
@@ -303,15 +358,19 @@ async function resolveArchiveTarget(
       ? recorded
       : null) ??
     targetWorkspaces[0];
+  const resolvedBacking = record
+    ? await resolveWorkspaceBackingDirectory(record, dependencies)
+    : backing;
   return {
-    backing: record ? await resolveWorkspaceBackingDirectory(record, dependencies) : backing,
-    teardownTargets:
-      targetWorkspaces.length > 0
-        ? targetWorkspaces.map((workspace) => ({
-            workspaceId: workspace.workspaceId,
-            cwd: workspace.cwd,
-          }))
-        : [{ workspaceId: null, cwd: scope.targetPath }],
+    backing: {
+      ...resolvedBacking,
+      untrustedSource: firstUntrustedSource(null, targetWorkspaces),
+    },
+    teardownTargets: targetWorkspaces.map((workspace) => ({
+      workspaceId: workspace.workspaceId,
+      cwd: workspace.cwd,
+    })),
+    checkoutWorkspaceIds: targetWorkspaces.map((workspace) => workspace.workspaceId),
     workspaceIds: targetWorkspaces.map((workspace) => workspace.workspaceId),
   };
 }
@@ -321,7 +380,7 @@ async function resolveWorkspaceBackingDirectory(
   dependencies: Pick<ArchiveDependencies, "jagentdeskHome" | "jagentdeskWorktreesBaseRoot">,
 ): Promise<BackingDirectory> {
   const worktreeManagerPluginId = workspace.worktreeManagerPluginId ?? null;
-  const untrusted = Boolean(workspace.untrustedSource);
+  const untrustedSource = workspace.untrustedSource ?? null;
   if (workspace.isJAgentDeskOwnedWorktree === false) {
     return {
       path: resolve(workspace.worktreeRoot ?? workspace.cwd),
@@ -331,7 +390,7 @@ async function resolveWorkspaceBackingDirectory(
       mainRepoRoot: workspace.mainRepoRoot ?? null,
       jagentdeskWorktreesRoot: null,
       worktreeManagerPluginId,
-      untrusted,
+      untrustedSource,
     };
   }
   if (workspace.isJAgentDeskOwnedWorktree && workspace.worktreeRoot && workspace.mainRepoRoot) {
@@ -343,7 +402,7 @@ async function resolveWorkspaceBackingDirectory(
       mainRepoRoot: workspace.mainRepoRoot,
       jagentdeskWorktreesRoot: null,
       worktreeManagerPluginId,
-      untrusted,
+      untrustedSource,
     };
   }
   if (workspace.kind !== "worktree") {
@@ -355,7 +414,7 @@ async function resolveWorkspaceBackingDirectory(
       mainRepoRoot: workspace.mainRepoRoot ?? null,
       jagentdeskWorktreesRoot: null,
       worktreeManagerPluginId,
-      untrusted,
+      untrustedSource,
     };
   }
 
@@ -369,7 +428,7 @@ async function resolveWorkspaceBackingDirectory(
     ...backing,
     mainRepoRoot: workspace.mainRepoRoot ?? backing.mainRepoRoot,
     worktreeManagerPluginId: worktreeManagerPluginId ?? backing.worktreeManagerPluginId,
-    untrusted: untrusted || backing.untrusted,
+    untrustedSource: untrustedSource ?? backing.untrustedSource,
   };
 }
 
@@ -390,7 +449,7 @@ async function resolveBackingDirectory(
     mainRepoRoot: ownership.repoRoot ?? null,
     jagentdeskWorktreesRoot: ownership.worktreeRoot ?? null,
     worktreeManagerPluginId: null,
-    untrusted: false,
+    untrustedSource: null,
   };
 }
 
@@ -470,18 +529,21 @@ async function maybeRemoveDirectory(
   }
 
   const archivedWorkspaceIdSet = new Set(archivedWorkspaceIds);
-  const teardownCwds = uniqueFilesystemPaths(
-    target.teardownTargets
-      .filter(
-        (teardownTarget) =>
-          teardownTarget.workspaceId === null ||
-          archivedWorkspaceIdSet.has(teardownTarget.workspaceId),
-      )
-      .map((teardownTarget) => teardownTarget.cwd),
+  const teardownTargets = target.teardownTargets.filter((teardownTarget) =>
+    archivedWorkspaceIdSet.has(teardownTarget.workspaceId),
   );
 
+  const teardownPlan = await resolveCheckoutTeardownPlan(
+    dependencies,
+    backing,
+    teardownTargets,
+    target.checkoutWorkspaceIds,
+  );
   const untrustedBacking =
-    backing.untrusted || Boolean(await dependencies.isCheckoutUntrusted?.(backing.path));
+    teardownPlan.untrustedBacking || Boolean(await dependencies.isCheckoutUntrusted(backing.path));
+  const teardownCwds = uniqueFilesystemPaths(
+    teardownPlan.allowedTargets.map((teardownTarget) => teardownTarget.cwd),
+  );
   try {
     for (const teardownCwd of teardownCwds) {
       request.checkpoint();
@@ -489,6 +551,15 @@ async function maybeRemoveDirectory(
         worktreePath: backing.path,
         teardownCwd,
         repoRootPath: backing.mainRepoRoot ?? undefined,
+        // Targets that share a directory run its teardown once, as the first of them.
+        prepareCommand: commandRunHook(dependencies.lifecycle, {
+          workspaceId:
+            teardownPlan.allowedTargets.find(
+              (teardownTarget) => uniqueFilesystemPaths([teardownTarget.cwd])[0] === teardownCwd,
+            )?.workspaceId ?? null,
+          cwd: teardownCwd,
+          purpose: "teardown",
+        }),
       });
     }
   } catch (error) {
@@ -541,6 +612,68 @@ async function maybeRemoveDirectory(
     );
     return { removedDirectory: false };
   }
+}
+
+async function resolveCheckoutTeardownPlan(
+  dependencies: ArchiveDependencies,
+  backing: BackingDirectory,
+  teardownTargets: Array<{ workspaceId: string; cwd: string }>,
+  checkoutWorkspaceIds: string[],
+): Promise<{
+  allowedTargets: Array<{ workspaceId: string; cwd: string }>;
+  untrustedBacking: boolean;
+}> {
+  const metadataUntrustedSource =
+    (await readJAgentDeskWorktreeMetadata(backing.path).catch(() => null))?.untrustedSource ?? null;
+  const checkoutUntrusted = Boolean(backing.untrustedSource || metadataUntrustedSource);
+  const teardownGate = checkoutUntrusted
+    ? { allowed: [] as Array<{ workspaceId: string; cwd: string }>, blockedSource: null }
+    : await filterAllowedTeardownTargets(dependencies, teardownTargets, checkoutWorkspaceIds);
+  const untrustedSourceToPersist =
+    teardownTargets.length === 0 || metadataUntrustedSource
+      ? null
+      : (backing.untrustedSource ?? teardownGate.blockedSource);
+  if (untrustedSourceToPersist) {
+    // Runs inside workspaceArchiveOperations.withCheckout, so a retained checkout keeps
+    // its block after its unapproved workspace record is archived.
+    await setJAgentDeskWorktreeUntrustedSource(backing.path, untrustedSourceToPersist).catch(
+      () => false,
+    );
+  }
+  return {
+    allowedTargets: teardownGate.allowed,
+    untrustedBacking: checkoutUntrusted || teardownGate.allowed.length < teardownTargets.length,
+  };
+}
+
+async function filterAllowedTeardownTargets(
+  dependencies: ArchiveDependencies,
+  targets: Array<{ workspaceId: string; cwd: string }>,
+  checkoutWorkspaceIds: string[],
+): Promise<{
+  allowed: Array<{ workspaceId: string; cwd: string }>;
+  blockedSource: UntrustedWorkspaceSource | null;
+}> {
+  if (targets.length === 0) {
+    return { allowed: [], blockedSource: null };
+  }
+  if (typeof dependencies.assertWorkspaceAutomationAllowed !== "function") {
+    return { allowed: [], blockedSource: null };
+  }
+  const workspaceIdsToCheck = Array.from(
+    new Set([...targets.map((target) => target.workspaceId), ...checkoutWorkspaceIds]),
+  );
+  for (const workspaceId of workspaceIdsToCheck) {
+    try {
+      await dependencies.assertWorkspaceAutomationAllowed(workspaceId);
+    } catch (error) {
+      if (!(error instanceof WorkspaceAutomationBlockedError)) throw error;
+      // Every workspace in checkoutWorkspaceIds shares the same backing checkout;
+      // if any active workspace on it is blocked, skip teardown for the checkout.
+      return { allowed: [], blockedSource: error.source };
+    }
+  }
+  return { allowed: targets, blockedSource: null };
 }
 
 function uniqueFilesystemPaths(paths: string[]): string[] {

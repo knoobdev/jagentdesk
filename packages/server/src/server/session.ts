@@ -340,6 +340,7 @@ import { type MessageReceipts } from "./message-receipts/index.js";
 import { isAbsolute, relative } from "node:path";
 import { applyRecordPatch } from "./record-patch.js";
 import {
+  assertWorkspaceAutomationAllowedForWorkspace,
   formatWorkspaceAutomationBlockedMessage,
   isCheckoutUntrusted,
 } from "./workspace-automation-gate.js";
@@ -1088,6 +1089,11 @@ export class Session {
 
   private readonly pluginRuntime: SessionOptions["pluginRuntime"];
 
+  // What worktree setup and teardown commands run through: the plugins' hooks, or none.
+  private get commandLifecycle(): NonNullable<SessionOptions["pluginRuntime"]> | null {
+    return this.pluginRuntime ?? null;
+  }
+
   private unsubscribePluginChanges: (() => void) | null = null;
 
   private registryMutationQueue: Promise<void> = Promise.resolve();
@@ -1585,11 +1591,14 @@ export class Session {
     });
     this.workspaceArchiveOperations = resolveWorkspaceArchiveOperations(workspaceArchiveOperations);
     this.createAgentLifecycleDispatch = new CreateAgentLifecycleDispatch({
+      lifecycle: this.commandLifecycle,
       jagentdeskHome: this.jagentdeskHome,
       worktreesRoot: this.worktreesRoot,
       worktreeManagers: pluginRuntime ?? undefined,
       workspaceArchiveOperations: this.workspaceArchiveOperations,
       getWorkspace: (workspaceId) => this.workspaceRegistry.get(workspaceId),
+      assertWorkspaceAutomationAllowed: (workspaceId) =>
+        assertWorkspaceAutomationAllowedForWorkspace(this.workspaceRegistry, workspaceId),
       isCheckoutUntrusted: (checkoutPath) =>
         isCheckoutUntrusted(this.workspaceRegistry, checkoutPath),
       agentManager: this.agentManager,
@@ -6245,6 +6254,7 @@ export class Session {
   ): Promise<void> {
     return handleWorktreeArchiveRequest(
       {
+        lifecycle: this.commandLifecycle,
         jagentdeskHome: this.jagentdeskHome,
         jagentdeskWorktreesBaseRoot: this.worktreesRoot,
         worktreeManagers: this.pluginRuntime,
@@ -6265,6 +6275,8 @@ export class Session {
         clearWorkspaceArchiving: (workspaceIds) => this.clearWorkspaceArchiving(workspaceIds),
         killTerminalsForWorkspace: (workspaceId) =>
           this.terminalController.killTerminalsForWorkspace(workspaceId),
+        assertWorkspaceAutomationAllowed: (workspaceId) =>
+          assertWorkspaceAutomationAllowedForWorkspace(this.workspaceRegistry, workspaceId),
         isCheckoutUntrusted: (checkoutPath) =>
           isCheckoutUntrusted(this.workspaceRegistry, checkoutPath),
         sessionLogger: this.sessionLogger,
@@ -6727,6 +6739,7 @@ export class Session {
       ...(workspace.labels && workspace.labels.length > 0 ? { labels: workspace.labels } : {}),
       metadata: workspace.metadata,
       background: workspace.background,
+      parentWorkspaceId: workspace.parentWorkspaceId,
       archivingAt: null,
       status: "done",
       statusEnteredAt: null,
@@ -6814,6 +6827,7 @@ export class Session {
       projectKind: projectRecord?.kind ?? "git",
       workspaceKind: result.workspace.kind,
       background: result.workspace.background,
+      parentWorkspaceId: result.workspace.parentWorkspaceId,
       name: resolveWorkspaceName({
         title: result.workspace.title,
         derivedDisplayName: result.worktree.branchName || result.workspace.displayName,
@@ -6997,16 +7011,19 @@ export class Session {
     };
   }
 
-  private async withWorkspaceCheckout<T>(workspaceId: string, run: () => Promise<T>): Promise<T> {
+  private async withWorkspaceCheckout<T>(
+    workspaceId: string,
+    run: (checkoutPath: string | null) => Promise<T>,
+  ): Promise<T> {
     const workspace = await this.workspaceRegistry.get(workspaceId);
     if (!workspace) {
-      return run();
+      return run(null);
     }
     const checkoutPath = await resolveWorkspaceBackingPath(workspace, {
       jagentdeskHome: this.jagentdeskHome,
       jagentdeskWorktreesBaseRoot: this.worktreesRoot,
     });
-    return this.workspaceArchiveOperations.withCheckout(checkoutPath, run);
+    return this.workspaceArchiveOperations.withCheckout(checkoutPath, () => run(checkoutPath));
   }
 
   private async withCheckoutForDirectory<T>(cwd: string, run: () => Promise<T>): Promise<T> {
@@ -8361,6 +8378,7 @@ export class Session {
   ): Promise<CreateJAgentDeskWorktreeWorkflowResult> {
     return createWorktreeWorkflow(
       {
+        lifecycle: this.commandLifecycle,
         jagentdeskHome: this.jagentdeskHome,
         worktreesRoot: this.worktreesRoot,
         createJAgentDeskWorktree: (workflowInput, serviceOptions) =>
@@ -8419,6 +8437,7 @@ export class Session {
           }
           return archiveByScope(
             {
+              lifecycle: this.commandLifecycle,
               jagentdeskHome: this.jagentdeskHome,
               jagentdeskWorktreesBaseRoot: this.worktreesRoot,
               worktreeManagers: this.pluginRuntime,
@@ -8429,6 +8448,8 @@ export class Session {
               agentStorage: this.agentStorage,
               findWorkspaceIdForCwd: (cwd) => this.findWorkspaceIdForCwd(cwd),
               getWorkspace: (workspaceId) => this.workspaceRegistry.get(workspaceId),
+              assertWorkspaceAutomationAllowed: (workspaceId) =>
+                assertWorkspaceAutomationAllowedForWorkspace(this.workspaceRegistry, workspaceId),
               listActiveWorkspaces: () => this.listActiveWorkspaceRefs(),
               archiveWorkspaceRecord: (workspaceId, archivedAt) =>
                 this.archiveWorkspaceRecord(workspaceId, archivedAt),

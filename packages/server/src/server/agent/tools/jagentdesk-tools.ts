@@ -180,6 +180,7 @@ export interface JAgentDeskToolHostDependencies {
   findWorkspaceIdForCwd?: ArchiveDependencies["findWorkspaceIdForCwd"];
   worktreeManagers?: ArchiveDependencies["worktreeManagers"];
   workspaceArchiveOperations?: ArchiveDependencies["workspaceArchiveOperations"];
+  assertWorkspaceAutomationAllowed?: ArchiveDependencies["assertWorkspaceAutomationAllowed"];
   isCheckoutUntrusted?: ArchiveDependencies["isCheckoutUntrusted"];
   listActiveWorkspaces?: ArchiveDependencies["listActiveWorkspaces"];
   archiveWorkspaceRecord?: ArchiveDependencies["archiveWorkspaceRecord"];
@@ -195,6 +196,7 @@ export interface JAgentDeskToolHostDependencies {
   workspaceScripts?: Pick<WorkspaceScriptsService, "list" | "launch" | "stop">;
   markWorkspaceArchiving?: ArchiveDependencies["markWorkspaceArchiving"];
   clearWorkspaceArchiving?: ArchiveDependencies["clearWorkspaceArchiving"];
+  lifecycle?: ArchiveDependencies["lifecycle"];
   createJAgentDeskWorktree?: CreateJAgentDeskWorktreeWorkflowFn;
   // Mints a fresh directory workspace for a cwd and returns its id.
   ensureWorkspaceForCreate?: (
@@ -283,6 +285,7 @@ interface ProviderSummary {
 }
 
 const WorkspaceAutomationSummarySchema = z.object({
+  parentWorkspaceId: z.string().optional(),
   workspaceId: z.string(),
   projectId: z.string(),
   cwd: z.string(),
@@ -301,6 +304,7 @@ function toWorkspaceAutomationSummary(workspace: PersistedWorkspaceRecord) {
     kind: workspace.kind,
     title: workspace.title,
     background: workspace.background,
+    parentWorkspaceId: workspace.parentWorkspaceId,
   };
 }
 
@@ -3440,6 +3444,7 @@ function createToolCatalog(
       const workspaceId = await resolveTerminalWorkspaceId(resolvedCwd);
 
       const terminal = await terminalManager.createTerminal({
+        origin: { source: "agent" },
         cwd: resolvedCwd,
         workspaceId,
         ...(name?.trim() ? { name: name.trim() } : {}),
@@ -4344,11 +4349,19 @@ function archiveWorktreeDependencies(
   if (!options.clearWorkspaceArchiving) {
     throw new Error("Workspace archiving clearer is required to archive worktrees");
   }
+  if (!options.assertWorkspaceAutomationAllowed) {
+    throw new Error("Workspace automation gate is required to archive worktrees");
+  }
+  if (!options.isCheckoutUntrusted) {
+    throw new Error("Checkout trust lookup is required to archive worktrees");
+  }
   return {
+    lifecycle: options.lifecycle ?? null,
     jagentdeskHome: options.jagentdeskHome,
     jagentdeskWorktreesBaseRoot: options.worktreesRoot,
     worktreeManagers: options.worktreeManagers,
     workspaceArchiveOperations: options.workspaceArchiveOperations,
+    assertWorkspaceAutomationAllowed: options.assertWorkspaceAutomationAllowed,
     isCheckoutUntrusted: options.isCheckoutUntrusted,
     github: options.github,
     workspaceGitService: options.workspaceGitService,

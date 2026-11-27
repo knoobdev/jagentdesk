@@ -33,6 +33,11 @@ export interface PluginWorkspaceSnapshot {
   readonly statusEnteredAt: string | null;
   readonly archivingAt: string | null;
   readonly diffStat: { readonly additions: number; readonly deletions: number } | null;
+  /**
+   * The workspace whose agent created this one, on the same host. Null when the host records no
+   * parent, as for root workspaces. The parent may be archived, so `getWorkspace` can return null.
+   */
+  readonly parentWorkspaceId: string | null;
 }
 
 export interface PluginAgentSnapshot {

@@ -668,6 +668,7 @@ export const ProviderSnapshotEntrySchema = z.object({
   iconSvg: z.string().optional(),
   docsUrl: z.string().optional(),
   defaultModeId: z.string().nullable().optional(),
+  launchWrap: z.boolean().optional(),
 });
 
 const AgentCapabilityFlagsSchema: z.ZodType<AgentCapabilityFlags> = z
@@ -5812,6 +5813,8 @@ export const WorkspaceGitHubRuntimePayloadSchema = z
 
 export const WorkspaceDescriptorPayloadSchema = z
   .object({
+    // Informational creation ancestry; independent of placement and lifecycle.
+    parentWorkspaceId: z.string().optional(),
     id: z.string(),
     background: z.boolean().optional(),
     projectId: z.string(),

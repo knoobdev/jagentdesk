@@ -57,6 +57,16 @@ export type TerminalWorkspaceContributionChangedListener = (
   event: TerminalWorkspaceContributionChangedEvent,
 ) => void;
 
+/**
+ * Who asked for a terminal: an agent's JAgentDesk tool, a `jagentdesk.json` script or service, or a
+ * `jagentdesk.json` worktree terminal; anything else is a client. `input` is the command JAgentDesk types
+ * into the shell once it starts.
+ */
+export interface TerminalOrigin {
+  source: "client" | "agent" | "script" | "worktree";
+  input?: string;
+}
+
 export interface TerminalManager {
   /**
    * Set when this host's terminals cannot be served at all (a worker from a newer JAgentDesk holds
@@ -65,6 +75,8 @@ export interface TerminalManager {
   getUnavailableError?(): Error | null;
   getTerminals(cwd: string, options?: { workspaceId?: string }): Promise<TerminalSession[]>;
   createTerminal(options: {
+    /** Where the terminal comes from, for plugins' `terminal.create.before` hooks. */
+    origin?: TerminalOrigin;
     id?: string;
     cwd: string;
     workspaceId: string;

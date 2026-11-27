@@ -113,6 +113,8 @@ function createHarness(overrides?: {
     markWorkspaceArchiving: vi.fn(),
     clearWorkspaceArchiving: vi.fn(),
     emitWorkspaceUpdatesForWorkspaceIds: vi.fn(),
+    assertWorkspaceAutomationAllowed: vi.fn(async () => undefined),
+    isCheckoutUntrusted: vi.fn(async () => false),
   };
   const archiveByScope = vi.fn(
     overrides?.archiveByScope ??
@@ -330,6 +332,8 @@ function createRealOutcomeHarness(input: {
     },
     markWorkspaceArchiving: () => {},
     clearWorkspaceArchiving: () => {},
+    assertWorkspaceAutomationAllowed: async () => {},
+    isCheckoutUntrusted: async () => false,
     emitWorkspaceUpdatesForWorkspaceIds: vi.fn(),
   };
 
@@ -599,6 +603,75 @@ describe("archiveIfSafe", () => {
     expect(archivedWorkspaceIds.has(workspaceA)).toBe(true);
     expect(archivedWorkspaceIds.has(workspaceB)).toBe(false);
     expect(existsSync(worktree.worktreePath)).toBe(true);
+  });
+
+  test("real outcome: skips teardown commands for an unapproved cross-repository checkout", async () => {
+    const { tempDir, repoDir } = createGitRepo();
+    const markerName = "auto-archive-merge-teardown.log";
+    const marker = path.join(repoDir, markerName);
+    const fs = await import("node:fs");
+    fs.writeFileSync(
+      path.join(repoDir, "jagentdesk.json"),
+      JSON.stringify({
+        worktree: {
+          teardown: [
+            `node -e "require('fs').writeFileSync(process.env.JAGENTDESK_SOURCE_CHECKOUT_PATH + '/${markerName}', 'ran')"`,
+          ],
+        },
+      }),
+    );
+    execFileSync("git", ["add", "."], { cwd: repoDir, stdio: "pipe" });
+    execFileSync("git", ["-c", "commit.gpgsign=false", "commit", "-m", "teardown"], {
+      cwd: repoDir,
+      stdio: "pipe",
+    });
+    const jagentdeskHome = path.join(tempDir, ".jagentdesk");
+    const worktree = await createJAgentDeskOwnedWorktree(
+      repoDir,
+      jagentdeskHome,
+      "merged-untrusted",
+    );
+    const workspaceId = "ws-merged-untrusted";
+    const archivedWorkspaceIds = new Set<string>();
+    const harness = createRealOutcomeHarness({
+      jagentdeskHome,
+      repoDir,
+      worktreePath: worktree.worktreePath,
+      activeWorkspaces: [
+        {
+          workspaceId,
+          cwd: worktree.worktreePath,
+          kind: "worktree",
+          worktreeRoot: worktree.worktreePath,
+          isJAgentDeskOwnedWorktree: true,
+          mainRepoRoot: repoDir,
+        },
+      ],
+      archivedWorkspaceIds,
+    });
+    const { WorkspaceAutomationBlockedError } = await import("../workspace-automation-gate.js");
+    const assertWorkspaceAutomationAllowed = vi.fn(async () => {
+      throw new WorkspaceAutomationBlockedError({
+        kind: "change_request",
+        forge: "github",
+        number: 123,
+        headRepository: "contributor/repo",
+      });
+    });
+    harness.options.assertWorkspaceAutomationAllowed = assertWorkspaceAutomationAllowed;
+
+    await archiveIfSafe({
+      cwd: worktree.worktreePath,
+      pullRequest: createPullRequest({ isMerged: true }),
+      inFlight: harness.inFlight,
+      options: harness.options,
+      log: harness.log,
+    });
+
+    expect(assertWorkspaceAutomationAllowed).toHaveBeenCalledWith(workspaceId);
+    expect(archivedWorkspaceIds.has(workspaceId)).toBe(true);
+    expect(existsSync(worktree.worktreePath)).toBe(false);
+    expect(existsSync(marker)).toBe(false);
   });
 
   test("real outcome: removes directory when no sibling workspace remains", async () => {

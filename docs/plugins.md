@@ -89,15 +89,66 @@ the workspace record, and skips first-agent branch auto-rename. Removal saves
 `untrusted` for fork change requests; `remove` and `restore` fall back to built-in Git when the
 plugin declines or is disabled. Example: `plugin-examples/worktrunk`.
 
+`terminal.create.before` runs in `withTerminalCreateHook`, which wraps the daemon's local terminal
+manager, so every local creation path is covered and adopted terminals are not; callers pass an
+`origin` to name the source. SSH terminals bypass it: they run on the remote host, where a launch
+wrap's executable does not exist. `command.run.before` runs inside the setup and teardown runners
+through `commandRunHook`. Setup and archive dependencies take `lifecycle` as a required field so a
+new caller cannot skip the hook by omission; pass `null` only where no plugins run. Both hooks change
+only `env` and a [launch wrap](#launch-wrap); `keepSelectedWrap` in the lifecycle module applies the
+one-wrap rule to all three wrap hooks. The terminal wrap becomes the terminal's `command` and `args`
+in `withTerminalCreateHook`, so the terminal worker protocol does not change. A default-shell
+terminal resolves the shell there through `default-terminal-shell.ts`, which stays apart from
+`terminal.ts` so the daemon does not load node-pty. The wrapped shell starts without JAgentDesk's
+shell integration, so a wrapped script does not report command completion. A setup or teardown wrap
+goes in front of the `buildStringCommandShellInvocation` argv.
+
 Plugin providers participate in provider discovery, launch overrides, diagnostics and reload.
+Declare `ProviderRegistration.launchWrap: true` when every session spawns its own harness and can
+run it as `[...config.wrap, command, ...args]`, and offer `session.launch_wrap` on the connection.
+`runAcpProvider({ command })` does both; the bundled Muse Code connector declares them itself.
 A reload retires their native sessions; the next prompt reopens a resumable session. Closing
 an already closed provider session does not issue another native close. Provider launch
 configuration preserves custom-provider environment overlays and internal MCP approval rules.
 
 `agent.open.before` can attach per-agent tools, MCP servers and instructions. These are launch
 state, not persisted user configuration. Tools are filtered through the provider's
-`jagentdeskTools` policy. Tool and MCP name collisions fail before the session opens. Plugin
-changes invalidate open sessions so the next open uses current contributions.
+`jagentdeskTools` policy. Tool and MCP name collisions fail before the session opens.
+`packages/server/src/server/plugins/session-attachments.ts` records what each plugin contributed to
+each live session. A plugin start, stop, or reload reruns only that plugin's callback per session,
+swaps its tools in place, and reopens a session only when its launch would differ. A reopen closes
+the provider process, so a reload must not reopen agents the plugin does not change. Agents with
+native plugin tools resolve the tool by plugin and name at call time and keep their launch-time
+catalog until the reopen.
+
+### Launch wrap
+
+An `agent.open.before` result can carry `wrap: [executable, ...args]`. The provider then starts that
+session's harness as `[...wrap, command, ...args]` with the final hook env, with no shell except for
+Windows script launchers, which go through cmd.exe like any provider launcher. `executable` must be
+an absolute path. The wrap is never saved on the agent; every open asks the hooks again, and a plugin
+session reopen reuses the wrap it opened with.
+
+- **Support is a provider property.** The provider snapshot entry carries `launchWrap: true` when
+  the provider can apply a wrap; an absent field means unsupported, which is also what an older host
+  reports. Built-in providers declare it in the contract table in `provider-registry.ts`; custom ACP
+  providers and providers that extend a built-in inherit it.
+- **One wrap per open.** A later hook may omit the wrap or return the same value. A different value
+  fails the open.
+- **Fail closed.** `buildLaunchContext` admits a wrapped open before any harness starts and throws
+  `LaunchWrapUnsupportedError` (`code: "launch_wrap_unsupported"`) when the provider does not declare
+  support or a plugin provider's live connection lacks `session.launch_wrap`. A missing launcher
+  fails the spawn; nothing retries the bare command.
+
+Providers start through `spawnProcess({ wrap })`; `applyLaunchWrap` covers the launches that do not
+(pty terminals, OMP's stdio MCP transports, worktree commands). The wrap also covers what JAgentDesk
+starts for the session: OMP's stdio MCP servers, Pi's MCP probe, and ACP client terminals. OpenCode
+shares one server between sessions, so a wrapped session gets a dedicated server started behind the
+wrap; the MCP servers OpenCode starts for it run inside that server. A configured external OpenCode
+server cannot be wrapped and the open fails. The guarantee does not cover JAgentDesk's host terminal
+tools, work before the open hook (draft command and control discovery, the catalog lookup during
+create without a model), host-side probes, catalog, session listing, version, update and usage
+commands, Codex native archive, or a later open after the plugin that chose the wrap is gone.
 
 Plugin sessions receive events only when they express demand through `observeEvents` or
 registered handlers. Plugin RPC subscriptions own their delivery, release and reconnect

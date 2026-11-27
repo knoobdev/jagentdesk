@@ -552,6 +552,8 @@ interface ACPAgentSessionOptions {
   configuredModelIds?: readonly string[];
   agentId?: string;
   launchEnv?: Record<string, string>;
+  /** Start the agent, and every terminal it asks for, as `[...wrap, command, ...args]`. */
+  wrap?: AgentLaunchContext["wrap"];
   waitForInitialCommands?: boolean;
   initialCommandsWaitTimeoutMs?: number;
   terminateProcess?: ProcessTerminator;
@@ -1183,6 +1185,7 @@ export class ACPAgentClient implements AgentClient {
         configuredModelIds: options?.configuredModelIds,
         agentId: launchContext?.agentId,
         launchEnv: launchContext?.env,
+        wrap: launchContext?.wrap,
         extensionCommandsParser: this.extensionCommandsParser,
         waitForInitialCommands: this.waitForInitialCommands,
         initialCommandsWaitTimeoutMs: this.initialCommandsWaitTimeoutMs,
@@ -1243,6 +1246,7 @@ export class ACPAgentClient implements AgentClient {
       configuredModelIds: options?.configuredModelIds,
       agentId: launchContext?.agentId,
       launchEnv: launchContext?.env,
+      wrap: launchContext?.wrap,
       extensionCommandsParser: this.extensionCommandsParser,
       waitForInitialCommands: this.waitForInitialCommands,
       initialCommandsWaitTimeoutMs: this.initialCommandsWaitTimeoutMs,
@@ -1982,6 +1986,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
   ) => Promise<void>;
   private readonly agentId?: string;
   private readonly launchEnv?: Record<string, string>;
+  private readonly wrap?: AgentLaunchContext["wrap"];
   private readonly usageProvider?: string;
   private readonly usageSessionKey = randomUUID();
   private readonly harnessEnvironment: Record<string, string>;
@@ -2054,6 +2059,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     this.availableModes = options.defaultModes;
     this.agentId = options.agentId;
     this.launchEnv = options.launchEnv;
+    this.wrap = options.wrap;
     this.usageProvider = options.usageProvider;
     this.harnessEnvironment = createProviderEnv({
       runtimeSettings: options.runtimeSettings,
@@ -3148,7 +3154,9 @@ export class ACPAgentSession implements AgentSession, ACPClient {
       terminalCommand.shell === false
         ? [this.launchEnv, env, createStringCommandShellEnvOverlay()]
         : [this.launchEnv, env];
+    // A terminal runs commands for the agent, so it runs behind the agent's wrap too.
     const child = spawnProcess(terminalCommand.command, terminalCommand.args, {
+      wrap: this.wrap,
       cwd: params.cwd ?? this.config.cwd,
       ...createProviderEnvSpec({
         runtimeSettings: this.runtimeSettings,
@@ -3253,6 +3261,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     const command = prefix.command;
     const args = [...prefix.args, ...this.defaultCommand.slice(1)];
     const child = spawnProcess(command, args, {
+      wrap: this.wrap,
       cwd: await this.resolveProcessCwd(),
       ...createProviderEnvSpec({
         runtimeSettings: this.runtimeSettings,
