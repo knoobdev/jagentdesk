@@ -1,0 +1,13 @@
+{
+  "id": "hermes-provider",
+  "requirements": {
+    "jagentdesk": ">=0.11.0"
+  },
+  "kind": "builtin",
+  "name": "Hermes",
+  "description": "Run Hermes through its local hermes CLI.",
+  "defaultEnabled": true,
+  "requires": [],
+  "command": "hermes",
+  "builtinOrder": 25.5
+}

@@ -213,6 +213,20 @@ second line'`,
     );
   });
 
+  it("summarizes a typed row by its detail when its name looks external", () => {
+    const timeline: AgentTimelineItem[] = [
+      toolCallItem({
+        callId: "hermes-terminal",
+        name: 'terminal: echo "whoami: $(whoami)" + 1 command',
+        detail: { type: "shell", command: 'echo "whoami: $(whoami)" && uname -s' },
+      }),
+    ];
+
+    const result = curateAgentActivity(timeline);
+
+    expect(result).toBe('[Shell] echo "whoami: $(whoami)" && uname -s');
+  });
+
   it("collapses repeated tool updates by callId", () => {
     const timeline: AgentTimelineItem[] = [
       toolCallItem({

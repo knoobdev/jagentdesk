@@ -1,6 +1,7 @@
 import { expect, test } from "../support/fixtures";
 import { gotoAppShell } from "../support/helpers/app";
 import {
+  chooseProjectWithKeyboard,
   connectNewWorkspaceDaemonClient,
   expectNewWorkspaceControlsEnabled,
   expectNewWorkspaceProjectSelected,
@@ -153,6 +154,33 @@ test.describe("New workspace entry points", () => {
       await openNewWorkspaceProjectPickerWithShortcut(page);
     } finally {
       await seeded.cleanup();
+    }
+  });
+
+  test("choosing a project returns focus to the composer, even when the picker was opened by clicking it", async ({
+    page,
+  }) => {
+    const projectA: SeededWorkspace = await seedWorkspace({ repoPrefix: "entry-focus-a-" });
+    const projectB: SeededWorkspace = await seedWorkspace({ repoPrefix: "entry-focus-b-" });
+
+    try {
+      await gotoAppShell(page);
+      await waitForSidebarHydration(page);
+      await openGlobalNewWorkspaceComposer(page);
+      const composer = page.getByRole("textbox", { name: "Message agent..." });
+
+      await page.getByTestId("new-workspace-project-picker-trigger").click();
+      await chooseProjectWithKeyboard(page, projectB.projectDisplayName);
+      await expectNewWorkspaceProjectSelected(page, projectB.projectDisplayName);
+      await expect(composer).toBeFocused();
+
+      await page.keyboard.press("Control+N");
+      await chooseProjectWithKeyboard(page, projectA.projectDisplayName);
+      await expectNewWorkspaceProjectSelected(page, projectA.projectDisplayName);
+      await expect(composer).toBeFocused();
+    } finally {
+      await projectA.cleanup();
+      await projectB.cleanup();
     }
   });
 

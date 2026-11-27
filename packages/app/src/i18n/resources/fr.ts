@@ -69,6 +69,7 @@ export const fr: TranslationResources = {
       downloadFailed: "\u00C9chec du t\u00E9l\u00E9chargement",
     },
     errors: {
+      unableToCopy: "Impossible de copier",
       folderOutsideWorkspace: "{{path}} is outside this workspace",
 
       error: "Erreur",
@@ -104,6 +105,8 @@ export const fr: TranslationResources = {
       addProject: "Ajouter un projet",
       home: "Accueil",
       copyBrowserHostName: "Copier le nom de l’hôte du navigateur",
+      profileGroupLabel: "Profil",
+      profileSearchKeywords: "profil appliquer un profil profil d'agent préréglage",
       modelGroupLabel: "Mod\u00E8le",
       modelSearchKeywords:
         "changer de mod\u00E8le modifier le mod\u00E8le d\u00E9finir le mod\u00E8le s\u00E9lectionner le mod\u00E8le model",
@@ -271,6 +274,7 @@ export const fr: TranslationResources = {
       implement: "Impl\u00E9menter",
       question: "Comment souhaitez-vous proc\u00E9der\u00A0?",
       proposedPlan: "Plan proposé",
+      notPending: "Cette demande n'est plus en attente",
     },
   },
   agentPanel: {
@@ -348,6 +352,7 @@ export const fr: TranslationResources = {
       viewDiagram: "View diagram",
     },
     actions: {
+      copyQuote: "Copier la citation",
       copyCode: "Copier le code",
       copyTurn: "Copier l\u2019\u00E9change",
       copyMessage: "Copier le message",
@@ -453,7 +458,13 @@ export const fr: TranslationResources = {
     turnFooter: { workedFor: "A travaill\u00E9 pendant {{duration}}" },
   },
   importSession: {
+    chooseHostTitle: "Importer depuis l\u2019h\u00F4te",
     title: "Importer une session",
+    searchPlaceholder: "Rechercher des sessions\u2026",
+    scope: {
+      host: "Sessions sur {{host}}",
+      workspace: "Cet espace de travail",
+    },
     filters: {
       all: "Tous",
     },
@@ -462,12 +473,13 @@ export const fr: TranslationResources = {
       updateHost: "Mettez \u00E0 jour l\u2019h\u00F4te pour importer des sessions.",
       noProviders: "Aucun fournisseur importable n\u2019est activ\u00E9.",
       loading: "Chargement des sessions r\u00E9centes\u2026",
-      failedAll: "Impossible de charger les sessions récentes.",
-      failedProviders: "Impossible de charger les sessions pour{{providers}}.",
+      failedProvider: "Impossible de charger les sessions {{provider}}",
       failedImport: "Impossible d\u2019importer la session s\u00E9lectionn\u00E9e.",
     },
     actions: {
       refresh: "Actualiser les sessions",
+      showAll: "Tout afficher",
+      loadMore: "Charger plus",
     },
     preview: {
       untitledSession: "Session sans titre",
@@ -475,6 +487,7 @@ export const fr: TranslationResources = {
     },
     empty: {
       noRecent: "Aucune session récente à importer.",
+      noMatches: "Aucune session ne correspond à votre recherche.",
       alreadyImported: "Toutes les sessions récentes sont déjà importées.",
       noProviderSessions: "Aucune session {{provider}} trouv\u00E9e.",
     },
@@ -890,6 +903,8 @@ export const fr: TranslationResources = {
           pushBehind:
             "Push indisponible pour l\u2019instant\u00A0: des modifications plus r\u00E9centes doivent d\u2019abord \u00EAtre r\u00E9cup\u00E9r\u00E9es",
           pushNothing: "Push indisponible\u00A0: il n\u2019y a rien de nouveau \u00E0 pousser",
+          pushUpstreamGone:
+            "Push indisponible\u00A0: la branche suivie par cette branche n\u2019existe plus",
           pullAndPushNoRemote:
             "Pull et push indisponibles\u00A0: cette branche n\u2019est pas encore li\u00E9e \u00E0 un d\u00E9p\u00F4t distant",
           pullAndPushDirty:
@@ -952,6 +967,8 @@ export const fr: TranslationResources = {
         },
         archiveWarning: {
           title: "Archiver \u00AB\u00A0{{workspaceName}}\u00A0\u00BB\u00A0?",
+          bulkTitle: "Archiver {{count}} espaces de travail ?",
+          bulkWorkspaceReason: "{{workspaceName}} : {{reason}}",
           confirm: "Archiver",
           cancel: "Annuler",
           uncommittedChanges: "Modifications non commit\u00E9es",
@@ -1239,6 +1256,7 @@ export const fr: TranslationResources = {
         rename: "Renommer l\u2019espace de travail",
         pin: "Épingler en haut",
         unpin: "Désépingler",
+        select: "Sélectionner",
         archive: "Archiver",
         archiveWorkspace: "Archiver l’espace de travail",
         hideFromSidebar: "Masquer de la barre latérale",
@@ -1257,6 +1275,10 @@ export const fr: TranslationResources = {
         submit: "Renommer",
         invalidBranchName: "Nom de branche invalide",
       },
+      selection: {
+        count: "{{count}} sélectionnés",
+        exit: "Quitter la sélection",
+      },
       toasts: {
         workspacePathUnavailable: "Chemin de l\u2019espace de travail indisponible",
         pathCopied: "Chemin copié",
@@ -1264,7 +1286,9 @@ export const fr: TranslationResources = {
         hostDisconnected: "L\u2019h\u00F4te n\u2019est pas connect\u00E9",
         hideFailed: "Impossible de masquer l\u2019espace de travail",
         archiveFailed: "Impossible d\u2019archiver l\u2019espace de travail",
+        archiveMultipleFailed: "Impossible d’archiver {{count}} espaces de travail",
         archived: "Espace de travail archivé",
+        archivedCount: "{{count}} espaces de travail archivés",
         undoArchive: "Annuler",
         undoArchiveFailed: "Impossible d’annuler l’archivage",
       },
@@ -1643,9 +1667,18 @@ export const fr: TranslationResources = {
     },
     settings: {
       addProvider: "Ajouter un fournisseur",
-      moveUp: "Monter",
-      moveDown: "Descendre",
-      remove: "Retirer",
+      defaultModel: "Modèle par défaut",
+      add: "Ajouter",
+      provider: "Fournisseur",
+      model: "Modèle",
+      chooseProvider: "Choisir un fournisseur",
+      chooseProviderFirst: "Choisissez d'abord un fournisseur",
+      noProviders: "Aucun autre fournisseur activé.",
+      noModels: "Aucun autre modèle.",
+      searchProviders: "Rechercher des fournisseurs",
+      searchModels: "Rechercher des modèles",
+      reorder: "Réordonner {{entry}}",
+      removeEntry: "Retirer {{entry}}",
       emptyList: "Aucun fournisseur pour l’instant.",
       failoverTitle: "Basculement",
       failoverHint:
@@ -1710,12 +1743,16 @@ export const fr: TranslationResources = {
     editProfilesLabel: "Modifier les profils d’agent",
     searchAllPlaceholder: "Rechercher dans tous les modèles…",
     createProfileFromModel: "Créer un profil à partir de ce modèle",
+    profileSaved: "« {{name}} » enregistré",
+    undo: "Annuler",
+    undoProfileSave: "Annuler l’enregistrement du profil",
     editProfileLabel: "Modifier {{name}}",
     editProfilesCount: "Modifier les profils ({{count}})",
     profiles: "Profils",
     createProfile: "Créer un profil",
     noMatchesForQuery: "Aucun modèle ne correspond à « {{query}} »",
     providers: "Fournisseurs",
+    models: "Modèles",
     model: "Modèle",
   },
   providerCatalog: {
@@ -2132,6 +2169,7 @@ export const fr: TranslationResources = {
       projects: "Projets",
       connections: "Connexions",
       agents: "Agents",
+      agentProfiles: "Profils d’agent",
       orchestration: "Orchestration",
       voice: "Voix",
       workspaces: "Espaces de travail",
@@ -2341,6 +2379,18 @@ export const fr: TranslationResources = {
           desktop: "App de bureau",
         },
       },
+      connectionLog: {
+        title: "Journal de connexion",
+        rowTitle: "Journal de connexion",
+        rowHint:
+          "Événements récents de connexion et de handshake sur cet appareil. Sans contenu de message ni clés.",
+        open: "Afficher",
+        copy: "Copier les journaux",
+        clear: "Effacer",
+        empty: "Aucun événement de connexion pour l'instant.",
+        copyLabel: "journal de connexion",
+        copyFailed: "Impossible de copier le journal de connexion",
+      },
     },
     appearance: {
       theme: {
@@ -2546,6 +2596,23 @@ export const fr: TranslationResources = {
         name: {
           label: "Nom",
         },
+        icon: {
+          label: "Icône",
+          accessibilityLabel: "Icône, {{value}}",
+          auto: "Auto",
+          autoDetected: "Auto ({{icon}})",
+          options: {
+            server: "Serveur",
+            laptop: "Portable",
+            desktop: "Bureau",
+            mini: "Mini",
+            workstation: "Station de travail",
+            cloud: "Cloud",
+            container: "Conteneur",
+            board: "Ordinateur monocarte",
+            terminal: "Terminal",
+          },
+        },
         color: {
           label: "Couleur",
           accessibilityLabel: "Couleur, {{value}}",
@@ -2581,6 +2648,13 @@ export const fr: TranslationResources = {
         relay: "Relay",
         tailnet: "Tailscale",
         local: "Local",
+      },
+      connectionKinds: {
+        local: "Local",
+        relay: "Relais",
+        tailscale: "Tailscale",
+        direct: "Direct",
+        routed: "Via",
       },
       connections: {
         active: "Active",
@@ -2793,6 +2867,31 @@ export const fr: TranslationResources = {
         save: "Enregistrer",
         moveUp: "Monter",
         moveDown: "Descendre",
+        searchPlaceholder: "Rechercher des profils",
+        clearSearch: "Effacer la recherche",
+        noSearchMatches: "Aucun profil ne correspond à « {{query}} »",
+        noRoutingNote: "Aucune note",
+        duplicate: "Dupliquer",
+        copyName: "{{name}} (copie)",
+        moveToTop: "Placer en haut",
+        profileActions: "Actions pour {{name}}",
+        reorderProfile: "Réorganiser {{name}}",
+        previousProfile: "Profil précédent",
+        nextProfile: "Profil suivant",
+        chooseModelPlaceholder: "Sélectionner un modèle",
+        searchModelsPlaceholder: "Rechercher des modèles",
+        chooseModelSubtitle: "Sélectionner un modèle",
+        customizeSettings: "Personnaliser les réglages",
+        addRoutingNoteShort: "Ajouter une note",
+        providerOptionsLabel: "Options {{provider}}",
+        discardTitle: "Ignorer les modifications ?",
+        discardMessage: "Vous avez des modifications non enregistrées pour ce profil.",
+        discardConfirm: "Ignorer",
+        columns: {
+          profile: "Profil",
+          runtime: "Modèle et exécution",
+          whenToUse: "Quand l’utiliser",
+        },
         editProfile: "Modifier le profil",
         remove: "Supprimer",
         removeConfirmTitle: "Supprimer le profil ?",

@@ -42,6 +42,7 @@ import {
   FinishSubscriptionStore,
   restoreFinishSubscriptions,
   hasOutstandingFinishSubscriptions,
+  setRemoteDelegationProbe,
   suspendFinishNotifications,
 } from "./agent/finish-subscriptions/index.js";
 import { ensureToolDirsOnPath, HostToolInstaller } from "./host-tools/installer.js";
@@ -51,14 +52,28 @@ import { unarchiveAgentState } from "./agent/agent-prompt.js";
 import { unarchiveWorkspaceAgents } from "./workspace-archive-service.js";
 import { createWorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
 import express from "express";
+import {
+  agentShimDir,
+  installAgentBrowserShims,
+  writeAgentShimEndpoint,
+} from "./agent-browser-shim/install.js";
+import {
+  AGENT_BROWSER_OPEN_ROUTE,
+  AGENT_FILES_ROUTE,
+  AgentFileShares,
+  createAgentBrowserOpenRouteHandler,
+  createAgentFilesRouteHandler,
+} from "./agent-browser-shim/routes.js";
 import { createServer as createHTTPServer, type IncomingMessage, type ServerResponse } from "http";
 import { constants, existsSync, unlinkSync } from "fs";
 import { open } from "fs/promises";
 import { randomUUID } from "node:crypto";
+import { getCachedHostMachineKind, primeHostMachineKind } from "./host-machine-kind.js";
 import { getHostName } from "./host-name.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { createMcpHandler } from "@modelcontextprotocol/server";
+import { toNodeHandler } from "@modelcontextprotocol/node";
 import type { Logger } from "pino";
 import { z } from "zod";
 import { createBranchChangeRouteHandler } from "./script-route-branch-handler.js";
@@ -190,10 +205,12 @@ import { createAgentMcpServer } from "./agent/mcp-server.js";
 import { createAgentMcpProtocolNormalizer } from "./agent/mcp-protocol.js";
 import {
   createJAgentDeskToolCatalog,
+  createJAgentDeskAgentToolManifest,
   type JAgentDeskToolHostDependencies,
 } from "./agent/tools/jagentdesk-tools.js";
 import type { JAgentDeskToolRuntimeContext } from "./agent/tools/types.js";
-import { ProviderSnapshotManager } from "./agent/provider-snapshot-manager.js";
+import type { ProviderSnapshotManager } from "./agent/provider-snapshot-manager.js";
+import { createAgentProviderRuntime } from "./agent/provider-runtime.js";
 import { bootstrapWorkspaceRegistries } from "./workspace-registry-bootstrap.js";
 import { WorkspaceReconciliationService } from "./workspace-reconciliation-service.js";
 import {
@@ -226,9 +243,14 @@ import {
   type ActiveWorkspaceRef,
 } from "./workspace-archive-service.js";
 import { setupAutoArchiveOnMerge } from "./auto-archive-on-merge/index.js";
+import {
+  assertWorkspaceAutomationAllowedForWorkspace,
+  isCheckoutUntrusted,
+} from "./workspace-automation-gate.js";
 import { wrapSessionMessage, type SessionOutboundMessage } from "./messages.js";
 import type { TerminalManager } from "../terminal/terminal-manager.js";
 import { startWorkerTerminalManager } from "../terminal/worker-terminal-manager.js";
+import { withTerminalCreateHook } from "../terminal/terminal-create-hook.js";
 import { createSshTerminalManager } from "../terminal/ssh-terminal-manager.js";
 import { SshService } from "./ssh/ssh-service.js";
 import { removeRetiredFigmaData } from "./retired-figma-data.js";
@@ -332,6 +354,14 @@ function createAgentMcpBaseUrl(listenTarget: ListenTarget | null): string | null
     "/mcp/agents",
     `http://${formatHostForHttpUrl(host)}:${listenTarget.port}`,
   ).toString();
+}
+
+function createLoopbackBaseUrl(listenTarget: ListenTarget | null): string | null {
+  if (!listenTarget || listenTarget.type !== "tcp") {
+    return null;
+  }
+  const host = resolveAgentMcpClientHost(listenTarget.host);
+  return `http://${formatHostForHttpUrl(host)}:${listenTarget.port}`;
 }
 
 function createTerminalActivityUrl(listenTarget: ListenTarget | null): string | null {
@@ -696,6 +726,9 @@ export async function createJAgentDeskDaemon(
   rootLogger: Logger,
   dependencies: JAgentDeskDaemonDependencies = {},
 ): Promise<JAgentDeskDaemon> {
+  // Start hardware detection at the beginning of bootstrap so it overlaps with disk/registry init
+  // and does not hold up the listener when probes are slow.
+  const hostMachineKindReady = primeHostMachineKind();
   configureGitProcessPolicy(config.git ?? resolveGitProcessPolicy({ env: process.env }));
   const logger = rootLogger.child({ module: "bootstrap" });
   // Recover the user's real PATH before any provider CLI discovery runs. A
@@ -828,7 +861,12 @@ export async function createJAgentDeskDaemon(
     logger,
     getTerminalActivityUrl: () => createTerminalActivityUrl(boundListenTarget),
   });
-  const terminalManager = createSshTerminalManager(localTerminalManager, () => sshService);
+  // SSH terminals run on the remote host, where a plugin's launch wrap does not exist; only local
+  // terminals run through terminal.create.before.
+  const terminalManager = createSshTerminalManager(
+    withTerminalCreateHook(localTerminalManager, pluginRuntime),
+    () => sshService,
+  );
   applyTerminalAgentHookSetting({ store: daemonConfigStore, logger });
 
   const serviceProxyPublicBaseUrl = config.serviceProxy?.publicBaseUrl
@@ -924,6 +962,27 @@ export async function createJAgentDeskDaemon(
     createTerminalActivityRouteHandler(terminalManager),
   );
 
+  // Spec 04 §27b item 3b: the agent shims (`open`, `xdg-open`, BROWSER) post web targets here and
+  // the in-app tab loads opened local files from the file route. Loopback only; the open route
+  // takes the per-run agent token, the file route an unguessable per-directory token.
+  const agentFileShares = new AgentFileShares();
+  app.post(
+    AGENT_BROWSER_OPEN_ROUTE,
+    express.json(),
+    createAgentBrowserOpenRouteHandler({
+      token: agentMcpAuthToken,
+      resolveAgent: (agentId) => {
+        const agent = agentManager.getAgent(agentId);
+        return agent ? { cwd: agent.cwd, workspaceId: agent.workspaceId ?? null } : null;
+      },
+      execute: (input) => browserToolsBroker.execute(input),
+      shares: agentFileShares,
+      baseUrl: () => createLoopbackBaseUrl(boundListenTarget),
+      logger,
+    }),
+  );
+  app.use(AGENT_FILES_ROUTE, createAgentFilesRouteHandler(agentFileShares));
+
   // Serve the bundled browser web UI when enabled. Mounted after service-proxy
   // classification and host/CORS handling, but before daemon bearer auth, so
   // static app files load without the daemon password while API/WebSocket calls
@@ -947,11 +1006,13 @@ export async function createJAgentDeskDaemon(
   });
 
   app.get("/api/status", (_req, res) => {
+    const machineKind = getCachedHostMachineKind();
     res.json({
       status: "server_info",
       serverId,
       hostname: getHostName(),
       version: daemonVersion,
+      ...(machineKind ? { machineKind } : {}),
       listen: formatListenTarget(boundListenTarget ?? listenTarget),
     });
   });
@@ -1107,21 +1168,26 @@ export async function createJAgentDeskDaemon(
     reloadRegistry: (removeProviders, changedProviders) =>
       reloadProviderRegistry(removeProviders, changedProviders),
   });
-  const providerSnapshotLogger = logger.child({ module: "provider-snapshot-manager" });
-  const providerSnapshotManager = new ProviderSnapshotManager({
-    backgroundRefresh: { intervalMs: PROVIDER_BACKGROUND_REFRESH_INTERVAL_MS },
-    logger: providerSnapshotLogger,
-    runtimeSettings: config.agentProviderSettings,
-    providerOverrides: config.providerOverrides,
-    workspaceGitService,
-    managedProcesses,
-    isDev: config.isDev === true,
-    extraClients: config.agentClients,
-    openCodeProviderInjection: (providerId) =>
-      customProviderService.materializeOpenCodeProvider(providerId),
-    claudeSpawnEnv: (providerId) => customProviderService.materializeClaudeEnv(providerId),
-    checkApiProviderEndpoint: (providerId) => customProviderService.checkEndpoint(providerId),
+  // The OpenCode tool bridge gives OpenCode agents JAgentDesk's tools and, on servers that report
+  // `features.mcpTools`, their own MCP servers without a server of their own (spec 33.7).
+  const agentProviderRuntime = await createAgentProviderRuntime({
+    jagentdeskHome: config.jagentdeskHome,
+    logger,
+    snapshotManager: {
+      backgroundRefresh: { intervalMs: PROVIDER_BACKGROUND_REFRESH_INTERVAL_MS },
+      runtimeSettings: config.agentProviderSettings,
+      providerOverrides: config.providerOverrides,
+      workspaceGitService,
+      managedProcesses,
+      isDev: config.isDev === true,
+      extraClients: config.agentClients,
+      openCodeProviderInjection: (providerId) =>
+        customProviderService.materializeOpenCodeProvider(providerId),
+      claudeSpawnEnv: (providerId) => customProviderService.materializeClaudeEnv(providerId),
+      checkApiProviderEndpoint: (providerId) => customProviderService.checkEndpoint(providerId),
+    },
   });
+  const providerSnapshotManager = agentProviderRuntime.snapshotManager;
   const initialAgentManagerState = providerSnapshotManager.getAgentManagerProviderState();
   const timelineSnapshots = new AgentTimelineSnapshots({
     directory: path.join(config.jagentdeskHome, "agent-timelines"),
@@ -1149,7 +1215,7 @@ export async function createJAgentDeskDaemon(
       resolveSnapshotContextWindow(providerSnapshotManager.getSnapshot(), provider, model),
     resolveJAgentDeskToolPolicy: (provider) =>
       resolveJAgentDeskToolPolicy(provider, daemonConfigStore.get().providers),
-    pluginAgentTools: pluginRuntime,
+    pluginSessions: pluginRuntime,
     clients: initialAgentManagerState.clients,
     providerDefinitions: initialAgentManagerState.providerDefinitions,
     registry: agentStorage,
@@ -1163,6 +1229,14 @@ export async function createJAgentDeskDaemon(
     mcpAuthToken: agentMcpAuthToken,
     logger,
   });
+  // Spec 04 §27b item 3b: shims first on every agent's PATH, BROWSER on the `.js` one.
+  const agentShimDirectory = agentShimDir(config.jagentdeskHome);
+  try {
+    await installAgentBrowserShims({ dir: agentShimDirectory });
+    agentManager.setAgentShimDir(agentShimDirectory);
+  } catch (error) {
+    logger.warn({ err: error }, "Could not install the agent browser shims");
+  }
 
   // Spec 04 §27b.1: built-in tool groups are compared at the start of every turn.
   const builtinHostToolSet = createBuiltinHostToolSet({
@@ -1187,10 +1261,6 @@ export async function createJAgentDeskDaemon(
     agentManager.updateProviderRegistry(
       providerSnapshotManager.replacePluginProviders(pluginRuntime.getProviderRegistrations()),
     );
-  });
-
-  const unsubscribePluginSessionChanges = pluginRuntime.subscribeSessionOpenChanges(() => {
-    agentManager.invalidatePluginSessions();
   });
 
   const detachAgentStoragePersistence = attachAgentStoragePersistence(
@@ -1259,6 +1329,7 @@ export async function createJAgentDeskDaemon(
         requireParentOwnership: record.requireParentOwnership,
         restoredSubscriptionId: record.id,
         restoredSubscriptionIds: subscriptionIds,
+        restoredFollowingSince: record.followingSince,
         logger,
       }).ready;
     },
@@ -1359,6 +1430,8 @@ export async function createJAgentDeskDaemon(
         worktreeRoot: workspace.worktreeRoot,
         isJAgentDeskOwnedWorktree: workspace.isJAgentDeskOwnedWorktree,
         mainRepoRoot: workspace.mainRepoRoot,
+        worktreeManagerPluginId: workspace.worktreeManagerPluginId,
+        untrustedSource: workspace.untrustedSource,
       }));
   };
   const markWorkspaceArchiving = (workspaceIds: Iterable<string>, archivingAt: string) =>
@@ -1402,8 +1475,11 @@ export async function createJAgentDeskDaemon(
   });
 
   setupAutoArchiveOnMerge({
+    lifecycle: pluginRuntime,
     jagentdeskHome: config.jagentdeskHome,
     jagentdeskWorktreesBaseRoot: config.worktreesRoot,
+    worktreeManagers: pluginRuntime,
+    workspaceArchiveOperations,
     daemonConfigStore,
     workspaceGitService,
     github,
@@ -1412,6 +1488,10 @@ export async function createJAgentDeskDaemon(
     terminalManager,
     logger,
     findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
+    getWorkspace: (workspaceId) => workspaceRegistry.get(workspaceId),
+    assertWorkspaceAutomationAllowed: (guardedWorkspaceId) =>
+      assertWorkspaceAutomationAllowedForWorkspace(workspaceRegistry, guardedWorkspaceId),
+    isCheckoutUntrusted: (checkoutPath) => isCheckoutUntrusted(workspaceRegistry, checkoutPath),
     listActiveWorkspaces: listActiveWorkspacesExternal,
     getAutoArchivedChangeRequestUrl: async (workspaceId) =>
       (await workspaceRegistry.get(workspaceId))?.autoArchivedChangeRequestUrl ?? null,
@@ -1427,11 +1507,13 @@ export async function createJAgentDeskDaemon(
   ) => {
     return createJAgentDeskWorktreeWorkflow(
       {
+        lifecycle: pluginRuntime,
         jagentdeskHome: config.jagentdeskHome,
         worktreesRoot: config.worktreesRoot,
         createJAgentDeskWorktree: async (workflowInput, workflowOptions) => {
           return createRegisteredJAgentDeskWorktree(workflowInput, {
             lifecycle: pluginRuntime,
+            worktreeManagers: pluginRuntime,
             github,
             ...(workflowOptions?.resolveDefaultBranch
               ? {
@@ -1486,13 +1568,20 @@ export async function createJAgentDeskDaemon(
   const archiveWorkspaceByIdExternal = (workspaceId: string, requestId: string) =>
     archiveByScope(
       {
+        lifecycle: pluginRuntime,
         jagentdeskHome: config.jagentdeskHome,
         jagentdeskWorktreesBaseRoot: config.worktreesRoot,
+        worktreeManagers: pluginRuntime,
+        workspaceArchiveOperations,
         github,
         workspaceGitService,
         agentManager,
         agentStorage,
         findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
+        getWorkspace: (workspaceIdToRead) => workspaceRegistry.get(workspaceIdToRead),
+        assertWorkspaceAutomationAllowed: (guardedWorkspaceId) =>
+          assertWorkspaceAutomationAllowedForWorkspace(workspaceRegistry, guardedWorkspaceId),
+        isCheckoutUntrusted: (checkoutPath) => isCheckoutUntrusted(workspaceRegistry, checkoutPath),
         listActiveWorkspaces: listActiveWorkspacesExternal,
         archiveWorkspaceRecord: (workspaceIdToArchive, archivedAt) =>
           archiveWorkspaceRecordExternal(workspaceIdToArchive, undefined, archivedAt),
@@ -1506,8 +1595,15 @@ export async function createJAgentDeskDaemon(
       { scope: { kind: "workspace", workspaceId }, requestId },
     );
   const hubAgentLifecycle = new CreateAgentLifecycleDispatch({
+    lifecycle: pluginRuntime,
     jagentdeskHome: config.jagentdeskHome,
     worktreesRoot: config.worktreesRoot,
+    worktreeManagers: pluginRuntime,
+    workspaceArchiveOperations,
+    getWorkspace: (workspaceId) => workspaceRegistry.get(workspaceId),
+    assertWorkspaceAutomationAllowed: (guardedWorkspaceId) =>
+      assertWorkspaceAutomationAllowedForWorkspace(workspaceRegistry, guardedWorkspaceId),
+    isCheckoutUntrusted: (checkoutPath) => isCheckoutUntrusted(workspaceRegistry, checkoutPath),
     agentManager,
     agentStorage,
     github,
@@ -1641,13 +1737,20 @@ export async function createJAgentDeskDaemon(
   const archiveScheduleWorkspaceExternal = async (workspaceId: string) => {
     await archiveByScope(
       {
+        lifecycle: pluginRuntime,
         jagentdeskHome: config.jagentdeskHome,
         jagentdeskWorktreesBaseRoot: config.worktreesRoot,
+        worktreeManagers: pluginRuntime,
+        workspaceArchiveOperations,
         github,
         workspaceGitService,
         agentManager,
         agentStorage,
         findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
+        getWorkspace: (workspaceIdToRead) => workspaceRegistry.get(workspaceIdToRead),
+        assertWorkspaceAutomationAllowed: (guardedWorkspaceId) =>
+          assertWorkspaceAutomationAllowedForWorkspace(workspaceRegistry, guardedWorkspaceId),
+        isCheckoutUntrusted: (checkoutPath) => isCheckoutUntrusted(workspaceRegistry, checkoutPath),
         listActiveWorkspaces: listActiveWorkspacesExternal,
         archiveWorkspaceRecord: (workspaceIdToArchive, archivedAt) =>
           archiveWorkspaceRecordExternal(workspaceIdToArchive, undefined, archivedAt),
@@ -1894,10 +1997,16 @@ export async function createJAgentDeskDaemon(
     providerSnapshotManager,
     github,
     workspaceGitService,
+    worktreeManagers: pluginRuntime,
+    workspaceArchiveOperations,
+    assertWorkspaceAutomationAllowed: (guardedWorkspaceId) =>
+      assertWorkspaceAutomationAllowedForWorkspace(workspaceRegistry, guardedWorkspaceId),
+    isCheckoutUntrusted: (checkoutPath) => isCheckoutUntrusted(workspaceRegistry, checkoutPath),
     findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
     listActiveWorkspaces: listActiveWorkspacesExternal,
     archiveWorkspaceRecord: (workspaceId, archivedAt) =>
       archiveWorkspaceRecordExternal(workspaceId, undefined, archivedAt),
+    lifecycle: pluginRuntime,
     emitWorkspaceUpdatesForWorkspaceIds: emitWorkspaceUpdatesExternal,
     workspaceRegistry,
     projectRegistry,
@@ -1981,8 +2090,14 @@ export async function createJAgentDeskDaemon(
   });
   const createAgentToolCatalog = (runtime: JAgentDeskToolRuntimeContext) =>
     createJAgentDeskToolCatalog(createAgentToolHostDependencies(runtime));
+  const setAgentProviderToolsEnabled = (enabled: boolean) => {
+    agentProviderRuntime.setJAgentDeskToolCatalog(
+      enabled ? createJAgentDeskAgentToolManifest(createAgentToolHostDependencies({})) : null,
+    );
+  };
   agentManager.setJAgentDeskToolCatalogFactory(createAgentToolCatalog);
   agentManager.setJAgentDeskToolsEnabled(config.mcpInjectIntoAgents !== false);
+  setAgentProviderToolsEnabled(config.mcpEnabled !== false && config.mcpInjectIntoAgents !== false);
 
   const mcpEnabled = config.mcpEnabled ?? true;
   let agentMcpBaseUrl: string | null = null;
@@ -1990,30 +2105,24 @@ export async function createJAgentDeskDaemon(
     const agentMcpRoute = "/mcp/agents";
     const normalizeAgentMcpProtocol = createAgentMcpProtocolNormalizer(logger);
 
+    // Stateless serving: createMcpHandler builds a fresh server per request and
+    // serves both protocol eras — modern 2026-07-28 (per-request envelope) and
+    // 2025-era clients through its stateless legacy fallback. No per-session
+    // state is retained between requests, matching the previous
+    // `sessionIdGenerator: undefined` transport.
     const createAgentMcpSession = async (callerAgentId?: string) => {
+      if (callerAgentId) await agentManager.refreshPluginTools(callerAgentId);
       const agentMcpServer = await createAgentMcpServer(
         createAgentToolHostDependencies({ callerAgentId }),
       );
 
-      // Stateless mode: each HTTP request builds a fresh server + transport that is
-      // torn down when the response closes, so no per-session state is retained between
-      // requests. The agent control plane only lists and calls tools, neither of which
-      // needs cross-request state, so sessions would only pin memory for the life of the
-      // daemon (agents that exit without a clean DELETE never get reaped).
-      const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: undefined,
-        // NOTE: We enforce a Vite-like host allowlist at the app/websocket layer.
-        // StreamableHTTPServerTransport's built-in check requires exact Host header matches.
-        enableDnsRebindingProtection: false,
-      });
-      Object.assign(transport, {
+      const handler = createMcpHandler(() => agentMcpServer, {
+        legacy: "stateless",
         onerror: (err: Error) => {
           logger.error({ err }, "Agent MCP transport error");
         },
       });
-
-      await agentMcpServer.connect(transport);
-      return { server: agentMcpServer, transport };
+      return { handler };
     };
 
     const runAgentMcpRequest = async (
@@ -2068,18 +2177,18 @@ export async function createJAgentDeskDaemon(
         } else if (Array.isArray(callerAgentIdRaw) && typeof callerAgentIdRaw[0] === "string") {
           callerAgentId = callerAgentIdRaw[0];
         }
-        const { server, transport } = await createAgentMcpSession(callerAgentId);
-        normalizeAgentMcpProtocol({ request: req, transport, callerAgentId });
-        res.on("close", () => {
-          void transport.close();
-          void server.close();
-        });
-
-        await transport.handleRequest(
-          req as unknown as IncomingMessage,
-          res as unknown as ServerResponse,
-          req.body,
-        );
+        normalizeAgentMcpProtocol({ request: req, callerAgentId });
+        const { handler } = await createAgentMcpSession(callerAgentId);
+        try {
+          // express.json() already consumed the stream, so hand the parsed body over.
+          await toNodeHandler(handler)(
+            req as unknown as IncomingMessage,
+            res as unknown as ServerResponse,
+            req.body,
+          );
+        } finally {
+          await handler.close();
+        }
       } catch (err) {
         logger.error({ err }, "Failed to handle Agent MCP request");
         if (!res.headersSent) {
@@ -2112,6 +2221,17 @@ export async function createJAgentDeskDaemon(
   const start = async () => {
     let mainStarted = false;
     try {
+      // Give hardware detection a brief head start so the first server_info carries machineKind.
+      let machineKindTimeout: ReturnType<typeof setTimeout> | null = null;
+      await Promise.race([
+        hostMachineKindReady,
+        new Promise<void>((resolve) => {
+          machineKindTimeout = setTimeout(resolve, 150);
+          machineKindTimeout.unref();
+        }),
+      ]).finally(() => {
+        if (machineKindTimeout) clearTimeout(machineKindTimeout);
+      });
       if (serviceProxyListenTarget) {
         const boundServiceProxyTarget = await serviceProxy.startStandalone({
           listenTarget: serviceProxyListenTarget,
@@ -2166,6 +2286,14 @@ export async function createJAgentDeskDaemon(
           };
           const logAndResolve = async () => {
             boundListenTarget = resolveBoundListenTarget(listenTarget, httpServer);
+            const loopbackBaseUrl = createLoopbackBaseUrl(boundListenTarget);
+            void writeAgentShimEndpoint({
+              dir: agentShimDirectory,
+              url: loopbackBaseUrl ? `${loopbackBaseUrl}${AGENT_BROWSER_OPEN_ROUTE}` : null,
+              token: agentMcpAuthToken,
+            }).catch((error: unknown) => {
+              logger.warn({ err: error }, "Could not write the agent shim endpoint");
+            });
             const mcpBaseUrl = mcpEnabled ? createAgentMcpBaseUrl(boundListenTarget) : null;
             agentMcpBaseUrl = config.mcpInjectIntoAgents === false ? null : mcpBaseUrl;
             agentManager.setMcpBaseUrl(agentMcpBaseUrl);
@@ -2173,6 +2301,7 @@ export async function createJAgentDeskDaemon(
             daemonConfigStore.onFieldChange("mcp.injectIntoAgents", (value) => {
               agentManager.setMcpBaseUrl(value ? mcpBaseUrl : null);
               agentManager.setJAgentDeskToolsEnabled(value !== false);
+              setAgentProviderToolsEnabled(mcpEnabled && value !== false);
             });
             daemonConfigStore.onFieldChange("appendSystemPrompt", (value) => {
               agentManager.setAppendSystemPrompt(typeof value === "string" ? value : "");
@@ -2309,6 +2438,11 @@ export async function createJAgentDeskDaemon(
               logger,
             });
             await remoteFinishSubscriptions.start();
+            // A local child waiting on an agent on another host is still working (Paseo #10864).
+            const remoteSubscriptions = remoteFinishSubscriptions;
+            setRemoteDelegationProbe(agentManager, (agentId) =>
+              remoteSubscriptions.hasPendingForCaller(agentId),
+            );
             await attachHostServices(wsServer);
             botsRuntimeReady = true;
             if (pluginRuntime.builtin.isEnabled("bots")) {
@@ -2403,9 +2537,9 @@ export async function createJAgentDeskDaemon(
       scriptHealthMonitor.start();
     } catch (error) {
       unsubscribePluginProviders();
-      unsubscribePluginSessionChanges();
       await pluginRuntime.stopAllPlugins().catch(() => undefined);
       await serviceProxy.stopStandalone().catch(() => undefined);
+      await agentProviderRuntime.shutdown().catch(() => undefined);
       if (mainStarted) {
         httpServer.closeAllConnections();
         await new Promise<void>((resolve) => httpServer.close(() => resolve()));
@@ -2418,7 +2552,6 @@ export async function createJAgentDeskDaemon(
     const keepTerminals = options?.keepTerminals === true;
     let terminalShutdownError: unknown = null;
     unsubscribePluginProviders();
-    unsubscribePluginSessionChanges();
     await hubRelationships.stop();
     workspaceReconciliation.dispose();
     scriptHealthMonitor.stop();
@@ -2454,7 +2587,8 @@ export async function createJAgentDeskDaemon(
     await agentStorage.flush().catch(() => undefined);
     // Spec 34: loopback forwards of api providers die with the daemon.
     customProviderService.closeAll();
-    await providerSnapshotManager.shutdown();
+    // Stops the provider snapshot manager, then the OpenCode tool bridge.
+    await agentProviderRuntime.shutdown();
     if (shutdownFlushTimedOut) {
       await withTimeout({
         promise: agentManager.flushForShutdown(),

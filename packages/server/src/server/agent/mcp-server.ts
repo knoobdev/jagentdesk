@@ -1,10 +1,9 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import type {
   CallToolResult,
-  ServerNotification,
-  ServerRequest,
-} from "@modelcontextprotocol/sdk/types.js";
+  ServerContext,
+  StandardSchemaWithJSON,
+} from "@modelcontextprotocol/server";
 
 import { addModelVisibleStructuredContent } from "./tools/jagentdesk-tool-serialization.js";
 import {
@@ -15,7 +14,7 @@ import type { JAgentDeskToolResult } from "./tools/types.js";
 
 export type AgentMcpServerOptions = JAgentDeskToolHostDependencies;
 
-type McpToolContext = RequestHandlerExtra<ServerRequest, ServerNotification>;
+type McpToolContext = ServerContext;
 
 function toMcpToolResult(result: JAgentDeskToolResult): CallToolResult {
   const modelVisibleResult = addModelVisibleStructuredContent(result);
@@ -44,11 +43,17 @@ export async function createAgentMcpServer(options: AgentMcpServerOptions): Prom
       {
         title: tool.title,
         description: tool.description,
-        inputSchema: tool.inputSchema,
+        // JAgentDesk declares tool schemas through the `zod` root entry; the SDK types
+        // its input schema through the `zod/v4` core entry. Both are the same zod
+        // runtime, but the two entry points carry distinct type identities, so a
+        // single narrowing cast is required at this boundary.
+        inputSchema: tool.inputSchema as StandardSchemaWithJSON,
         ...(tool._meta ? { _meta: tool._meta } : {}),
       },
       async (args: unknown, context?: McpToolContext) =>
-        toMcpToolResult(await catalog.executeTool(tool.name, args, { signal: context?.signal })),
+        toMcpToolResult(
+          await catalog.executeTool(tool.name, args, { signal: context?.mcpReq?.signal }),
+        ),
     );
   }
 

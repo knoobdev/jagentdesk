@@ -1,6 +1,6 @@
 {
   "name": "@jagentdesk/plugin",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "description": "JAgentDesk plugin SDK package",
   "files": [
     "dist",
@@ -53,6 +53,11 @@
       "source": "./src/server/lifecycle.ts",
       "default": "./dist/server/lifecycle.js"
     },
+    "./internal/windows-command": {
+      "types": "./dist/server/process-internal/windows-command.d.ts",
+      "source": "./src/server/process-internal/windows-command.ts",
+      "default": "./dist/server/process-internal/windows-command.js"
+    },
     "./server/usage": {
       "types": "./dist/server/usage.d.ts",
       "default": "./dist/server/usage.js"
@@ -72,8 +77,8 @@
     "use-sync-external-store": "^1.6.0"
   },
   "devDependencies": {
-    "@jagentdesk/client": "0.11.0",
-    "@jagentdesk/protocol": "0.11.0",
+    "@jagentdesk/client": "0.11.1",
+    "@jagentdesk/protocol": "0.11.1",
     "@types/node": "^20.9.0",
     "@types/react": "~19.2.0",
     "react": "19.2.3",
@@ -83,8 +88,8 @@
     "zod": "^4.4.3"
   },
   "peerDependencies": {
-    "@jagentdesk/client": "0.11.0",
-    "@jagentdesk/protocol": "0.11.0",
+    "@jagentdesk/client": "0.11.1",
+    "@jagentdesk/protocol": "0.11.1",
     "react": ">=19.1.0 <20",
     "react-native": ">=0.81.5",
     "zod": "^4.4.3"

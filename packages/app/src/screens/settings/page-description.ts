@@ -21,6 +21,7 @@ const HOST_SECTION_DESCRIPTIONS: Record<string, string> = {
   connections: "How your devices reach this host.",
   "pair-device": "Add a phone or computer to this host.",
   agents: "Defaults for new agents on this host.",
+  "agent-profiles": "Saved model, mode and option presets for new agents.",
   orchestration: "How agents hand work to other agents.",
   voice: "Dictation and voice mode.",
   workspaces: "Where new workspaces and worktrees are created.",

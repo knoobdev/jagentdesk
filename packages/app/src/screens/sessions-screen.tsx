@@ -5,7 +5,7 @@ import { View, Text } from "react-native";
 import { useIsFocused } from "expo-router/react-navigation";
 import { router } from "expo-router";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { ChevronLeft, History } from "lucide-react-native";
+import { ChevronLeft, History, Import } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { PageHeader } from "@/components/headers/page-header";
 import { usePageScroll } from "@/components/headers/use-page-scroll";
@@ -15,6 +15,7 @@ import { AgentList } from "@/components/agent-list";
 import { HostFilter } from "@/components/hosts/host-filter";
 import { ALL_HOSTS_OPTION_ID } from "@/components/hosts/host-picker";
 import { useAgentHistory } from "@/hooks/use-agent-history";
+import { useImportSession } from "@/hooks/use-import-session";
 import { useHosts } from "@/runtime/host-runtime";
 import { buildOpenProjectRoute } from "@/utils/host-routes";
 
@@ -36,6 +37,7 @@ function SessionsScreenContent() {
   );
   const { theme } = useUnistyles();
   const { t } = useTranslation();
+  const importSession = useImportSession();
   const pageScroll = usePageScroll();
   const hosts = useHosts();
   const [selectedHost, setSelectedHost] = useState(ALL_HOSTS_OPTION_ID);
@@ -123,6 +125,9 @@ function SessionsScreenContent() {
           <Button variant="ghost" leftIcon={ChevronLeft} onPress={handleBack}>
             Back
           </Button>
+          <Button variant="ghost" leftIcon={Import} onPress={importSession.open}>
+            {t("importSession.title")}
+          </Button>
         </View>
       ) : null}
       {!isInitialLoad && !showLoadError && sortedAgents.length > 0 ? (
@@ -138,6 +143,7 @@ function SessionsScreenContent() {
           scrollProps={pageScroll.scrollProps}
         />
       ) : null}
+      {importSession.sheet}
     </View>
   );
 }

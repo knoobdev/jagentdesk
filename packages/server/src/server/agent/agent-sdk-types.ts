@@ -163,6 +163,7 @@ export interface ProviderSnapshotEntry {
   /** The page that helps users set up and troubleshoot this provider. */
   docsUrl?: string;
   defaultModeId?: string | null;
+  launchWrap?: boolean;
 }
 
 export interface AgentCreateConfigParent {
@@ -493,6 +494,8 @@ export type AgentStreamEvent =
       provider: AgentProvider;
       requestId: string;
       resolution: AgentPermissionResponse;
+      /** The provider no longer had the request, so nobody answered it. */
+      expired?: boolean;
       turnId?: string;
     }
   | {
@@ -596,8 +599,12 @@ export interface AgentSlashCommand {
 }
 
 export interface ListImportableSessionsOptions {
+  /** Aborts provider work when the caller stops waiting for a listing. */
+  signal?: AbortSignal;
   providerOptions?: ProviderOptions;
   limit?: number;
+  /** Optional case-insensitive descriptor search text. */
+  query?: string;
   /**
    * How many candidate sessions to scan before ranking down to `limit`. Lets a
    * host-wide search page deeper than the returned window; capped by the provider.
@@ -721,6 +728,8 @@ export interface AgentLaunchContext {
   mcpServerOwners?: Record<string, string>;
   agentId?: string;
   env?: Record<string, string>;
+  /** Spawn the harness as `[...wrap, command, ...args]`. Selected by a plugin hook; never persisted. */
+  wrap?: readonly [string, ...string[]];
   /**
    * JAgentDesk browser tools are part of this launch. Providers turn off their own browser
    * tooling (Codex's Browser/Chrome plugin skills, Claude in Chrome) and refuse shell commands
@@ -887,6 +896,11 @@ export interface AgentSession {
    * An optional additional veto: missing methods use daemon baseline eligibility;
    * implemented checks that reject or return false keep the runtime resident. */
   canStopRuntime?(): Promise<boolean>;
+  /**
+   * True while work this session started will start another turn by itself, such as a
+   * background task that reports back when it ends. Recurring triggers do not count.
+   */
+  hasPendingWakeup?(): boolean;
 
   /** Release live runtime resources without archiving or deleting the durable native session. */
   close(): Promise<void>;
@@ -1036,6 +1050,12 @@ export interface AgentClient {
   readonly provider: AgentProvider;
 
   readonly capabilities: AgentCapabilityFlags;
+
+  /** Sessions honor `AgentLaunchContext.wrap`. The provider registry sets it from the provider contract. */
+  supportsLaunchWrap?: boolean;
+
+  /** Throw unless the live provider runtime can apply a wrap. Plugin providers connect to learn it. */
+  requireLaunchWrap?(): Promise<void>;
 
   createSession(
     config: AgentSessionConfig,

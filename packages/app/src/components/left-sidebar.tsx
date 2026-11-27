@@ -13,7 +13,7 @@ import {
   CalendarClock,
   FolderPlus,
   History,
-  Home,
+  Import,
   Plus,
   Search,
   Server,
@@ -60,12 +60,14 @@ import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome
 import { PluginSidebarItems } from "@/plugins";
 import { SidebarDisplayPreferencesMenu } from "@/components/sidebar/sidebar-display-preferences-menu";
 import { SidebarToastRegion } from "@/components/sidebar/sidebar-toast-region";
+import { SidebarSelectionHost } from "@/sidebar-selection";
 import { SidebarHelpMenu } from "@/components/sidebar/sidebar-help-menu";
 import { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
 import { Shortcut } from "@/components/ui/shortcut";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { HEADER_INNER_HEIGHT, useIsCompactFormFactor } from "@/constants/layout";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
+import { useImportSession } from "@/hooks/use-import-session";
 import { useShortcutKeys } from "@/hooks/use-shortcut-keys";
 import {
   type SidebarProjectEntry,
@@ -84,7 +86,6 @@ import { useCloseAgentListGesture } from "@/mobile-panels/gestures";
 import { MobilePanelOverlay } from "@/mobile-panels/presentation";
 import { useIsMobilePanelPresented } from "@/mobile-panels/provider";
 import {
-  buildOpenProjectRoute,
   buildSchedulesRoute,
   buildSessionsRoute,
   buildSettingsAddHostRoute,
@@ -191,7 +192,7 @@ interface SidebarSharedProps {
   toggleProjectCollapsed: (projectViewKey: string) => void;
   handleRefresh: () => void;
   handleOpenProject: () => void;
-  handleHome: () => void;
+  handleImportSession: () => void;
   handleSettings: () => void;
   handleMarketplace: () => void;
   labels: SidebarLabels;
@@ -204,7 +205,7 @@ interface SidebarLabels {
   addProject: string;
   newWorkspace: string;
   hosts: string;
-  home: string;
+  importSession: string;
   pairDevice: string;
   settings: string;
   searchHosts: string;
@@ -265,6 +266,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
   }, [isRevalidating, isManualRefresh]);
 
   const openProjectPicker = useOpenAddProject();
+  const { open: openImportSession, sheet: importSessionSheet } = useImportSession();
 
   const handleOpenProjectMobile = useCallback(() => {
     showMobileAgent();
@@ -305,14 +307,10 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     router.push(buildSettingsHostSectionRoute(serverId, "connections"));
   }, []);
 
-  const handleHomeMobile = useCallback(() => {
+  const handleImportSessionMobile = useCallback(() => {
     showMobileAgent();
-    router.push(buildOpenProjectRoute());
-  }, [showMobileAgent]);
-
-  const handleHomeDesktop = useCallback(() => {
-    router.push(buildOpenProjectRoute());
-  }, []);
+    openImportSession();
+  }, [openImportSession, showMobileAgent]);
 
   const { marketplaceRoute } = useAppNavTargets();
 
@@ -341,7 +339,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       addProject: t("sidebar.actions.addProject"),
       newWorkspace: t("sidebar.actions.newWorkspace"),
       hosts: t("sidebar.actions.hosts"),
-      home: t("sidebar.actions.home"),
+      importSession: t("importSession.title"),
       pairDevice: t("openProject.tiles.pairDevice.title"),
       settings: t("sidebar.actions.settings"),
       searchHosts: t("sidebar.host.searchPlaceholder"),
@@ -383,11 +381,12 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
           insetsBottom={insets.bottom}
           closeSidebar={showMobileAgent}
           handleOpenProject={handleOpenProjectMobile}
-          handleHome={handleHomeMobile}
+          handleImportSession={handleImportSessionMobile}
           handleSettings={handleSettingsMobile}
           handleAddHost={handleAddHostMobile}
           handleOpenHostSettings={handleOpenHostSettingsMobile}
         />
+        {importSessionSheet}
       </RetainedPanelActivity>
     );
   }
@@ -401,13 +400,14 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
         insetsBottom={insets.bottom}
         active={active}
         handleOpenProject={handleOpenProjectDesktop}
-        handleHome={handleHomeDesktop}
+        handleImportSession={openImportSession}
         handleSettings={handleSettingsDesktop}
         handleAddHost={handleAddHostDesktop}
         handleOpenHostSettings={handleOpenHostSettingsDesktop}
         handleViewMore={handleViewMoreNavigate}
         handleViewSchedules={handleViewSchedulesNavigate}
       />
+      {importSessionSheet}
     </RetainedPanelActivity>
   );
 });
@@ -560,10 +560,10 @@ function SidebarHostPicker({
       includeAddHost
       onAddHost={onAddHost}
       showActiveConnection
-      onOpenHostSettings={onOpenHostSettings}
       searchable
+      title={label}
       desktopPlacement="top-start"
-      desktopMinWidth={240}
+      desktopMinWidth={328}
       addHostTestID="sidebar-host-add"
       hostOptionTestID={sidebarHostOptionTestID}
     >
@@ -625,7 +625,7 @@ const SidebarNewWorkspaceHeaderRow = memo(function SidebarNewWorkspaceHeaderRow(
 function SidebarFooter({
   theme,
   handleOpenProject,
-  handleHome,
+  handleImportSession,
   handleSettings,
   labels,
   handleAddHost,
@@ -634,12 +634,12 @@ function SidebarFooter({
 }: {
   theme: SidebarTheme;
   handleOpenProject: () => void;
-  handleHome: () => void;
+  handleImportSession: () => void;
   handleSettings: () => void;
   labels: {
     addProject: string;
     hosts: string;
-    home: string;
+    importSession: string;
     pairDevice: string;
     settings: string;
     searchHosts: string;
@@ -688,10 +688,10 @@ function SidebarFooter({
           onOpenHostSettings={handleOpenHostSettings}
         />
         <FooterIconButton
-          onPress={handleHome}
-          testID="sidebar-home"
-          label={labels.home}
-          icon={Home}
+          onPress={handleImportSession}
+          testID="sidebar-import-session"
+          label={labels.importSession}
+          icon={Import}
           theme={theme}
         />
         {localServerId ? (
@@ -733,7 +733,7 @@ function MobileSidebar({
   handleRefresh,
   newWorkspaceKeys,
   handleOpenProject,
-  handleHome,
+  handleImportSession,
   handleSettings,
   labels,
   handleAddHost,
@@ -781,6 +781,7 @@ function MobileSidebar({
         onRefresh={handleRefresh}
         onWorkspacePress={handleWorkspacePress}
         onAddProject={handleOpenProject}
+        onImportSession={handleImportSession}
         parentGestureRef={closeGestureRef}
         dragGestureHostPresented={dragGestureHostPresented}
         listHeaderComponent={workspacesSectionHeaderElement}
@@ -860,13 +861,17 @@ function MobileSidebar({
           builtinPanelRoute,
           <SidebarToastRegion active={dragGestureHostPresented}>
             {mobileWorkspaceBody}
+            <SidebarSelectionHost
+              active={dragGestureHostPresented}
+              workspaceEntriesByKey={workspaceEntriesByKey}
+            />
           </SidebarToastRegion>,
         )}
 
         <SidebarFooter
           theme={theme}
           handleOpenProject={handleOpenProject}
-          handleHome={handleHome}
+          handleImportSession={handleImportSession}
           handleSettings={handleSettings}
           labels={labels}
           handleAddHost={handleAddHost}
@@ -893,7 +898,7 @@ function DesktopSidebar({
   handleRefresh,
   newWorkspaceKeys,
   handleOpenProject,
-  handleHome,
+  handleImportSession,
   handleSettings,
   handleMarketplace,
   labels,
@@ -994,6 +999,7 @@ function DesktopSidebar({
         isRefreshing={isManualRefresh && isRevalidating}
         onRefresh={handleRefresh}
         onAddProject={handleOpenProject}
+        onImportSession={handleImportSession}
         listHeaderComponent={workspacesSectionHeaderElement}
       />
     );
@@ -1082,7 +1088,10 @@ function DesktopSidebar({
 
         {resolveSidebarNavBody(
           builtinPanelRoute,
-          <SidebarToastRegion active={active}>{workspaceListElement}</SidebarToastRegion>,
+          <SidebarToastRegion active={active}>
+            {workspaceListElement}
+            <SidebarSelectionHost active={active} workspaceEntriesByKey={workspaceEntriesByKey} />
+          </SidebarToastRegion>,
           sectionRoute,
         )}
 
@@ -1092,7 +1101,7 @@ function DesktopSidebar({
           <SidebarFooter
             theme={theme}
             handleOpenProject={handleOpenProject}
-            handleHome={handleHome}
+            handleImportSession={handleImportSession}
             handleSettings={handleSettings}
             labels={labels}
             handleAddHost={handleAddHost}

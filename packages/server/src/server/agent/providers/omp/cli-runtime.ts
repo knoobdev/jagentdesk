@@ -21,6 +21,7 @@ import {
   OmpBranchMessagesResultSchema,
   OmpBranchResultSchema,
   OmpCommandsResultSchema,
+  type OmpExtensionUiResponse,
   OmpHostToolsResultSchema,
   OmpMessagesResultSchema,
   OmpModelSchema,
@@ -81,6 +82,7 @@ export class OmpCliRuntime implements OmpRuntime {
       args,
       cwd: launch.cwd,
       env: launch.env,
+      wrap: launch.wrap,
     };
     const spawn = this.spawnProcess;
     const processOptions = {
@@ -281,10 +283,7 @@ class OmpCliRuntimeSession implements OmpRuntimeSession {
     });
   }
 
-  respondToExtensionUiRequest(
-    id: string,
-    response: { value?: string; confirmed?: boolean; cancelled?: boolean },
-  ): void {
+  respondToExtensionUiRequest(id: string, response: OmpExtensionUiResponse): void {
     this.process.send({ type: "extension_ui_response", id, ...response });
   }
 

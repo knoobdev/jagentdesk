@@ -22,6 +22,7 @@ export interface PluginProviderMetadata {
   hasStatus?: boolean;
   installation?: PluginProviderInstallationMetadata;
   command?: readonly [string, ...string[]];
+  launchWrap?: boolean;
   id: string;
   label: string;
   description?: string;
@@ -44,6 +45,11 @@ export interface PluginUsageSourceMetadata {
   label: string;
   icon?: string;
   discover: boolean;
+}
+
+export interface PluginWorktreeManagerCapabilities {
+  hasRemove: boolean;
+  hasRestore: boolean;
 }
 
 export type PluginProcessRequest =
@@ -87,6 +93,10 @@ export type PluginProcessRequest =
     }
   | { type: "hook"; requestId: string; name: string; input: unknown }
   | { type: "hook.cancel"; requestId: string }
+  | { type: "worktree.create"; requestId: string; request: unknown }
+  | { type: "worktree.remove"; requestId: string; request: unknown }
+  | { type: "worktree.restore"; requestId: string; request: unknown }
+  | { type: "worktree.cancel"; requestId: string }
   | { type: "invoke"; requestId: string; method: string; input: unknown }
   | {
       type: "subscribe";
@@ -117,12 +127,17 @@ export type PluginProcessMessage =
   | { type: "settings.changed"; settingsId: string }
   | { type: "hooks.changed"; hooks: string[] }
   | {
+      type: "worktree_manager.changed";
+      worktreeManager: PluginWorktreeManagerCapabilities | null;
+    }
+  | {
       type: "ready";
       methods: string[];
       subscriptions?: string[];
       providers: PluginProviderMetadata[];
       usageSources?: PluginUsageSourceMetadata[];
       hooks?: string[];
+      worktreeManager?: PluginWorktreeManagerCapabilities | null;
     }
   | { type: "result"; requestId: string; output: unknown }
   | { type: "error"; requestId: string; error: string }
@@ -150,6 +165,12 @@ export type PluginProcessMessage =
   | { type: "jagentdesk_close" };
 
 const hooksSchema = z.array(z.string());
+const worktreeManagerCapabilitiesSchema = z
+  .object({
+    hasRemove: z.boolean(),
+    hasRestore: z.boolean(),
+  })
+  .strict();
 
 const providerMetadataSchema = z
   .object({
@@ -172,6 +193,7 @@ const providerMetadataSchema = z
       .strict()
       .optional(),
     command: z.tuple([z.string().min(1)], z.string()).optional(),
+    launchWrap: z.boolean().optional(),
   })
   .strict();
 
@@ -303,6 +325,14 @@ export const PluginProcessRequestSchema: z.ZodType<PluginProcessRequest> = z.dis
     z.object({ type: z.literal("hook.cancel"), requestId: z.string() }).strict(),
     z
       .object({
+        type: z.enum(["worktree.create", "worktree.remove", "worktree.restore"]),
+        requestId: z.string().min(1),
+        request: z.unknown(),
+      })
+      .strict(),
+    z.object({ type: z.literal("worktree.cancel"), requestId: z.string().min(1) }).strict(),
+    z
+      .object({
         type: z.literal("usage.fetch"),
         requestId: z.string(),
         sourceId: z.string(),
@@ -365,12 +395,19 @@ export const PluginProcessMessageSchema: z.ZodType<PluginProcessMessage> = z.dis
     z.object({ type: z.literal("hooks.changed"), hooks: hooksSchema }).strict(),
     z
       .object({
+        type: z.literal("worktree_manager.changed"),
+        worktreeManager: worktreeManagerCapabilitiesSchema.nullable(),
+      })
+      .strict(),
+    z
+      .object({
         type: z.literal("ready"),
         methods: z.array(z.string()),
         subscriptions: z.array(z.string()).optional(),
         providers: z.array(providerMetadataSchema),
         usageSources: z.array(usageSourceMetadataSchema).optional(),
         hooks: hooksSchema.optional(),
+        worktreeManager: worktreeManagerCapabilitiesSchema.nullable().optional(),
       })
       .strict(),
     z

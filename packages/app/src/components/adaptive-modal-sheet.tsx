@@ -562,6 +562,16 @@ export interface AdaptiveModalSheetProps {
   bodyStyle?: StyleProp<ViewStyle>;
   /** Re-provides context lost when the compact sheet renders in a portal. */
   contextBridge?: ContextBridge | null;
+  /**
+   * Keys the body handles while the sheet is the top overlay, such as list navigation. Escape
+   * always closes the sheet. Return true from `onKeyDown` to claim the key.
+   */
+  keyboard?: SheetKeyboard;
+}
+
+export interface SheetKeyboard {
+  keys: readonly string[];
+  onKeyDown: (event: KeyboardInputEvent) => boolean;
 }
 
 export function AdaptiveModalSheet({
@@ -582,6 +592,7 @@ export function AdaptiveModalSheet({
   desktopHeight,
   bodyStyle,
   contextBridge = null,
+  keyboard,
 }: AdaptiveModalSheetProps) {
   const { theme } = useUnistyles();
   const { t } = useTranslation();
@@ -687,16 +698,21 @@ export function AdaptiveModalSheet({
 
   const handleOverlayKeyDown = useCallback(
     (event: KeyboardInputEvent) => {
-      if (event.key !== "Escape") return false;
+      if (event.key !== "Escape") {
+        if (!keyboard?.onKeyDown(event)) return false;
+        event.preventDefault();
+        return true;
+      }
       event.preventDefault();
       event.stopPropagation();
       onClose();
       return true;
     },
-    [onClose],
+    [keyboard, onClose],
   );
+  const overlayKeys = useMemo(() => ["Escape", ...(keyboard?.keys ?? [])], [keyboard?.keys]);
   const setOverlayScope = useOverlayRegistration({
-    keys: ["Escape"],
+    keys: overlayKeys,
     active: visible,
     layer: modalLayer,
     onKeyDown: handleOverlayKeyDown,

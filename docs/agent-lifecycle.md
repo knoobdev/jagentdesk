@@ -53,9 +53,26 @@ Agents can launch other agents via the agent-scoped `create_agent` MCP tool. Age
 
 Runtime ownership is resolved from explicit workspace ID and caller context, never from `cwd`. Workspace creation is a separate operation with `local | worktree` isolation; agent creation only selects an existing workspace.
 
+Agent-scoped workspace creation records the caller's workspace as `parentWorkspaceId`.
+This is informational ancestry for workspace grouping. It does not change placement,
+visibility, status, or archive behavior. Archiving a parent workspace preserves its children's
+records and parentage. Unscoped creation and existing workspaces have no parent; ancestry is
+never inferred from directories, projects, or Git branches.
+
 Users can also detach an existing subagent from the subagents track. Detach is deliberately a manual lifecycle gesture, not an agent-facing MCP tool. It removes the `jagentdesk.parent-agent-id` label only: it does not stop, archive, move, or restart the agent. The agent keeps its current `cwd` and `workspaceId`, leaves the former parent's track, and behaves like a root agent for tab close, workspace activity, and future parent archive.
 
 `notifyOnFinish` defaults to `true` for agent-scoped creation and background prompt follow-ups because most delegated work needs to report back to the creating agent. Set it to `false` only for truly fire-and-forget agents or prompts.
+
+A turn end is not always a finished child. When the child ends its turn with work that will start
+its next turn by itself, the caller gets one `message` notice ("ended its turn but is still
+working") and the subscription keeps following the child. That work is a running turn, queued
+messages, a pending provider wake-up (`AgentSession.hasPendingWakeup`: Claude background tasks,
+task notifications and one-shot wake-ups), or the child's own outstanding finish subscriptions.
+Heartbeats, recurring crons and other daemon background items never count: they are external
+triggers, not work the caller waits for. Later turn ends stay silent until nothing is pending,
+which sends `finished`. `followingSince` is saved in `finish-subscriptions.json` before the notice,
+so a restart resumes following without repeating it. Following ends after 24 hours with an "is
+still working" notice. Children on another host report their first turn end as `finished`.
 
 ## Agent messages
 

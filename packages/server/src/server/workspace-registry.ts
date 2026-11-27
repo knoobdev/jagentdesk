@@ -48,6 +48,7 @@ const UntrustedWorkspaceSourceSchema = z.object({
 
 const PersistedWorkspaceRecordSchema = z.object({
   untrustedSource: UntrustedWorkspaceSourceSchema.optional(),
+  parentWorkspaceId: z.string().optional(),
   workspaceId: z.string(),
   projectId: z.string(),
   cwd: z.string(),
@@ -85,6 +86,7 @@ const PersistedWorkspaceRecordSchema = z.object({
     .transform((value) => value ?? null),
   isJAgentDeskOwnedWorktree: z.boolean().default(false),
   mainRepoRoot: z.string().nullable().default(null),
+  worktreeManagerPluginId: z.string().min(1).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   archivedAt: z.string().nullable(),
@@ -551,6 +553,7 @@ export function resolveProjectDisplayName(record: PersistedProjectRecord): strin
 }
 
 export function createPersistedWorkspaceRecord(input: {
+  parentWorkspaceId?: string;
   workspaceId: string;
   projectId: string;
   cwd: string;
@@ -562,6 +565,7 @@ export function createPersistedWorkspaceRecord(input: {
   baseBranch?: string | null;
   isJAgentDeskOwnedWorktree?: boolean;
   mainRepoRoot?: string | null;
+  worktreeManagerPluginId?: string | null;
   createdAt: string;
   updatedAt: string;
   archivedAt?: string | null;
@@ -571,7 +575,7 @@ export function createPersistedWorkspaceRecord(input: {
   metadata?: Record<string, JsonValue>;
   background?: boolean;
 }): PersistedWorkspaceRecord {
-  const { background, ...rest } = input;
+  const { background, worktreeManagerPluginId, ...rest } = input;
   return PersistedWorkspaceRecordSchema.parse({
     ...rest,
     background: background ?? false,
@@ -581,6 +585,7 @@ export function createPersistedWorkspaceRecord(input: {
     baseBranch: input.baseBranch ?? null,
     isJAgentDeskOwnedWorktree: input.isJAgentDeskOwnedWorktree ?? false,
     mainRepoRoot: input.mainRepoRoot ?? null,
+    ...(worktreeManagerPluginId ? { worktreeManagerPluginId } : {}),
     archivedAt: input.archivedAt ?? null,
     autoArchivedChangeRequestUrl: input.autoArchivedChangeRequestUrl ?? null,
     pinnedAt: input.pinnedAt ?? null,

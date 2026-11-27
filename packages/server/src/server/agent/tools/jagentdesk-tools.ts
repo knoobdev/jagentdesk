@@ -58,8 +58,9 @@ import {
   toAgentListItemPayload,
   toAgentPayload,
 } from "../agent-projections.js";
-import { curateAgentActivity } from "../activity-curator.js";
-import { selectItemsByProjectedLimit } from "../timeline-projection.js";
+import { pageAgentActivity } from "../activity-curator.js";
+import type { AgentTimelineRow } from "../agent-timeline-store-types.js";
+
 import { type AgentStorage, type StoredAgentRecord } from "../agent-storage.js";
 import { AgentNotFoundError, ensureAgentLoaded } from "../agent-loading.js";
 import { isStoredAgentProviderAvailable } from "../../persistence-hooks.js";
@@ -177,6 +178,10 @@ export interface JAgentDeskToolHostDependencies {
     "getSnapshot" | "listWorktrees" | "resolveRepoRoot" | "invalidateWorktrees"
   >;
   findWorkspaceIdForCwd?: ArchiveDependencies["findWorkspaceIdForCwd"];
+  worktreeManagers?: ArchiveDependencies["worktreeManagers"];
+  workspaceArchiveOperations?: ArchiveDependencies["workspaceArchiveOperations"];
+  assertWorkspaceAutomationAllowed?: ArchiveDependencies["assertWorkspaceAutomationAllowed"];
+  isCheckoutUntrusted?: ArchiveDependencies["isCheckoutUntrusted"];
   listActiveWorkspaces?: ArchiveDependencies["listActiveWorkspaces"];
   archiveWorkspaceRecord?: ArchiveDependencies["archiveWorkspaceRecord"];
   emitWorkspaceUpdatesForWorkspaceIds?: ArchiveDependencies["emitWorkspaceUpdatesForWorkspaceIds"];
@@ -191,6 +196,7 @@ export interface JAgentDeskToolHostDependencies {
   workspaceScripts?: Pick<WorkspaceScriptsService, "list" | "launch" | "stop">;
   markWorkspaceArchiving?: ArchiveDependencies["markWorkspaceArchiving"];
   clearWorkspaceArchiving?: ArchiveDependencies["clearWorkspaceArchiving"];
+  lifecycle?: ArchiveDependencies["lifecycle"];
   createJAgentDeskWorktree?: CreateJAgentDeskWorktreeWorkflowFn;
   // Mints a fresh directory workspace for a cwd and returns its id.
   ensureWorkspaceForCreate?: (
@@ -279,6 +285,7 @@ interface ProviderSummary {
 }
 
 const WorkspaceAutomationSummarySchema = z.object({
+  parentWorkspaceId: z.string().optional(),
   workspaceId: z.string(),
   projectId: z.string(),
   cwd: z.string(),
@@ -297,6 +304,7 @@ function toWorkspaceAutomationSummary(workspace: PersistedWorkspaceRecord) {
     kind: workspace.kind,
     title: workspace.title,
     background: workspace.background,
+    parentWorkspaceId: workspace.parentWorkspaceId,
   };
 }
 
@@ -510,6 +518,7 @@ interface ScheduleUpdateToolInput {
   model?: string | null;
   mode?: string | null;
   cwd?: string;
+  archiveOnFinish?: boolean;
   expiresIn?: string;
   clearExpires?: boolean;
 }
@@ -645,6 +654,7 @@ function buildScheduleUpdateInput(input: ScheduleUpdateToolInput): UpdateSchedul
     ...(providerModelPatch.model !== undefined ? { model: providerModelPatch.model } : {}),
     ...(input.mode !== undefined ? { modeId: input.mode } : {}),
     ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
+    ...(input.archiveOnFinish !== undefined ? { archiveOnFinish: input.archiveOnFinish } : {}),
   };
 
   return {
@@ -1310,7 +1320,10 @@ function createToolCatalog(
     provider?: string;
     cwd?: string;
     isolation?: "local" | "worktree";
+    archiveOnFinish?: boolean;
   }) => {
+    const archiveOnFinish =
+      params?.archiveOnFinish === undefined ? {} : { archiveOnFinish: params.archiveOnFinish };
     const callerAgent = resolveCallerAgent();
     if (callerAgent) {
       return {
@@ -1318,6 +1331,7 @@ function createToolCatalog(
         config: {
           ...buildCallerAgentScheduleConfig(callerAgent, params),
           ...(params?.isolation ? { isolation: params.isolation } : {}),
+          ...archiveOnFinish,
         },
       };
     }
@@ -1337,6 +1351,7 @@ function createToolCatalog(
         cwd: params?.cwd?.trim() ? expandUserPath(params.cwd) : process.cwd(),
         ...(resolvedProviderModel.model ? { model: resolvedProviderModel.model } : {}),
         ...(params?.isolation ? { isolation: params.isolation } : {}),
+        ...archiveOnFinish,
       },
     };
   };
@@ -1572,7 +1587,7 @@ function createToolCatalog(
       .boolean()
       .optional()
       .describe(
-        "True creates a background agent: hidden from tabs, default lists, your subagent track and notifications. You still get its finish notification and can address it by id. Omit to inherit your own value (false without a caller); use it for helpers the user does not need to watch.",
+        "Hide the agent from the UI. Inherits your visibility when omitted. Omit unless the user asks for a specific value.",
       ),
   };
   const legacyCreateAgentPlacementFields = {
@@ -1965,7 +1980,7 @@ function createToolCatalog(
           .boolean()
           .optional()
           .describe(
-            "True hides the workspace from default lists and the sidebar while its contents remain durable and accessible; omit background to inherit your own visibility (true when you or your current workspace are background, false without a caller), and override it only when the user explicitly asks.",
+            "Hide the workspace from the UI. Inherits your visibility when omitted. Omit unless the user asks for a specific value.",
           ),
         mode: z
           .enum(["branch-off", "checkout-branch", "checkout-pr"])
@@ -2124,14 +2139,17 @@ function createToolCatalog(
       {
         title: "Update session ledger",
         description:
-          "Record decisions (with a one-line reason), open or finished work items, and the next step in " +
-          "this session's ledger. The ledger is what another model reads if this session moves to a " +
-          "different provider. Entries are merged: decisions and open items are appended, an item sent " +
-          'as {"text", "done": true} is closed, nextStep replaces the previous one.',
+          "Record the current goal (the task the user is giving you now), decisions (with a one-line " +
+          "reason), open or finished work items, and the next step in this session's ledger. The ledger " +
+          "is what another model reads if this session moves to a different provider, and JAgentDesk " +
+          "repeats its goal and next step to you every turn. Entries are merged: decisions and open items " +
+          'are appended, an item sent as {"text", "done": true} is closed, goal and nextStep replace the ' +
+          "previous ones.",
         inputSchema: SessionLedgerUpdateInputSchema.shape,
         outputSchema: {
           added: z.object({ decisions: z.number(), openItems: z.number() }),
           closed: z.number(),
+          goalChanged: z.boolean(),
           nextStepChanged: z.boolean(),
           openItems: z.array(z.object({ id: z.string(), text: z.string() })),
         },
@@ -2149,6 +2167,7 @@ function createToolCatalog(
           structuredContent: ensureValidJson({
             added: result.added,
             closed: result.closed,
+            goalChanged: result.goalChanged,
             nextStepChanged: result.nextStepChanged,
             openItems,
           }),
@@ -3033,7 +3052,10 @@ function createToolCatalog(
     "list_agents",
     {
       title: "List agents",
-      description: "List recent agents as compact metadata.",
+      description:
+        "List agents on this host as compact metadata (id, title, provider, status). Defaults to your " +
+        "workspace; pass cwd for another one. Archived agents are not listed; read any agent's " +
+        "history, archived or not, by id with get_agent_activity.",
       inputSchema: {
         includeBackground: z.boolean().optional().default(false),
         includeArchived: z.boolean().optional().default(false),
@@ -3422,6 +3444,7 @@ function createToolCatalog(
       const workspaceId = await resolveTerminalWorkspaceId(resolvedCwd);
 
       const terminal = await terminalManager.createTerminal({
+        origin: { source: "agent" },
         cwd: resolvedCwd,
         workspaceId,
         ...(name?.trim() ? { name: name.trim() } : {}),
@@ -3575,13 +3598,30 @@ function createToolCatalog(
           ),
           cwd: z.string().optional(),
           isolation: z.enum(["local", "worktree"]).optional(),
+          archiveOnFinish: z
+            .boolean()
+            .optional()
+            .describe(
+              "Archive each run's workspace and agent when the run ends. Defaults to true; pass false to keep them active.",
+            ),
           maxRuns: z.number().int().positive().optional(),
           expiresIn: scheduleDurationInputSchema.optional(),
         })
         .superRefine(addScheduleCadenceIssue),
       outputSchema: ScheduleSummarySchema.shape,
     },
-    async ({ prompt, cron, timezone, name, provider, cwd, isolation, maxRuns, expiresIn }) => {
+    async ({
+      prompt,
+      cron,
+      timezone,
+      name,
+      provider,
+      cwd,
+      isolation,
+      archiveOnFinish,
+      maxRuns,
+      expiresIn,
+    }) => {
       if (!scheduleService) {
         throw new Error("Schedule service is not configured");
       }
@@ -3593,7 +3633,7 @@ function createToolCatalog(
           cron,
           ...(timezone !== undefined ? { timezone } : {}),
         }),
-        target: resolveNewAgentScheduleTarget({ provider, cwd, isolation }),
+        target: resolveNewAgentScheduleTarget({ provider, cwd, isolation, archiveOnFinish }),
         ...(name?.trim() ? { name: name.trim() } : {}),
         ...(maxRuns === undefined ? {} : { maxRuns }),
         ...(expiresAt === undefined ? {} : { expiresAt }),
@@ -3913,6 +3953,10 @@ function createToolCatalog(
             .optional()
             .describe("New mode for new-agent target (null to clear)."),
           cwd: z.string().trim().min(1).optional().describe("New cwd for new-agent target."),
+          archiveOnFinish: z
+            .boolean()
+            .optional()
+            .describe("Archive the workspace and agent of later runs when each run ends."),
           expiresIn: scheduleDurationInputSchema
             .optional()
             .describe("New relative expiry duration (for example: 1h, 2d)."),
@@ -4097,57 +4141,75 @@ function createToolCatalog(
     },
   );
 
+  /**
+   * An agent that is not loaded (idle, archived, another provider) is read from the durable
+   * timeline without resuming it; without one it is loaded the old way, which hydrates history.
+   */
+  async function readAgentActivityRows(agentId: string): Promise<AgentTimelineRow[]> {
+    const durable = agentManager.getAgent(agentId)
+      ? null
+      : await agentManager.readAgentTimelineRows(agentId);
+    if (durable && durable.length > 0) return durable;
+    await ensureAgentLoaded(agentId, { agentManager, agentStorage, logger: childLogger });
+    return agentManager.getTimelineRows(agentId);
+  }
+
   registerTool(
     "get_agent_activity",
     {
       title: "Get agent activity",
-      description: "Return recent agent timeline entries as a curated summary.",
+      description:
+        "Read any JAgentDesk agent's timeline on this host as a curated summary: live, idle or archived, " +
+        "on any provider, including your own id. Use this (with list_agents) to learn what another " +
+        "agent did; never search provider session folders such as ~/.claude or ~/.codex for it. " +
+        "Pages backwards: pass limit, then the returned nextBeforeSeq as beforeSeq for older entries.",
       inputSchema: {
         agentId: z.string(),
         limit: z
           .number()
           .optional()
           .describe("Optional limit for number of activities to include (most recent first)."),
+        beforeSeq: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe(
+            "Only entries older than this timeline seq (nextBeforeSeq of the previous page).",
+          ),
       },
       outputSchema: {
         agentId: z.string(),
         updateCount: z.number(),
         currentModeId: z.string().nullable(),
         content: z.string(),
+        isYou: z.boolean().optional(),
+        title: z.string().nullable().optional(),
+        provider: z.string().optional(),
+        archived: z.boolean().optional(),
+        nextBeforeSeq: z.number().nullable().optional(),
       },
     },
-    async ({ agentId, limit }) => {
-      await ensureAgentLoaded(agentId, {
-        agentManager,
-        agentStorage,
-        logger: childLogger,
-      });
-      const timeline = agentManager.getTimeline(agentId);
+    async ({ agentId, limit, beforeSeq }) => {
+      const rows = await readAgentActivityRows(agentId);
+      const record = await agentStorage.get(agentId);
       const snapshot = agentManager.getAgent(agentId);
-
-      const selection = selectItemsByProjectedLimit({
-        items: timeline,
-        direction: "tail",
-        limit: limit ?? 0,
-      });
-      const curatedContent = curateAgentActivity(selection.items);
-      const { totalProjected, shownProjected } = selection;
-
-      const noun = totalProjected === 1 ? "activity" : "activities";
-      const countHeader =
-        limit && shownProjected < totalProjected
-          ? `Showing ${shownProjected} of ${totalProjected} ${noun} (limited to ${limit})`
-          : `Showing all ${totalProjected} ${noun}`;
-
-      const contentWithCount = `${countHeader}\n\n${curatedContent}`;
-
+      const page = pageAgentActivity({ rows, limit, beforeSeq });
+      const isYou = Boolean(callerAgentId) && agentId === callerAgentId;
       return {
         content: [],
         structuredContent: ensureValidJson({
           agentId,
-          updateCount: timeline.length,
+          updateCount: rows.length,
           currentModeId: snapshot?.currentModeId ?? null,
-          content: contentWithCount,
+          content: isYou
+            ? page.content.replace("\n\n", "\n(This is your own timeline.)\n\n")
+            : page.content,
+          isYou,
+          title: snapshot?.config?.title ?? record?.title ?? null,
+          provider: snapshot?.provider ?? record?.provider,
+          archived: Boolean(record?.archivedAt),
+          nextBeforeSeq: page.nextBeforeSeq,
         }),
       };
     },
@@ -4287,14 +4349,28 @@ function archiveWorktreeDependencies(
   if (!options.clearWorkspaceArchiving) {
     throw new Error("Workspace archiving clearer is required to archive worktrees");
   }
+  if (!options.assertWorkspaceAutomationAllowed) {
+    throw new Error("Workspace automation gate is required to archive worktrees");
+  }
+  if (!options.isCheckoutUntrusted) {
+    throw new Error("Checkout trust lookup is required to archive worktrees");
+  }
   return {
+    lifecycle: options.lifecycle ?? null,
     jagentdeskHome: options.jagentdeskHome,
     jagentdeskWorktreesBaseRoot: options.worktreesRoot,
+    worktreeManagers: options.worktreeManagers,
+    workspaceArchiveOperations: options.workspaceArchiveOperations,
+    assertWorkspaceAutomationAllowed: options.assertWorkspaceAutomationAllowed,
+    isCheckoutUntrusted: options.isCheckoutUntrusted,
     github: options.github,
     workspaceGitService: options.workspaceGitService,
     agentManager: context.agentManager,
     agentStorage: context.agentStorage,
     findWorkspaceIdForCwd: options.findWorkspaceIdForCwd,
+    ...(options.workspaceRegistry
+      ? { getWorkspace: (workspaceId: string) => options.workspaceRegistry!.get(workspaceId) }
+      : {}),
     listActiveWorkspaces: options.listActiveWorkspaces,
     archiveWorkspaceRecord: options.archiveWorkspaceRecord,
     emitWorkspaceUpdatesForWorkspaceIds: options.emitWorkspaceUpdatesForWorkspaceIds,

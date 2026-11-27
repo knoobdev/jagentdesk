@@ -95,6 +95,7 @@ import {
 import {
   useAgentProfileEditor,
   useAgentProfilePicker,
+  type AgentProfile,
   type AgentProfileApplyTarget,
   type AgentProfileEditorControls,
   type AgentProfilePicker,
@@ -128,7 +129,7 @@ interface ControlledAgentControlsProps {
   agentProfiles?: AgentProfilePicker | null;
   onApplyAgentProfile?: (profileId: string) => void;
   onEditAgentProfiles?: () => void;
-  onCreateAgentProfile?: (seed: AgentProfileSeed) => void;
+  onCreateAgentProfile?: (seed: AgentProfileSeed) => Promise<AgentProfile | null> | void;
   onEditAgentProfile?: (profileId: string) => void;
   optionControls?: ComposerOptionControls;
   onDropdownClose?: () => void;
@@ -148,6 +149,8 @@ export interface DraftAgentControlsProps {
   onSelectMode: (modeId: string) => void;
   models: AgentModelDefinition[];
   selectedModel: string;
+  /** The model the draft will run, the provider default when none is chosen. */
+  effectiveModelId?: string;
   onSelectModel: (modelId: string) => void;
   isModelLoading: boolean;
   modelSelectorProviders: ProviderSelectorProvider[];
@@ -268,7 +271,7 @@ function useEditAgentProfilesNavigation(
 ): (() => void) | undefined {
   const handleEdit = useCallback(() => {
     if (!serverId) return;
-    router.push(buildSettingsHostSectionRoute(serverId, "agents"));
+    router.push(buildSettingsHostSectionRoute(serverId, "agent-profiles"));
   }, [serverId]);
   return serverId && isSupported ? handleEdit : undefined;
 }
@@ -277,14 +280,14 @@ function resolveAgentProfileEditorActions(
   isSupported: boolean,
   editor: AgentProfileEditorControls,
 ): {
-  create?: (seed: AgentProfileSeed) => void;
+  create?: (seed: AgentProfileSeed) => Promise<AgentProfile | null>;
   edit?: (profileId: string) => void;
 } {
   if (!isSupported) {
     return {};
   }
   return {
-    create: editor.openCreateFromModel,
+    create: editor.quickCreateFromModel,
     edit: editor.openEdit,
   };
 }
@@ -727,7 +730,7 @@ interface AgentControlsContentProps {
   featureItems: ComposerControlItem[];
   onApplyAgentProfile?: (profileId: string) => void;
   onEditAgentProfiles?: () => void;
-  onCreateAgentProfile?: (seed: AgentProfileSeed) => void;
+  onCreateAgentProfile?: (seed: AgentProfileSeed) => Promise<AgentProfile | null> | void;
   onEditAgentProfile?: (profileId: string) => void;
   onDropdownClose?: () => void;
   onModelSelectorOpen?: () => void;
@@ -1250,6 +1253,7 @@ export const AgentControls = memo(function AgentControls({
       ownerKey: agentId,
       provider: agentProvider,
       providerDefinitions: modeProviderDefinitions,
+      profiles: agentProfiles,
       models: {
         providers: agentModelSelectorProviders,
         selectedProvider: agentProvider,
@@ -1267,6 +1271,7 @@ export const AgentControls = memo(function AgentControls({
     [
       activeModelId,
       agentOptionControls,
+      agentProfiles,
       client,
       agentId,
       agentModelSelectorProviders,
@@ -1341,6 +1346,8 @@ export const AgentControls = memo(function AgentControls({
 });
 
 export function DraftAgentControls({
+  draftId,
+  serverId,
   providerDefinitions,
   selectedProvider,
   modeOptions,
@@ -1348,6 +1355,7 @@ export function DraftAgentControls({
   onSelectMode,
   models,
   selectedModel,
+  effectiveModelId: effectiveModelIdProp,
   onSelectModel,
   isModelLoading: _isModelLoading,
   modelSelectorProviders,
@@ -1370,7 +1378,8 @@ export function DraftAgentControls({
   context = "draft",
   metadata,
   onSetMetadata,
-}: DraftAgentControlsProps) {
+}: DraftAgentControlsProps & { draftId: string; serverId: string }) {
+  const effectiveModelId = effectiveModelIdProp ?? selectedModel;
   const mappedThinkingOptions = useMemo<AgentControlOption[]>(() => {
     return toThinkingControlOptions(thinkingOptions);
   }, [thinkingOptions]);
@@ -1479,9 +1488,54 @@ export function DraftAgentControls({
     [composerAgent, composerInput],
   );
 
+  const commandCenterControls = useMemo<AgentControlCommandCenterSource>(
+    () => ({
+      serverId,
+      ownerKey: draftId,
+      provider: selectedProvider,
+      providerDefinitions,
+      profiles: agentProfiles,
+      models: {
+        providers: modelSelectorProviders,
+        selectedProvider,
+        selectedModelId: effectiveModelId,
+        select: (provider, modelId) => {
+          onSelectProviderAndModel(provider, modelId);
+        },
+      },
+      thinking: {
+        options: thinkingOptions,
+        selectedId: selectedThinkingOptionId,
+        select: onSelectThinkingOption,
+      },
+      modes: toCommandCenterModes(modeControl),
+      optionControls: optionControls ?? null,
+    }),
+    [
+      serverId,
+      draftId,
+      selectedProvider,
+      providerDefinitions,
+      agentProfiles,
+      modelSelectorProviders,
+      effectiveModelId,
+      onSelectProviderAndModel,
+      thinkingOptions,
+      selectedThinkingOptionId,
+      onSelectThinkingOption,
+      modeControl,
+      optionControls,
+    ],
+  );
+
   return (
     <ComposerAgentProvider value={composerAgent}>
       <ComposerModelProvider value={composerModel}>
+        <AgentControlCommandCenterRegistration
+          sourceId={`draft:${serverId}:${draftId}`}
+          enabled={!disabled}
+          controls={commandCenterControls}
+        />
         {profileEditor.element}
         <ControlledAgentControls
           provider={selectedProvider ?? ""}

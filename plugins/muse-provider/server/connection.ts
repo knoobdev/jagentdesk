@@ -40,13 +40,19 @@ export class MspConnection {
   constructor(
     private readonly options: {
       launch: ProviderLaunch;
+      /** Start `muse serve` as `[...wrap, command, ...args]`. */
+      wrap?: readonly [string, ...string[]];
       cwd?: string;
       timeoutMs?: number;
       serveArgs?: string[];
     },
   ) {
-    const { launch, cwd } = options;
-    this.child = spawn(launch.command, [...launch.args, "serve", ...(options.serveArgs ?? [])], {
+    const { launch, cwd, wrap } = options;
+    const args = [...launch.args, "serve", ...(options.serveArgs ?? [])];
+    const [command, ...commandArgs] = wrap
+      ? [...wrap, launch.command, ...args]
+      : [launch.command, ...args];
+    this.child = spawn(command!, commandArgs, {
       env: launch.env,
       cwd,
       stdio: "pipe",

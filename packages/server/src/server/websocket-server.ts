@@ -20,6 +20,7 @@ import {
 import { WebSocket, WebSocketServer } from "ws";
 import { type IncomingMessage, type Server as HTTPServer } from "http";
 import { join } from "path";
+import { getCachedHostMachineKind } from "./host-machine-kind.js";
 import { getHostName } from "./host-name.js";
 import { randomUUID } from "node:crypto";
 import { monitorEventLoopDelay } from "node:perf_hooks";
@@ -150,6 +151,8 @@ import { MessageReceipts } from "./message-receipts/index.js";
 type PluginRuntimePort = NonNullable<SessionOptions["pluginRuntime"]>;
 
 const WS_CLOSE_DAEMON_AUTH_FAILED = 4401;
+// Give clients intermediate messages that count as progress during large transfers.
+const DIRECT_WEBSOCKET_FRAME_BYTES = 512 * 1024;
 
 export interface ExternalSocketMetadata {
   transport: "tailnet" | "relay";
@@ -282,7 +285,11 @@ function createFallbackWorkspaceGitSnapshot(cwd: string): WorkspaceGitRuntimeSna
       upstreamRef: null,
       aheadOfOrigin: null,
       behindOfOrigin: null,
+      upstreamState: "none",
       hasRemote: false,
+      pullRemote: null,
+      pushRemote: null,
+      firstPushRemote: null,
       diffStat: null,
     },
     forge: {
@@ -1140,7 +1147,8 @@ export class VoiceAssistantWebSocketServer {
       },
     });
     wss.on("connection", (ws, request) => {
-      void this.attachAuthenticatedSocket(ws, request, password);
+      const socket = Object.assign(ws, { maxFrameBytes: DIRECT_WEBSOCKET_FRAME_BYTES });
+      void this.attachAuthenticatedSocket(socket, request, password);
     });
     return wss;
   }
@@ -1742,14 +1750,19 @@ export class VoiceAssistantWebSocketServer {
     ws: WebSocketLike,
     message: WSOutboundMessage,
   ): Promise<void> {
+    if (!this.ensureOutboundCapacity(ws, 0)) throw new Error("Source message delivery unavailable");
     const frame = JSON.stringify(message);
-    const sent = await sendBoundedPhysicalFrameAndWait({
-      socket: ws,
-      frame,
-      frameBytes: outboundFrameByteLength(frame),
-      onHighWater: () => this.closeAtOutboundHighWater(ws),
-    });
-    if (!sent) throw new Error("Source message delivery unavailable");
+    // Through the chunked transport, so a large awaited reply reaches a direct client in
+    // frames it can count as progress.
+    try {
+      await this.sendSocketFrame(ws, frame, outboundFrameByteLength(frame), true);
+    } catch (err) {
+      if (ws.readyState !== 1)
+        throw new Error("Source message delivery unavailable", { cause: err });
+      this.logger.warn({ err }, "ws_send_failed");
+      throw err;
+    }
+    this.runtimeMetrics.recordOutboundMessage(message, ws.bufferedAmount);
   }
 
   private sendMessageToSockets(sockets: Iterable<WebSocketLike>, message: WSOutboundMessage): void {
@@ -2660,11 +2673,13 @@ export class VoiceAssistantWebSocketServer {
   }
 
   private buildServerInfoStatusPayload(): ServerInfoStatusPayload {
+    const machineKind = getCachedHostMachineKind();
     return {
       status: "server_info",
       serverId: this.serverId,
       hostname: getHostName(),
       version: this.daemonVersion,
+      ...(machineKind ? { machineKind } : {}),
       // COMPAT(desktopManaged): added in v0.1.X, remove optional parsing after 2027-01-16.
       desktopManaged: this.daemonRuntimeConfig?.desktopManaged === true,
       ...(this.serverCapabilities ? { capabilities: this.serverCapabilities } : {}),
@@ -2806,6 +2821,8 @@ export class VoiceAssistantWebSocketServer {
         providerRemoval: true,
         // COMPAT(importSessionWorkspaceTarget): added in v0.1.110, remove gate after 2027-01-16.
         importSessionWorkspaceTarget: true,
+        // COMPAT(importSessionSearch): added in v0.7.3, remove gate after 2027-03-02.
+        importSessionSearch: true,
         // COMPAT(forgeProviders): added in v0.1.106, drop the gate when daemon floor >= v0.1.106.
         forgeProviders: true,
         // COMPAT(selectiveAgentTimeline): added in v0.1.106, remove after 2027-01-12.

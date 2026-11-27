@@ -24,8 +24,13 @@ import type { AgentStorage } from "./agent-storage.js";
 import { ensureAgentLoaded } from "./agent-loading.js";
 import {
   areFinishNotificationsSuspended,
+  awaitsRemoteDelegates,
+  getFinishFollowLimitMs,
   getFinishSubscriptionStore,
   getFinishSubscriptionSignal,
+  recheckFinishFollowers,
+  registerFinishFollower,
+  type PendingWork,
 } from "./finish-subscriptions/index.js";
 import { getParentAgentIdFromLabels } from "@jagentdesk/protocol/agent-labels";
 import type { ActiveTurnBehavior } from "@jagentdesk/protocol/messages";
@@ -707,10 +712,16 @@ export interface SetupFinishNotificationParams {
   /** Reattach durable local intent instead of creating a new subscription. */
   restoredSubscriptionId?: string;
   restoredSubscriptionIds?: readonly string[];
+  /** The restored subscription was already following a child that ended a turn still working. */
+  restoredFollowingSince?: string;
   logger: Logger;
 }
 
 type FinishNotificationReason =
+  /** The turn ended while work that will wake the child is pending. The subscription stays. */
+  | "ended its turn but is still working"
+  /** The follow limit passed while the child was still working. The subscription ends. */
+  | "is still working"
   | "finished"
   | "errored"
   | "needs permission"
@@ -726,7 +737,55 @@ const finishNotificationEvents = {
   "was closed": "closed",
   // Use the existing failure event so older clients still parse agent-message metadata.
   "was canceled": "errored",
+  // Not a finish: the existing neutral event keeps older clients parsing the metadata.
+  "ended its turn but is still working": "message",
+  "is still working": "message",
 } as const;
+
+const PENDING_WORK_DESCRIPTIONS: Record<PendingWork, string> = {
+  turn: "a turn in progress",
+  "background work": "background work that will wake it",
+  "queued messages": "queued messages",
+  "delegated agents": "agents it is waiting on",
+};
+
+/** The child's own work that will start its next turn by itself (Paseo #10864). */
+function ownPendingWork(agentManager: AgentManager, agentId: string): PendingWork[] {
+  const work: PendingWork[] = [];
+  if (agentManager.getAgent(agentId)?.lifecycle === "running") work.push("turn");
+  if (agentManager.hasPendingWakeup(agentId)) work.push("background work");
+  if (agentMessageDeliveries.get(agentManager)?.hasPending(agentId)) work.push("queued messages");
+  return work;
+}
+
+/**
+ * Whether one of the agent's delegations can still bring it a notice. A delegate that has
+ * settled is about to report; a delegate that only waits on agents in `chain` never will, so
+ * agents that wait on each other settle together.
+ */
+function awaitsDelegates(agentManager: AgentManager, agentId: string, chain: Set<string>): boolean {
+  // A remote delegate's work is known only to its host.
+  if (awaitsRemoteDelegates(agentManager, agentId)) return true;
+  const store = getFinishSubscriptionStore(agentManager);
+  if (!store) return false;
+  chain.add(agentId);
+  return store.delegatesOf(agentId).some((delegate) => {
+    if (chain.has(delegate)) return false;
+    if (
+      ownPendingWork(agentManager, delegate).length > 0 ||
+      (store.delegatesOf(delegate).length === 0 && !awaitsRemoteDelegates(agentManager, delegate))
+    )
+      return true;
+    return awaitsDelegates(agentManager, delegate, chain);
+  });
+}
+
+/** Everything that will start the child's next turn by itself. */
+function pendingWorkOf(agentManager: AgentManager, agentId: string): PendingWork[] {
+  const work = ownPendingWork(agentManager, agentId);
+  if (awaitsDelegates(agentManager, agentId, new Set())) work.push("delegated agents");
+  return work;
+}
 
 interface FinishNotificationBodyInput {
   childAgentId: string;
@@ -734,11 +793,23 @@ interface FinishNotificationBodyInput {
   reason: FinishNotificationReason;
   lastAssistantMessage: string | null;
   permissionRequest?: AgentPermissionRequest;
+  pendingWork?: readonly PendingWork[];
 }
 
 function formatFinishNotificationBody(params: FinishNotificationBodyInput): string {
-  const statusLine = `Agent ${params.childAgentId} (${params.title}) ${params.reason}.`;
+  const work = params.pendingWork?.length
+    ? `: ${params.pendingWork.map((item) => PENDING_WORK_DESCRIPTIONS[item]).join(", ")}`
+    : "";
+  const statusLine = `Agent ${params.childAgentId} (${params.title}) ${params.reason}${work}.`;
   const sections = [statusLine];
+  if (params.reason === "ended its turn but is still working")
+    sections.push(
+      "This is not its final reply. You will be notified when it finishes, errors, or needs permission.",
+    );
+  if (params.reason === "is still working")
+    sections.push(
+      "This finish subscription has ended without a final reply. Check the agent with `get_agent_status`.",
+    );
   if (params.reason === "needs permission" && params.permissionRequest) {
     sections.push(
       "Respond with `respond_to_permission` using the `agentId` and `requestId` below.",
@@ -767,6 +838,9 @@ function formatFinishNotificationBody(params: FinishNotificationBodyInput): stri
 interface NotifySafelyOptions {
   terminal?: boolean;
   permissionRequest?: AgentPermissionRequest;
+  pendingWork?: readonly PendingWork[];
+  /** Runs before the notice is admitted, in the notification order. */
+  beforeNotify?: () => Promise<void>;
 }
 
 // A caller waits on a child through one armed notification. Arming again, such as a
@@ -792,6 +866,10 @@ export function setupFinishNotification(
   const notifiedPermissionRequestIds = new Set<string>();
   let unsubscribe: (() => void) | null = null;
   let notificationQueue = Promise.resolve();
+  // Paseo #10864: set once the child ended a turn while still working and the caller was told.
+  let followingSince: string | null = params.restoredFollowingSince ?? null;
+  let followLimitTimer: ReturnType<typeof setTimeout> | null = null;
+  let unregisterFollower: (() => void) | null = null;
 
   const armedByManager = armedFinishNotifications.get(agentManager) ?? new Map();
   armedFinishNotifications.set(agentManager, armedByManager);
@@ -819,12 +897,16 @@ export function setupFinishNotification(
     if (id && store) {
       for (const ownedId of params.restoredSubscriptionIds ?? [id]) await store.remove(ownedId);
     }
+    // The caller may have nothing left to wait on now; its own followed watches decide again.
+    recheckFinishFollowers(agentManager, callerAgentId);
   }
 
   function stopObserving(): void {
     if (stopped) return;
     stopped = true;
     unsubscribe?.();
+    unregisterFollower?.();
+    if (followLimitTimer) clearTimeout(followLimitTimer);
     if (armedByManager.get(armedKey) === stop) {
       armedByManager.delete(armedKey);
     }
@@ -844,6 +926,7 @@ export function setupFinishNotification(
   async function notify(
     reason: FinishNotificationReason,
     permissionRequest?: AgentPermissionRequest,
+    pendingWork?: readonly PendingWork[],
   ): Promise<boolean> {
     if (areFinishNotificationsSuspended(agentManager)) return false;
     const callerRecord = await agentStorage.get(callerAgentId);
@@ -863,6 +946,7 @@ export function setupFinishNotification(
       reason,
       lastAssistantMessage,
       permissionRequest,
+      pendingWork,
     });
 
     // The report and its completion share the recipient's ordered queue.
@@ -888,14 +972,18 @@ export function setupFinishNotification(
   async function notifyUntilAcknowledged(
     reason: FinishNotificationReason,
     terminal: boolean,
-    permissionRequest?: AgentPermissionRequest,
+    options: NotifySafelyOptions,
   ): Promise<void> {
     let delivered = false;
+    let prepared = false;
     let warned = false;
     let retries = 0;
     while (!areFinishNotificationsSuspended(agentManager)) {
       try {
-        if (!delivered) delivered = await notify(reason, permissionRequest);
+        if (!prepared) await options.beforeNotify?.();
+        prepared = true;
+        if (!delivered)
+          delivered = await notify(reason, options.permissionRequest, options.pendingWork);
         if (terminal && delivered) await settle();
         return;
       } catch (error) {
@@ -928,11 +1016,85 @@ export function setupFinishNotification(
     const terminal = options.terminal ?? true;
     if (terminal) stopObserving();
     notificationQueue = notificationQueue.then(() =>
-      notifyUntilAcknowledged(reason, terminal, options.permissionRequest),
+      notifyUntilAcknowledged(reason, terminal, options),
     );
     void notificationQueue.catch((error: unknown) =>
       logger.error({ err: error, childAgentId, callerAgentId }, "Finish notification retry failed"),
     );
+  }
+
+  function armFollowLimit(since: string): void {
+    if (followLimitTimer || stopped) return;
+    const remainingMs = Math.max(
+      0,
+      Date.parse(since) + getFinishFollowLimitMs(agentManager) - Date.now(),
+    );
+    followLimitTimer = setTimeout(() => {
+      followLimitTimer = null;
+      notifySafely("is still working", { pendingWork: pendingWorkOf(agentManager, childAgentId) });
+    }, remainingMs);
+    followLimitTimer.unref?.();
+  }
+
+  function follow(since: string): void {
+    followingSince = since;
+    unregisterFollower ??= registerFinishFollower(agentManager, childAgentId, recheck);
+    armFollowLimit(since);
+  }
+
+  /**
+   * A turn end is not always a settled child (Paseo #10864). When work that will start its next
+   * turn by itself is pending, the caller is told once and the watch keeps following the child;
+   * later turn ends stay silent until nothing is pending, which reports `finished`.
+   */
+  function settleTurnEnd(): void {
+    if (stopped) return;
+    // A turn can end while the message that started it is still being dispatched. Like the
+    // observed outcome in Paseo, the turn end is judged once the child's admitted messages
+    // have been dispatched; a message that starts another turn makes this one silent.
+    const delivery = agentMessageDeliveries.get(agentManager);
+    if (delivery?.hasPending(childAgentId)) {
+      void (async () => {
+        try {
+          await delivery.waitForDispatch(childAgentId, getFinishSubscriptionSignal(agentManager));
+        } catch {
+          return;
+        }
+        const agent = agentManager.getAgent(childAgentId);
+        if (agent?.lifecycle === "idle" && agent.pendingPermissions.size === 0) decideTurnEnd();
+      })();
+      return;
+    }
+    decideTurnEnd();
+  }
+
+  function decideTurnEnd(): void {
+    if (stopped) return;
+    const work = pendingWorkOf(agentManager, childAgentId);
+    if (!work.length) {
+      notifySafely("finished");
+      return;
+    }
+    if (followingSince) return;
+    const since = new Date().toISOString();
+    follow(since);
+    notifySafely("ended its turn but is still working", {
+      terminal: false,
+      pendingWork: work,
+      // Written before the notice is sent, so a restart never repeats it.
+      beforeNotify: async () => {
+        const id = await subscriptionId;
+        if (id && store) await store.markFollowing(params.restoredSubscriptionIds ?? [id], since);
+      },
+    });
+  }
+
+  /** Decides a followed idle child's state again without an event from it. */
+  function recheck(): void {
+    if (stopped || !followingSince) return;
+    const agent = agentManager.getAgent(childAgentId);
+    if (agent?.lifecycle !== "idle" || agent.pendingPermissions.size > 0) return;
+    settleTurnEnd();
   }
 
   function observeState(agent: ManagedAgent): void {
@@ -975,11 +1137,13 @@ export function setupFinishNotification(
         return;
       }
 
-      if (
-        event.type === "timeline_replacement" ||
-        event.type === "background_work" ||
-        event.type === "agent_removed"
-      ) {
+      if (event.type === "background_work") {
+        // An idle child's work can settle without another turn.
+        recheck();
+        return;
+      }
+
+      if (event.type === "timeline_replacement" || event.type === "agent_removed") {
         return;
       }
 
@@ -994,7 +1158,7 @@ export function setupFinishNotification(
         // cancellation. The task settles only when the child becomes idle.
         if (agentManager.getAgent(childAgentId)?.lifecycle !== "idle") return;
         if (event.event.type === "turn_completed" && hasSeenRunning) {
-          notifySafely("finished");
+          settleTurnEnd();
         } else if (event.event.type === "turn_canceled" && hasSeenTurn) {
           notifySafely("was canceled");
         }
@@ -1038,8 +1202,10 @@ export function setupFinishNotification(
     else stop();
     return registration;
   }
+  if (followingSince) follow(followingSince);
   if (params.restoredSubscriptionId && !agentManager.hasInFlightRun(childAgentId)) {
-    notifySafely(childSnapshot.lifecycle === "error" ? "errored" : "finished");
+    if (childSnapshot.lifecycle === "error") notifySafely("errored");
+    else settleTurnEnd();
     return registration;
   }
   if (childSnapshot.lifecycle === "running" && !waitForTurnStart) {

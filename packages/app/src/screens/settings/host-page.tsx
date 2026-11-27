@@ -21,8 +21,10 @@ import {
   getTerminalProfileIcon,
   resolveTerminalProfiles,
 } from "@jagentdesk/protocol/terminal-profiles";
+import { AgentProfilesPage, type AgentProfilesBeforeLeaveGuard } from "@/agent-profiles";
 import { AdaptiveModalSheet, type SheetHeader } from "@/components/adaptive-modal-sheet";
 import { HostPickerOption } from "@/components/hosts/host-picker";
+import { PageLayout } from "@/components/page-layout";
 import { SettingsTextAreaCard } from "@/components/settings-textarea";
 import { Alert as InlineAlert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -56,6 +58,7 @@ import {
 import { ProvidersSection } from "@/screens/settings/providers-section";
 import { HostUsageSection } from "@/usage/host-usage-section";
 import { HostAppearanceSection } from "@/screens/settings/host-appearance-section";
+import type { HostAppearance } from "@/hosts/appearance";
 import { SettingsSection } from "@/screens/settings/settings-section";
 import { PairedDevicesSection } from "@/screens/settings/paired-devices-section";
 import { migrateHostData } from "@/runtime/migration/host-migration-service";
@@ -286,6 +289,43 @@ export function HostAgentsPage({ serverId }: { serverId: string }) {
         </View>
       )}
     </View>
+  );
+}
+
+export function HostAgentProfilesPage({
+  serverId,
+  description,
+  onBack,
+  onRegisterBeforeLeave,
+}: {
+  serverId: string;
+  description?: string;
+  onBack?: () => void;
+  onRegisterBeforeLeave?: (guard: AgentProfilesBeforeLeaveGuard | null) => void;
+}) {
+  const { t } = useTranslation();
+  const host = useHostProfile(serverId);
+
+  if (!host) {
+    return (
+      <PageLayout
+        title={t("settings.host.agentProfiles.sectionTitle")}
+        description={description}
+        onBack={onBack}
+        titleTestID="settings-detail-header-title"
+      >
+        <HostNotFound />
+      </PageLayout>
+    );
+  }
+
+  return (
+    <AgentProfilesPage
+      serverId={serverId}
+      description={description}
+      onBack={onBack}
+      onRegisterBeforeLeave={onRegisterBeforeLeave}
+    />
   );
 }
 
@@ -1417,10 +1457,12 @@ function PairDeviceRow({ serverId }: { serverId: string }) {
 function MigrateTargetOption({
   serverId,
   label,
+  appearance,
   onSelect,
 }: {
   serverId: string;
   label: string;
+  appearance: HostAppearance;
   onSelect: (targetServerId: string, targetLabel: string) => void;
 }) {
   const handlePress = useCallback(() => onSelect(serverId, label), [onSelect, serverId, label]);
@@ -1428,7 +1470,7 @@ function MigrateTargetOption({
     <HostPickerOption
       serverId={serverId}
       label={label}
-      showActiveConnection
+      appearance={appearance}
       active={false}
       onPress={handlePress}
       testID={`migrate-data-target-${serverId}`}
@@ -1554,6 +1596,7 @@ function MigrateHostDataSection({ host }: { host: HostProfile }) {
                 key={target.serverId}
                 serverId={target.serverId}
                 label={target.label}
+                appearance={target.appearance}
                 onSelect={handleSelectTarget}
               />
             ))}

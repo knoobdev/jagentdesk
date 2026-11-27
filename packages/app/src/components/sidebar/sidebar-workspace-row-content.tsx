@@ -14,6 +14,7 @@ import {
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from "react-native-svg";
 import {
+  Check,
   CircleAlert,
   Folder,
   FolderGit2,
@@ -22,6 +23,7 @@ import {
   Monitor,
   SquareTerminal,
 } from "lucide-react-native";
+import { bySizing } from "@/components/ui/control-geometry";
 import { HostBadge } from "@/components/sidebar/host-badge";
 import { ProjectStatusIndicator } from "@/components/sidebar/project-leading-visual";
 import { WorkspaceHoverCard } from "@/components/workspace-hover-card";
@@ -60,6 +62,10 @@ const redColorMapping = (theme: Theme) => ({ color: theme.colors.palette.red[500
 const purpleColorMapping = (theme: Theme) => ({ color: theme.colors.palette.purple[500] });
 
 const ThemedGitPullRequest = withUnistyles(GitPullRequest);
+const checkedIconMapping = (theme: Theme) => ({
+  color: theme.colors.accentForeground,
+});
+const ThemedCheck = withUnistyles(Check);
 const ThemedCircleAlert = withUnistyles(CircleAlert);
 const ThemedMonitor = withUnistyles(Monitor);
 const ThemedFolder = withUnistyles(Folder);
@@ -110,11 +116,14 @@ export function SidebarWorkspaceRowFrame({
   workspace,
   isDragging = false,
   isEditingTitle = false,
+  isSelectionMode = false,
   children,
 }: {
   workspace: SidebarWorkspaceEntry;
   isDragging?: boolean;
   isEditingTitle?: boolean;
+  /** Hover cards would cover neighbouring rows while the user clicks through a selection. */
+  isSelectionMode?: boolean;
   children: (input: {
     isHovered: boolean;
     contextMenuOpen: boolean;
@@ -142,7 +151,7 @@ export function SidebarWorkspaceRowFrame({
       workspace={workspace}
       prHint={workspace.prHint}
       isDragging={isDragging}
-      disabled={contextMenuOpen}
+      disabled={contextMenuOpen || isSelectionMode}
     >
       {children({
         isHovered: isHovered && !contextMenuOpen,
@@ -164,6 +173,8 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
   isHovered,
   isLoading,
   isCreating = false,
+  isSelectionMode = false,
+  isBulkSelected = false,
   shortcutNumber = null,
   showShortcutBadge = false,
   reserveIdleStatusIndicatorSpace = true,
@@ -180,6 +191,8 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
   isHovered: boolean;
   isLoading: boolean;
   isCreating?: boolean;
+  isSelectionMode?: boolean;
+  isBulkSelected?: boolean;
   shortcutNumber?: number | null;
   showShortcutBadge?: boolean;
   /** Keep the empty leading slot when the workspace has no active status. */
@@ -201,40 +214,24 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
   });
   const hasTitleAccessory = Boolean(scriptIconKind || workspace.prHint || hostBadge);
   const workspaceBranchTextStyle = useMemo(
-    () => [
-      styles.workspaceBranchText,
-      hasTitleAccessory
-        ? styles.workspaceBranchTextWithAccessory
-        : styles.workspaceBranchTextFlexible,
-      isHovered && styles.workspaceBranchTextHovered,
-      isCreating && styles.workspaceBranchTextCreating,
-    ],
-    [hasTitleAccessory, isHovered, isCreating],
+    // A checked row reads as hovered so the selection stands out.
+    () => workspaceBranchTextStyles(hasTitleAccessory, isHovered || isBulkSelected, isCreating),
+    [hasTitleAccessory, isHovered, isBulkSelected, isCreating],
   );
 
   return (
     <View style={styles.workspaceRowContent}>
       <View style={styles.workspaceRowMain}>
-        {leadingProjectName ? (
-          <ProjectStatusIndicator
-            backdrop={backdrop}
-            iconDataUri={leadingProjectIconDataUri}
-            displayName={leadingProjectName}
-            projectViewKey={workspace.projectViewKey}
-            statusBucket={workspace.statusBucket}
-            loading={isLoading}
-            testID={`sidebar-row-project-icon-${workspace.workspaceKey}`}
-          />
-        ) : (
-          <WorkspaceBackgroundStatusTooltip workspace={workspace}>
-            <WorkspaceStatusIndicator
-              bucket={workspace.statusBucket}
-              workspaceKind={workspace.workspaceKind}
-              loading={isLoading}
-              reserveIdleSpace={reserveIdleStatusIndicatorSpace}
-            />
-          </WorkspaceBackgroundStatusTooltip>
-        )}
+        <WorkspaceLeadingVisual
+          workspace={workspace}
+          backdrop={backdrop}
+          leadingProjectName={leadingProjectName}
+          leadingProjectIconDataUri={leadingProjectIconDataUri}
+          isLoading={isLoading}
+          isSelectionMode={isSelectionMode}
+          isBulkSelected={isBulkSelected}
+          reserveIdleStatusIndicatorSpace={reserveIdleStatusIndicatorSpace}
+        />
         <View style={styles.workspaceContentColumn}>
           <View style={styles.workspaceTitleRow}>
             <View style={styles.workspaceTitleLeft}>
@@ -244,6 +241,7 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
                   serverId={hostBadge.serverId}
                   label={hostBadge.label}
                   color={hostBadge.color}
+                  icon={hostBadge.icon}
                   showLabel={hostBadge.showLabel}
                 />
               ) : null}
@@ -271,11 +269,9 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
           </View>
         </View>
       </View>
-      {showShortcutBadge && shortcutNumber !== null ? (
-        <View style={styles.shortcutBadgeOverlay} pointerEvents="none">
-          <SidebarWorkspaceShortcutBadge number={shortcutNumber} />
-        </View>
-      ) : null}
+      <ShortcutBadgeOverlay
+        number={isSelectionMode || !showShortcutBadge ? null : shortcutNumber}
+      />
     </View>
   );
 });
@@ -321,6 +317,97 @@ function WorkspaceScriptIcon({ kind }: { kind: SidebarWorkspaceScriptIconKind })
       ) : (
         <ThemedSquareTerminal size={12} uniProps={blueColorMapping} />
       )}
+    </View>
+  );
+}
+
+/** Select mode hides the shortcut numbers: a number key would open a row, not select it. */
+function ShortcutBadgeOverlay({ number }: { number: number | null }) {
+  if (number === null) return null;
+  return (
+    <View style={styles.shortcutBadgeOverlay} pointerEvents="none">
+      <SidebarWorkspaceShortcutBadge number={number} />
+    </View>
+  );
+}
+
+function workspaceBranchTextStyles(
+  hasTitleAccessory: boolean,
+  emphasized: boolean,
+  isCreating: boolean,
+) {
+  return [
+    styles.workspaceBranchText,
+    hasTitleAccessory
+      ? styles.workspaceBranchTextWithAccessory
+      : styles.workspaceBranchTextFlexible,
+    emphasized && styles.workspaceBranchTextHovered,
+    isCreating && styles.workspaceBranchTextCreating,
+  ];
+}
+
+/** The row's leading slot: a checkbox in select mode, else the project icon or the status dot. */
+function WorkspaceLeadingVisual({
+  workspace,
+  backdrop,
+  leadingProjectName,
+  leadingProjectIconDataUri,
+  isLoading,
+  isSelectionMode,
+  isBulkSelected,
+  reserveIdleStatusIndicatorSpace,
+}: {
+  workspace: SidebarWorkspaceEntry;
+  backdrop: SidebarSurfaceBackdrop;
+  leadingProjectName: string | null;
+  leadingProjectIconDataUri: string | null;
+  isLoading: boolean;
+  isSelectionMode: boolean;
+  isBulkSelected: boolean;
+  reserveIdleStatusIndicatorSpace: boolean;
+}) {
+  if (isSelectionMode) {
+    return (
+      <WorkspaceSelectionCheckbox checked={isBulkSelected} workspaceKey={workspace.workspaceKey} />
+    );
+  }
+  if (leadingProjectName) {
+    return (
+      <ProjectStatusIndicator
+        backdrop={backdrop}
+        iconDataUri={leadingProjectIconDataUri}
+        displayName={leadingProjectName}
+        projectViewKey={workspace.projectViewKey}
+        statusBucket={workspace.statusBucket}
+        loading={isLoading}
+        testID={`sidebar-row-project-icon-${workspace.workspaceKey}`}
+      />
+    );
+  }
+  return (
+    <WorkspaceBackgroundStatusTooltip workspace={workspace}>
+      <WorkspaceStatusIndicator
+        bucket={workspace.statusBucket}
+        workspaceKind={workspace.workspaceKind}
+        loading={isLoading}
+        reserveIdleSpace={reserveIdleStatusIndicatorSpace}
+      />
+    </WorkspaceBackgroundStatusTooltip>
+  );
+}
+
+function WorkspaceSelectionCheckbox({
+  checked,
+  workspaceKey,
+}: {
+  checked: boolean;
+  workspaceKey: string;
+}) {
+  return (
+    <View style={styles.workspaceStatusDot} testID={`sidebar-workspace-checkbox-${workspaceKey}`}>
+      <View style={checked ? styles.selectionCheckboxChecked : styles.selectionCheckbox}>
+        {checked ? <ThemedCheck size={11} strokeWidth={2.5} uniProps={checkedIconMapping} /> : null}
+      </View>
     </View>
   );
 }
@@ -578,14 +665,17 @@ export function resolveTrailingActionVisibility({
   isHovered,
   isTouchPlatform,
   showShortcut,
+  isSelectionMode = false,
 }: {
   hasDiffStat: boolean;
   hasArchiveAction: boolean;
   isHovered: boolean;
   isTouchPlatform: boolean;
   showShortcut: boolean;
+  isSelectionMode?: boolean;
 }): { showDiffStat: boolean; showKebab: boolean; showArchiveButton: boolean; showScrim: boolean } {
-  const showKebab = Boolean(hasArchiveAction && (isHovered || isTouchPlatform)) && !showShortcut;
+  const allowRowActions = hasArchiveAction && !isSelectionMode;
+  const showKebab = Boolean(allowRowActions && (isHovered || isTouchPlatform)) && !showShortcut;
   const showDiffStat = hasDiffStat && !showShortcut && (isHovered || !showKebab);
   return {
     showDiffStat,
@@ -707,6 +797,25 @@ const styles = StyleSheet.create((theme) => ({
     height: 20,
     borderRadius: theme.borderRadius.full,
     flexShrink: 0,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  selectionCheckbox: {
+    width: bySizing({ touch: 18, pointer: 15 }),
+    height: bySizing({ touch: 18, pointer: 15 }),
+    borderRadius: theme.borderRadius.sm,
+    borderWidth: 1.5,
+    borderColor: theme.colors.borderAccent,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  selectionCheckboxChecked: {
+    width: bySizing({ touch: 18, pointer: 15 }),
+    height: bySizing({ touch: 18, pointer: 15 }),
+    borderRadius: theme.borderRadius.sm,
+    borderWidth: 1.5,
+    borderColor: theme.colors.accent,
+    backgroundColor: theme.colors.accent,
     alignItems: "center",
     justifyContent: "center",
   },

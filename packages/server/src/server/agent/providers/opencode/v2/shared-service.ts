@@ -1,11 +1,12 @@
 import { OpenCode } from "@opencode/client";
+import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Logger } from "pino";
 import type { ProviderRuntimeSettings } from "../../../provider-launch-config.js";
 import type { OpenCodeBridge } from "../bridge.js";
-import { OpenCodeHttpError } from "../http-error.js";
+import { validateOpenCodeResponse } from "./http-response.js";
 import { resolveOpenCodeHomeDir } from "../paths.js";
 import { openCodeConfigDirectory, provisionLocalBridge } from "./bridge-provisioning.js";
 import { awaitJAgentDeskPlugin } from "./readiness.js";
@@ -22,6 +23,24 @@ interface SharedServiceOptions {
   bridge?: OpenCodeBridge;
 }
 
+/**
+ * Spec 33.7: how an OpenCode server runs an agent's own MCP servers. `session`: JAgentDesk hosts
+ * them and the v2 plugin exposes them to that session only. `legacy`: `mcp.add` on a server of the
+ * agent's own, for a server or plugin without `features.mcpTools` (OpenCode before 2.0.29).
+ */
+export type OpenCodeMcpPath = "session" | "legacy";
+
+/** Forces the legacy path on every server, for diagnosis and tests. */
+export const OPENCODE_MCP_PATH_ENV = "JAGENTDESK_OPENCODE_MCP_PATH";
+
+export interface McpPathLogContext {
+  logger: Logger;
+  /** The server's reported version, when it was read. */
+  version?: string;
+  /** Whether JAgentDesk started this server for one agent. */
+  dedicated?: boolean;
+}
+
 export interface OpenCodeSessionToolsStatus {
   bound: boolean;
   tools: string[];
@@ -36,6 +55,8 @@ export interface SharedService {
   refreshLocation(cwd: string, signal?: AbortSignal): Promise<void>;
   /** Spec 04 §27b.0: the bridge plugin's tools for one session; null when the plugin cannot tell. */
   sessionToolsStatus(sessionId: string, cwd: string): Promise<OpenCodeSessionToolsStatus | null>;
+  /** Spec 33.7: decided once for this server, from the plugin's bind `features.mcpTools`. */
+  mcpPath(cwd: string): Promise<OpenCodeMcpPath>;
 }
 
 export async function connectSharedService(
@@ -68,12 +89,7 @@ export async function connectSharedService(
         if (isConnectionRefused(error)) markExited(error);
         throw error;
       }
-      const html = response.headers.get("content-type")?.includes("text/html") ?? false;
-      if (!response.ok || html) {
-        const requestUrl = request instanceof Request ? request.url : String(request);
-        throw new OpenCodeHttpError(new URL(requestUrl).pathname, response.status, html);
-      }
-      return response;
+      return validateOpenCodeResponse(request, response);
     },
   });
   const markExited = (cause: unknown) => {
@@ -134,7 +150,10 @@ export async function connectSharedService(
       resolveExited(closed);
     },
     exited,
-    ...bridgeBindings(client, bridge, advertised, pluginDirectory),
+    ...bridgeBindings(client, bridge, advertised, pluginDirectory, {
+      logger,
+      version: info.version,
+    }),
   };
   logger.info({ url: server.url }, "Using existing OpenCode v2 server");
   return generation;
@@ -169,45 +188,111 @@ function validateBridgeAddress(
     );
 }
 
+interface BindOutput {
+  error?: unknown;
+  features?: { mcpTools?: boolean };
+}
+
 export function bridgeBindings(
-  client: ReturnType<typeof OpenCode.make>,
+  client: Pick<ReturnType<typeof OpenCode.make>, "plugin" | "rpc">,
   bridge: OpenCodeBridge | undefined,
   advertised?: string,
   pluginDirectory?: string,
-): Pick<SharedService, "bindSession" | "unbindSession" | "refreshLocation" | "sessionToolsStatus"> {
+  pathLog?: McpPathLogContext,
+): Pick<
+  SharedService,
+  "bindSession" | "unbindSession" | "refreshLocation" | "sessionToolsStatus" | "mcpPath"
+> {
+  // One decision per server: a restarted server is a new generation with new bindings.
+  let decided: OpenCodeMcpPath | undefined;
+  let probing: Promise<OpenCodeMcpPath> | undefined;
+  const decide = (reported: OpenCodeMcpPath, reason: string): OpenCodeMcpPath => {
+    if (decided) return decided;
+    const forced = globalThis.process.env[OPENCODE_MCP_PATH_ENV] === "legacy";
+    decided = forced ? "legacy" : reported;
+    pathLog?.logger.info(
+      {
+        opencode_mcp_path: decided,
+        reason: forced ? `${OPENCODE_MCP_PATH_ENV}=legacy` : reason,
+        ...(pathLog.version ? { opencodeVersion: pathLog.version } : {}),
+        ...(pathLog.dedicated ? { dedicated: true } : {}),
+      },
+      `OpenCode MCP path: ${decided}`,
+    );
+    return decided;
+  };
+  const bind = async (sessionId: string, cwd: string): Promise<BindOutput | undefined> => {
+    if (!bridge) return undefined;
+    const location = { directory: cwd };
+    let result: Awaited<ReturnType<typeof client.rpc.call>>;
+    try {
+      await awaitJAgentDeskPlugin({ client, location });
+      result = await client.rpc.call({
+        location,
+        rpcID: "jagentdesk.bridge",
+        method: "bind",
+        input: { sessionID: sessionId, ...bridge.sharedV2Connection(advertised) },
+      });
+    } catch (error) {
+      throw new Error(
+        `Cannot connect the JAgentDesk tool bridge to OpenCode. Install the plugin from ${pluginDirectory ?? "JAgentDesk's runtime directory"} and configure a reachable bridge URL: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
+    }
+    const output = result.output as BindOutput | undefined;
+    if (output?.error !== undefined) throw new Error(String(output.error));
+    // An OpenCode older than 2.0.29, or a plugin from an older JAgentDesk, ignores MCP tools.
+    const mcpTools = output?.features?.mcpTools === true;
+    decide(mcpTools ? "session" : "legacy", "bind features.mcpTools");
+    return output;
+  };
+  const unbind = async (sessionId: string, cwd: string) => {
+    if (bridge)
+      await client.rpc.call(
+        {
+          location: { directory: cwd },
+          rpcID: "jagentdesk.bridge",
+          method: "unbind",
+          input: { sessionID: sessionId, ...bridge.sharedV2Connection(advertised) },
+        },
+        { signal: AbortSignal.timeout(2_000) },
+      );
+  };
+  // A bind needs a session the bridge knows. The probe binds one with no tools, which the plugin
+  // installs nothing for, and removes it again.
+  const probe = async (cwd: string): Promise<OpenCodeMcpPath> => {
+    if (!bridge) return decide("legacy", "no JAgentDesk tool bridge");
+    const sessionId = `jagentdesk-mcp-probe-${randomUUID()}`;
+    const release = bridge.bindSession({ sessionId, env: {} });
+    try {
+      await bind(sessionId, cwd);
+    } finally {
+      await unbind(sessionId, cwd).catch(() => undefined);
+      release();
+    }
+    return decided ?? "legacy";
+  };
   return {
     bindSession: async (sessionId, cwd) => {
-      if (!bridge) return;
-      const location = { directory: cwd };
-      let result: Awaited<ReturnType<typeof client.rpc.call>>;
-      try {
-        await awaitJAgentDeskPlugin({ client, location });
-        result = await client.rpc.call({
-          location,
-          rpcID: "jagentdesk.bridge",
-          method: "bind",
-          input: { sessionID: sessionId, ...bridge.sharedV2Connection(advertised) },
-        });
-      } catch (error) {
+      const output = await bind(sessionId, cwd);
+      if (bridge?.hasMcpTools(sessionId) && output?.features?.mcpTools !== true)
         throw new Error(
-          `Cannot connect the JAgentDesk tool bridge to OpenCode. Install the plugin from ${pluginDirectory ?? "JAgentDesk's runtime directory"} and configure a reachable bridge URL: ${error instanceof Error ? error.message : String(error)}`,
-          { cause: error },
+          `This OpenCode server cannot run the agent's MCP servers. Update OpenCode to 2.0.29 or newer${pluginDirectory ? `, install the JAgentDesk plugin from ${pluginDirectory}, and restart the server` : ""}.`,
         );
-      }
-      if (result.output && typeof result.output === "object" && "error" in result.output)
-        throw new Error(String(result.output.error));
     },
-    unbindSession: async (sessionId, cwd) => {
-      if (bridge)
-        await client.rpc.call(
-          {
-            location: { directory: cwd },
-            rpcID: "jagentdesk.bridge",
-            method: "unbind",
-            input: { sessionID: sessionId, ...bridge.sharedV2Connection(advertised) },
-          },
-          { signal: AbortSignal.timeout(2_000) },
+    unbindSession: unbind,
+    mcpPath: async (cwd) => {
+      if (decided) return decided;
+      probing ??= probe(cwd).catch((error: unknown) => {
+        probing = undefined;
+        // Never fail a session over the probe: the legacy path works on every server.
+        pathLog?.logger.warn(
+          { err: error, opencode_mcp_path: "legacy" },
+          "OpenCode MCP path probe failed; using the legacy path for this session",
         );
+        return "legacy" as const;
+      });
+      return probing;
     },
     refreshLocation: async (cwd, signal) => {
       if (!bridge) return;

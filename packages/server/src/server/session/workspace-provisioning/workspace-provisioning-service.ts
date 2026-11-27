@@ -20,6 +20,8 @@ import { type WorkspaceGitService } from "../../workspace-git-service.js";
 import { type CreateJAgentDeskWorktreeWorkflowResult } from "../../worktree-session.js";
 import { deriveProjectKey } from "../../project-key.js";
 import { areEquivalentPaths, createRealpathAwarePathMatcher } from "../../../utils/path.js";
+import { readJAgentDeskWorktreeMetadata } from "../../../utils/worktree-metadata.js";
+import type { UntrustedWorkspaceSource } from "../../workspace-automation-gate.js";
 import { type JsonValue } from "@jagentdesk/protocol/agent-types";
 
 export interface ResolveOrCreateWorkspaceIdInput {
@@ -57,6 +59,10 @@ export interface CreateWorktreeWorkspaceInput {
   branch: string | null;
 
   baseBranch: string | null;
+
+  worktreeManagerPluginId?: string | null;
+
+  untrustedSource?: UntrustedWorkspaceSource;
 
   title: string | null;
 
@@ -172,18 +178,28 @@ export function createWorkspaceProvisioningService(deps: {
       };
     }
 
-    const projectsBeforeImport = await projectRegistry.list();
-    const workspace = await createWorkspaceForDirectory(input.cwd);
+    const [projectsBeforeImport, workspacesBeforeImport] = await Promise.all([
+      projectRegistry.list(),
+      workspaceRegistry.list(),
+    ]);
+    const workspace = await findOrCreateWorkspaceForDirectory(input.cwd);
+    const createdWorkspace = workspacesBeforeImport.some(
+      (candidate) => candidate.workspaceId === workspace.workspaceId,
+    )
+      ? null
+      : workspace;
     const previousProject =
       projectsBeforeImport.find((project) => project.projectId === workspace.projectId) ?? null;
 
     try {
       return {
         value: await operation(workspace),
-        createdWorkspace: workspace,
+        createdWorkspace,
       };
     } catch (error) {
-      await rollbackFailedImportWorkspace(workspace, previousProject);
+      if (createdWorkspace) {
+        await rollbackFailedImportWorkspace(createdWorkspace, previousProject);
+      }
       throw error;
     }
   }
@@ -239,15 +255,21 @@ export function createWorkspaceProvisioningService(deps: {
     return project;
   }
 
-  async function resolveBackground(input?: {
+  async function resolveCreationMetadata(input?: {
+    workspaceId?: string;
     background?: boolean;
     callerWorkspaceId?: string;
-  }): Promise<boolean> {
-    if (input?.background !== undefined) return input.background;
-    if (!input?.callerWorkspaceId) return false;
+  }): Promise<{ background: boolean; parentWorkspaceId?: string }> {
+    if (!input?.callerWorkspaceId) return { background: input?.background ?? false };
+    if (input.workspaceId === input.callerWorkspaceId) {
+      throw new Error("A workspace cannot be its own parent");
+    }
     const callerWorkspace = await workspaceRegistry.get(input.callerWorkspaceId);
     if (!callerWorkspace) throw new Error(`Caller workspace ${input.callerWorkspaceId} not found`);
-    return callerWorkspace.background;
+    return {
+      background: input.background ?? callerWorkspace.background,
+      parentWorkspaceId: callerWorkspace.workspaceId,
+    };
   }
 
   async function createWorkspaceForDirectory(
@@ -268,13 +290,25 @@ export function createWorkspaceProvisioningService(deps: {
       ? await refreshProjectKind(await requireActiveProject(projectId), normalizedCwd, checkout)
       : // COMPAT(workspaceCreateMissingProjectId): added in v0.1.107, remove after 2027-01-15.
         await findOrCreateProjectForDirectory(normalizedCwd);
+    const checkoutRoot = (checkout.isGit ? checkout.worktreeRoot : null) ?? normalizedCwd;
+    // A directory inside a manager-owned checkout belongs to that manager too.
+    const checkoutMetadata =
+      checkout.isGit && checkout.isJAgentDeskOwnedWorktree
+        ? await readJAgentDeskWorktreeMetadata(checkoutRoot)
+        : null;
+    const { untrustedSource: inheritedUntrustedSource } = await resolveCheckoutUntrustedSource(
+      checkoutRoot,
+      checkoutMetadata?.untrustedSource,
+    );
     const timestamp = new Date().toISOString();
     const workspace = createPersistedWorkspaceRecord({
       workspaceId: context?.workspaceId ?? generateWorkspaceId(),
       metadata: context?.metadata,
-      background: await resolveBackground(context),
+      ...(await resolveCreationMetadata(context)),
       projectId: project.projectId,
       ...initialWorkspacePlacement({ source: "checkout", cwd: normalizedCwd, checkout }),
+      worktreeManagerPluginId: checkoutMetadata?.worktreeManagerPluginId ?? null,
+      ...(inheritedUntrustedSource ? { untrustedSource: inheritedUntrustedSource } : {}),
       title: title?.trim() || null,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -308,11 +342,13 @@ export function createWorkspaceProvisioningService(deps: {
         baseBranch: input.baseBranch,
         mainRepoRoot: repoRoot,
       }),
+      worktreeManagerPluginId: input.worktreeManagerPluginId ?? null,
       title: input.title,
       metadata: input.metadata,
+      ...(input.untrustedSource ? { untrustedSource: input.untrustedSource } : {}),
       createdAt: timestamp,
       updatedAt: timestamp,
-      background: await resolveBackground(input),
+      ...(await resolveCreationMetadata(input)),
     });
     await workspaceRegistry.upsert(workspace, {
       expectsInitialAgent: input.expectsInitialAgent,
@@ -417,6 +453,49 @@ export function createWorkspaceProvisioningService(deps: {
     ).workspaceId;
   }
 
+  async function resolveCheckoutUntrustedSource(
+    checkoutRoot: string,
+    knownMetadataUntrustedSource?: UntrustedWorkspaceSource,
+  ): Promise<{ hasEvidence: boolean; untrustedSource: UntrustedWorkspaceSource | undefined }> {
+    const metadataUntrustedSource =
+      knownMetadataUntrustedSource ??
+      (await readJAgentDeskWorktreeMetadata(checkoutRoot).catch(() => null))?.untrustedSource;
+    if (metadataUntrustedSource) {
+      return { hasEvidence: true, untrustedSource: metadataUntrustedSource };
+    }
+    const matchesCheckout = createRealpathAwarePathMatcher(checkoutRoot);
+    const active = (await workspaceRegistry.list())
+      .filter((candidate) => !candidate.archivedAt)
+      .filter((candidate) => matchesCheckout(candidate.worktreeRoot ?? candidate.cwd));
+    if (active.length === 0) {
+      return { hasEvidence: false, untrustedSource: undefined };
+    }
+    return {
+      hasEvidence: true,
+      untrustedSource: active.find((candidate) => Boolean(candidate.untrustedSource))
+        ?.untrustedSource,
+    };
+  }
+
+  async function syncUnarchivedCheckoutUntrustedSource(
+    workspace: PersistedWorkspaceRecord,
+  ): Promise<PersistedWorkspaceRecord> {
+    const resolved = await resolveCheckoutUntrustedSource(workspace.worktreeRoot ?? workspace.cwd);
+    if (!resolved.hasEvidence) {
+      return workspace;
+    }
+    if (resolved.untrustedSource) {
+      return workspace.untrustedSource
+        ? workspace
+        : { ...workspace, untrustedSource: resolved.untrustedSource };
+    }
+    if (!workspace.untrustedSource) {
+      return workspace;
+    }
+    const { untrustedSource: _stale, ...approved } = workspace;
+    return approved;
+  }
+
   async function resolveRestoredAutoArchiveChangeRequestUrl(
     workspace: PersistedWorkspaceRecord,
   ): Promise<string | null> {
@@ -454,7 +533,7 @@ export function createWorkspaceProvisioningService(deps: {
         updatedAt: timestamp,
       });
       next = {
-        ...(placementUpdate?.workspace ?? workspace),
+        ...(await syncUnarchivedCheckoutUntrustedSource(placementUpdate?.workspace ?? workspace)),
         archivedAt: null,
         autoArchivedChangeRequestUrl,
         updatedAt: timestamp,

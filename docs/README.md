@@ -1,12 +1,13 @@
 # JAgentDesk docs
 
 Docs for people working on JAgentDesk. User-facing guides live in [`public-docs/`](../public-docs/index.md);
-release notes live in [`releases/`](releases/v0.11.0.md).
+release notes live in [`releases/`](releases/v0.11.1.md).
 
 ## Product
 
 - [product.md](product.md) — what JAgentDesk is, who it is for, what ships in this version.
 - [glossary.md](glossary.md) — the terms to use; the UI label wins.
+- [releases/v0.11.1.md](releases/v0.11.1.md) — release notes for v0.11.1.
 - [releases/v0.11.0.md](releases/v0.11.0.md) — release notes for v0.11.0.
 - [releases/v0.10.1.md](releases/v0.10.1.md) — release notes for v0.10.1.
 - [releases/v0.10.0.md](releases/v0.10.0.md) — release notes for v0.10.0.
@@ -25,6 +26,7 @@ release notes live in [`releases/`](releases/v0.11.0.md).
 - [terminal-performance.md](terminal-performance.md) — terminal latency, coalescing and backpressure.
 - [terminal-activity.md](terminal-activity.md) — terminal activity indicators and hook providers.
 - [agent-stream-performance.md](agent-stream-performance.md) — assistant text coalescing and paced reveal.
+- [markdown-renderer.md](markdown-renderer.md) — the vendored Markdown engine fork, its layout and backports.
 - [notifications.md](notifications.md) — OS notifications, startup readiness, deferred targets.
 
 ## Protocol and security
@@ -63,6 +65,7 @@ release notes live in [`releases/`](releases/v0.11.0.md).
 - [unistyles.md](unistyles.md) — Unistyles rules and gotchas.
 - [hover.md](hover.md) — the hover pattern.
 - [menus.md](menus.md) — the menu engine.
+- [drag-reorder.md](drag-reorder.md) — reorderable lists, the scroll view that hosts the drag, grips.
 - [floating-panels.md](floating-panels.md) — anchored popovers.
 - [forms.md](forms.md) — form architecture.
 - [mobile-panels.md](mobile-panels.md) — compact panels, gestures and sheets.

@@ -9,6 +9,7 @@ export const LinearGradient = Stub;
 export const Path = Stub;
 export const Rect = Stub;
 export const Stop = Stub;
+export const Text = Stub;
 export const SvgCss = Stub;
 export const SvgCssUri = Stub;
 export const SvgFromXml = Stub;

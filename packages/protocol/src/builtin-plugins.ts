@@ -46,6 +46,7 @@ export const BUILTIN_PLUGIN_FEATURES = {
 
   bots: ["bots", "botsOptionalIdentity"],
   "goose-provider": [],
+  "hermes-provider": [],
   "fx-provider": [],
   "hoplite-provider": [],
   "antigravity-provider": [],

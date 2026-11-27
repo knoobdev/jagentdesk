@@ -398,6 +398,7 @@ import {
   type DaemonTransportFactory,
   type WebSocketFactory,
 } from "./daemon-client-transport.js";
+import { connectionDiagnostics } from "./connection-diagnostics.js";
 import { DaemonClientRuntimeMetrics } from "./daemon-client-runtime-metrics.js";
 import {
   normalizeListProviderModelsPayload,
@@ -647,6 +648,13 @@ export interface DaemonClientConfig {
   runtimeMetricsIntervalMs?: number;
   runtimeMetricsWindowMs?: number;
   capabilities?: Partial<Record<ClientCapability, unknown>>;
+  /**
+   * Ping the daemon every 10 s and reconnect after missed replies (default true). Turn it off
+   * only where the transport reports its own loss (a plugin's IPC channel, an in-process
+   * channel): there a ping cannot find a dead link the channel would not, and it costs both
+   * processes a wakeup per client every 10 s.
+   */
+  livenessHeartbeat?: boolean;
   /**
    * Tailnet transport only: when true the client waits for the daemon's
    * `challenge` message before sending `hello` instead of sending it on open.
@@ -2186,6 +2194,8 @@ const DEFAULT_RECONNECT_BASE_DELAY_MS = 1500;
 const DEFAULT_RECONNECT_MAX_DELAY_MS = 30000;
 
 const DEFAULT_SESSION_RPC_TIMEOUT_MS = 60_000;
+// The daemon allows 90s per provider; retain its result through the delivery margin.
+const RECENT_PROVIDER_SESSIONS_TIMEOUT_MS = 100_000;
 
 // Migration bundles carry serialized records + provider history blobs and can be
 // large; allow more headroom than a normal RPC.
@@ -2196,6 +2206,18 @@ const DEFAULT_CONNECT_TIMEOUT_MS = 15_000;
 const DEFAULT_LIVENESS_TIMEOUT_MS = 5000;
 
 export const CHALLENGE_WAIT_FALLBACK_MS = 10_000;
+/** Messages per connection attempt whose type is logged before the client is connected. */
+const MAX_PRE_CONNECT_MESSAGE_DIAGNOSTICS = 20;
+let diagnosticClientCounter = 0;
+
+function describeCloseEventForDiagnostics(event: unknown): Record<string, unknown> {
+  if (!event || typeof event !== "object") return { detail: describeTransportClose(event) };
+  const record = event as { code?: unknown; reason?: unknown };
+  return {
+    code: typeof record.code === "number" ? record.code : null,
+    reason: typeof record.reason === "string" ? record.reason : describeTransportClose(event),
+  };
+}
 
 const LIVENESS_HEARTBEAT_INTERVAL_MS = 10_000;
 
@@ -2500,6 +2522,12 @@ export class DaemonClient {
 
   private registeredThisConnection = false;
   private connectStageValue: DaemonConnectStage = "connecting";
+  /** Names this client in the connection diagnostics log, e.g. `relay#3`. */
+  private readonly diagnosticSource: string;
+  /** Host messages received since the current transport opened. */
+  private messagesSinceOpen = 0;
+  /** Why the latest host message of this attempt was dropped, if one was. */
+  private lastInboundProblem: string | null = null;
 
   private reconnectAttempt = 0;
 
@@ -2599,6 +2627,8 @@ export class DaemonClient {
   constructor(private config: DaemonClientConfig) {
     this.logger = config.logger ?? consoleLogger;
     this.logConnectionPath = isRelayClientWebSocketUrl(this.config.url) ? "relay" : "direct";
+    diagnosticClientCounter += 1;
+    this.diagnosticSource = `${this.logConnectionPath}#${diagnosticClientCounter}`;
     this.relaySecurityFloorValue = config.e2ee?.minimumMode;
     let parsedUrlForLog: URL | null = null;
     try {
@@ -2692,6 +2722,7 @@ export class DaemonClient {
         baseFactory: transportFactory,
         daemonPublicKeyB64,
         logger: this.logger,
+        onDiagnostic: (event, fields) => this.diagnostic(event, fields),
         ...(this.relaySecurityFloorValue ? { minimumMode: this.relaySecurityFloorValue } : {}),
         onSecurityMode: (mode) => {
           if (mode === "protected") this.relaySecurityFloorValue = "protected";
@@ -2754,6 +2785,14 @@ export class DaemonClient {
       this.owned.disconnected();
       this.registeredThisConnection = false;
       this.connectStageValue = "connecting";
+      this.messagesSinceOpen = 0;
+      this.lastInboundProblem = null;
+      this.diagnostic("connect_attempt", {
+        attempt: this.reconnectAttempt,
+        serverId: this.logServerId,
+        e2ee: this.config.e2ee?.enabled === true,
+        expectChallenge: this.config.expectChallenge === true,
+      });
 
       this.updateConnectionState(
         {
@@ -2769,6 +2808,11 @@ export class DaemonClient {
           return;
         }
         this.lastErrorValue = "Connection timed out";
+        this.diagnostic("connect_timeout", {
+          timeoutMs,
+          stage: this.connectStageValue,
+          messagesSinceOpen: this.messagesSinceOpen,
+        });
         this.disposeTransport(1001, "Connection timed out");
         this.scheduleReconnect({
           reason: "Connection timed out",
@@ -2785,6 +2829,7 @@ export class DaemonClient {
           }
           this.lastErrorValue = null;
           this.connectStageValue = "opened";
+          this.diagnostic("transport_open");
           if (this.config.expectChallenge) {
             this.startChallengeWaitFallback();
           } else {
@@ -2792,6 +2837,10 @@ export class DaemonClient {
           }
         }),
         transport.onClose((event) => {
+          this.diagnostic("transport_close", {
+            ...describeCloseEventForDiagnostics(event),
+            stage: this.connectStageValue,
+          });
           this.resetConnectTimeout();
           if (this.pendingGenericTransportErrorTimeout) {
             clearTimeout(this.pendingGenericTransportErrorTimeout);
@@ -2816,6 +2865,7 @@ export class DaemonClient {
         transport.onError((event) => {
           this.resetConnectTimeout();
           const reason = describeTransportError(event);
+          this.diagnostic("transport_error", { message: reason, stage: this.connectStageValue });
           const isGeneric = reason === "Transport error";
           // Browser WebSocket.onerror often provides no useful details and is followed
           // by a close event (often with code 1006). Prefer surfacing the close details
@@ -2855,7 +2905,11 @@ export class DaemonClient {
           });
         }),
         transport.onMessage((data) => {
-          if (this.transport !== transport) return;
+          if (this.transport !== transport) {
+            this.diagnostic("message_from_replaced_transport");
+            return;
+          }
+          this.messagesSinceOpen += 1;
           const bytes = asUint8Array(data);
           try {
             if (typeof data === "string" || bytes)
@@ -2867,9 +2921,13 @@ export class DaemonClient {
               this.lastErrorValue = `Failed to handle a message from the host: ${
                 error instanceof Error ? error.message : String(error)
               }`;
+              this.noteInboundProblem(this.lastErrorValue);
               this.logger.warn({ err: error }, "transport_message_handler_failed");
               throw error;
             }
+            this.noteInboundProblem(
+              `The host sent an invalid chunked frame: ${error instanceof Error ? error.message : String(error)}`,
+            );
             transport.close(4003, "Invalid chunked transport");
           }
         }),
@@ -3811,7 +3869,11 @@ export class DaemonClient {
   }
 
   private scheduleNextLivenessHeartbeat(): void {
-    if (this.connectionState.status !== "connected" || this.livenessHeartbeatTimer) {
+    if (
+      this.config.livenessHeartbeat === false ||
+      this.connectionState.status !== "connected" ||
+      this.livenessHeartbeatTimer
+    ) {
       return;
     }
     this.livenessHeartbeatTimer = setTimeout(() => {
@@ -3943,10 +4005,12 @@ export class DaemonClient {
       ...(options?.providers ? { providers: options.providers } : {}),
       ...(options?.since ? { since: options.since } : {}),
       ...(options?.limit ? { limit: options.limit } : {}),
+      ...(options?.query !== undefined ? { query: options.query } : {}),
     });
     return this.sendRequest({
       requestId: resolvedRequestId,
       message,
+      timeout: RECENT_PROVIDER_SESSIONS_TIMEOUT_MS,
       options: { skipQueue: true },
       select: (msg) => {
         if (msg.type !== "fetch_recent_provider_sessions_response") {
@@ -4032,6 +4096,9 @@ export class DaemonClient {
         cwd,
       },
       responseType: "open_project_response",
+      // Opening a path whose checkout is currently archiving waits on the daemon checkout gate;
+      // wait for the terminal response or transport disconnect instead of timing out while queued.
+      timeout: 0,
     });
   }
 
@@ -4163,6 +4230,9 @@ export class DaemonClient {
         workspaceId,
       },
       responseType: "archive_workspace_response",
+      // Archive may wait for a queued checkout operation and then run teardown/manager removal,
+      // each bounded on the daemon; wait for the terminal response or transport disconnect.
+      timeout: 0,
     });
   }
 
@@ -4661,7 +4731,9 @@ export class DaemonClient {
           type: "workspace.recovery.restore.request",
           workspaceId,
         },
-        timeout: 150_000,
+        // Restore may wait behind an active archive/removal before running a bounded restore stage;
+        // wait for the terminal response or transport disconnect instead of timing out mid-workflow.
+        timeout: 0,
       });
     if (!payload.accepted) {
       throw new Error(payload.error ?? "Workspace recovery was rejected by the host");
@@ -4677,8 +4749,9 @@ export class DaemonClient {
           type: "workspace.archive.undo.request",
           workspaceId,
         },
-        // Undoing a finished worktree archive recreates the worktree, like recovery does.
-        timeout: 150_000,
+        // Undo may wait for an in-flight archive to settle and then recreate the worktree;
+        // wait for the terminal response or transport disconnect.
+        timeout: 0,
       });
     if (!payload.accepted) {
       throw new Error(payload.error ?? "The host could not undo the workspace archive");
@@ -6395,6 +6468,9 @@ export class DaemonClient {
         ...(input.scope !== undefined ? { scope: input.scope } : {}),
       },
       responseType: "jagentdesk_worktree_archive_response",
+      // Archive may wait for a queued checkout operation and then run teardown/manager removal,
+      // each bounded on the daemon; wait for the terminal response or transport disconnect.
+      timeout: 0,
     });
   }
 
@@ -6418,6 +6494,10 @@ export class DaemonClient {
         ...(input.githubPrNumber !== undefined ? { githubPrNumber: input.githubPrNumber } : {}),
       },
       responseType: "create_jagentdesk_worktree_response",
+      // Every daemon stage (before hooks, shared 120s manager budget, Git, after hooks) enforces
+      // its own deadline, and transport heartbeats/close reject if the host drops, so wait for the
+      // terminal worktree response instead of aborting prematurely mid-workflow.
+      timeout: 0,
     });
   }
 
@@ -12515,6 +12595,7 @@ export class DaemonClient {
         }),
       );
       this.connectStageValue = "hello_sent";
+      this.diagnostic("hello_sent", { signed: Boolean(extra?.signature) });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to send hello message";
       this.lastErrorValue = message;
@@ -12524,6 +12605,47 @@ export class DaemonClient {
         reasonCode: "transport_error",
       });
     }
+  }
+
+  private diagnostic(event: string, fields?: Record<string, unknown>): void {
+    connectionDiagnostics.record(this.diagnosticSource, event, fields);
+  }
+
+  /** Keeps the reason a host message was dropped, so a later timeout can name it. */
+  private noteInboundProblem(problem: string): void {
+    this.lastInboundProblem = problem;
+    this.diagnostic("message_dropped", { reason: problem, stage: this.connectStageValue });
+  }
+
+  private recordPreConnectMessage(parsedJson: unknown): void {
+    if (this.connectionState.status === "connected") return;
+    if (this.messagesSinceOpen > MAX_PRE_CONNECT_MESSAGE_DIAGNOSTICS) return;
+    const record =
+      parsedJson && typeof parsedJson === "object" ? (parsedJson as Record<string, unknown>) : null;
+    const type = typeof record?.type === "string" ? record.type : typeof parsedJson;
+    const inner =
+      record?.message && typeof record.message === "object"
+        ? (record.message as Record<string, unknown>).type
+        : undefined;
+    this.diagnostic("message", {
+      type,
+      ...(typeof inner === "string" ? { messageType: inner } : {}),
+    });
+  }
+
+  /**
+   * The challenge timeout is often the last thing that happens, not the cause.
+   * Say what arrived after the connection opened and why it was not a challenge.
+   */
+  private describeChallengeTimeout(): string {
+    const transport = this.logConnectionPath === "relay" ? "Relay" : "Tailnet";
+    const base = `${transport} challenge timed out; refusing unsigned hello.`;
+    if (this.lastInboundProblem) return `${base} ${this.lastInboundProblem}.`;
+    if (this.messagesSinceOpen === 0) {
+      return `${base} No message from the host arrived after the connection opened.`;
+    }
+    const count = this.messagesSinceOpen;
+    return `${base} ${count} message${count === 1 ? "" : "s"} from the host arrived after the connection opened; none was a challenge.`;
   }
 
   private startChallengeWaitFallback(): void {
@@ -12546,7 +12668,12 @@ export class DaemonClient {
       // Tailnet transport is always paired and signed. An unsigned fallback
       // would turn a challenge timeout into an authorization bypass, so close
       // this attempt and let the normal reconnect/health loop report failure.
-      const reason = "Tailnet challenge timed out; refusing unsigned hello";
+      const reason = this.describeChallengeTimeout();
+      this.diagnostic("challenge_timeout", {
+        waitedMs: fallbackMs,
+        messagesSinceOpen: this.messagesSinceOpen,
+        lastProblem: this.lastInboundProblem,
+      });
       this.lastErrorValue = reason;
       this.disposeTransport(1008, "Tailnet challenge required");
       this.scheduleReconnect({
@@ -12559,6 +12686,7 @@ export class DaemonClient {
 
   private handleChallenge(nonce: string): void {
     this.connectStageValue = "challenged";
+    this.diagnostic("challenge_received");
     if (this.challengeWaitTimeout) {
       clearTimeout(this.challengeWaitTimeout);
       this.challengeWaitTimeout = null;
@@ -12707,6 +12835,7 @@ export class DaemonClient {
   private sendSignedHello(nonce: string): void {
     const { devicePublicKeyB64, signNonce } = this.config.deviceSigning!;
     this.connectStageValue = "signing";
+    this.diagnostic("signing");
     try {
       const signed = signNonce(nonce);
       if (typeof signed === "string") {
@@ -12796,8 +12925,11 @@ export class DaemonClient {
           this.handleTransportMessage(buffer);
           return;
         })
-        .catch(() => {
-          // Ignore failed blob decoding and allow reconnect logic to recover.
+        .catch((error: unknown) => {
+          // Allow reconnect logic to recover, but never lose the message silently.
+          this.noteInboundProblem(
+            `Could not read a Blob message from the host: ${error instanceof Error ? error.message : String(error)}`,
+          );
         });
       return;
     }
@@ -12820,8 +12952,10 @@ export class DaemonClient {
     try {
       parsedJson = JSON.parse(payload);
     } catch {
+      this.noteInboundProblem(`A ${bytes}-byte message from the host was not valid JSON`);
       return;
     }
+    this.recordPreConnectMessage(parsedJson);
 
     const parsed = validateWSOutboundMessage(parsedJson);
     if (!parsed.success) {
@@ -12835,6 +12969,9 @@ export class DaemonClient {
           : "unknown";
       const msgType = responseIdentity?.responseType ?? envelopeType;
       this.logger.warn({ msgType, error: parsed.error.message }, "Message validation failed");
+      this.noteInboundProblem(
+        `A "${msgType}" message from the host failed validation: ${parsed.error.message}`,
+      );
       if (responseIdentity) {
         this.rejectWaitersForRequestId(
           responseIdentity.requestId,
@@ -13032,6 +13169,14 @@ export class DaemonClient {
       next.status === "disconnected" && typeof next.reason === "string" ? next.reason : null;
     const reason = metadata?.reason ?? reasonFromNext;
     const reasonCode = metadata?.reasonCode ?? toReasonCode(reason);
+    if (previous.status !== next.status) {
+      this.diagnostic("state", {
+        from: previous.status,
+        to: next.status,
+        event: metadata?.event ?? "STATE_UPDATE",
+        reason,
+      });
+    }
     this.logger.debug(
       {
         serverId: this.logServerId,

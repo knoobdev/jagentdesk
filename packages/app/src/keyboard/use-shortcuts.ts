@@ -1,6 +1,7 @@
 import { usesDesktopBindings } from "./internal/conventions";
 import { createKeyboardPipeline } from "./internal/pipeline";
 import { overlays } from "./internal/overlays";
+import { heldModifiers } from "./internal/press-modifiers";
 import { attachKeyboardSources, publishKeyboardPolicy } from "./internal/sources";
 import type { KeyboardSourceInput } from "./internal/sources/contract";
 import type { KeyboardInputEvent } from "./internal/overlays";
@@ -248,19 +249,30 @@ export function useKeyboardShortcuts({
     [getContext, getBindings, isCapturing, dispatchMatch, beforeResolve, chordChanged],
   );
 
+  const handleKeyDown = useStableEvent((input: KeyboardSourceInput) => {
+    heldModifiers.handleKeyDown(input.event);
+    return pipeline.keyDown(input);
+  });
+
   const handleKeyUp = useStableEvent((event: KeyboardInputEvent) => {
+    heldModifiers.handleKeyUp(event);
     const key = event.key ?? "";
     if (key === badgeModifierKey) {
       setBadgeModifierDown(false);
     }
   });
 
+  const handleBlur = useStableEvent(() => {
+    heldModifiers.reset();
+    resetModifiers();
+  });
+
   useEffect(() => {
     if (!enabled) return;
     const detach = attachKeyboardSources({
-      keyDown: pipeline.keyDown,
+      keyDown: handleKeyDown,
       keyUp: handleKeyUp,
-      blur: resetModifiers,
+      blur: handleBlur,
       commandCenterOpen: () => useKeyboardShortcutsStore.getState().commandCenterOpen,
       subscribeCommandCenter: (listener) =>
         useKeyboardShortcutsStore.subscribe((state, previous) => {
@@ -269,7 +281,8 @@ export function useKeyboardShortcuts({
     });
     return () => {
       detach();
+      heldModifiers.reset();
       pipeline.dispose();
     };
-  }, [enabled, pipeline, handleKeyUp, resetModifiers]);
+  }, [enabled, pipeline, handleKeyDown, handleKeyUp, handleBlur]);
 }

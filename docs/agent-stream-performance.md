@@ -38,12 +38,9 @@ So arrival sets a _target_ and the reveal rate is derived from the backlog inste
   `areLayoutItemsEquivalent`, or sharing silently stops.
 - **Markdown uses one engine across chat and file previews.** Keep pacing in the reveal hook.
   Native splits only the immutable streaming prefix from the mutable tail, and keeps synchronous
-  updates to populated views in the enriched-markdown patch. Web parses new rows synchronously
+  updates to populated views in the enriched-markdown fork. Web parses new rows synchronously
   after WASM initialization so an empty measurement cannot move the reading anchor.
-- **Do not rebrand embedded WASM bytes.** The enriched-markdown patch includes compiler build paths
-  inside its binary payload. Changing their spelling corrupts section lengths. Keep the factory
-  hunks byte-for-byte upstream and run the renderer browser regression; a successful bundle export
-  does not prove the parser can initialize.
+- **Do not rebrand embedded WASM bytes.** See [the Markdown fork](markdown-renderer.md#the-fork).
 
 ## Measuring
 

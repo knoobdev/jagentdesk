@@ -38,7 +38,7 @@ test("a fresh real owned OpenCode server sends the injected MCP tools on its fir
       transports.delete(transport);
       void mcp.close();
     });
-    normalize({ request, transport, callerAgentId: "cold-owned" });
+    normalize({ request, callerAgentId: "cold-owned" });
     await mcp.connect(transport);
     await transport.handleRequest(request, response, request.body);
   }

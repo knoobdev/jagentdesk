@@ -1,10 +1,8 @@
-import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
-  InitializeRequestSchema,
-  InitializeResultSchema,
   LATEST_PROTOCOL_VERSION,
+  PROTOCOL_VERSION_META_KEY,
   SUPPORTED_PROTOCOL_VERSIONS,
-} from "@modelcontextprotocol/sdk/types.js";
+} from "@modelcontextprotocol/server";
 import type { Request } from "express";
 import { LRUCache } from "lru-cache";
 import type { Logger } from "pino";
@@ -16,18 +14,42 @@ interface AgentMcpProtocolSession {
 
 interface AgentMcpProtocolRequest {
   request: Request;
-  transport: StreamableHTTPServerTransport;
   callerAgentId?: string;
+}
+
+function readObject(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function readRequestParams(body: unknown): Record<string, unknown> | undefined {
+  return readObject(readObject(body)?.params);
+}
+
+// A 2026-07-28 request repeats its protocol version in the per-request `_meta`
+// envelope. Only requests without that envelope are 2025-era requests that
+// carry a header the legacy path cannot serve.
+function carriesModernEnvelope(body: unknown): boolean {
+  return readObject(readRequestParams(body)?._meta)?.[PROTOCOL_VERSION_META_KEY] !== undefined;
+}
+
+// The legacy handshake answers with the requested version when it supports it
+// and with its latest version otherwise.
+function negotiatedLegacyVersion(body: unknown): string | undefined {
+  if (readObject(body)?.method !== "initialize") return undefined;
+  const requested = readRequestParams(body)?.protocolVersion;
+  if (typeof requested !== "string") return undefined;
+  return SUPPORTED_PROTOCOL_VERSIONS.includes(requested) ? requested : LATEST_PROTOCOL_VERSION;
 }
 
 export function createAgentMcpProtocolNormalizer(logger: Logger) {
   // Stateless clients can disappear without a DELETE. Retain bounded negotiation
-  // metadata without pinning live servers or transports.
+  // metadata without pinning live servers or handlers.
   const protocolSessions = new LRUCache<string, AgentMcpProtocolSession>({ max: 1024 });
 
   return function normalizeAgentMcpProtocol({
     request,
-    transport,
     callerAgentId,
   }: AgentMcpProtocolRequest): void {
     const sessionId = request.header("mcp-session-id");
@@ -48,10 +70,11 @@ export function createAgentMcpProtocolNormalizer(logger: Logger) {
     // COMPAT(openCodeMcpVersion): added in v0.9.59; remove after 2027-05-23 once OpenCode sends the negotiated version.
     if (
       originalProtocolVersion !== undefined &&
-      !SUPPORTED_PROTOCOL_VERSIONS.includes(originalProtocolVersion)
+      !SUPPORTED_PROTOCOL_VERSIONS.includes(originalProtocolVersion) &&
+      !carriesModernEnvelope(request.body)
     ) {
       request.headers["mcp-protocol-version"] = protocolSession.protocolVersion;
-      // The SDK's Hono adapter reads rawHeaders rather than Node's headers map.
+      // The SDK's Node adapter reads rawHeaders rather than Node's headers map.
       for (let index = request.rawHeaders.length - 2; index >= 0; index -= 2) {
         if (request.rawHeaders[index]?.toLowerCase() === "mcp-protocol-version") {
           request.rawHeaders.splice(index, 2);
@@ -72,19 +95,10 @@ export function createAgentMcpProtocolNormalizer(logger: Logger) {
       }
       protocolSessions.set(cacheKey, protocolSession);
     }
-    const initialize = InitializeRequestSchema.safeParse(request.body);
-    if (initialize.success && protocolSessionKey) {
-      const send = transport.send.bind(transport);
-      transport.send = async (message, options) => {
-        const result = InitializeResultSchema.safeParse(
-          "result" in message ? message.result : undefined,
-        );
-        if (result.success) {
-          protocolSession.protocolVersion = result.data.protocolVersion;
-          protocolSessions.set(protocolSessionKey, protocolSession);
-        }
-        await send(message, options);
-      };
+    const negotiated = negotiatedLegacyVersion(request.body);
+    if (negotiated !== undefined && protocolSessionKey) {
+      protocolSession.protocolVersion = negotiated;
+      protocolSessions.set(protocolSessionKey, protocolSession);
     }
   };
 }

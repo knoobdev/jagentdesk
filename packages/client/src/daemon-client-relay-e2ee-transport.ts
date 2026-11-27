@@ -3,6 +3,7 @@ import { MAX_RELAY_WEBSOCKET_MESSAGE_BYTES } from "@jagentdesk/protocol/websocke
 import {
   openClientSecureChannel,
   PROTECTED_HANDSHAKE_FAILED_CLOSE_CODE,
+  type ClientHandshakeEvent,
   type SecureChannel,
   type SecurityMode,
   type Transport as RelayTransport,
@@ -30,7 +31,15 @@ export interface RelayE2eeTransportOptions {
   assertOutboundCapacity?: (wireBytes: number) => void;
   /** Reports the negotiated mode once the daemon has authenticated the handshake. */
   onSecurityMode?: (mode: SecurityMode) => void;
+  /**
+   * Socket and handshake events for the connection diagnostics log: names,
+   * sizes, codes and reasons only, never payloads or keys.
+   */
+  onDiagnostic?: (event: string, fields?: Record<string, unknown>) => void;
 }
+
+/** Frames recorded per connection before the channel opens; enough to see the handshake. */
+const MAX_PRE_OPEN_FRAME_DIAGNOSTICS = 12;
 
 export function createRelayE2eeTransportFactory(
   args: RelayE2eeTransportOptions & { baseFactory: DaemonTransportFactory },
@@ -108,6 +117,14 @@ export function createEncryptedTransport(
   let opened = false;
   let closed = false;
   let awaitingServerInfo = true;
+  let preOpenFrames = 0;
+  const diagnostic = (event: string, fields?: Record<string, unknown>) => {
+    try {
+      options.onDiagnostic?.(event, fields);
+    } catch {
+      // Diagnostics never break the connection.
+    }
+  };
 
   const openHandlers = new Set<OpenHandler>();
   const closeHandlers = new Set<CloseHandler>();
@@ -146,6 +163,7 @@ export function createEncryptedTransport(
       if (daemonSupportsProtected !== null) {
         awaitingServerInfo = false;
         if (daemonSupportsProtected && channel?.securityMode() === "legacy") {
+          diagnostic("e2ee_downgrade_rejected");
           logger.warn(
             { reason: DAEMON_REQUIRES_PROTECTED_REASON },
             "relay_e2ee_downgrade_rejected",
@@ -188,6 +206,7 @@ export function createEncryptedTransport(
       channel = await openClientSecureChannel(relayTransport, {
         daemonPublicKeyB64,
         ...(minimumMode ? { minimumMode } : {}),
+        onHandshakeEvent: (event) => diagnostic(...describeHandshakeEvent(event)),
         events: {
           onopen: () => {
             onSecurityMode?.(channel?.securityMode() ?? "legacy");
@@ -199,11 +218,15 @@ export function createEncryptedTransport(
           // code and reason; forwarding the error first would make the consumer
           // reconnect before it sees them.
           onerror: (error) => {
+            diagnostic("e2ee_channel_error", { message: error.message });
             logger.warn({ err: normalizeTransportError(error) }, "relay_e2ee_channel_error");
           },
         },
       });
     } catch (error) {
+      diagnostic("e2ee_handshake_start_failed", {
+        message: error instanceof Error ? error.message : String(error),
+      });
       logger.warn({ err: normalizeTransportError(error) }, "relay_e2ee_handshake_failed");
       emitError(error);
       // Browser WebSocket.close only accepts 1000 or 3000-4999.
@@ -213,17 +236,33 @@ export function createEncryptedTransport(
   };
 
   base.onOpen(() => {
+    diagnostic("ws_open");
     void startHandshake();
   });
   base.onMessage((data, isBinary) => {
-    relayTransport.onmessage?.(extractTransportMessage(data, isBinary));
+    const message = extractTransportMessage(data, isBinary);
+    if (!opened && preOpenFrames < MAX_PRE_OPEN_FRAME_DIAGNOSTICS) {
+      preOpenFrames += 1;
+      diagnostic("ws_frame_before_open", {
+        kind: message.isBinary ? "binary" : "text",
+        shape: describeFrameShape(data),
+        bytes: frameBytes(message.data),
+      });
+    }
+    relayTransport.onmessage?.(message);
   });
   base.onClose((event) => {
     const record = event as { code?: number; reason?: string } | undefined;
+    diagnostic("ws_close", {
+      code: record?.code ?? null,
+      reason: record?.reason ?? "",
+      channelOpened: opened,
+    });
     relayTransport.onclose?.(record?.code ?? 0, record?.reason ?? "");
     emitClose(event);
   });
   base.onError((event) => {
+    diagnostic("ws_error", { message: describeErrorEvent(event), channelOpened: opened });
     relayTransport.onerror?.(event instanceof Error ? event : new Error(String(event)));
     emitError(event);
   });
@@ -278,6 +317,42 @@ export function createEncryptedTransport(
       return () => errorHandlers.delete(handler);
     },
   };
+}
+
+function describeHandshakeEvent(event: ClientHandshakeEvent): [string, Record<string, unknown>] {
+  switch (event.type) {
+    case "hello_sent":
+      return ["e2ee_hello_sent", { attempt: event.attempt }];
+    case "opened":
+      return ["e2ee_open", { mode: event.mode, helloAttempts: event.helloAttempts }];
+    case "duplicate_ready":
+      return ["e2ee_duplicate_ready", {}];
+    case "frame_ignored":
+      return ["e2ee_frame_ignored", { reason: event.reason, bytes: event.bytes }];
+    case "failed":
+      return ["e2ee_handshake_failed", { reason: event.reason }];
+  }
+}
+
+function describeFrameShape(data: unknown): string {
+  if (typeof data === "string") return "string";
+  if (data instanceof ArrayBuffer) return "ArrayBuffer";
+  if (ArrayBuffer.isView(data)) return data.constructor?.name ?? "ArrayBufferView";
+  if (data === null || data === undefined) return String(data);
+  return (data as { constructor?: { name?: string } }).constructor?.name ?? typeof data;
+}
+
+function frameBytes(data: string | ArrayBuffer): number {
+  return typeof data === "string" ? data.length : data.byteLength;
+}
+
+function describeErrorEvent(event: unknown): string {
+  if (event instanceof Error) return event.message;
+  if (event && typeof event === "object" && "message" in event) {
+    const message = (event as { message?: unknown }).message;
+    if (typeof message === "string" && message.length > 0) return message;
+  }
+  return "no detail";
 }
 
 function emitHandlers<TArgs extends unknown[]>(

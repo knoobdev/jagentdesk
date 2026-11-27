@@ -1,9 +1,14 @@
-import { CodexAppServerAgentSession } from "./providers/codex-app-server-agent.js";
+import type { AttachedAgentTool, PluginSessionsRuntime } from "../plugins/agent-tools.js";
+import {
+  CodexAppServerAgentClient,
+  CodexAppServerAgentSession,
+} from "./providers/codex-app-server-agent.js";
+import { spawnProcess } from "../../utils/spawn.js";
 import { createFakeCodexAppServer } from "./providers/codex/test-utils/fake-app-server.js";
 import { expect, test, vi, onTestFinished } from "vitest";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { delimiter, join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 
@@ -17,6 +22,7 @@ import {
   type AgentManagerEvent,
   type ManagedAgent,
 } from "./agent-manager.js";
+import { agentIdentityInstruction } from "./durable-context/instructions.js";
 import { AgentStorage } from "./agent-storage.js";
 import { InMemoryAgentTimelineStore } from "./agent-timeline-store.js";
 import { toAgentPayload } from "./agent-projections.js";
@@ -57,6 +63,12 @@ import type { ProviderDefinition } from "./provider-registry.js";
 
 import { OpenCodeV2AgentClient } from "./providers/opencode/v2/agent.js";
 import { V2Harness } from "./providers/opencode/test-utils/v2-harness.js";
+import { OpenCodeHttpError } from "./providers/opencode/http-error.js";
+import { ClientError } from "@opencode/client";
+
+function identityLine(agentId: string, cwd: string): string {
+  return agentIdentityInstruction({ agentId, title: undefined, cwd, agentTools: false });
+}
 
 const DESKTOP_OPEN_AGENT_TAB_LABEL = getOpenAgentTabLabel("desktop-client");
 const MOBILE_OPEN_AGENT_TAB_LABEL = getOpenAgentTabLabel("mobile-client");
@@ -638,6 +650,83 @@ async function startAndSteerThroughManager(
   return { manager, agentId: agent.id, workdir };
 }
 
+/** Plugin sessions whose only plugin appends the given instructions to every open. */
+function instructionPluginSessions(instructions: () => string[]): PluginSessionsRuntime {
+  return {
+    openSession: async (request) => ({
+      ...request,
+      appendSystemPrompt: instructions(),
+      tools: [],
+      mcpServerOwners: {},
+    }),
+    sessionLaunched: () => {},
+    sessionLaunchFailed: () => {},
+    refreshSession: async () => ({ stale: false }),
+    sessionTools: () => [],
+    closeSession: () => {},
+    callTool: async () => ({ isError: true, text: "No plugin tools" }),
+  };
+}
+
+test("an OpenCode permission the server no longer has is dropped instead of failing", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-permission-not-pending-"));
+  const harness = new V2Harness();
+  harness.info.location.directory = workdir;
+  harness.api.permission.list = async () => [
+    {
+      id: "per_stale",
+      sessionID: "session",
+      action: "external_directory",
+      resources: ["/private/var/folders/T/opencode/*"],
+    },
+  ];
+  // OpenCode 2.4.2 answers a reply for a request it no longer has with 404.
+  harness.api.permission.reply = async (input) => {
+    throw new ClientError("Transport", {
+      cause: new OpenCodeHttpError(
+        `/api/session/${input.sessionID}/permission/${input.requestID}/reply`,
+        404,
+        false,
+      ),
+    });
+  };
+  const client = new OpenCodeV2AgentClient({ logger, runtime: harness.runtime });
+  const manager = new AgentManager({ clients: { opencode: client }, logger });
+  const agent = await manager.createAgent({ provider: "opencode", cwd: workdir }, undefined, {
+    workspaceId: undefined,
+  });
+  const events: AgentManagerEvent[] = [];
+  manager.subscribe((event) => events.push(event), { replayState: false });
+  try {
+    expect([...manager.getAgent(agent.id)!.pendingPermissions.keys()]).toEqual(["per_stale"]);
+    await expect(
+      manager.respondToPermission(agent.id, "per_stale", {
+        behavior: "allow",
+        selectedActionId: "once",
+      }),
+    ).resolves.toBeUndefined();
+    expect(manager.getAgent(agent.id)!.pendingPermissions.size).toBe(0);
+    const resolved = events.flatMap((event) =>
+      event.type === "agent_stream" && event.event.type === "permission_resolved"
+        ? [event.event]
+        : [],
+    );
+    expect(resolved).toEqual([
+      {
+        type: "permission_resolved",
+        provider: "opencode",
+        requestId: "per_stale",
+        resolution: { behavior: "deny", message: "This request is no longer pending" },
+        expired: true,
+      },
+    ]);
+  } finally {
+    await manager.closeAgent(agent.id);
+    await client.shutdown();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
 test("OpenCode persistence excludes launch-only instructions from storage and clients", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-plugin-persistence-"));
   const harness = new V2Harness();
@@ -649,19 +738,15 @@ test("OpenCode persistence excludes launch-only instructions from storage and cl
     registry: storage,
     logger,
     appendSystemPrompt: "Daemon instruction",
-    pluginLifecycle: {
-      emit: () => {},
-      before: async (name, request) =>
-        name === "agent.open.before"
-          ? { ...request, appendSystemPrompt: ["Plugin instruction"] }
-          : request,
-    },
+    pluginSessions: instructionPluginSessions(() => ["Plugin instruction"]),
   });
   const agent = await manager.createAgent({ provider: "opencode", cwd: workdir }, undefined, {
     workspaceId: undefined,
   });
   try {
-    expect(harness.instructions.get("jagentdesk")).toBe("Daemon instruction\n\nPlugin instruction");
+    expect(harness.instructions.get("jagentdesk")).toBe(
+      `Daemon instruction\n\n${identityLine(agent.id, workdir)}\n\nPlugin instruction`,
+    );
     await manager.flush();
     const record = await storage.get(agent.id);
     expect(record?.persistence?.metadata).not.toHaveProperty("pluginAppendSystemPrompt");
@@ -2548,7 +2633,9 @@ test("createAgent injects daemon append system prompt at runtime only", async ()
   const record = await storage.get(snapshot.id);
 
   expect(client.createdConfigs[0]?.systemPrompt).toBe("Agent instructions.");
-  expect(client.createdConfigs[0]?.daemonAppendSystemPrompt).toBe("Daemon instructions.");
+  expect(client.createdConfigs[0]?.daemonAppendSystemPrompt).toBe(
+    `Daemon instructions.\n\n${identityLine(snapshot.id, workdir)}`,
+  );
   expect(snapshot.config).not.toHaveProperty("daemonAppendSystemPrompt");
   expect(record?.config?.systemPrompt).toBe("Agent instructions.");
   expect(record?.config).not.toHaveProperty("daemonAppendSystemPrompt");
@@ -2572,7 +2659,7 @@ test("daemon append system prompt is injected into Pi configs", async () => {
     idFactory: () => "00000000-0000-4000-8000-000000000104",
   });
 
-  await manager.createAgent(
+  const snapshot = await manager.createAgent(
     {
       provider: "pi",
       cwd: workdir,
@@ -2582,7 +2669,9 @@ test("daemon append system prompt is injected into Pi configs", async () => {
     { workspaceId: undefined },
   );
 
-  expect(client.createdConfigs[0]?.daemonAppendSystemPrompt).toBe("Daemon instructions.");
+  expect(client.createdConfigs[0]?.daemonAppendSystemPrompt).toBe(
+    `Daemon instructions.\n\n${identityLine(snapshot.id, workdir)}`,
+  );
 });
 
 test("setAgentMode persists the selected mode across session reload", async () => {
@@ -3083,6 +3172,7 @@ test("createAgent passes daemon launch env through the provider launch context",
     provider: "codex",
     cwd: workdir,
     model: "gpt-5.4",
+    daemonAppendSystemPrompt: identityLine(snapshot.id, workdir),
   });
   expect(client.lastLaunchContext).toEqual({
     agentId: snapshot.id,
@@ -3091,6 +3181,38 @@ test("createAgent passes daemon launch env through the provider launch context",
       JAGENTDESK_AGENT_CWD: workdir,
     },
   });
+});
+
+test("every agent launch puts the browser shims first on PATH and BROWSER on the .js shim", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-shim-env-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+
+  class CaptureClient extends TestAgentClient {
+    lastLaunchContext: AgentLaunchContext | undefined;
+
+    override async createSession(
+      config: AgentSessionConfig,
+      launchContext?: AgentLaunchContext,
+    ): Promise<AgentSession> {
+      this.lastLaunchContext = launchContext;
+      return new TestAgentSession(config);
+    }
+  }
+
+  const client = new CaptureClient();
+  const manager = new AgentManager({ clients: { codex: client }, registry: storage, logger });
+  const shimDir = join(workdir, "agent-bin");
+  manager.setAgentShimDir(shimDir);
+  await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+    workspaceId: undefined,
+  });
+
+  const env = client.lastLaunchContext?.env ?? {};
+  expect(env.PATH?.split(delimiter)[0]).toBe(shimDir);
+  expect(env.PATH?.split(delimiter).slice(1)).toEqual(
+    (process.env.PATH ?? "").split(delimiter).filter((entry) => entry && entry !== shimDir),
+  );
+  expect(env.BROWSER).toBe(join(shimDir, "jagentdesk-browser.js"));
 });
 
 test("createAgent and resume give the agent its workspace id", async () => {
@@ -11399,7 +11521,7 @@ test.each([
 
     expect(includedClient.calls).toBe(1);
     expect(skippedClient.calls).toBe(0);
-    expect(result.map((d) => d.provider)).toEqual([includedProvider]);
+    expect(result.sessions.map((d) => d.provider)).toEqual([includedProvider]);
   },
 );
 
@@ -11419,7 +11541,7 @@ test("listImportableSessions includes derived providers that list persisted agen
 
   expect(claudeClient.calls).toBe(1);
   expect(ompClient.calls).toBe(1);
-  expect(result.map((d) => d.provider).sort()).toEqual(["claude", "omp"]);
+  expect(result.sessions.map((d) => d.provider).sort()).toEqual(["claude", "omp"]);
 });
 
 test("listImportableSessions narrows to the providerFilter when supplied", async () => {
@@ -11440,7 +11562,7 @@ test("listImportableSessions narrows to the providerFilter when supplied", async
 
   expect(claudeClient.calls).toBe(1);
   expect(codexClient.calls).toBe(0);
-  expect(result.map((d) => d.provider)).toEqual(["claude"]);
+  expect(result.sessions.map((d) => d.provider)).toEqual(["claude"]);
 });
 
 test("listImportableSessions skips providers that lack supportsSessionListing even when row listing is defined", async () => {
@@ -11467,7 +11589,121 @@ test("listImportableSessions skips providers that lack supportsSessionListing ev
 
   expect(listableClient.calls).toBe(1);
   expect(nonListableClient.calls).toBe(0);
-  expect(result.map((d) => d.provider)).toEqual(["claude"]);
+  expect(result.sessions.map((d) => d.provider)).toEqual(["claude"]);
+});
+
+test("listImportableSessions returns healthy rows alongside thrown and timed-out provider errors", async () => {
+  vi.useFakeTimers();
+  try {
+    const healthyClient = new RecordingPersistedAgentsClient("claude");
+    const failingClient = new RecordingPersistedAgentsClient("codex");
+    failingClient.listImportableSessions = async () => {
+      throw new Error("codex listing failed");
+    };
+    const hangingClient = new RecordingPersistedAgentsClient("pi");
+    hangingClient.listImportableSessions = async () => await new Promise(() => undefined);
+    const manager = new AgentManager({
+      clients: { claude: healthyClient, codex: failingClient, pi: hangingClient },
+      providerDefinitions: {
+        claude: { enabled: true, derivedFromProviderId: null },
+        codex: { enabled: true, derivedFromProviderId: null },
+        pi: { enabled: true, derivedFromProviderId: null },
+      },
+      logger,
+    });
+
+    const resultPromise = manager.listImportableSessions();
+    await vi.advanceTimersByTimeAsync(90_000);
+
+    await expect(resultPromise).resolves.toEqual({
+      sessions: [
+        {
+          provider: "claude",
+          providerHandleId: "claude-session",
+          cwd: "/tmp/recent",
+          title: null,
+          lastActivityAt: new Date("2026-01-01T00:00:00Z"),
+          firstPromptPreview: null,
+          lastPromptPreview: null,
+        },
+      ],
+      providerErrors: [
+        { provider: "codex", message: "codex listing failed" },
+        {
+          provider: "pi",
+          message: "Timed out listing importable sessions for provider 'pi' after 90000ms",
+        },
+      ],
+    });
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("listImportableSessions searches every provider result before global ranking", async () => {
+  const client = new RecordingPersistedAgentsClient("claude");
+  client.listImportableSessions = async () => [
+    ...Array.from({ length: 25 }, (_, index) => ({
+      providerHandleId: `non-match-${index}`,
+      cwd: "/tmp/other",
+      title: "Other work",
+      firstPromptPreview: null,
+      lastPromptPreview: null,
+      lastActivityAt: new Date(`2026-04-${String(index + 2).padStart(2, "0")}T00:00:00.000Z`),
+    })),
+    {
+      providerHandleId: "title-match",
+      cwd: "/tmp/archive",
+      title: "Invoice cleanup",
+      firstPromptPreview: null,
+      lastPromptPreview: null,
+      lastActivityAt: new Date("2026-04-01T04:00:00.000Z"),
+    },
+    {
+      providerHandleId: "first-prompt-match",
+      cwd: "/tmp/archive",
+      title: "Unrelated",
+      firstPromptPreview: "Investigate invoice totals",
+      lastPromptPreview: null,
+      lastActivityAt: new Date("2026-04-01T03:00:00.000Z"),
+    },
+    {
+      providerHandleId: "last-prompt-match",
+      cwd: "/tmp/archive",
+      title: "Unrelated",
+      firstPromptPreview: null,
+      lastPromptPreview: "Finish invoice export",
+      lastActivityAt: new Date("2026-04-01T02:00:00.000Z"),
+    },
+    {
+      providerHandleId: "cwd-match",
+      cwd: "/tmp/invoice-service",
+      title: "Unrelated",
+      firstPromptPreview: null,
+      lastPromptPreview: null,
+      lastActivityAt: new Date("2026-04-01T01:00:00.000Z"),
+    },
+  ];
+  const manager = new AgentManager({
+    clients: { claude: client },
+    providerDefinitions: {
+      claude: { enabled: true, derivedFromProviderId: null },
+    },
+    logger,
+  });
+
+  const result = await manager.listImportableSessions({
+    query: "INVOICE",
+    limit: 10,
+    scanLimit: 500,
+  });
+
+  expect(result.sessions.map((session) => session.providerHandleId)).toEqual([
+    "title-match",
+    "first-prompt-match",
+    "last-prompt-match",
+    "cwd-match",
+  ]);
 });
 
 test("user_message events wrapping a jagentdesk-system envelope are not added to the timeline", async () => {
@@ -11905,11 +12141,7 @@ test("plugin instructions are recomputed for each launch without changing saved 
     registry: storage,
     logger,
     appendSystemPrompt: "Daemon",
-    pluginLifecycle: {
-      emit: () => {},
-      before: async (name, request) =>
-        name === "agent.open.before" ? { ...request, appendSystemPrompt: additions } : request,
-    },
+    pluginSessions: instructionPluginSessions(() => additions),
   });
   const snapshot = await manager.createAgent(
     { provider: "codex", cwd: workdir, systemPrompt: "Saved" },
@@ -11918,7 +12150,7 @@ test("plugin instructions are recomputed for each launch without changing saved 
   );
   expect(client.createdConfigs[0]).toMatchObject({
     systemPrompt: "Saved",
-    daemonAppendSystemPrompt: "Daemon",
+    daemonAppendSystemPrompt: `Daemon\n\n${identityLine(snapshot.id, workdir)}`,
     pluginAppendSystemPrompt: ["Plugin one", "Plugin two"],
   });
   expect(snapshot.config.systemPrompt).toBe("Saved");
@@ -11957,7 +12189,9 @@ test("plugin instructions are recomputed for each launch without changing saved 
     snapshot.id,
   );
   expect(client.resumeOverrides.at(-1)?.systemPrompt).toBe("Saved");
-  expect(client.resumeOverrides.at(-1)?.daemonAppendSystemPrompt).toBe("Daemon");
+  expect(client.resumeOverrides.at(-1)?.daemonAppendSystemPrompt).toBe(
+    `Daemon\n\n${identityLine(snapshot.id, workdir)}`,
+  );
   expect((await storage.get(snapshot.id))?.config?.systemPrompt).toBe("Saved");
 });
 
@@ -13012,4 +13246,233 @@ test("forkAgent reports providers without a native fork", async () => {
     await manager.flush().catch(() => undefined);
     rmSync(workdir, { recursive: true, force: true });
   }
+});
+
+class LaunchWrapRecordingClient extends TestAgentClient {
+  readonly sessions: CloseRecordingTestAgentSession[] = [];
+  readonly launchContexts: Array<AgentLaunchContext | undefined> = [];
+  calls = { create: 0, resume: 0, import: 0 };
+
+  constructor(supportsLaunchWrap: boolean) {
+    super("codex");
+    if (supportsLaunchWrap) this.supportsLaunchWrap = true;
+  }
+
+  supportsLaunchWrap?: boolean;
+
+  override async createSession(
+    config: AgentSessionConfig,
+    launchContext?: AgentLaunchContext,
+  ): Promise<AgentSession> {
+    this.calls.create += 1;
+    this.launchContexts.push(launchContext);
+    const session = new CloseRecordingTestAgentSession(config);
+    this.sessions.push(session);
+    return session;
+  }
+
+  override async resumeSession(
+    handle: AgentPersistenceHandle,
+    config?: Partial<AgentSessionConfig>,
+    launchContext?: AgentLaunchContext,
+  ): Promise<AgentSession> {
+    this.calls.resume += 1;
+    this.launchContexts.push(launchContext);
+    return await super.resumeSession(handle, config, launchContext);
+  }
+
+  async importSession(input: ImportProviderSessionInput, context: ImportProviderSessionContext) {
+    this.calls.import += 1;
+    return {
+      session: new TestAgentSession(context.config),
+      config: context.storedConfig,
+      persistence: { provider: this.provider, sessionId: input.providerHandleId },
+      timeline: [],
+    };
+  }
+}
+
+type TestLaunchWrap = [string, ...string[]];
+
+/**
+ * A session-open plugin that selects `wrap()` and attaches one tool while it does. Like the real runtime, an open's
+ * tools take over only once its launch does, and a failed launch leaves the running session's tools.
+ */
+function launchWrapPluginSessions(wrap: () => TestLaunchWrap | undefined) {
+  const pending = new Map<string, AttachedAgentTool[]>();
+  const running = new Map<string, AttachedAgentTool[]>();
+  const failedLaunches: string[] = [];
+  const sessions: PluginSessionsRuntime = {
+    openSession: async (request) => {
+      const selected = wrap();
+      const tools: AttachedAgentTool[] = selected
+        ? [
+            {
+              name: "sandbox_status",
+              description: "Report the sandbox",
+              inputSchema: {},
+              pluginId: "sandbox",
+              pluginInstanceId: "sandbox-1",
+            },
+          ]
+        : [];
+      if (request.purpose === "interactive") pending.set(request.agentId, tools);
+      return { ...request, ...(selected ? { wrap: selected } : {}), tools, mcpServerOwners: {} };
+    },
+    sessionLaunched: (agentId) => {
+      const tools = pending.get(agentId);
+      pending.delete(agentId);
+      if (tools) running.set(agentId, tools);
+    },
+    sessionLaunchFailed: (agentId) => {
+      pending.delete(agentId);
+      failedLaunches.push(agentId);
+    },
+    refreshSession: async () => ({ stale: false }),
+    sessionTools: (agentId) => running.get(agentId) ?? [],
+    closeSession: (agentId) => {
+      pending.delete(agentId);
+      running.delete(agentId);
+    },
+    callTool: async () => ({ isError: true, text: "No plugin tools" }),
+  };
+  return { sessions, failedLaunches };
+}
+
+function createLaunchWrapManager(client: LaunchWrapRecordingClient) {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-launch-wrap-"));
+  onTestFinished(() => rmSync(workdir, { recursive: true, force: true }));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const hook: { wrap: TestLaunchWrap | undefined } = { wrap: undefined };
+  const { sessions, failedLaunches } = launchWrapPluginSessions(() => hook.wrap);
+  const manager = new AgentManager({
+    clients: { codex: client },
+    registry: storage,
+    logger,
+    pluginSessions: sessions,
+  });
+  return { manager, storage, workdir, failedLaunches, hook };
+}
+
+test("a wrapped open rejects on every path for a provider that does not apply wraps", async () => {
+  const client = new LaunchWrapRecordingClient(false);
+  const { manager, storage, workdir, failedLaunches, hook } = createLaunchWrapManager(client);
+  const created = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+    workspaceId: undefined,
+  });
+  const existing = client.sessions[0]!;
+  hook.wrap = ["/opt/sandbox/bin/run", "--profile", "a b"];
+  const calls = { ...client.calls };
+  const unsupported = { code: "launch_wrap_unsupported", provider: "codex" };
+
+  await expect(
+    manager.createAgent({ provider: "codex", cwd: workdir }, undefined, { workspaceId: undefined }),
+  ).rejects.toMatchObject(unsupported);
+  await expect(
+    manager.resumeAgentFromPersistence({ provider: "codex", sessionId: "saved" }, { cwd: workdir }),
+  ).rejects.toMatchObject(unsupported);
+  await expect(
+    manager.importProviderSession({
+      provider: "codex",
+      providerHandleId: "native",
+      cwd: workdir,
+      workspaceId: "import",
+    }),
+  ).rejects.toMatchObject(unsupported);
+  await expect(manager.reloadAgentSession(created.id)).rejects.toMatchObject(unsupported);
+
+  expect(client.calls).toEqual(calls);
+  expect(existing.closed).toBe(false);
+  expect(manager.getAgent(created.id)?.session).toBe(existing);
+  // Each refused open is discarded, so the running session keeps the tools it launched with.
+  expect(failedLaunches).toHaveLength(4);
+  expect(failedLaunches.at(-1)).toBe(created.id);
+  expect(manager.getPluginTools(created.id)).toEqual([]);
+  await manager.flush();
+  expect(JSON.stringify(await storage.get(created.id))).not.toContain("/opt/sandbox");
+  await manager.closeAgent(created.id);
+});
+
+test("a supporting provider receives the wrap at launch and the record never stores it", async () => {
+  const client = new LaunchWrapRecordingClient(true);
+  const { manager, storage, workdir, hook } = createLaunchWrapManager(client);
+  hook.wrap = ["/opt/sandbox/bin/run", "--profile", "a b"];
+  const created = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+    workspaceId: undefined,
+  });
+  expect(client.launchContexts[0]?.wrap).toEqual(["/opt/sandbox/bin/run", "--profile", "a b"]);
+  await manager.flush();
+  expect(JSON.stringify(await storage.get(created.id))).not.toContain("/opt/sandbox");
+  await manager.closeAgent(created.id);
+});
+
+// Records its argv, then answers as the Codex app server, so the provider command is only an
+// argument: a Windows script name there must reach the wrapper as is.
+const RECORDING_CODEX_APP_SERVER = `
+const { appendFileSync } = require("node:fs");
+const [log, ...rest] = process.argv.slice(2);
+appendFileSync(log, JSON.stringify(rest) + "\\n");
+const results = {
+  "collaborationMode/list": { data: [] },
+  "config/read": { config: {} },
+  getUserSavedConfig: { config: {} },
+  "model/list": { data: [{ id: "gpt-5.4", isDefault: true, defaultReasoningEffort: "medium" }] },
+  "skills/list": { data: [] },
+  "thread/start": { thread: { id: "thread-1" } },
+  "thread/resume": { thread: { id: "thread-1" } },
+  "thread/loaded/list": { data: [] },
+  "thread/backgroundTerminals/list": { data: [], nextCursor: null },
+};
+let buffer = "";
+process.stdin.on("data", (chunk) => {
+  buffer += chunk.toString();
+  for (let index = buffer.indexOf("\\n"); index !== -1; index = buffer.indexOf("\\n")) {
+    const line = buffer.slice(0, index).trim();
+    buffer = buffer.slice(index + 1);
+    if (!line) continue;
+    const message = JSON.parse(line);
+    if (message.id === undefined || !message.method) continue;
+    process.stdout.write(JSON.stringify({ id: message.id, result: results[message.method] ?? {} }) + "\\n");
+  }
+});
+`;
+
+test("a wrapped refresh passes a Windows script provider command to the wrapper through the real spawn", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-launch-wrap-refresh-"));
+  onTestFinished(() => rmSync(workdir, { recursive: true, force: true }));
+  const launcher = join(workdir, "recording-app-server.cjs");
+  const launches = join(workdir, "launches.jsonl");
+  writeFileSync(launcher, RECORDING_CODEX_APP_SERVER);
+  // The version probes run `node --version`; sessions spawn through the production spawnProcess.
+  const codex = new CodexAppServerAgentClient(
+    logger,
+    { command: { mode: "replace", argv: [process.execPath] } },
+    {
+      appServerProcess: {
+        resolvePrefix: async () => ({ command: "C:\\codex\\codex.cmd", args: [] }),
+        spawn: ({ command, args, options }) => spawnProcess(command, args, options),
+      },
+    },
+  );
+  const client: AgentClient = Object.assign(codex, { supportsLaunchWrap: true });
+  const manager = new AgentManager({
+    clients: { codex: client },
+    logger,
+    pluginSessions: launchWrapPluginSessions(() => [process.execPath, launcher, launches]).sessions,
+  });
+  const created = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+    workspaceId: undefined,
+  });
+
+  await manager.reloadAgentSession(created.id);
+
+  const argv = readFileSync(launches, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as string[]);
+  expect(argv).toHaveLength(2);
+  for (const launched of argv)
+    expect(launched.slice(0, 2)).toEqual(["C:\\codex\\codex.cmd", "app-server"]);
+  expect(manager.getAgent(created.id)?.lifecycle).not.toBe("error");
+  await manager.closeAgent(created.id);
 });

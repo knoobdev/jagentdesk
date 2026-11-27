@@ -25,6 +25,9 @@ export type {
   PluginHookWorkspace,
   PluginHookWorktree,
   PluginWorktreeCreateRequest,
+  PluginLaunchWrap,
+  PluginTerminalCreateRequest,
+  PluginCommandRunRequest,
   PluginHookAgent,
   PluginSessionOpenRequest,
   PluginTurnOutcome,
@@ -34,6 +37,18 @@ export type {
 } from "./lifecycle.js";
 
 export { spawnProcess, execCommand, terminateProcess } from "./process.js";
+export type { SpawnProcessOptions } from "./process.js";
 
 export { defineAgentTool } from "./agent-tools.js";
 export type { AgentToolDefinition, AgentToolResult, AgentToolContext } from "./agent-tools.js";
+export type {
+  PluginWorktreeContext,
+  PluginWorktreeCreateInput,
+  PluginWorktreeCreateResult,
+  PluginWorktreeRemoveRequest,
+  PluginWorktreeRemoveResult,
+  PluginWorktreeRestoreTarget,
+  PluginWorktreeRestoreRequest,
+  PluginWorktreeRestoreResult,
+  WorktreeManagerRegistration,
+} from "./worktree.js";

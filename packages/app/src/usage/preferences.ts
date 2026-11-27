@@ -79,18 +79,17 @@ function samePin(a: UsagePin, b: UsagePin): boolean {
   return a.sourceId === b.sourceId && a.windowId === b.windowId;
 }
 
-/** The only owner of default and customized pin selection, shared by every usage surface. */
-export function effectiveUsagePins(
-  preferences: UsagePreferences,
+/** Each source's `summary` windows with data, else its first window with data. */
+export function defaultUsagePins(
+  displayAs: UsageDisplayAs,
   reports: readonly UsageReportEntry[],
 ): UsagePin[] {
-  if (preferences.pins !== null) return preferences.pins;
   const pins: UsagePin[] = [];
   for (const entry of reports) {
     const snapshot = resolveUsageSnapshot(entry);
     if (!snapshot) continue;
     const withPercent = snapshot.report.windows.filter(
-      (window) => displayPercent(window, preferences.displayAs) !== null,
+      (window) => displayPercent(window, displayAs) !== null,
     );
     const marked = withPercent.filter((window) => window.summary);
     for (const window of marked.length > 0 ? marked : withPercent.slice(0, 1)) {
@@ -99,6 +98,15 @@ export function effectiveUsagePins(
     }
   }
   return pins;
+}
+
+/** The only owner of default and customized pin selection, shared by every usage surface. */
+export function effectiveUsagePins(
+  preferences: UsagePreferences,
+  reports: readonly UsageReportEntry[],
+): UsagePin[] {
+  if (preferences.pins !== null) return preferences.pins;
+  return defaultUsagePins(preferences.displayAs, reports);
 }
 
 export function isUsagePinned(

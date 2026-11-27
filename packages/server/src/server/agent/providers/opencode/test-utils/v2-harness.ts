@@ -7,6 +7,7 @@ import type {
 } from "@opencode/client";
 import type { V2Api } from "../v2/api.js";
 import type { V2Connection } from "../v2/runtime.js";
+import type { OpenCodeMcpPath } from "../v2/shared-service.js";
 
 function unexpected(): never {
   throw new Error("Unexpected OpenCode v2 test operation");
@@ -28,8 +29,11 @@ export class V2Harness {
   readonly prompts: string[] = [];
   readonly environments: Array<{ sessionID: string; variables: Record<string, string> }> = [];
   readonly mcpAdds: string[] = [];
+  readonly mcpAddInputs: Array<Parameters<V2Api["mcp"]["add"]>[0]> = [];
   readonly instructions = new Map<string, string>();
   releases = 0;
+  /** What the server reports for spec 33.7; `legacy` stands for OpenCode before 2.0.29. */
+  mcpPathResult: OpenCodeMcpPath = "session";
   active = false;
   activeReads = 0;
   autoComplete = true;
@@ -122,9 +126,11 @@ export class V2Harness {
     provider: { list: unexpected },
     command: { list: unexpected },
     skill: { list: unexpected },
+    // Spec 33.7: only the legacy path (no `features.mcpTools`) uses OpenCode's location-wide MCP.
     mcp: {
       add: async (input) => {
         this.mcpAdds.push(input.server);
+        this.mcpAddInputs.push(input);
       },
       list: async (input) => ({
         location: { directory: input?.location?.directory ?? this.info.location.directory },
@@ -213,6 +219,7 @@ export class V2Harness {
     unbindSession: async () => {},
     refreshLocation: async () => {},
     sessionToolsStatus: async () => null,
+    mcpPath: async () => this.mcpPathResult,
     client: this.api,
     release: async () => {
       this.releases += 1;

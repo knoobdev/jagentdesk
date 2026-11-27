@@ -5,7 +5,11 @@ import type { AgentTimelineRow } from "./agent-timeline-store-types.js";
 import { isLikelyExternalToolName } from "@jagentdesk/protocol/tool-name-normalization";
 import { buildAgentMessageDisplay } from "@jagentdesk/protocol/jagentdesk-tool-presentation/index";
 import { buildToolCallDisplayModel } from "@jagentdesk/protocol/tool-call-display";
-import { projectTimelineRows, selectItemsByProjectedLimit } from "./timeline-projection.js";
+import {
+  projectTimelineRows,
+  selectItemsByProjectedLimit,
+  selectTimelineWindowByProjectedLimit,
+} from "./timeline-projection.js";
 
 const DEFAULT_MAX_ITEMS = 0;
 const MAX_TOOL_INPUT_CHARS = 400;
@@ -84,7 +88,7 @@ function formatToolSummary(summary: string | undefined): string | null {
 function inputFromUnknownDetail(
   detail: Extract<AgentTimelineItem, { type: "tool_call" }>["detail"],
 ): unknown {
-  return detail.type === "unknown" ? detail.input : null;
+  return detail.type === "unknown" ? detail.input : undefined;
 }
 
 function projectForCuration(items: readonly AgentTimelineItem[]): AgentTimelineItem[] {
@@ -228,6 +232,43 @@ export function summarizeAgentActivity(timeline: AgentTimelineItem[], limit?: nu
   return {
     updateCount: timeline.length,
     content: `${countHeader}\n\n${curateAgentActivity(selection.items)}`,
+  };
+}
+
+export interface AgentActivityPage {
+  content: string;
+  /** Pass as `beforeSeq` for the next older page; null when nothing older is left. */
+  nextBeforeSeq: number | null;
+}
+
+/**
+ * One page of an agent's activity, newest last: the last `limit` projected entries older than
+ * `beforeSeq` (all of them when limit is 0 or missing).
+ */
+export function pageAgentActivity(input: {
+  rows: readonly AgentTimelineRow[];
+  limit?: number;
+  beforeSeq?: number;
+}): AgentActivityPage {
+  const { limit, beforeSeq } = input;
+  const page = beforeSeq ? input.rows.filter((row) => row.seq < beforeSeq) : input.rows;
+  const window = selectTimelineWindowByProjectedLimit({
+    rows: page,
+    direction: "tail",
+    limit: limit ?? 0,
+  });
+  const totalProjected = projectTimelineRows({ rows: page, mode: "projected" }).length;
+  const shownProjected = window.projectedEntries.length;
+  const noun = totalProjected === 1 ? "activity" : "activities";
+  const countHeader =
+    limit && shownProjected < totalProjected
+      ? `Showing ${shownProjected} of ${totalProjected} ${noun} (limited to ${limit})`
+      : `Showing all ${totalProjected} ${noun}`;
+  const firstShownSeq = window.selectedRows[0]?.seq ?? null;
+  const hasOlder = firstShownSeq !== null && page.some((row) => row.seq < firstShownSeq);
+  return {
+    content: `${countHeader}\n\n${curateAgentActivity(window.selectedRows.map((row) => row.item))}`,
+    nextBeforeSeq: hasOlder ? firstShownSeq : null,
   };
 }
 

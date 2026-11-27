@@ -41,6 +41,7 @@ At the start of non-trivial work, list `docs/` and skim anything relevant to the
 | [docs/unistyles.md](docs/unistyles.md)                                 | Unistyles gotchas — `useUnistyles()` is forbidden, alternatives in order                                                               |
 | [docs/floating-panels.md](docs/floating-panels.md)                     | Anchored popovers — Portal/Modal escape for Android, lifecycle gates, keyboard-shared-value, status-bar offset, the flash              |
 | [docs/menus.md](docs/menus.md)                                         | The menu engine — popover vs sheet, submenu pages, hover intent, when a decision earns a submenu                                       |
+| [docs/drag-reorder.md](docs/drag-reorder.md)                           | Drag to reorder — `DraggableList` and its handle, the scroll view that must host the drag, grip placement, phone testing               |
 | [docs/mobile-panels.md](docs/mobile-panels.md)                         | Compact left/center/right panel ownership, worklet motion, gesture revisions, and Fabric constraints                                   |
 | [docs/i18n.md](docs/i18n.md)                                           | UI translations — locales, fallbacks, parity test, English-only shared subtrees                                                        |
 | [docs/notifications.md](docs/notifications.md)                         | OS notification delivery, startup readiness, acknowledgement, and deferred targets                                                     |
@@ -73,6 +74,7 @@ At the start of non-trivial work, list `docs/` and skim anything relevant to the
 | [docs/terminal-performance.md](docs/terminal-performance.md)           | Terminal latency pipeline, coalescing/backpressure invariants, benchmark + perf spec usage                                             |
 | [docs/terminal-activity.md](docs/terminal-activity.md)                 | Terminal activity indicators — source-agnostic tracker, agent hook reporting, adding a new hook provider                               |
 | [docs/agent-stream-performance.md](docs/agent-stream-performance.md)   | Assistant text pipeline — coalescing window, paced reveal, why arrival lumps are smoothed at render                                    |
+| [docs/markdown-renderer.md](docs/markdown-renderer.md)                 | Markdown engine — the vendored `react-native-enriched-markdown` fork, its layout, backports, native tests                              |
 | [docs/development.md](docs/development.md)                             | Dev server, build sync gotchas, CLI reference, agent state, Playwright MCP                                                             |
 | [docs/testing.md](docs/testing.md)                                     | TDD workflow, determinism, real dependencies over mocks, test organization                                                             |
 | [docs/qa.md](docs/qa.md)                                               | QA evidence bar for pull requests — platform matrix, version drift, performance, UI proof                                              |

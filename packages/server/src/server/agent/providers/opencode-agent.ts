@@ -77,6 +77,7 @@ import {
 } from "../provider-launch-config.js";
 import { withTimeout } from "../../../utils/promise-timeout.js";
 import { execCommand } from "../../../utils/spawn.js";
+import type { LaunchWrap } from "../../../utils/launch-wrap.js";
 import { mapOpencodeToolCall } from "./opencode/tool-call-mapper.js";
 import {
   OPENCODE_EVENT_STREAM_READY_TIMEOUT_MS,
@@ -373,6 +374,9 @@ const OPENCODE_SESSION_ENV_KEYS = new Set([
   "JAGENTDESK_AGENT_ID",
   "JAGENTDESK_AGENT_CWD",
   "JAGENTDESK_WORKSPACE_ID",
+  // The agent shim PATH and BROWSER (spec 04 §27b item 3b) are the same for every agent.
+  "PATH",
+  "BROWSER",
 ]);
 
 function requiresDedicatedOpenCodeServer(
@@ -1083,7 +1087,11 @@ async function collectOpenCodeImportableSessionsFromSdk(
   options?: ListImportableSessionsOptions,
 ): Promise<ImportableProviderSession[]> {
   const limit = options?.limit ?? OPENCODE_PERSISTED_SESSION_LIMIT;
-  const sessionListLimit = options?.cwd ? Math.max(limit, OPENCODE_PERSISTED_SESSION_LIMIT) : limit;
+  const scanLimit = Math.min(options?.scanLimit ?? limit, 500);
+  const sessionListLimit = Math.min(
+    options?.cwd ? Math.max(scanLimit, OPENCODE_PERSISTED_SESSION_LIMIT) : scanLimit,
+    500,
+  );
   const response = await client.experimental.session.list({
     archived: true,
     roots: true,
@@ -1566,7 +1574,10 @@ export class OpenCodeAgentClient implements AgentClient {
       cwd,
     };
     const openCodeConfig = this.assertConfig(config);
-    const registeredServerUrl = getOpenCodeChildSessionServerUrl(handle.sessionId);
+    // A registered parent server runs outside this launch's wrap, so a wrapped resume starts its own.
+    const registeredServerUrl = launchContext?.wrap
+      ? undefined
+      : getOpenCodeChildSessionServerUrl(handle.sessionId);
     const registeredAcquisition = registeredServerUrl
       ? this.serverManager.acquireExisting(registeredServerUrl)
       : null;
@@ -1648,12 +1659,23 @@ export class OpenCodeAgentClient implements AgentClient {
     config: OpenCodeAgentConfig,
     launchContext?: AgentLaunchContext,
   ): Promise<OpenCodeServerAcquisition> {
-    if (!this.bridge || requiresDedicatedOpenCodeServer(config, launchContext)) {
-      return launchContext?.env
-        ? this.serverManager.acquireDedicated(launchContext.env)
-        : this.serverManager.acquireCurrent();
+    if (launchContext?.wrap)
+      return this.acquireWrappedServer(launchContext.wrap, launchContext.env);
+    if (
+      launchContext?.env &&
+      (!this.bridge || requiresDedicatedOpenCodeServer(config, launchContext))
+    ) {
+      return this.serverManager.acquireDedicated({ env: launchContext.env });
     }
     return this.serverManager.acquireCurrent();
+  }
+
+  /** A wrapped session gets its own server, so it never shares one that runs outside its wrap. */
+  private acquireWrappedServer(
+    wrap: LaunchWrap,
+    env: Record<string, string> = {},
+  ): Promise<OpenCodeServerAcquisition> {
+    return this.serverManager.acquireDedicated({ env, wrap });
   }
 
   private bindBridgeSession(
@@ -1743,7 +1765,11 @@ export class OpenCodeAgentClient implements AgentClient {
   }
 
   async importSession(input: ImportProviderSessionInput, context: ImportProviderSessionContext) {
-    const acquisition = await this.serverManager.acquireCurrent();
+    const wrap = context.launchContext?.wrap;
+    // A wrapped import reads the session behind its wrap too, so it never starts a server outside it.
+    const acquisition = wrap
+      ? await this.acquireWrappedServer(wrap, context.launchContext?.env)
+      : await this.serverManager.acquireCurrent();
     const { url } = acquisition.server;
     const client = this.createOpenCodeClient({
       baseUrl: url,

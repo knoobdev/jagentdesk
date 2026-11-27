@@ -18,9 +18,17 @@ import {
 } from "@jagentdesk/plugin/server/provider";
 import { validateWorktreePath } from "../../utils/worktree-path.js";
 import type { PluginHookPayload } from "@jagentdesk/plugin/server";
-import type { PluginWireBeforeRequests, PluginBeforeResults } from "./lifecycle/index.js";
-import type { SessionOpenWireRequest, AttachedAgentTool } from "./agent-tools.js";
-import type { PluginHookEvents, PluginHookAgent, AgentToolResult } from "@jagentdesk/plugin/server";
+import type { PluginLifecycleBeforeName, PluginWireBeforeRequests } from "./lifecycle/index.js";
+import { SessionAttachments, type SessionOpenPlugin } from "./session-attachments.js";
+import type {
+  PluginHookEvents,
+  PluginHookAgent,
+  AgentToolResult,
+  PluginWorktreeCreateInput,
+  PluginWorktreeRemoveRequest,
+  PluginWorktreeRestoreRequest,
+} from "@jagentdesk/plugin/server";
+import { z } from "zod";
 import { validateBeforeRequest, validateBeforeResult } from "./lifecycle/index.js";
 import { fork } from "node:child_process";
 import path from "node:path";
@@ -43,6 +51,7 @@ import type {
   PluginProcessMessage,
   PluginProcessRequest,
   PluginProviderMetadata,
+  PluginWorktreeManagerCapabilities,
 } from "./plugin-process-protocol.js";
 import { PluginProcessMessageSchema } from "./plugin-process-protocol.js";
 import {
@@ -52,7 +61,40 @@ import {
 import { PluginSessionSocket } from "./session-socket.js";
 
 const REQUEST_TIMEOUT_MS = 30_000;
+const WORKTREE_MANAGER_TIMEOUT_MS = 120_000;
 const TOOL_CALL_TIMEOUT_MS = 10 * 60_000;
+
+const worktreeCreateResultSchema = z
+  .object({ type: z.literal("created"), path: z.string().min(1) })
+  .strict()
+  .nullable();
+const worktreeRemoveResultSchema = z
+  .object({ type: z.literal("removed") })
+  .strict()
+  .nullable();
+const worktreeRestoreResultSchema = z
+  .object({ type: z.literal("restored"), path: z.string().min(1) })
+  .strict()
+  .nullable();
+
+export interface PluginWorktreeManagerRuntime {
+  hasWorktreeManager(options?: {
+    operation?: "create" | "remove" | "restore";
+    preferredPluginId?: string;
+  }): boolean;
+  createWorktree(
+    request: PluginWorktreeCreateInput,
+    options?: { signal?: AbortSignal },
+  ): Promise<{ pluginId: string; path: string } | null>;
+  removeWorktree(
+    request: PluginWorktreeRemoveRequest,
+    options?: { preferredPluginId?: string; signal?: AbortSignal },
+  ): Promise<{ pluginId: string } | null>;
+  restoreWorktree(
+    request: PluginWorktreeRestoreRequest,
+    options?: { preferredPluginId?: string; signal?: AbortSignal },
+  ): Promise<{ pluginId: string; path: string } | null>;
+}
 const MAX_LOG_ENTRIES = 500;
 const MAX_LOG_BYTES = 256 * 1024;
 const MAX_LOG_LINE_BYTES = 16 * 1024;
@@ -86,6 +128,8 @@ interface PluginRequestOptions {
   signal?: AbortSignal;
   /** Receives `provider.installation.report` messages for the request. */
   report?: (report: ProviderUpdateReport) => void;
+  /** Overrides the default per-message timeout (e.g. shared budget across serial worktree managers). */
+  timeoutMs?: number;
 }
 
 interface LoadedPlugin {
@@ -98,6 +142,7 @@ interface LoadedPlugin {
   subscriptionMethods: ReadonlySet<string>;
   subscriptions: Map<string, BufferedPluginSubscription>;
   hooks: string[];
+  worktreeManager: PluginWorktreeManagerCapabilities | null;
   providers: readonly PluginProviderMetadata[];
   usageSources: readonly PluginUsageSourceMetadata[];
   child: PluginChild | null;
@@ -287,8 +332,17 @@ function isInstallationRequest(message: PluginProcessRequest): boolean {
   );
 }
 
+function isWorktreeManagerRequest(message: PluginProcessRequest): boolean {
+  return (
+    message.type === "worktree.create" ||
+    message.type === "worktree.remove" ||
+    message.type === "worktree.restore"
+  );
+}
+
 function requestTimeoutMs(message: PluginProcessRequest): number | null {
   if (message.type === "tool.call") return TOOL_CALL_TIMEOUT_MS;
+  if (isWorktreeManagerRequest(message)) return WORKTREE_MANAGER_TIMEOUT_MS;
   // An updater runs as long as it needs; daemon shutdown aborts it.
   if (message.type === "provider.installation.update") return null;
   return REQUEST_TIMEOUT_MS;
@@ -314,7 +368,8 @@ export class PluginRuntime {
   private readonly spawnChild: () => PluginChild;
   private sessionHost: PluginJAgentDeskSessionHost | null;
   private readonly listeners = new Set<(pluginId: string, error?: string) => void>();
-  private readonly sessionOpenListeners = new Set<() => void>();
+  /** What `agent.open.before` plugins attached to each live session. */
+  readonly sessionAttachments: SessionAttachments;
 
   constructor(
     logger: pino.Logger,
@@ -324,6 +379,13 @@ export class PluginRuntime {
     this.logger = logger.child({ module: "plugins" });
     this.spawnChild = dependencies.spawnChild ?? spawnPluginChild;
     this.sessionHost = dependencies.sessionHost ?? null;
+    this.sessionAttachments = new SessionAttachments(
+      {
+        sessionOpenPlugins: () => this.sessionOpenPlugins(),
+        detachEverywhere: (agentId) => this.detachTools(agentId),
+      },
+      this.logger,
+    );
   }
 
   bindJAgentDeskSessionHost(sessionHost: PluginJAgentDeskSessionHost): void {
@@ -335,16 +397,6 @@ export class PluginRuntime {
   subscribe(listener: (pluginId: string, error?: string) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
-  }
-
-  subscribeSessionOpenChanges(listener: () => void): () => void {
-    this.sessionOpenListeners.add(listener);
-    return () => this.sessionOpenListeners.delete(listener);
-  }
-
-  private notifySessionOpenChange(loaded: LoadedPlugin): void {
-    if (!loaded.hooks.includes("agent.open.before")) return;
-    for (const listener of this.sessionOpenListeners) listener();
   }
 
   async startPlugin(
@@ -369,7 +421,6 @@ export class PluginRuntime {
       throw new Error(`Plugin start cancelled: ${pluginId}`);
     }
     this.plugins.set(pluginId, loaded);
-    this.notifySessionOpenChange(loaded);
     this.appendLog(pluginId, "stdout", "[jagentdesk] Plugin ready");
   }
 
@@ -381,7 +432,6 @@ export class PluginRuntime {
     const loaded = this.plugins.get(pluginId);
     if (!loaded) return false;
     this.plugins.delete(pluginId);
-    this.notifySessionOpenChange(loaded);
     this.rejectPending(loaded, `Plugin stopped: ${pluginId}`);
     await this.stopPlugin(loaded);
     return true;
@@ -679,17 +729,14 @@ export class PluginRuntime {
     }
   }
 
-  async before<Name extends keyof PluginWireBeforeRequests>(
+  async before<Name extends PluginLifecycleBeforeName>(
     name: Name,
     input: PluginWireBeforeRequests[Name],
-  ): Promise<PluginBeforeResults[Name]> {
+  ): Promise<PluginWireBeforeRequests[Name]> {
     let request = validateBeforeRequest(name, input);
     const plugins = [...this.plugins.values()].sort((left, right) => {
       return left.id.localeCompare(right.id);
     });
-    const attached: AttachedAgentTool[] = [];
-    const mcpServers: SessionOpenWireRequest["mcpServers"] = {};
-    const mcpServerOwners: Record<string, string> = {};
     for (const loaded of plugins) {
       if (!loaded.hooks.includes(name)) {
         continue;
@@ -699,7 +746,7 @@ export class PluginRuntime {
           type: "hook",
           requestId: randomUUID(),
           name,
-          input: name === "agent.open.before" ? { ...request, tools: [], mcpServers: {} } : request,
+          input: request,
         });
         request = await validateBeforeResult(name, request, output);
         if (name === "worktree.create.before") {
@@ -709,28 +756,116 @@ export class PluginRuntime {
             repoPath: worktree.repoRoot,
           });
         }
-        if (name === "agent.open.before") {
-          const opened = request as SessionOpenWireRequest;
-          this.collectMcpServers(mcpServers, mcpServerOwners, loaded, opened.mcpServers);
-          this.collectAgentTools(attached, loaded, opened.tools);
-        }
       } catch (error) {
-        if (name === "agent.open.before")
-          this.detachTools((request as SessionOpenWireRequest).agentId);
         throw new Error(`Plugin ${loaded.id} ${name} failed: ${describeError(error)}`, {
           cause: error,
         });
       }
     }
-    if (name === "agent.open.before") {
-      return {
-        ...request,
-        tools: attached,
-        mcpServers,
-        mcpServerOwners,
-      } as PluginBeforeResults[Name];
-    }
     return request;
+  }
+
+  hasWorktreeManager(options?: {
+    operation?: "create" | "remove" | "restore";
+    preferredPluginId?: string;
+  }): boolean {
+    const operation = options?.operation ?? "create";
+    const supports = (manager: PluginWorktreeManagerCapabilities | null): boolean => {
+      if (!manager) return false;
+      if (operation === "remove") return manager.hasRemove;
+      if (operation === "restore") return manager.hasRestore;
+      return true;
+    };
+    if (options?.preferredPluginId) {
+      return supports(this.plugins.get(options.preferredPluginId)?.worktreeManager ?? null);
+    }
+    for (const loaded of this.plugins.values()) {
+      if (supports(loaded.worktreeManager)) return true;
+    }
+    return false;
+  }
+
+  async createWorktree(
+    request: PluginWorktreeCreateInput,
+    options?: { signal?: AbortSignal },
+  ): Promise<{ pluginId: string; path: string } | null> {
+    const plugins = [...this.plugins.values()]
+      .filter((plugin) => plugin.worktreeManager !== null)
+      .sort((left, right) => left.id.localeCompare(right.id));
+    // All create callbacks share one timeout budget.
+    const deadline = Date.now() + WORKTREE_MANAGER_TIMEOUT_MS;
+    for (const loaded of plugins) {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) {
+        throw new Error("Worktree creation manager budget expired");
+      }
+      try {
+        const raw = await this.request(
+          loaded,
+          { type: "worktree.create", requestId: randomUUID(), request },
+          { signal: options?.signal, timeoutMs: remainingMs },
+        );
+        const parsed = worktreeCreateResultSchema.parse(raw ?? null);
+        if (parsed !== null) {
+          return { pluginId: loaded.id, path: parsed.path };
+        }
+      } catch (error) {
+        throw new Error(`Plugin ${loaded.id} worktree.create failed: ${describeError(error)}`, {
+          cause: error,
+        });
+      }
+    }
+    return null;
+  }
+
+  async removeWorktree(
+    request: PluginWorktreeRemoveRequest,
+    options?: { preferredPluginId?: string; signal?: AbortSignal },
+  ): Promise<{ pluginId: string } | null> {
+    if (!options?.preferredPluginId) return null;
+    const loaded = this.plugins.get(options.preferredPluginId);
+    if (!loaded?.worktreeManager?.hasRemove) return null;
+    try {
+      const raw = await this.request(
+        loaded,
+        { type: "worktree.remove", requestId: randomUUID(), request },
+        { signal: options.signal },
+      );
+      const parsed = worktreeRemoveResultSchema.parse(raw ?? null);
+      if (parsed !== null) {
+        return { pluginId: loaded.id };
+      }
+      return null;
+    } catch (error) {
+      throw new Error(`Plugin ${loaded.id} worktree.remove failed: ${describeError(error)}`, {
+        cause: error,
+      });
+    }
+  }
+
+  async restoreWorktree(
+    request: PluginWorktreeRestoreRequest,
+    options?: { preferredPluginId?: string; signal?: AbortSignal },
+  ): Promise<{ pluginId: string; path: string } | null> {
+    if (!options?.preferredPluginId) return null;
+    const loaded = this.plugins.get(options.preferredPluginId);
+    if (!loaded?.worktreeManager?.hasRestore) return null;
+    try {
+      const raw = await this.request(
+        loaded,
+        { type: "worktree.restore", requestId: randomUUID(), request },
+        { signal: options.signal },
+      );
+      const parsed = worktreeRestoreResultSchema.parse(raw ?? null);
+      if (parsed !== null) {
+        return { pluginId: loaded.id, path: parsed.path };
+      }
+      return null;
+    } catch (error) {
+      throw new Error(`Plugin ${loaded.id} worktree.restore failed: ${describeError(error)}`, {
+        cause: error,
+      });
+    }
   }
 
   async getProviderCatalogCacheKey(
@@ -751,43 +886,34 @@ export class PluginRuntime {
     return output;
   }
 
-  private collectMcpServers(
-    servers: SessionOpenWireRequest["mcpServers"],
-    owners: Record<string, string>,
-    loaded: LoadedPlugin,
-    contributions: SessionOpenWireRequest["mcpServers"],
-  ): void {
-    for (const [name, server] of Object.entries(contributions)) {
-      if (Object.hasOwn(servers, name)) {
-        throw new Error(
-          `MCP server ${name} from plugin ${loaded.id} collides with plugin ${owners[name]}`,
-        );
-      }
-      servers[name] = server;
-      owners[name] = loaded.id;
-    }
-  }
-
-  private collectAgentTools(
-    attached: AttachedAgentTool[],
-    loaded: LoadedPlugin,
-    tools: SessionOpenWireRequest["tools"],
-  ): void {
-    for (const tool of tools) {
-      const collision = attached.find((entry) => entry.name === tool.name);
-      if (collision)
-        throw new Error(
-          `Agent tool ${tool.name} from plugin ${loaded.id} collides with plugin ${collision.pluginId}`,
-        );
-      attached.push({ ...tool, pluginId: loaded.id, pluginInstanceId: loaded.instanceId });
-    }
-  }
-
   isToolPluginAvailable(pluginId: string, pluginInstanceId: string): boolean {
     return this.plugins.get(pluginId)?.instanceId === pluginInstanceId;
   }
 
-  detachTools(agentId: string): void {
+  private sessionOpenPlugins(): SessionOpenPlugin[] {
+    return [...this.plugins.values()]
+      .filter((loaded) => loaded.child && loaded.hooks.includes("agent.open.before"))
+      .sort((left, right) => left.id.localeCompare(right.id))
+      .map((loaded) => ({
+        id: loaded.id,
+        instanceId: loaded.instanceId,
+        open: async (input) => {
+          const output = await this.request(loaded, {
+            type: "hook",
+            requestId: randomUUID(),
+            name: "agent.open.before",
+            input,
+          });
+          return validateBeforeResult("agent.open.before", input, output);
+        },
+        detach: (agentId) => {
+          if (loaded.child)
+            void send(loaded.child, { type: "tools.detach", agentId }).catch(() => {});
+        },
+      }));
+  }
+
+  private detachTools(agentId: string): void {
     for (const loaded of this.plugins.values()) {
       if (loaded.child) void send(loaded.child, { type: "tools.detach", agentId }).catch(() => {});
     }
@@ -834,12 +960,14 @@ export class PluginRuntime {
         loaded.pending.delete(requestId);
         if (message.type === "tool.call")
           void send(child, { type: "tool.cancel", requestId }).catch(() => {});
+        if (isWorktreeManagerRequest(message))
+          void send(child, { type: "worktree.cancel", requestId }).catch(() => {});
         if (isInstallationRequest(message))
           void send(child, { type: "provider.installation.cancel", requestId }).catch(() => {});
         signal?.removeEventListener("abort", cancel);
-        reject(signal?.reason ?? new Error("Tool call canceled"));
+        reject(signal?.reason ?? new Error("Plugin request canceled"));
       };
-      const timeoutMs = requestTimeoutMs(message);
+      const timeoutMs = options.timeoutMs ?? requestTimeoutMs(message);
       const timeout =
         timeoutMs === null
           ? undefined
@@ -850,6 +978,9 @@ export class PluginRuntime {
                 void send(child, { type: "tool.cancel", requestId }).catch(() => {});
               if (message.type === "hook") {
                 void send(child, { type: "hook.cancel", requestId }).catch(() => {});
+              }
+              if (isWorktreeManagerRequest(message)) {
+                void send(child, { type: "worktree.cancel", requestId }).catch(() => {});
               }
               // The handler may still start after the daemon gave up on it.
               if (message.type === "subscribe") {
@@ -888,7 +1019,6 @@ export class PluginRuntime {
     const loaded = [...this.plugins.values()];
     this.plugins.clear();
     for (const plugin of loaded) {
-      this.notifySessionOpenChange(plugin);
       this.rejectPending(plugin, `Plugin stopped: ${plugin.id}`);
     }
     await Promise.all(loaded.map((plugin) => this.stopPlugin(plugin)));
@@ -917,6 +1047,7 @@ export class PluginRuntime {
         subscriptionMethods: new Set(),
         subscriptions: new Map(),
         hooks: [],
+        worktreeManager: null,
         providers: [],
         usageSources: [],
         child: null,
@@ -953,7 +1084,6 @@ export class PluginRuntime {
       serverBundle: "",
     });
     this.plugins.set(input.id, loaded);
-    this.notifySessionOpenChange(loaded);
     this.appendLog(input.id, "stdout", "[jagentdesk] Plugin ready");
   }
 
@@ -1075,6 +1205,7 @@ export class PluginRuntime {
       subscriptionMethods: new Set(ready.subscriptions ?? []),
       subscriptions: new Map(),
       hooks: ready.hooks ?? [],
+      worktreeManager: ready.worktreeManager ?? null,
       providers: ready.providers ?? [],
       usageSources: ready.usageSources ?? [],
       child,
@@ -1158,14 +1289,11 @@ export class PluginRuntime {
 
   private handleChildMessage(loaded: LoadedPlugin, message: PluginProcessMessage): void {
     if (message.type === "hooks.changed") {
-      const hadSessionOpen = loaded.hooks.includes("agent.open.before");
       loaded.hooks = message.hooks;
-      if (
-        this.plugins.get(loaded.id) === loaded &&
-        hadSessionOpen !== loaded.hooks.includes("agent.open.before")
-      ) {
-        for (const listener of this.sessionOpenListeners) listener();
-      }
+      return;
+    }
+    if (message.type === "worktree_manager.changed") {
+      loaded.worktreeManager = message.worktreeManager;
       return;
     }
     if (message.type === "settings.changed") {
@@ -1493,7 +1621,6 @@ export class PluginRuntime {
     const wasPublished = this.plugins.get(loaded.id) === loaded;
     if (wasPublished) {
       this.plugins.delete(loaded.id);
-      this.notifySessionOpenChange(loaded);
     }
     this.rejectPending(loaded, `Plugin process exited: ${loaded.id}`);
     for (const state of loaded.providerConnections.values()) {

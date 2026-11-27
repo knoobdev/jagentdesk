@@ -69,6 +69,7 @@ export const ru: TranslationResources = {
       downloadFailed: "Загрузка не удалась",
     },
     errors: {
+      unableToCopy: "Не удалось скопировать",
       folderOutsideWorkspace: "{{path}} is outside this workspace",
 
       error: "Ошибка",
@@ -107,6 +108,8 @@ export const ru: TranslationResources = {
         "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043F\u0440\u043E\u0435\u043A\u0442",
       home: "\u0413\u043B\u0430\u0432\u043D\u0430\u044F",
       copyBrowserHostName: "Скопировать имя хоста браузера",
+      profileGroupLabel: "Профиль",
+      profileSearchKeywords: "профиль применить профиль профиль агента пресет",
       modelGroupLabel: "\u041C\u043E\u0434\u0435\u043B\u044C",
       modelSearchKeywords:
         "\u0421\u043C\u0435\u043D\u0438\u0442\u044C, \u0438\u0437\u043C\u0435\u043D\u0438\u0442\u044C, \u0432\u044B\u0431\u0440\u0430\u0442\u044C \u0438\u043B\u0438 \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C \u043C\u043E\u0434\u0435\u043B\u044C",
@@ -287,6 +290,7 @@ export const ru: TranslationResources = {
       implement: "Осуществлять",
       question: "Как бы вы хотели продолжить?",
       proposedPlan: "Предлагаемый план",
+      notPending: "Этот запрос больше не ожидает ответа",
     },
   },
   agentPanel: {
@@ -362,6 +366,7 @@ export const ru: TranslationResources = {
       viewDiagram: "View diagram",
     },
     actions: {
+      copyQuote: "Копировать цитату",
       copyCode: "Скопировать код",
       copyTurn: "Копировать ход",
       copyMessage: "Копировать сообщение",
@@ -471,7 +476,13 @@ export const ru: TranslationResources = {
     },
   },
   importSession: {
+    chooseHostTitle: "Импорт с хоста",
     title: "Импортировать сеанс",
+    searchPlaceholder: "Поиск сеансов...",
+    scope: {
+      host: "Сеансы на {{host}}",
+      workspace: "Это рабочее пространство",
+    },
     filters: {
       all: "Все",
     },
@@ -480,12 +491,13 @@ export const ru: TranslationResources = {
       updateHost: "Обновите хост для импорта сеансов.",
       noProviders: "Импортируемые поставщики не включены.",
       loading: "Загрузка последних сеансов...",
-      failedAll: "Не удалось загрузить последние сеансы.",
-      failedProviders: "Не удалось загрузить сеансы для{{providers}}.",
+      failedProvider: "Не удалось загрузить сеансы {{provider}}",
       failedImport: "Не удалось импортировать выбранный сеанс.",
     },
     actions: {
       refresh: "Обновить сеансы",
+      showAll: "Показать все",
+      loadMore: "Загрузить ещё",
     },
     preview: {
       untitledSession: "Сессия без названия",
@@ -493,6 +505,7 @@ export const ru: TranslationResources = {
     },
     empty: {
       noRecent: "Нет последних сеансов для импорта.",
+      noMatches: "Нет сеансов, соответствующих поиску.",
       alreadyImported: "Все последние сеансы уже импортированы.",
       noProviderSessions: "Сеансы{{provider}}не найдены.",
     },
@@ -905,6 +918,8 @@ export const ru: TranslationResources = {
             "Push здесь недоступен, поскольку эта ветка еще не подключена к удаленному устройству.",
           pushBehind: "Push пока недоступен, поскольку сначала нужно внести новые изменения.",
           pushNothing: "Push недоступен, поскольку нет ничего нового для отправки.",
+          pushUpstreamGone:
+            "Push недоступен, поскольку ветка, которую отслеживает эта ветка, больше не существует.",
           pullAndPushNoRemote:
             "Функция Pull and Push здесь недоступна, поскольку эта ветка еще не подключена к удаленному устройству.",
           pullAndPushDirty:
@@ -963,6 +978,8 @@ export const ru: TranslationResources = {
         },
         archiveWarning: {
           title: 'Архив "{{workspaceName}}"?',
+          bulkTitle: "Архивировать рабочие пространства ({{count}})?",
+          bulkWorkspaceReason: "{{workspaceName}}: {{reason}}",
           confirm: "Архив",
           cancel: "Отмена",
           uncommittedChanges: "Незафиксированные изменения",
@@ -1274,6 +1291,7 @@ export const ru: TranslationResources = {
         rename: "Переименовать рабочую область",
         pin: "Закрепить вверху",
         unpin: "Открепить",
+        select: "Выбрать",
         archive: "Архив",
         archiveWorkspace: "Архивировать рабочее пространство",
         hideFromSidebar: "Скрыть с боковой панели",
@@ -1292,6 +1310,10 @@ export const ru: TranslationResources = {
         submit: "Переименовать",
         invalidBranchName: "Неверное название ветки",
       },
+      selection: {
+        count: "Выбрано: {{count}}",
+        exit: "Выйти из выбора",
+      },
       toasts: {
         workspacePathUnavailable: "Путь Workspace недоступен",
         pathCopied: "Путь скопирован",
@@ -1299,7 +1321,9 @@ export const ru: TranslationResources = {
         hostDisconnected: "Host не подключен",
         hideFailed: "Не удалось скрыть рабочую область.",
         archiveFailed: "Не удалось заархивировать рабочее пространство.",
+        archiveMultipleFailed: "Не удалось архивировать рабочие пространства ({{count}})",
         archived: "Рабочее пространство архивировано",
+        archivedCount: "Архивировано рабочих пространств: {{count}}",
         undoArchive: "Отменить",
         undoArchiveFailed: "Не удалось отменить архивацию",
       },
@@ -1664,9 +1688,18 @@ export const ru: TranslationResources = {
     },
     settings: {
       addProvider: "Добавить провайдера",
-      moveUp: "Вверх",
-      moveDown: "Вниз",
-      remove: "Удалить",
+      defaultModel: "Модель по умолчанию",
+      add: "Добавить",
+      provider: "Провайдер",
+      model: "Модель",
+      chooseProvider: "Выберите провайдера",
+      chooseProviderFirst: "Сначала выберите провайдера",
+      noProviders: "Других включённых провайдеров нет.",
+      noModels: "Других моделей нет.",
+      searchProviders: "Поиск провайдеров",
+      searchModels: "Поиск моделей",
+      reorder: "Переместить {{entry}}",
+      removeEntry: "Удалить {{entry}}",
       emptyList: "Провайдеров пока нет.",
       failoverTitle: "Переключение при сбое",
       failoverHint:
@@ -1731,12 +1764,16 @@ export const ru: TranslationResources = {
     editProfilesLabel: "Изменить профили агентов",
     searchAllPlaceholder: "Поиск по всем моделям...",
     createProfileFromModel: "Создать профиль из этой модели",
+    profileSaved: "Сохранено: «{{name}}»",
+    undo: "Отменить",
+    undoProfileSave: "Отменить сохранение профиля",
     editProfileLabel: "Изменить {{name}}",
     editProfilesCount: "Изменить профили ({{count}})",
     profiles: "Профили",
     createProfile: "Создать профиль",
     noMatchesForQuery: "Нет моделей, соответствующих «{{query}}»",
     providers: "Провайдеры",
+    models: "Модели",
     model: "Модель",
   },
   providerCatalog: {
@@ -2151,6 +2188,7 @@ export const ru: TranslationResources = {
       projects: "Проекты",
       connections: "Соединения",
       agents: "Agents",
+      agentProfiles: "Профили агентов",
       orchestration: "Orchestration",
       workspaces: "Workspaces",
       voice: "Голос",
@@ -2358,6 +2396,18 @@ export const ru: TranslationResources = {
           desktop: "Desktop",
         },
       },
+      connectionLog: {
+        title: "Журнал подключения",
+        rowTitle: "Журнал подключения",
+        rowHint:
+          "Недавние события подключения и рукопожатия на этом устройстве. Без содержимого сообщений и ключей.",
+        open: "Открыть",
+        copy: "Копировать журнал",
+        clear: "Очистить",
+        empty: "Событий подключения пока нет.",
+        copyLabel: "журнал подключения",
+        copyFailed: "Не удалось скопировать журнал подключения",
+      },
     },
     appearance: {
       theme: {
@@ -2559,6 +2609,23 @@ export const ru: TranslationResources = {
         name: {
           label: "Имя",
         },
+        icon: {
+          label: "Значок",
+          accessibilityLabel: "Значок, {{value}}",
+          auto: "Авто",
+          autoDetected: "Авто ({{icon}})",
+          options: {
+            server: "Сервер",
+            laptop: "Ноутбук",
+            desktop: "Компьютер",
+            mini: "Мини-ПК",
+            workstation: "Рабочая станция",
+            cloud: "Облако",
+            container: "Контейнер",
+            board: "Одноплатный ПК",
+            terminal: "Терминал",
+          },
+        },
         color: {
           label: "Цвет",
           accessibilityLabel: "Цвет, {{value}}",
@@ -2594,6 +2661,13 @@ export const ru: TranslationResources = {
         relay: "Relay",
         tailnet: "Tailscale",
         local: "Местный",
+      },
+      connectionKinds: {
+        local: "Локальный",
+        relay: "Ретранслятор",
+        tailscale: "Tailscale",
+        direct: "Прямой",
+        routed: "Через",
       },
       connections: {
         active: "Active",
@@ -2799,6 +2873,31 @@ export const ru: TranslationResources = {
         save: "Сохранить",
         moveUp: "Переместить вверх",
         moveDown: "Переместить вниз",
+        searchPlaceholder: "Поиск профилей",
+        clearSearch: "Очистить поиск",
+        noSearchMatches: "Нет профилей по запросу «{{query}}»",
+        noRoutingNote: "Без заметки",
+        duplicate: "Дублировать",
+        copyName: "{{name}} (копия)",
+        moveToTop: "В начало списка",
+        profileActions: "Действия для {{name}}",
+        reorderProfile: "Изменить порядок {{name}}",
+        previousProfile: "Предыдущий профиль",
+        nextProfile: "Следующий профиль",
+        chooseModelPlaceholder: "Выберите модель",
+        searchModelsPlaceholder: "Поиск моделей",
+        chooseModelSubtitle: "Выберите модель",
+        customizeSettings: "Настроить параметры",
+        addRoutingNoteShort: "Добавить заметку",
+        providerOptionsLabel: "Параметры {{provider}}",
+        discardTitle: "Отменить изменения?",
+        discardMessage: "В этом профиле есть несохранённые изменения.",
+        discardConfirm: "Отменить",
+        columns: {
+          profile: "Профиль",
+          runtime: "Модель и запуск",
+          whenToUse: "Когда использовать",
+        },
         editProfile: "Изменить профиль",
         remove: "Удалить",
         removeConfirmTitle: "Удалить профиль?",

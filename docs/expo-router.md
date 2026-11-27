@@ -69,7 +69,12 @@ that decision; if no host route is mounted yet, it falls back to ordinary route
 navigation.
 
 Those hidden entries are not harmless: composer floating panels can measure
-against the wrong deck and disappear offscreen.
+against the wrong deck and disappear offscreen, and every hidden deck still
+treats the current workspace as focused, so each one runs the workspace
+effects. In v0.11.0 the ORC Workspace agents column used `router.push` for its
+rows; after a few clicks, closing the last tab seeded one blank "New Agent"
+draft per stacked deck. Open agents from inside a workspace with
+`navigateToAgent()` or `navigateToWorkspace()`, never `router.push`.
 
 Hidden host routes may keep their local params while an app-wide route is
 foregrounded. Active-workspace observers must prefer the current pathname and

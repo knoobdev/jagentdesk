@@ -28,13 +28,24 @@ export async function runCreateCommand(
   options: WorktreeCreateOptions,
   _command: Command,
 ): Promise<SingleResult<WorktreeCreateResult>> {
+  return runCreateCommandWithDeps(options, { connectToDaemon });
+}
+
+export async function runCreateCommandWithDeps(
+  options: WorktreeCreateOptions,
+  deps: {
+    connectToDaemon(
+      options: Parameters<typeof connectToDaemon>[0],
+    ): Promise<Pick<DaemonClient, "createJAgentDeskWorktree" | "close">>;
+  },
+): Promise<SingleResult<WorktreeCreateResult>> {
   const cwd = options.cwd ?? process.cwd();
   const request = buildCreateWorktreeRequest(options, cwd);
 
   const host = getDaemonHost({ host: options.host });
-  let client: DaemonClient;
+  let client: Pick<DaemonClient, "createJAgentDeskWorktree" | "close">;
   try {
-    client = await connectToDaemon({ host: options.host });
+    client = await deps.connectToDaemon({ host: options.host });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     throw cmdError(

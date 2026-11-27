@@ -8,6 +8,10 @@ import {
   normalizeWorkspaceTabTarget,
   workspaceTabTargetsEqual,
 } from "@/workspace-tabs/identity";
+import {
+  resolveTabDepartureSuccessor,
+  type PaneTabFocusHistory,
+} from "@/stores/workspace-tab-focus-policy";
 
 export interface SplitPane {
   id: string;
@@ -72,6 +76,7 @@ interface InsertChildIntoGroupInput {
 interface DetachTabFromTreeInput {
   tabId: string;
   preserveEmptyPaneId?: string | null;
+  replacementFocusedTabId?: string | null;
 }
 
 interface DetachTabFromTreeResult {
@@ -92,6 +97,7 @@ interface InsertSplitInternalInput {
   tabId: string;
   position: "left" | "right" | "top" | "bottom";
   createNodeId: (prefix: WorkspaceLayoutNodeIdPrefix) => string;
+  replacementFocusedTabId?: string | null;
 }
 
 interface InsertSplitInternalResult {
@@ -149,6 +155,7 @@ interface SplitPaneInLayoutInput {
   position: "left" | "right" | "top" | "bottom";
   createNodeId: (prefix: WorkspaceLayoutNodeIdPrefix) => string;
   maxTreeDepth: number;
+  paneFocusHistory?: PaneTabFocusHistory;
 }
 
 interface SplitPaneInLayoutResult {
@@ -168,6 +175,7 @@ interface MoveTabToPaneInLayoutInput {
   layout: WorkspaceLayout;
   tabId: string;
   toPaneId: string;
+  paneFocusHistory?: PaneTabFocusHistory;
 }
 
 interface FocusTabInLayoutInput {
@@ -710,6 +718,10 @@ function detachTabFromTree(
   const nextPane = normalizePaneAfterTabChange({
     ...paneNode.pane,
     tabs: paneNode.pane.tabs.filter((entry) => entry.tabId !== input.tabId),
+    focusedTabId:
+      paneNode.pane.focusedTabId === input.tabId
+        ? (input.replacementFocusedTabId ?? paneNode.pane.focusedTabId)
+        : paneNode.pane.focusedTabId,
   });
 
   const nextRoot = replaceNodeAtPath(root, panePath, () => ({ kind: "pane", pane: nextPane }));
@@ -846,6 +858,7 @@ function insertSplitInternal(input: InsertSplitInternalInput): InsertSplitIntern
   const detached = detachTabFromTree(input.root, {
     tabId: input.tabId,
     preserveEmptyPaneId: input.targetPaneId,
+    replacementFocusedTabId: input.replacementFocusedTabId,
   });
   invariant(detached.tab, `Tab not found: ${input.tabId}`);
 
@@ -1031,6 +1044,14 @@ export function collectAllTabs(root: SplitNode): WorkspaceTab[] {
     return internalRoot.pane.tabs.slice();
   }
   return internalRoot.group.children.flatMap((child) => collectAllTabs(child));
+}
+
+export function collectAllPanesIncludingHidden(root: SplitNode): SplitPane[] {
+  const internalRoot = asInternalNode(root);
+  if (internalRoot.kind === "pane") {
+    return [internalRoot.pane];
+  }
+  return internalRoot.group.children.flatMap((child) => collectAllPanesIncludingHidden(child));
 }
 
 export function collectAllPanes(root: SplitNode): SplitPane[] {
@@ -1242,9 +1263,9 @@ export function closeTabInLayout(input: CloseTabInLayoutInput): WorkspaceLayout 
     return null;
   }
 
-  const closeSuccessorTabId = getCloseSuccessorTabId({
+  const closeSuccessorTabId = resolveTabDepartureSuccessor("close", {
     pane,
-    tabId: input.tabId,
+    departingTabId: input.tabId,
     openTabIds: new Set(collectAllTabs(internalLayout.root).map((tab) => tab.tabId)),
     parentTabIdByTabId: input.layout.parentTabIdByTabId,
   });
@@ -1432,9 +1453,18 @@ export function splitPaneInLayout(input: SplitPaneInLayoutInput): SplitPaneInLay
   if (!findPaneById(layout.root, input.targetPaneId)) {
     return null;
   }
-  if (!findPaneContainingTab(layout.root, input.tabId)) {
+  const sourcePane = findPaneContainingTab(layout.root, input.tabId);
+  if (!sourcePane) {
     return null;
   }
+
+  const replacementFocusedTabId = resolveTabDepartureSuccessor("relocate", {
+    pane: sourcePane,
+    departingTabId: input.tabId,
+    openTabIds: new Set(collectAllTabs(layout.root).map((tab) => tab.tabId)),
+    parentTabIdByTabId: input.layout.parentTabIdByTabId,
+    paneFocusHistory: input.paneFocusHistory,
+  });
 
   const result = insertSplitInternal({
     root: layout.root,
@@ -1442,6 +1472,7 @@ export function splitPaneInLayout(input: SplitPaneInLayoutInput): SplitPaneInLay
     tabId: input.tabId,
     position: input.position,
     createNodeId: input.createNodeId,
+    replacementFocusedTabId,
   });
   if (getTreeDepth(result.root) > input.maxTreeDepth) {
     return null;
@@ -1523,9 +1554,21 @@ export function moveTabToPaneInLayout(input: MoveTabToPaneInLayoutInput): Worksp
     return null;
   }
 
+  const replacementFocusedTabId =
+    sourcePane.id === input.toPaneId
+      ? null
+      : resolveTabDepartureSuccessor("relocate", {
+          pane: sourcePane,
+          departingTabId: input.tabId,
+          openTabIds: new Set(collectAllTabs(layout.root).map((tab) => tab.tabId)),
+          parentTabIdByTabId: input.layout.parentTabIdByTabId,
+          paneFocusHistory: input.paneFocusHistory,
+        });
+
   const detached = detachTabFromTree(layout.root, {
     tabId: input.tabId,
     preserveEmptyPaneId: sourcePane.id === input.toPaneId ? input.toPaneId : null,
+    replacementFocusedTabId,
   });
   if (!detached.tab) {
     return null;
@@ -1676,29 +1719,6 @@ function withNormalizedParentTabMap(layout: WorkspaceLayout): WorkspaceLayout {
   return parentTabIdByTabId
     ? { ...layout, parentTabIdByTabId }
     : { root: layout.root, focusedPaneId: layout.focusedPaneId };
-}
-
-function getCloseSuccessorTabId(input: {
-  pane: SplitPane;
-  tabId: string;
-  openTabIds: ReadonlySet<string>;
-  parentTabIdByTabId?: Record<string, string>;
-}): string | null {
-  if (input.pane.focusedTabId !== input.tabId) {
-    return null;
-  }
-
-  const tabIndex = input.pane.tabIds.indexOf(input.tabId);
-  const parentTabId = input.parentTabIdByTabId?.[input.tabId] ?? null;
-  if (parentTabId && input.openTabIds.has(parentTabId)) {
-    return parentTabId;
-  }
-
-  return (
-    input.pane.tabIds[tabIndex + 1] ??
-    (tabIndex > 0 ? input.pane.tabIds[tabIndex - 1] : null) ??
-    null
-  );
 }
 
 function getFocusedPaneIdAfterTabClose(input: {

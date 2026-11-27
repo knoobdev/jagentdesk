@@ -118,7 +118,10 @@ export async function waitForConnectedHost(
 ): Promise<void> {
   await page.getByTestId("sidebar-hosts-trigger").click();
   const host = page.getByTestId(`sidebar-host-row-${input.serverId}`);
-  await expect(host).toContainText(input.endpoint, { timeout: 30_000 });
+  const escapedEndpoint = input.endpoint.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Local daemons render "Local" without repeating localhost:<port>; remote hosts render the endpoint.
+  await expect(host).toContainText(new RegExp(`${escapedEndpoint}|Local`), { timeout: 30_000 });
+  await expect(host).toContainText(/\d+(?:\.\d+)?(?:µs|ms|s)/, { timeout: 30_000 });
   await page.keyboard.press("Escape");
   await expect(host).not.toBeVisible();
 }
@@ -198,6 +201,12 @@ export async function chooseHostColor(page: Page, colorName: string): Promise<vo
   await page.getByRole("button", { name: /^Color, / }).click();
   await page.getByRole("button", { name: colorName, exact: true }).click();
   await expect(page.getByRole("button", { name: `Color, ${colorName}` })).toBeVisible();
+}
+
+export async function chooseHostIcon(page: Page, iconName: string): Promise<void> {
+  await page.getByTestId("host-appearance-icon").click();
+  await page.getByRole("menuitem", { name: iconName, exact: true }).click();
+  await expect(page.getByRole("button", { name: `Icon, ${iconName}` })).toBeVisible();
 }
 
 export async function chooseHostBadgeDisplay(
@@ -285,6 +294,28 @@ export async function reloadPreservingHostRegistry(page: Page): Promise<void> {
       localStorage.setItem(keys.disableSeedOnce, nonce);
     },
     { nonce: SEED_NONCE_KEY, disableSeedOnce: DISABLE_DEFAULT_SEED_ONCE_KEY },
+  );
+  await page.reload();
+}
+
+export async function disconnectAllHostsAndReload(page: Page): Promise<void> {
+  await page.evaluate(
+    ({ registryKey, nonceKey, disableSeedKey }) => {
+      const nonce = localStorage.getItem(nonceKey);
+      if (!nonce) throw new Error("Expected the e2e seed nonce");
+      const hosts = JSON.parse(localStorage.getItem(registryKey) ?? "[]");
+      for (const host of hosts) {
+        host.connections = [{ id: "offline", type: "directTcp", endpoint: "127.0.0.1:59999" }];
+        host.preferredConnectionId = "offline";
+      }
+      localStorage.setItem(registryKey, JSON.stringify(hosts));
+      localStorage.setItem(disableSeedKey, nonce);
+    },
+    {
+      registryKey: REGISTRY_KEY,
+      nonceKey: SEED_NONCE_KEY,
+      disableSeedKey: DISABLE_DEFAULT_SEED_ONCE_KEY,
+    },
   );
   await page.reload();
 }

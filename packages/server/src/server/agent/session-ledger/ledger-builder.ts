@@ -1,7 +1,7 @@
 import path from "node:path";
 import type { AgentTimelineItem } from "../agent-sdk-types.js";
 
-export const MAX_GOAL_CHARS = 4000;
+export const MAX_USER_MESSAGE_CHARS = 4000;
 export const MAX_TURN_ANSWER_CHARS = 2000;
 export const FAILED_COMMAND_TAIL_LINES = 20;
 const SYSTEM_ERROR_PREFIX = "[System Error]";
@@ -13,10 +13,16 @@ export interface LedgerTimelineRow {
   timestamp?: string;
 }
 
-export interface LedgerGoal {
+/**
+ * One user message, verbatim. A record of what was asked, never a goal: the agent's current goal
+ * is the ledger `goal` it writes itself (spec 42 §2).
+ */
+export interface LedgerUserMessage {
   seq: number;
   text: string;
-  /** Original length when the message was cut to {@link MAX_GOAL_CHARS}. */
+  /** ISO time the message was sent; renderers show it so old requests read as old. */
+  at?: string;
+  /** Original length when the message was cut to {@link MAX_USER_MESSAGE_CHARS}. */
   originalLength?: number;
 }
 
@@ -58,7 +64,8 @@ export interface LedgerTurn {
 
 /** The deterministic part of the session ledger: everything that can be read off the timeline. */
 export interface TimelineLedgerFacts {
-  goals: LedgerGoal[];
+  /** Oldest first, as on the timeline. */
+  userMessages: LedgerUserMessage[];
   files: LedgerFile[];
   commands: LedgerCommand[];
   errors: LedgerError[];
@@ -66,9 +73,11 @@ export interface TimelineLedgerFacts {
   latestSeq: number;
 }
 
-function truncateGoal(text: string, seq: number): LedgerGoal {
-  if (text.length <= MAX_GOAL_CHARS) return { seq, text };
-  return { seq, text: text.slice(0, MAX_GOAL_CHARS), originalLength: text.length };
+function truncateUserMessage(text: string, seq: number, at: string | undefined): LedgerUserMessage {
+  const message: LedgerUserMessage = { seq, text: text.slice(0, MAX_USER_MESSAGE_CHARS) };
+  if (at) message.at = at;
+  if (text.length > MAX_USER_MESSAGE_CHARS) message.originalLength = text.length;
+  return message;
 }
 
 export function truncateTurnAnswer(text: string): string {
@@ -104,7 +113,7 @@ function isDeleteDiff(diff: string | undefined): boolean {
 type ToolCallItem = Extract<AgentTimelineItem, { type: "tool_call" }>;
 
 class LedgerFactCollector {
-  readonly goals: LedgerGoal[] = [];
+  readonly userMessages: LedgerUserMessage[] = [];
   readonly files = new Map<string, LedgerFile>();
   readonly commands: LedgerCommand[] = [];
   readonly errors: LedgerError[] = [];
@@ -137,7 +146,7 @@ class LedgerFactCollector {
 
   private addUserMessage(seq: number, text: string): void {
     if (!text) return;
-    this.goals.push(truncateGoal(text, seq));
+    this.userMessages.push(truncateUserMessage(text, seq, this.at));
     this.currentTurn = { seq, endSeq: seq, userText: text, answer: null };
     this.turns.push(this.currentTurn);
   }
@@ -235,7 +244,7 @@ export function collectTimelineLedgerFacts(input: {
     if (row.seq > sinceSeq) collector.add(row.seq, row.item, row.timestamp);
   }
   return {
-    goals: collector.goals,
+    userMessages: collector.userMessages,
     files: Array.from(collector.files.values()),
     commands: collector.commands,
     errors: collector.errors,

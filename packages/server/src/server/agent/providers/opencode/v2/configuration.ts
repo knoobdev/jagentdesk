@@ -7,6 +7,7 @@ import {
 } from "../../../agent-sdk-types.js";
 import { OpenCodeProviderOptionsSchema, buildOpenCodePermissionRules } from "../options.js";
 import { modelRef } from "./mapping.js";
+import { openCodeMcpToolName } from "./session-mcp.js";
 
 export const controls: AgentOptionControl[] = [
   { type: "toggle", key: "auto_accept", label: "Auto-accept" },
@@ -19,7 +20,7 @@ export function permissionRules(config: AgentSessionConfig): PermissionRuleset {
       undefined,
     ) ?? [];
   const grants: PermissionRuleset = (config.toolPolicy?.preapproved ?? []).map((grant) => ({
-    action: `${grant.server.replace(/[^a-zA-Z0-9_-]/g, "_")}_${grant.tool.replace(/[^a-zA-Z0-9_-]/g, "_")}`,
+    action: openCodeMcpToolName(grant.server, grant.tool),
     resource: "*",
     effect: "allow",
   }));
@@ -61,14 +62,16 @@ export async function applyResumeOverrides(
   }
 }
 
-// Agent identity env is applied per session through `session.environment`, so
-// it must not force a dedicated server. Custom MCP is location-scoped, and any
-// other env key belongs to the process, so both need isolation. Mirrors the v1
-// adapter's `requiresDedicatedOpenCodeServer`.
+// Agent identity env is applied per session through `session.environment` on every server. Custom
+// MCP and any other env key need either the session path (the shared server reports
+// `features.mcpTools`) or, on the legacy path, a server of the agent's own (spec 33.7).
 const V2_SESSION_ENV_KEYS = new Set([
   "JAGENTDESK_AGENT_ID",
   "JAGENTDESK_AGENT_CWD",
   "JAGENTDESK_WORKSPACE_ID",
+  // The agent shim PATH and BROWSER (spec 04 §27b item 3b) are the same for every agent.
+  "PATH",
+  "BROWSER",
 ]);
 
 export function requiresDedicatedV2Server(

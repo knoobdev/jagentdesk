@@ -83,6 +83,19 @@ describe("turn_on_host_tools (spec 04 §27b.2)", () => {
     expect(result.text).toContain("reach this same conversation with the user's next message");
   });
 
+  test('the card names the group once, without a doubled "tools"', async () => {
+    const browser = setup({ groups: [group({ id: "browser-tools" })] });
+    await browser.run("browser-tools");
+    expect(browser.permissions[0]?.request.description).toBe(
+      "Agents on this host get the Browser tools. This conversation keeps its history.",
+    );
+    const docker = setup({ groups: [group({ id: "docker", name: "Docker" })] });
+    await docker.run("docker");
+    expect(docker.permissions[0]?.request.description).toBe(
+      "Agents on this host get the Docker tools. This conversation keeps its history.",
+    );
+  });
+
   test("Not now keeps the group off", async () => {
     const { run, turnedOn } = setup({
       groups: [group({ id: "docker" })],
@@ -135,7 +148,7 @@ describe("buildHostToolInstructions", () => {
     expect(off).not.toContain("`docker`");
     expect(off).toContain(TURN_ON_HOST_TOOLS_TOOL);
     expect(off).toContain("Never tell the user to open a new session");
-    expect(off).toContain("do not open web pages in the system browser");
+    expect(off).toContain("do not open web pages, HTML or PDF files in the system browser");
     expect(rest).toEqual([]);
   });
 
@@ -148,6 +161,10 @@ describe("buildHostToolInstructions", () => {
     expect(instructions[1]).toContain("`open`, `xdg-open`, `start`, `Start-Process`");
     expect(instructions[1]).toContain("Playwright");
     expect(instructions[1]).toContain("never fall back to the system browser");
+    // Spec 04 §27b item 3b: pages and local HTML/PDF files, not only URLs.
+    expect(instructions[1]).toContain("an HTML file or a PDF");
+    expect(instructions[1]).toContain("use `browser_new_tab`");
+    expect(instructions[1]).toContain("No JAgentDesk browser is connected");
   });
 
   test("only the tools-stay rule when every group is on and browser tools are absent", () => {

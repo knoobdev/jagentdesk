@@ -524,10 +524,12 @@ try {
     "attended worker permission",
     240000,
   );
-  await visible("bots-worker-permissions").waitFor();
+  // Worker permission cards are Needs you work at the top of the Items tab (spec 37.5).
+  await clickTab("items");
+  await visible("bots-needs-you-permissions").waitFor();
   await shot("worker-permission-desktop");
   await page.setViewportSize({ width: 390, height: 844 });
-  await visible("bots-worker-permissions").waitFor();
+  await visible("bots-needs-you-permissions").waitFor();
   await shot("worker-permission-mobile");
   result.workerPermission = permissionProof.worker.pendingPermissions[0];
   await client.botsRequest("bots.pause.request", { botId: attendedBot.id, paused: true });

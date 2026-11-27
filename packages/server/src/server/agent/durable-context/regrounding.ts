@@ -2,10 +2,10 @@ import type {
   LedgerCommand,
   LedgerError,
   LedgerFile,
-  LedgerGoal,
+  LedgerUserMessage,
   TimelineLedgerFacts,
 } from "../session-ledger/ledger-builder.js";
-import { estimateTokens } from "../session-ledger/ledger-render.js";
+import { estimateTokens, renderUserMessages } from "../session-ledger/ledger-render.js";
 import type { LedgerNote, LedgerOpenItem } from "../session-ledger/ledger-schema.js";
 
 /** Spec 42 §2: the "Where we are" block never exceeds this. */
@@ -16,7 +16,10 @@ export const RECITATION_TOKEN_CAP = 120;
 export const LEDGER_NUDGE_SHARE = 0.8;
 /** The artifact index starts from at most this many entries of each kind. */
 const MAX_INDEX_ENTRIES = 60;
-const GOAL_KEEP_RECENT = 3;
+/** The newest user messages are cut last, after everything but the next step. */
+const USER_MESSAGES_KEEP_RECENT = 3;
+/** Spec 42 §2: marks the recitation line as context so the model never reads it as a request. */
+export const RECITATION_PREFIX = "[JAgentDesk context, not a new request]";
 
 export const LEDGER_NUDGE_TEXT =
   "(JAgentDesk) Your context window is over 80 % full and will be compacted soon. Before you go on " +
@@ -39,9 +42,12 @@ export interface UnresolvedError {
 
 /** What the block shows; trimmed in place while fitting. */
 export interface RegroundingDocument {
-  goals: LedgerGoal[];
-  /** User messages left out of the middle to fit the cap. */
-  omittedGoals: number;
+  /** The agent's own record of the current task; never cut. */
+  goal: LedgerNote | null;
+  /** The user's messages, newest first; the oldest are cut first. */
+  userMessages: LedgerUserMessage[];
+  /** Oldest user messages left out to fit the cap. */
+  omittedUserMessages: number;
   nextStep: LedgerNote | null;
   decisions: LedgerNote[];
   openItems: LedgerOpenItem[];
@@ -99,7 +105,12 @@ function oneLine(text: string, max: number): string {
 
 export function buildRegroundingDocument(input: {
   facts: TimelineLedgerFacts;
-  notes: { decisions: LedgerNote[]; openItems: LedgerOpenItem[]; nextStep: LedgerNote | null };
+  notes: {
+    goal?: LedgerNote | null;
+    decisions: LedgerNote[];
+    openItems: LedgerOpenItem[];
+    nextStep: LedgerNote | null;
+  };
   memories: string[];
   memoriesAttached: boolean;
 }): RegroundingDocument {
@@ -107,8 +118,9 @@ export function buildRegroundingDocument(input: {
     .sort((left, right) => left.lastSeq - right.lastSeq)
     .slice(-MAX_INDEX_ENTRIES);
   return {
-    goals: [...input.facts.goals],
-    omittedGoals: 0,
+    goal: input.notes.goal ?? null,
+    userMessages: input.facts.userMessages.toReversed(),
+    omittedUserMessages: 0,
     nextStep: input.notes.nextStep,
     decisions: [...input.notes.decisions],
     openItems: input.notes.openItems.filter((item) => item.closedSeq == null),
@@ -122,13 +134,6 @@ export function buildRegroundingDocument(input: {
   };
 }
 
-function quote(text: string): string {
-  return text
-    .split("\n")
-    .map((line) => `> ${line}`)
-    .join("\n");
-}
-
 function fence(text: string): string {
   const longest = Math.max(2, ...Array.from(text.matchAll(/`+/g), (match) => match[0].length));
   const ticks = "`".repeat(longest + 1);
@@ -137,22 +142,6 @@ function fence(text: string): string {
 
 function when(at: string | undefined): string {
   return at ? ` · ${at.replace("T", " ").replace(/\.\d+Z$/, "Z")}` : "";
-}
-
-function renderGoals(document: RegroundingDocument): string[] {
-  if (document.goals.length === 0) return [];
-  const lines = ["## Goals and constraints (the user's messages, verbatim, oldest first)", ""];
-  document.goals.forEach((goal, index) => {
-    if (document.omittedGoals > 0 && index === 1) {
-      lines.push(`(${document.omittedGoals} earlier messages left out to fit)`, "");
-    }
-    lines.push(quote(goal.text));
-    if (goal.originalLength) {
-      lines.push(`(first ${goal.text.length} of ${goal.originalLength} characters)`);
-    }
-    lines.push("");
-  });
-  return lines;
 }
 
 function renderList(heading: string, entries: string[]): string[] {
@@ -208,7 +197,11 @@ export function renderRegroundingBlock(document: RegroundingDocument): string {
     "Your context was just compacted. JAgentDesk rebuilt this from its session ledger and the " +
       "timeline (no model wrote it). Where it differs from your summary, trust this.",
     "",
-    ...renderGoals(document),
+    ...(document.goal ? ["## Current goal (recorded by you)", "", document.goal.text, ""] : []),
+    ...renderUserMessages(document.userMessages, {
+      heading: "## The user's messages (verbatim)",
+      omitted: document.omittedUserMessages,
+    }),
     ...(document.nextStep ? ["## Next step", "", document.nextStep.text, ""] : []),
     ...renderList(
       "## Decisions",
@@ -226,9 +219,9 @@ export function renderRegroundingBlock(document: RegroundingDocument): string {
 
 /**
  * Cut steps, in spec 40.3's spirit for a 3 000-token block: old command output first, then the
- * command list, memories, older files, decisions, open items and errors (oldest first), then user
- * messages from the middle (the first one and the latest three stay longest). The next step is
- * never cut. Each step returns false when it has nothing left.
+ * command list, memories, older files, decisions, open items and errors (oldest first), and the
+ * user's messages from the oldest; the newest three stay longest and the newest one is never cut.
+ * The goal and the next step are never cut. Each step returns false when it has nothing left.
  */
 const CUT_STEPS: Array<(document: RegroundingDocument) => boolean> = [
   (document) => {
@@ -249,30 +242,32 @@ const CUT_STEPS: Array<(document: RegroundingDocument) => boolean> = [
   },
   (document) => document.memories.pop() !== undefined,
   (document) => (document.files.length > 10 ? document.files.shift() !== undefined : false),
-  (document) => (document.goals.length > GOAL_KEEP_RECENT + 1 ? dropMiddleGoal(document) : false),
+  (document) =>
+    document.userMessages.length > USER_MESSAGES_KEEP_RECENT
+      ? dropOldestUserMessage(document)
+      : false,
   (document) => document.decisions.shift() !== undefined,
   (document) => document.files.shift() !== undefined,
   (document) => (document.errors.length > 1 ? document.errors.shift() !== undefined : false),
   (document) => (document.openItems.length > 3 ? document.openItems.shift() !== undefined : false),
-  (document) => (document.goals.length > 2 ? dropMiddleGoal(document) : false),
-  (document) => shortenLongestGoal(document),
+  (document) => shortenLongestUserMessage(document),
   (document) => document.openItems.shift() !== undefined,
   (document) => document.errors.shift() !== undefined,
-  (document) => (document.goals.length > 1 ? dropMiddleGoal(document) : false),
+  (document) => (document.userMessages.length > 1 ? dropOldestUserMessage(document) : false),
 ];
 
-function dropMiddleGoal(document: RegroundingDocument): boolean {
-  if (document.goals.length < 2) return false;
-  document.goals.splice(1, 1);
-  document.omittedGoals += 1;
+function dropOldestUserMessage(document: RegroundingDocument): boolean {
+  if (document.userMessages.length < 2) return false;
+  document.userMessages.pop();
+  document.omittedUserMessages += 1;
   return true;
 }
 
-function shortenLongestGoal(document: RegroundingDocument): boolean {
-  let longest: LedgerGoal | null = null;
-  for (const goal of document.goals) {
-    if (goal.text.length > 400 && (!longest || goal.text.length > longest.text.length))
-      longest = goal;
+function shortenLongestUserMessage(document: RegroundingDocument): boolean {
+  let longest: LedgerUserMessage | null = null;
+  for (const message of document.userMessages) {
+    if (message.text.length > 400 && (!longest || message.text.length > longest.text.length))
+      longest = message;
   }
   if (!longest) return false;
   longest.originalLength = longest.originalLength ?? longest.text.length;
@@ -308,20 +303,28 @@ function clip(text: string, max: number): string {
 }
 
 /**
- * Spec 42 §2 recitation: "Goal: … · Next: … · Open: n" at the end of the message, under 120 tokens.
- * Null when there is no goal yet (an agent's first message).
+ * Spec 42 §2 recitation: "[JAgentDesk context, not a new request] Goal: … · Next: … · Open: n" at
+ * the end of the message, under 120 tokens. Goal is the ledger goal the agent wrote itself, never a
+ * user message: an agent alive for weeks re-sent its oldest request as "Goal" every turn and
+ * redid it. Empty parts are left out; null when all three are empty.
  */
 export function renderRecitation(input: {
   goal: string | null;
   nextStep: string | null;
   openCount: number;
 }): string | null {
-  if (!input.goal) return null;
-  const budget = RECITATION_TOKEN_CAP * 4 - 60;
-  const nextBudget = input.nextStep ? Math.floor(budget / 2) : 0;
-  const goal = clip(input.goal, budget - nextBudget);
-  const next = input.nextStep ? clip(input.nextStep, nextBudget) : "—";
-  return `(JAgentDesk recitation) Goal: ${goal} · Next: ${next} · Open: ${input.openCount}`;
+  const goalText = input.goal?.trim() ?? "";
+  const nextText = input.nextStep?.trim() ?? "";
+  if (!goalText && !nextText && input.openCount <= 0) return null;
+  const budget = RECITATION_TOKEN_CAP * 4 - RECITATION_PREFIX.length - 30;
+  const goalBudget = nextText ? Math.floor(budget / 2) : budget;
+  const nextBudget = goalText ? budget - goalBudget : budget;
+  const parts = [
+    ...(goalText ? [`Goal: ${clip(goalText, goalBudget)}`] : []),
+    ...(nextText ? [`Next: ${clip(nextText, nextBudget)}`] : []),
+    ...(input.openCount > 0 ? [`Open: ${input.openCount}`] : []),
+  ];
+  return `${RECITATION_PREFIX} ${parts.join(" · ")}`;
 }
 
 /** Context use as a share of the window, or null when the provider did not report both. */

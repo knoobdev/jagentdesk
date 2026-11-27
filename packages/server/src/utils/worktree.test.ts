@@ -5,6 +5,7 @@ import {
   deleteJAgentDeskWorktree,
   readWorktreeHead,
   isJAgentDeskOwnedWorktreeCwd,
+  listJAgentDeskWorktrees,
   mapWorkspaceCwdToWorktree,
   runWorktreeTeardownCommands,
   slugify,
@@ -96,6 +97,14 @@ describe("jagentdesk worktree manager", () => {
   afterEach(async () => {
     await rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
+
+  function cloneBareRepository(): string {
+    const bareRepo = join(tempDir, "bare.git");
+    execFileSync("git", ["clone", "--bare", "-q", repoDir, bareRepo]);
+    // A bare clone does not copy the checkout's local config; its linked worktrees share this one.
+    execFileSync("git", ["--git-dir", bareRepo, "config", "core.autocrlf", "false"]);
+    return bareRepo;
+  }
 
   it.each([
     { existing: [], preferred: "main/patch-1", expected: "main-1/patch-1" },
@@ -216,6 +225,45 @@ describe("jagentdesk worktree manager", () => {
     }).toEqual({ exitCode: 0, stdoutLength: limit, stderrLength: limit });
   });
 
+  it("stops teardown at its deadline while a plugin hook is pending, without starting the command", async () => {
+    writeFileSync(
+      join(repoDir, "jagentdesk.json"),
+      JSON.stringify({
+        worktree: {
+          teardown: `node -e "require('fs').writeFileSync('ran.txt', 'ran')"`,
+          teardownTimeoutMs: 100,
+        },
+      }),
+    );
+    let hookDone!: () => void;
+    const hookSettled = new Promise<void>((resolve) => {
+      hookDone = resolve;
+    });
+
+    const startedAt = Date.now();
+    await expect(
+      runWorktreeTeardownCommands({
+        worktreePath: repoDir,
+        repoRootPath: repoDir,
+        branchName: "main",
+        prepareCommand: async ({ env }) => {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          hookDone();
+          return { env };
+        },
+      }),
+    ).rejects.toMatchObject({
+      name: "WorktreeTeardownError",
+      message: `Worktree teardown command failed: node -e "require('fs').writeFileSync('ran.txt', 'ran')"\nTimed out after 0.1s`,
+      results: [],
+    });
+    expect(Date.now() - startedAt).toBeLessThan(900);
+    // The hook answering after the deadline does not start the command.
+    await hookSettled;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(existsSync(join(repoDir, "ran.txt"))).toBe(false);
+  });
+
   it("rejects paths that are not under the jagentdesk worktrees root", async () => {
     const outsidePath = join(tempDir, "outside-jagentdesk-home");
     mkdirSync(outsidePath, { recursive: true });
@@ -307,6 +355,48 @@ describe("jagentdesk worktree manager", () => {
     ).resolves.toMatchObject({
       allowed: false,
     });
+  });
+
+  it("creates and removes a worktree from a bare repository with no linked checkouts", async () => {
+    const bareRepo = cloneBareRepository();
+
+    const created = await createLegacyWorktreeForTest({
+      branchName: "from-bare",
+      cwd: bareRepo,
+      baseBranch: "main",
+      worktreeSlug: "from-bare",
+      jagentdeskHome,
+    });
+    expect(readFileSync(join(created.worktreePath, "file.txt"), "utf8")).toBe("hello\n");
+
+    await deleteJAgentDeskWorktree({
+      cwd: bareRepo,
+      worktreePath: created.worktreePath,
+      jagentdeskHome,
+    });
+    expect(existsSync(created.worktreePath)).toBe(false);
+    expect(
+      execFileSync("git", ["--git-dir", bareRepo, "worktree", "list", "--porcelain"], {
+        encoding: "utf8",
+      }),
+    ).not.toContain(created.worktreePath);
+  });
+
+  it("lists the worktrees of a bare repository that only JAgentDesk checkouts use", async () => {
+    const bareRepo = cloneBareRepository();
+    const created = await createLegacyWorktreeForTest({
+      branchName: "listed",
+      cwd: bareRepo,
+      baseBranch: "main",
+      worktreeSlug: "listed",
+      jagentdeskHome,
+    });
+
+    const worktrees = await listJAgentDeskWorktrees({ cwd: bareRepo, jagentdeskHome });
+
+    expect(worktrees.map((entry) => [entry.path, entry.branchName])).toEqual([
+      [realpathSync.native(created.worktreePath), "listed"],
+    ]);
   });
 
   it("deletes a worktree whose .git admin dir has already been removed", async () => {

@@ -47,6 +47,13 @@ Jira, Argo CD, forges and devices, Bots, and connected hosts.
 
 ---
 
+## ✨ New in v0.11.1
+
+Phones connect after pairing again, long agents stop redoing old work, agents never open your real browser, and bot
+permission cards answer instead of spinning. OpenCode agents run their own MCP servers on a shared OpenCode server, and
+Paseo 0.17.4–0.17.5 brings a redesigned host picker, multi-select archiving and new agent profiles. Details:
+**[docs/releases/v0.11.1.md](docs/releases/v0.11.1.md)**.
+
 ## ✨ New in v0.11.0
 
 Agents that keep their context: switch an agent between Claude, Codex, OpenCode and other providers without losing what it
@@ -289,7 +296,7 @@ GitHub release. To cut one:
 ```bash
 # set "version" in the root package.json, then sync every workspace:
 npm run version:sync-internal
-git tag v0.11.0
+git tag v0.11.1
 git push origin main --tags
 ```
 

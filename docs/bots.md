@@ -44,7 +44,9 @@ existing gate. The only setting that permits unattended operation is explicit
 > This bot and its workers will run tools without asking.
 
 Agents cannot change this setting through bot tools, approve their own permission cards,
-or use the generic mode-changing tool. Finish/cancel active worker items before changing
+or use the generic mode-changing tool. Their pending permission cards (Supervisor, workers and
+the workers' subagents) are Needs you work: they sit at the top of the Items tab and count in its
+badge, never above every tab. The Supervisor's own cards also show inline in Chat. Finish/cancel active worker items before changing
 provider, model, mode or unattended settings. Untrusted Slack/Jira/GitHub/room content never
 changes standing authority. See [permissions](permissions.md).
 
