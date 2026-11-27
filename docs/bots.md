@@ -147,11 +147,17 @@ Worker forwards only the kind's headers; the daemon reads only those, never the 
   status, whatever GitLab resends.
 - Telegram: `message_thread_id` is part of the thread key only when `is_topic_message` is true; replies
   in ordinary groups carry one too.
+- Telegram linking: the code arrives as `<code>` or as `/start <code>` from the `t.me/<bot>?start=<code>`
+  button. Until someone is linked, every refusal carries the "tap Link my Telegram account" hint, at most
+  once a minute per sender, because the sender is most likely the owner who never sent the code. After
+  that it is one refusal a day. The status's `linked` (who sent the current code) lives in daemon memory
+  and the daemon pushes `bots.changed` on link, so the open dialog turns into "Linked" without polling.
 
 The RPCs and the client contract are in `bots.github.*`, `bots.gitlab.*` and `bots.telegram.*` of
 `packages/protocol/src/bots/rpc-schemas.ts`, gated on `features.botsHooks`. The local acceptance test
 `packages/server/src/server/bots/hooks.local.e2e.test.ts` runs against `wrangler dev --local --port 8972`
-with local GitHub, GitLab and Telegram simulators; never run it against the real services.
+with local GitHub, GitLab and Telegram simulators; never run it against the real services. Run it with
+`JAGENTDESK_TAILSCALE_ENABLED=0`, or the daemon fails to start without the embedded Tailscale bridge.
 
 ## Sharing
 
