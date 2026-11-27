@@ -1425,8 +1425,13 @@ function reduceTimelineCompaction(
   timestamp: Date,
   timelineCursor?: TimelinePosition,
 ): StreamItem[] {
+  const loadingIdx = state.findIndex((s) => s.kind === "compaction" && s.status === "loading");
+  // Timelines recorded before the Claude provider deduped its 30-second "compacting" heartbeat
+  // hold one loading row per repeat. One compaction gets one row, so a repeat is dropped.
+  if (item.status === "loading" && loadingIdx >= 0) {
+    return state;
+  }
   if (item.status === "completed") {
-    const loadingIdx = state.findIndex((s) => s.kind === "compaction" && s.status === "loading");
     const existing = loadingIdx >= 0 ? state[loadingIdx] : undefined;
     if (loadingIdx >= 0 && existing && existing.kind === "compaction") {
       const updated: CompactionItem = {
@@ -1436,10 +1441,12 @@ function reduceTimelineCompaction(
         trigger: item.trigger ?? existing.trigger,
         preTokens: item.preTokens ?? existing.preTokens,
       };
-      return [...state.slice(0, loadingIdx), updated, ...state.slice(loadingIdx + 1)];
-    }
-    if (loadingIdx >= 0) {
-      return state;
+      // Any other loading row is a repeat of the compaction that just finished.
+      return state.flatMap((entry, index) => {
+        if (index === loadingIdx) return [updated];
+        if (entry.kind === "compaction" && entry.status === "loading") return [];
+        return [entry];
+      });
     }
   }
   const compaction: CompactionItem = {
