@@ -20,7 +20,6 @@ export interface V2Api {
     | "context"
     | "interrupt"
     | "revert"
-    | "log"
   > & {
     inbox: Pick<OpenCodeClient["session"]["inbox"], "list">;
     form: Pick<OpenCodeClient["session"]["form"], "list" | "reply" | "cancel">;
