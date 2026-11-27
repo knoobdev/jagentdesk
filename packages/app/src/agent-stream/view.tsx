@@ -67,7 +67,8 @@ import type {
 } from "@jagentdesk/protocol/agent-types";
 import { type AgentScreenAgent } from "@/hooks/use-agent-screen-state-machine";
 import { useSessionStore } from "@/stores/session-store";
-import { stripBotEnvelope, stripBotQuietMarker } from "@/bots/envelope";
+import { isBotRestartWake, stripBotEnvelope, stripBotQuietMarker } from "@/bots/envelope";
+import { BotRestartNotice } from "@/bots/restart-notice";
 import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
 import { useLoadOlderAgentHistory } from "@/hooks/use-load-older-agent-history";
 import { useSettings, resolveContentMaxWidth } from "@/hooks/use-settings";
@@ -764,7 +765,10 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const renderUserMessageItem = useCallback(
       (layoutItem: StreamLayoutItem, item: Extract<StreamItem, { kind: "user_message" }>) => {
         const collapsedTurn = getCollapsedTurn(item.id);
-        const message = (
+        const restart = Boolean(context.botId) && isBotRestartWake(item.text);
+        const message = restart ? (
+          <BotRestartNotice />
+        ) : (
           <UserMessage
             serverId={resolvedServerId}
             agentId={agentId}
@@ -1138,6 +1142,8 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         const layoutItem =
           originalLayoutItem.item === item ? originalLayoutItem : { ...originalLayoutItem, item };
         const rawContent = renderStreamItemContent(layoutItem);
+        // Nothing drawn (a bot's quiet reply) gets no turn header either.
+        if (!rawContent) return null;
         const segment = providerSegments.get(item.id);
         const content = isGumloop
           ? wrapGumloopAgentItem({

@@ -127,6 +127,10 @@ export type BotAllowedSource = (bot: Bot) => Promise<BotAllowedPerson[]>;
 
 /** Orca's turn to a bot it just created (`shared/bot-created-kickoff.ts`). */
 export const BOT_CREATED_KICKOFF = "JAgentDesk: you were just created. Start your first-run setup.";
+/** Orca dfdb4fda (MIT) src/shared/agent-session/lifecycle/stopping/agent-session-restart-continuation.ts:7,
+ *  "Orca" → "JAgentDesk". Sent as `[restart]`; the app shows its own notice instead of this text. */
+export const RESTART_CONTINUATION_PROMPT =
+  "JAgentDesk restarted, so your previous reply was cut off partway through. Before continuing, check whether your most recent action completed — don't repeat it if it did. Then carry on.";
 const TOOK_OVER_TURN_PREFIX = "[JAgentDesk: your owner just handed you the workspace ";
 const TOOK_OVER_GOAL_HEADING = "Your owner's words:\n\n";
 const DAY_MS = 24 * 60 * 60_000;
@@ -2302,17 +2306,14 @@ export class BotsService {
             running: false,
             runAgentId: undefined,
           });
+        // Orca continues only a chat whose turn the restart cut (agent-session-restart-continuation.ts,
+        // structured-agent-session-launch-continuation.ts): once per cut message, in Orca's words.
+        // Open items, waiting questions and workers need no turn: they stay as stored, and a worker's
+        // next finish or failure wakes the bot as usual. An undelivered message already owns its retry.
         const active = this.storage.state(`active:${bot.id}`, BotMessageSchema.nullable());
-        // An undelivered wake already owns its retry. Otherwise the active receipt
-        // survives a crash even when a chat turn has not created an item yet.
         const retryPending = active && this.storage.pending(bot.id).some((m) => m.id === active.id);
-        if (!retryPending && (active || this.storage.items(bot.id).length > 0))
-          this.wake(
-            bot.id,
-            "The daemon resumed. Reconcile your open items with their existing workers and pending questions. Never create a replacement worker for an existing item; inspect or message its worker first.",
-            "resume",
-            active ? `resume:${active.id}` : undefined,
-          );
+        if (active && !retryPending)
+          this.wake(bot.id, RESTART_CONTINUATION_PROMPT, "restart", `restart:${active.id}`);
       }
     }
     this.timer = setInterval(() => this.launch(this.tick()), 1000);

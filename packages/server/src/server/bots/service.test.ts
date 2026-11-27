@@ -7,7 +7,7 @@ import pino from "pino";
 import { afterEach, expect, it } from "vitest";
 import type { Bot } from "@jagentdesk/protocol/bots/types";
 import { BotStorage, DEFAULT_BOT_IDENTITY } from "./storage.js";
-import { BotsService } from "./service.js";
+import { BotsService, RESTART_CONTINUATION_PROMPT } from "./service.js";
 import { FakeBotRuntime } from "./test-utils/fake-runtime.js";
 
 class Runtime extends FakeBotRuntime {}
@@ -342,7 +342,29 @@ it("cold restart continues a running background supervisor once with generic rec
   expect(generic).toEqual(["foreground"]);
   expect(runtime.sent.filter(({ id }) => id === supervisorId)).toHaveLength(1);
   expect(runtime.sent.filter(({ id }) => id === "idle-supervisor")).toEqual([]);
-  expect(runtime.sent.find(({ id }) => id === supervisorId)?.text).toContain("daemon resumed");
+  expect(runtime.sent.find(({ id }) => id === supervisorId)?.text).toBe(
+    `[restart]\n${RESTART_CONTINUATION_PROMPT}`,
+  );
+});
+
+it("cold restart leaves an idle bot with open items asleep (no model turn)", async () => {
+  const { service: before } = setup();
+  const bot = await createBot(before);
+  before.addItem(bot.id, "Fix sum", "Tests pass");
+  const home = homes.at(-1)!;
+  await before.dispose();
+  services.splice(services.indexOf(before), 1);
+  const runtime = new Runtime();
+  const restarted = new BotsService(new BotStorage(home), runtime, {
+    logger: pino({ level: "silent" }),
+  });
+  services.push(restarted);
+  restarted.start();
+  await restarted.settled();
+  await restarted.tick();
+  await restarted.settled();
+  expect(runtime.sent).toEqual([]);
+  expect(restarted.storage.items(bot.id).map((item) => item.title)).toEqual(["Fix sum"]);
 });
 
 it("cold restart retries an undelivered active wake without also scheduling a continuation", async () => {

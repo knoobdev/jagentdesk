@@ -130,6 +130,9 @@ const botsShareStrings = {
 // Strings JAgentDesk owns (round-1 surfaces still in use, and the lines spec 37 adds to Orca's:
 // GitLab and Telegram rows, Review before done, the Look around / Tidy memory result lines).
 const botsJadStrings = {
+  // Orca dfdb4fda en.json `restartContinued` (the native chat's restart notice), "Orca" -> "JAgentDesk".
+  restartContinued:
+    "JAgentDesk asked this agent to continue after a restart. Your own prompt was not re-sent.",
   slack: {
     title: "Slack",
     createApp: "Create Slack app",

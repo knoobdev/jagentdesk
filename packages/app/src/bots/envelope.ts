@@ -14,6 +14,22 @@ export function stripBotEnvelope(text: string): string {
   return text.replace(BOT_ENVELOPE, "");
 }
 
+/** The source the daemon put on a delivered message, or null without an envelope. */
+export function botEnvelopeSource(text: string): string | null {
+  const match = BOT_ENVELOPE.exec(text);
+  return match ? match[0].slice(1, -2) : null;
+}
+
+/**
+ * The daemon's turn after a restart cut the bot's reply (`[restart]`; `[resume]` from round-1
+ * daemons). Its words are for the agent only; the chat shows a notice in their place, as Orca's
+ * NativeChatNoticeRow does for `restartContinued`.
+ */
+export function isBotRestartWake(text: string): boolean {
+  const source = botEnvelopeSource(text);
+  return source === "restart" || source === "resume";
+}
+
 /** `BOT_QUIET_MARKER` (`server/bots/look-around.ts`): a bot ends a reply with it to post nothing. */
 const BOT_QUIET_MARKER = "[[quiet]]";
 
