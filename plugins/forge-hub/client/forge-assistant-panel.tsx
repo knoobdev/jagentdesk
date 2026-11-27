@@ -5,18 +5,12 @@ import { ArrowLeft, MessageSquare, Plus, X } from "lucide-react-native";
 import type { ForgeRepo, ForgeRepoRef } from "@jagentdesk/protocol/messages";
 import {
   AgentConversationPanel,
-  PaneProvider,
-  PaneFocusProvider,
-  createPaneFocusContextValue,
+  EmbeddedAgentPaneProvider,
   useHostRuntimeClient,
   useProvidersSnapshot,
   useSessionStore,
 } from "../../../packages/app/src/plugins/builtin/host-api";
-import type {
-  PaneContextValue,
-  Agent,
-  Theme,
-} from "../../../packages/app/src/plugins/builtin/host-api";
+import type { Agent, Theme } from "../../../packages/app/src/plugins/builtin/host-api";
 import {
   ForgeAssistantDraft,
   FORGE_ASSISTANT_LABEL,
@@ -29,7 +23,6 @@ const ThemedArrowLeft = withUnistyles(ArrowLeft);
 const ThemedMessageSquare = withUnistyles(MessageSquare);
 const ThemedPlus = withUnistyles(Plus);
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
-const noop = () => {};
 
 /** Most recently active, non-archived Forge assistant agent for this host whose
  *  baked repo context matches `currentRepo`. Matching the repo-scope label (not
@@ -91,25 +84,31 @@ function ForgeAssistantBody({
   ready,
   hasProvider,
   hasCwd,
-  paneValue,
-  focusValue,
+  serverId,
+  workspaceId,
+  onClose,
   entryComposer,
 }: {
   agentId: string | null;
   ready: boolean;
   hasProvider: boolean;
   hasCwd: boolean;
-  paneValue: PaneContextValue;
-  focusValue: ReturnType<typeof createPaneFocusContextValue>;
+  serverId: string;
+  workspaceId: string | null;
+  onClose: () => void;
   entryComposer: ReactNode;
 }) {
   if (agentId) {
     return (
-      <PaneProvider value={paneValue}>
-        <PaneFocusProvider value={focusValue}>
-          <AgentConversationPanel />
-        </PaneFocusProvider>
-      </PaneProvider>
+      <EmbeddedAgentPaneProvider
+        serverId={serverId}
+        workspaceId={workspaceId}
+        agentId={agentId}
+        tabId={`forge-assistant-${agentId}`}
+        onClose={onClose}
+      >
+        <AgentConversationPanel />
+      </EmbeddedAgentPaneProvider>
     );
   }
   if (ready) {
@@ -155,9 +154,16 @@ export function ForgeAssistantPanel({
   const [agentId, setAgentId] = useState<string | null>(null);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
 
+  // Keyed on the fields, so a re-fetched repo object naming the same repo keeps the same ref.
+  const repoForge = repo?.forge;
+  const repoOwner = repo?.owner;
+  const repoName = repo?.name;
   const repoRef = useMemo<ForgeRepoRef | null>(
-    () => (repo ? { forge: repo.forge, owner: repo.owner, name: repo.name } : null),
-    [repo?.forge, repo?.owner, repo?.name],
+    () =>
+      repoForge !== undefined && repoOwner !== undefined && repoName !== undefined
+        ? { forge: repoForge, owner: repoOwner, name: repoName }
+        : null,
+    [repoForge, repoOwner, repoName],
   );
 
   const handleCreated = useCallback((input: { agentId: string; workspaceId: string | null }) => {
@@ -220,25 +226,6 @@ export function ForgeAssistantPanel({
     [serverId, repoRef, cwd, handleCreated],
   );
 
-  const paneValue = useMemo<PaneContextValue>(
-    () => ({
-      serverId,
-      workspaceId: workspaceId ?? "",
-      tabId: `forge-assistant-${agentId ?? "none"}`,
-      target: { kind: "agent", agentId: agentId ?? "" },
-      openTab: noop,
-      closeCurrentTab: onClose,
-      retargetCurrentTab: noop,
-      openFileInWorkspace: noop,
-      openImportSheet: noop,
-    }),
-    [serverId, workspaceId, agentId, onClose],
-  );
-  const focusValue = useMemo(
-    () => createPaneFocusContextValue({ isWorkspaceFocused: true, isPaneFocused: true }),
-    [],
-  );
-
   const subtitle = repo ? `${repo.owner}/${repo.name}` : "All repositories";
 
   return (
@@ -292,8 +279,9 @@ export function ForgeAssistantPanel({
           ready={ready}
           hasProvider={Boolean(provider)}
           hasCwd={Boolean(cwd)}
-          paneValue={paneValue}
-          focusValue={focusValue}
+          serverId={serverId}
+          workspaceId={workspaceId}
+          onClose={onClose}
           entryComposer={entryComposer}
         />
       </View>
