@@ -26,6 +26,7 @@ import { newShareKey, openShare, parseShareLink, sealShare, ShareSealError } fro
 import { readBotPackageArchive, writeBotPackageArchive } from "./archive.js";
 import { BOT_PACKAGE_MANIFEST_PATH } from "./package.js";
 import { scanBotText } from "./text-scan.js";
+import { attachBotSchedules } from "../test-utils/schedules.js";
 
 class Bucket implements ShareBucket {
   readonly objects = new Map<string, { bytes: Uint8Array; meta?: Record<string, string> }>();
@@ -128,6 +129,7 @@ async function daemon(worker: Awaited<ReturnType<typeof startWorker>>, serverId:
   const service = new BotsService(storage, new FakeBotRuntime(), {
     logger: pino({ level: "silent" }),
   });
+  attachBotSchedules({ service, home });
   const secrets = new MemorySecretStore();
   const sharing = new BotsSharing(service, {
     logger: pino({ level: "silent" }),
@@ -165,7 +167,7 @@ async function makeBot(d: Awaited<ReturnType<typeof daemon>>, name: string) {
   }
   writeFileSync(join(home, "skills", "release-notes", "run.sh"), "#!/bin/sh\necho hi\n");
   writeFileSync(join(home, "memory", "repo-facts.md"), "Fact: tests run with vitest\n");
-  d.service.saveSchedule(bot.id, {
+  await d.service.saveSchedule(bot.id, {
     name: "Morning review",
     cron: "0 9 * * 1-5",
     prompt: "List open PRs waiting on me",
@@ -346,7 +348,10 @@ describe("share -> receive between two daemons", () => {
     });
     expect(made.provider).toBe("codex");
     expect(made.avatar).toBe("mascot:A1");
-    expect(made.schedules.map((s) => [s.name, s.enabled])).toEqual([["Morning review", false]]);
+    // Shared automations arrive off, as the new bot's core schedules.
+    expect((await recipient.service.schedulesOf(made.id)).map((s) => [s.name, s.enabled])).toEqual([
+      ["Morning review", false],
+    ]);
     const madeHome = recipient.storage.botHome(made);
     expect(readFileSync(join(madeHome, "SOUL.md"), "utf8")).toContain("Reviews pull requests");
     expect(existsSync(join(madeHome, "skills", "release-notes", "run.sh"))).toBe(false);

@@ -14,6 +14,7 @@ import type { AgentManager } from "../agent/agent-manager.js";
 import type { BotsService } from "./service.js";
 import { BOT_ID_LABEL } from "./runtime.js";
 import { BOT_EVENT_AUTOMATION_SOURCES } from "./event-automations.js";
+import { BOT_RUNS_IN } from "./schedules.js";
 
 /** What a gated tool asks: its card, and `once`, a key no second ask may share while it waits. */
 interface BotToolAsk {
@@ -210,7 +211,7 @@ export function createBotAgentTools(options: {
     ),
     define(
       "bot_automation_save",
-      "Create or change an automation that runs a prompt in your Home Chat on a cron schedule",
+      "Create or change an automation: a JAgentDesk schedule of yours that runs a prompt on a cron schedule, in your Home Chat (runsIn home, the default), one of your chats (runsIn chat with its chatId) or a new conversation in your home (runsIn new). End a run's reply with the quiet marker to post nothing",
       {
         automationId: z.string().optional(),
         name: z.string().trim().min(1).max(100),
@@ -218,6 +219,8 @@ export function createBotAgentTools(options: {
         timezone: z.string().optional(),
         prompt: z.string().trim().min(1).max(20000),
         enabled: z.boolean().optional(),
+        runsIn: z.enum(BOT_RUNS_IN).optional(),
+        chatId: z.string().optional(),
       },
       (i) =>
         service.saveSchedule(
@@ -228,6 +231,8 @@ export function createBotAgentTools(options: {
             ...(i.timezone ? { timezone: i.timezone } : {}),
             prompt: i.prompt,
             enabled: i.enabled ?? true,
+            ...(i.runsIn ? { runsIn: i.runsIn } : {}),
+            ...(i.chatId ? { chatId: i.chatId } : {}),
           },
           i.automationId,
         ),

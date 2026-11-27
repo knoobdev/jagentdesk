@@ -202,7 +202,10 @@ test(
           bot: botInput("Release Pal"),
         })
       ).bot;
-      expect(made.schedules.map((s) => s.enabled)).toEqual([false]);
+      const madeSchedules = await recipient.client.botsRequest("bots.schedules.list.request", {
+        botId: made.id,
+      });
+      expect(madeSchedules.schedules.map((s) => s.enabled)).toEqual([false]);
       const madeHome = join(recipient.daemon.jagentdeskHome, "bots", "release-pal");
       expect(readFileSync(join(madeHome, "SOUL.md"), "utf8")).toContain("Ships releases");
       expect(existsSync(join(madeHome, "memory", "repo-facts.md"))).toBe(false);

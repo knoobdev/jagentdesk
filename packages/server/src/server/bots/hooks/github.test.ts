@@ -269,7 +269,7 @@ describe("GitHub webhook connector (spec 37.10)", () => {
     await t.bots.settled();
     await t.github.settled();
     expect(t.gh.api("POST", "repos/octo/test-repo/issues")).toHaveLength(0);
-    const { automations } = t.bots.automations(t.bot.id);
+    const { automations } = await t.bots.automations(t.bot.id);
     expect(automations.find((row) => row.event)).toMatchObject({
       name: "Triage comments",
       event: { source: "github", event: "comment" },

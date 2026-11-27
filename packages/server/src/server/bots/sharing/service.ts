@@ -199,6 +199,7 @@ export class BotsSharing implements RelayControlHandler {
       bot,
       home: this.bots.storage.botHome(bot),
       connectors: this.connectors(bot),
+      schedules: await this.bots.schedulesOf(bot.id),
     });
     return this.candidates.prepare({ bot, shareable, selection });
   }
@@ -477,8 +478,9 @@ export class BotsSharing implements RelayControlHandler {
     try {
       await this.writeHome(this.bots.storage.botHome(bot), recipient);
       if (!input.avatar) await this.applyAvatar(bot.id, recipient);
+      // Shared automations arrive off (ADR-0061 §5), as the bot's core schedules.
       for (const schedule of recipient.bot.schedules)
-        this.bots.saveSchedule(bot.id, {
+        await this.bots.saveSchedule(bot.id, {
           name: schedule.name,
           cron: schedule.cron,
           ...(schedule.timezone ? { timezone: schedule.timezone } : {}),

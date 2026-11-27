@@ -5347,6 +5347,8 @@ export const ServerInfoStatusPayloadSchema = z
         botsSharing: z.boolean().optional(),
         // The first-run screen reads the kickoff from Home Chat; `bots.kickoff.retry` (v0.12.2).
         botsKickoff: z.boolean().optional(),
+        // Bot automations are core schedules carrying `bot` (spec 37.2.6), listed by `schedule/list`.
+        botsSchedules: z.boolean().optional(),
         binaryChunkingV1: z.boolean().optional(),
         backgroundAgents: z.boolean().optional(),
         // COMPAT(agentRequestReceipts): added in v0.8.0; remove gate after 2027-03-05.

@@ -1,5 +1,6 @@
 import { MoreVertical, Pause, Pencil, Play, RotateCw, Trash2 } from "lucide-react-native";
 import { useCallback, useState, type ReactElement } from "react";
+import { useTranslation } from "react-i18next";
 import { Pressable, Text, View, type PressableStateCallbackType } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import {
@@ -26,6 +27,12 @@ import {
 } from "@/utils/schedule-format";
 import { useTimeAgo } from "@/hooks/use-time-ago";
 import type { ScheduleSummary } from "@jagentdesk/protocol/schedule/types";
+import {
+  ScheduleBotGlyph,
+  scheduleBotName,
+  scheduleBotTargetLabel,
+  useScheduleBot,
+} from "@/components/schedules/schedule-bot";
 
 // Themed lucide wrappers — module-scope so only the icon re-renders on theme
 // change (never call useUnistyles in render). See docs/unistyles.md.
@@ -42,6 +49,7 @@ const destructiveColorMapping = (theme: Theme) => ({ color: theme.colors.destruc
 
 const MENU_ICON_SIZE = 14;
 const PROVIDER_ICON_SIZE = 16;
+const BOT_AVATAR_SIZE = 18;
 
 // Pending flags for each action so the parent table can wire a mutation hook
 // and the row reflects in-flight state without owning the mutation itself.
@@ -62,6 +70,8 @@ export interface ScheduleRowActions {
 
 interface ScheduleRowProps extends ScheduleRowActions {
   schedule: ScheduleSummary;
+  /** The schedule's host, for a bot automation's bot. */
+  serverId: string;
   /** Client-derived target line (agent title / project / shortened path). */
   targetLabel: string;
   /** Provider glyph, resolved from the schedule config or the target agent. */
@@ -104,6 +114,8 @@ function buildMeta(input: {
   lastRunAgo: string;
   serverName: string | undefined;
   singleHost: boolean;
+  /** A paused bot's automation: why it doesn't run, in place of the next run. */
+  skipped?: string;
 }): string {
   const { schedule, state, serverName, singleHost } = input;
   const parts = [
@@ -111,7 +123,9 @@ function buildMeta(input: {
     `Created ${input.createdAgo}`,
     schedule.lastRunAt ? `Last run ${input.lastRunAgo}` : "Never run",
   ];
-  if (state === "active") {
+  if (input.skipped) {
+    parts.push(input.skipped);
+  } else if (state === "active") {
     const next = formatNextRun(schedule.nextRunAt);
     if (next) {
       parts.push(`Next run ${next}`);
@@ -144,6 +158,7 @@ function ProviderGlyph({ provider }: { provider: string | null }): ReactElement 
  */
 export function ScheduleRow({
   schedule,
+  serverId,
   targetLabel,
   provider,
   state,
@@ -163,10 +178,27 @@ export function ScheduleRow({
   const handlePointerEnter = useCallback(() => setIsHovered(true), []);
   const handlePointerLeave = useCallback(() => setIsHovered(false), []);
 
+  const { t } = useTranslation();
   const title = resolveScheduleTitle(schedule);
   const productName = scheduleProductName(schedule);
-  const badge = stateBadge(state);
-  const canRun = schedule.target.type === "new-agent" && (state === "active" || state === "paused");
+  // A bot's automation (spec 37.2.6): its bot, where its runs go, and nothing while the bot is paused.
+  const bot = useScheduleBot(serverId, schedule.bot?.botId);
+  const botName = scheduleBotName(bot);
+  const botPaused = Boolean(schedule.bot && bot?.paused && state === "active");
+  const shownTarget = schedule.bot ? scheduleBotTargetLabel(schedule.bot, botName) : targetLabel;
+  const editLabel = schedule.bot
+    ? t("bots.jad.schedulesScreen.editInChat", { name: botName })
+    : `Edit ${productName.toLowerCase()}`;
+  const badge = botPaused
+    ? { label: t("bots.jad.schedulesScreen.botPaused"), variant: "muted" as const }
+    : stateBadge(state);
+  const skipped = botPaused
+    ? t("bots.jad.schedulesScreen.skippedWhilePaused", { name: botName })
+    : undefined;
+  const canRun =
+    schedule.target.type === "new-agent" &&
+    (state === "active" || state === "paused") &&
+    !botPaused;
 
   const rowStyle = useCallback(
     ({ pressed }: PressableStateCallbackType) => [
@@ -191,12 +223,16 @@ export function ScheduleRow({
         style={rowStyle}
         onPress={onEdit}
         accessibilityRole="button"
-        accessibilityLabel={`Edit ${productName.toLowerCase()} ${title}`}
+        accessibilityLabel={schedule.bot ? `${editLabel}: ${title}` : `${editLabel} ${title}`}
         testID={`schedule-row-${schedule.id}`}
       >
         <View style={styles.main}>
           <View style={isGumloop ? gumloopListStyles.rowIconCircle : styles.leading}>
-            <ProviderGlyph provider={provider} />
+            {schedule.bot ? (
+              <ScheduleBotGlyph serverId={serverId} bot={bot} size={BOT_AVATAR_SIZE} />
+            ) : (
+              <ProviderGlyph provider={provider} />
+            )}
           </View>
           <View style={styles.textGroup}>
             <Text style={settingsStyles.rowTitle} numberOfLines={1}>
@@ -204,7 +240,7 @@ export function ScheduleRow({
             </Text>
             {isGumloop ? null : (
               <Text style={styles.target} numberOfLines={1}>
-                {targetLabel}
+                {shownTarget}
               </Text>
             )}
             <ScheduleMeta
@@ -212,7 +248,8 @@ export function ScheduleRow({
               state={state}
               serverName={serverName}
               singleHost={singleHost ?? false}
-              targetLabel={isGumloop ? targetLabel : undefined}
+              targetLabel={isGumloop ? shownTarget : undefined}
+              skipped={skipped}
             />
           </View>
         </View>
@@ -221,6 +258,7 @@ export function ScheduleRow({
           <StatusBadge label={badge.label} variant={badge.variant} />
           <ScheduleKebabMenu
             schedule={schedule}
+            editLabel={editLabel}
             canRun={canRun}
             pending={pending}
             onEdit={onEdit}
@@ -312,6 +350,7 @@ function renderKebabTriggerIcon({ hovered }: { hovered?: boolean }): ReactElemen
 
 function ScheduleKebabMenu({
   schedule,
+  editLabel,
   canRun,
   pending,
   onEdit,
@@ -324,6 +363,7 @@ function ScheduleKebabMenu({
   "schedule" | "pending" | "onEdit" | "onPause" | "onResume" | "onRunNow" | "onDelete"
 > & {
   canRun: boolean;
+  editLabel: string;
 }): ReactElement {
   const productName = scheduleProductName(schedule);
   const productNameLower = productName.toLowerCase();
@@ -344,7 +384,7 @@ function ScheduleKebabMenu({
           onSelect={onEdit}
           testID={`schedule-menu-edit-${schedule.id}`}
         >
-          Edit {productNameLower}
+          {editLabel}
         </DropdownMenuItem>
         <ScheduleExecutionMenuItems
           schedule={schedule}
@@ -406,8 +446,8 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[3],
   },
   leading: {
-    width: PROVIDER_ICON_SIZE,
-    height: PROVIDER_ICON_SIZE,
+    minWidth: PROVIDER_ICON_SIZE,
+    height: BOT_AVATAR_SIZE,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -440,6 +480,7 @@ function ScheduleMeta({
   serverName,
   singleHost,
   targetLabel,
+  skipped,
 }: {
   schedule: ScheduleSummary;
   state: ScheduleDerivedState;
@@ -447,10 +488,19 @@ function ScheduleMeta({
   singleHost: boolean;
   /** Gumloop folds the target into this line so the row stays two lines. */
   targetLabel?: string;
+  skipped?: string;
 }) {
   const createdAgo = useTimeAgo(new Date(schedule.createdAt));
   const lastRunAgo = useTimeAgo(schedule.lastRunAt ? new Date(schedule.lastRunAt) : null);
-  const meta = buildMeta({ schedule, state, createdAgo, lastRunAgo, serverName, singleHost });
+  const meta = buildMeta({
+    schedule,
+    state,
+    createdAgo,
+    lastRunAgo,
+    serverName,
+    singleHost,
+    skipped,
+  });
   return (
     <Text
       style={[settingsStyles.rowHint, targetLabel !== undefined && styles.metaTwoLine]}

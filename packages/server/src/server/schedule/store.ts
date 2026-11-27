@@ -185,6 +185,22 @@ export class ScheduleStore {
     });
   }
 
+  /** Writes a schedule under the id it already has; an existing one with that id wins, unchanged. */
+  async insert(schedule: StoredSchedule): Promise<StoredSchedule> {
+    const created = StoredScheduleSchema.parse(schedule);
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(created.id)) {
+      throw new Error(`Invalid schedule id: ${created.id}`);
+    }
+    return this.serializeScheduleMutation(created.id, async () => {
+      const existing = await this.get(created.id);
+      if (existing) {
+        return existing;
+      }
+      await this.write(created);
+      return created;
+    });
+  }
+
   async update(id: string, updater: ScheduleUpdater): Promise<StoredSchedule | null> {
     return this.serializeScheduleMutation(id, async () => {
       const current = await this.get(id);

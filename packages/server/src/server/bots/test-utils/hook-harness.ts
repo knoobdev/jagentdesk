@@ -13,6 +13,7 @@ import { BotsService } from "../service.js";
 import { BotStorage } from "../storage.js";
 import { ForgeCliError, type ForgeCli } from "../hooks/cli.js";
 import { BotConnectorEvents, type BotConnectorEvent } from "../hooks/events.js";
+import { attachBotSchedules } from "./schedules.js";
 
 /** A supervisor that records each turn and finishes it when the test says so (bt1's runtime otherwise). */
 export class RecordingRuntime extends FakeBotRuntime {
@@ -172,6 +173,7 @@ export async function hookHarness(): Promise<HookHarness> {
     },
   );
   const bots = new BotsService(new BotStorage(home), runtime, { logger });
+  attachBotSchedules({ service: bots, home });
   const bus = new BotConnectorEvents();
   const events: BotConnectorEvent[] = [];
   bus.on((event) => events.push(event));

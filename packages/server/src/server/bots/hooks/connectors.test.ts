@@ -154,7 +154,7 @@ describe("event automations (spec 37.2.6)", () => {
       t.request("bots.automations.run_now.request", { automationId: automation.id }),
     ).rejects.toMatchObject({ code: "invalid_argument" });
     await t.request("bots.schedules.delete.request", { scheduleId: automation.id });
-    expect(t.bots.automations(t.bot.id).automations.some((row) => row.event)).toBe(false);
+    expect((await t.bots.automations(t.bot.id)).automations.some((row) => row.event)).toBe(false);
   });
 
   it("refuses an event the source does not have", async () => {

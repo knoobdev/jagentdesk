@@ -3,6 +3,7 @@ import { botsOrcaPhoneStrings } from "./bots-orca-phone";
 import { botsJadDialogsStrings } from "./bots-jad-dialogs";
 import { botsJadItemsStrings } from "./bots-jad-items";
 import { botsJadPanelsStrings } from "./bots-jad-panels";
+import { botsJadSchedulesStrings } from "./bots-jad-schedules";
 import { botsJadSettingsStrings } from "./bots-jad-settings";
 
 // Over Orca's `bots.share` (see `botsStrings`).
@@ -325,5 +326,6 @@ export const botsStrings = {
     settings: botsJadSettingsStrings,
     dialogs: botsJadDialogsStrings,
     panels: botsJadPanelsStrings,
+    schedulesScreen: botsJadSchedulesStrings,
   },
 };

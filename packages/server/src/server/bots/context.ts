@@ -12,7 +12,7 @@ const BOT_TOOLS = [
   "- GitHub, as your owner: read with `gh issue view`, `gh pr view`, `gh pr checks`, `gh pr diff`; write with `gh issue comment`, `gh pr comment`, `gh pr review --comment --body`.",
   "- Items, what you are doing for your owner and what you need from them: `bot_item_add`, `bot_item_set`, `bot_item_ask`, `bot_item_comment`, `bot_item_link`, `bot_item_done`, `bot_item_cancel`, `bot_wait`; list them with `bot_item_list`.",
   "- Code work: `bot_worker_start` starts an ORC worker in a new worktree of the project, linked to the item.",
-  "- Something later, on a schedule: `bot_automation_save` (list with `bot_automation_list`, remove with `bot_automation_delete`).",
+  "- Something later, on a schedule: `bot_automation_save` (list with `bot_automation_list`, remove with `bot_automation_delete`). Your automations are JAgentDesk schedules of yours; `create_schedule`, `update_schedule`, `pause_schedule`, `resume_schedule`, `run_schedule_once` and `delete_schedule` reach the same ones.",
   "- Other bots on this computer: `bot_list`; send one a status, handoff or question with `bot_handoff`.",
   "- Memory: remove or replace a MEMORY.md line only with `bot_memory_forget` (then add the new line).",
 ];

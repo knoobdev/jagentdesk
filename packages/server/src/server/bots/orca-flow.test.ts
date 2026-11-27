@@ -14,6 +14,7 @@ import { FakeBotRuntime } from "./test-utils/fake-runtime.js";
 import { backgroundToolDecision, lookAroundCommandAllowed } from "./look-around.js";
 import { BOT_TEMPLATE_SKILL_TEXT } from "./templates/skills.js";
 import { botFirstScreenState } from "@jagentdesk/protocol/bots/rules";
+import { attachBotSchedules } from "./test-utils/schedules.js";
 
 const homes: string[] = [];
 const services: BotsService[] = [];
@@ -32,6 +33,7 @@ function setup(options: { home?: string; now?: number } = {}) {
     now: () => clock,
   });
   services.push(service);
+  attachBotSchedules({ service, home, now: () => new Date(clock) });
   return { home, service, runtime, setTime: (v: number) => (clock = v) };
 }
 
@@ -691,7 +693,8 @@ describe("templates, hand over, groups, New Home Chat", () => {
       provider: "claude",
       model: "default",
     });
-    expect(dep.bot.schedules.map((s) => s.enabled)).toEqual([false]);
+    // Template automations are core schedules, made off (spec 37.4.10).
+    expect((await service.schedulesOf(dep.bot.id)).map((s) => s.enabled)).toEqual([false]);
   });
 
   it("hands a workspace over with Orca's one-line ask when there is no goal (A37.7.24)", async () => {
