@@ -27,6 +27,15 @@ interface SeedProjectDescriptor {
  * prefer those wrappers over reaching for this client directly.
  */
 export interface SeedDaemonClient {
+  patchDaemonConfig(
+    config: import("@jagentdesk/protocol/messages").MutableDaemonConfigPatch,
+  ): Promise<{ config: import("@jagentdesk/protocol/messages").MutableDaemonConfig }>;
+  installDirectoryPlugin(
+    directoryPath: string,
+    id?: string,
+  ): Promise<import("@jagentdesk/protocol/messages").PluginListItem>;
+  removePlugin(pluginId: string): Promise<void>;
+  invokePluginRpc(pluginId: string, method: string, input: unknown): Promise<unknown>;
   connect(): Promise<void>;
   close(): Promise<void>;
   addProject(cwd: string): Promise<{

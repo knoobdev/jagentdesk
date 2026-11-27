@@ -33,6 +33,7 @@ import {
   type PluginComposerSelector,
 } from "./composer.js";
 import { type PluginNewWorkspaceItemContribution } from "./new-workspace.js";
+import type { PluginNotificationOpenHandler } from "./notifications.js";
 
 export interface PluginHostProps {
   theme: PluginTheme;
@@ -46,25 +47,30 @@ export interface PluginHostProps {
   };
 }
 
+export interface PluginHostNavigationActions {
+  readonly openAgent: (input: {
+    readonly agentId: string;
+    readonly serverId?: string;
+    /** Select only the destination host in the sidebar and clear project/label filters. */
+    readonly focusHost?: boolean;
+  }) => void;
+  readonly openWorkspace: (input: {
+    readonly workspaceId: string;
+    readonly serverId?: string;
+    /** Select only the destination host in the sidebar and clear project/label filters. */
+    readonly focusHost?: boolean;
+  }) => void;
+}
+
 interface PluginNavigableHostProps extends PluginHostProps {
   /** Client-owned navigation. Undefined on older hosts; hide dependent affordances when absent. */
-  readonly navigation?: {
+  readonly navigation?: PluginHostNavigationActions & {
     readonly supportsFocusHost?: boolean;
     /** Present only on Electron. The browser runs locally; serverId selects workspace ownership. */
     readonly openBrowser?: (input: {
       readonly url: string;
       readonly workspaceId: string;
       readonly serverId?: string;
-    }) => void;
-    readonly openAgent: (input: {
-      readonly agentId: string;
-      readonly serverId?: string;
-      readonly focusHost?: boolean;
-    }) => void;
-    readonly openWorkspace: (input: {
-      readonly workspaceId: string;
-      readonly serverId?: string;
-      readonly focusHost?: boolean;
     }) => void;
   };
 }
@@ -270,6 +276,7 @@ export interface PluginClientContext extends PluginCommandCapabilities {
   addTimelineRenderer<Schema extends ZodType>(
     contribution: PluginTimelineRendererContribution<Schema>,
   ): PluginCleanup;
+  onNotificationOpen(handler: PluginNotificationOpenHandler): PluginCleanup;
 
   openPanel(id: string, options: PluginClientOpenPanelOptions): void;
 

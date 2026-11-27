@@ -178,6 +178,17 @@ duration and stats. Read a reply with `getAssistantReply` (`packages/app/src/typ
 instead of checking `kind === "assistant_message"`. Client renderers run inside the installation's
 existing runtime, including its translations and state source.
 
+`server.notifications.send(input)` reaches every connected app and the host's push tokens.
+`PluginNotificationDispatcher` (`packages/server/src/server/plugins/notifications.ts`) truncates
+`title` to 160 and `body` to 500 characters, caps `open` and `data` at 1,024 UTF-8 bytes each so
+APNs and FCM envelopes stay within 4 KiB, drops a repeated `(pluginId, key)` for 60 seconds and
+rate-limits each plugin (burst 10, one more every 6 seconds). Each device decides through its
+notification preferences, including a per-plugin mute (Settings → This device → Notifications).
+Native apps do not subscribe to `plugin.notification`: an open phone would become the in-app
+recipient and suppress its own push without showing anything. A tap runs
+`client.onNotificationOpen` handlers, then falls back to the declarative `open` target; see
+[notifications.md](notifications.md). Example: `plugin-examples/notifications`.
+
 ## Bundled plugins
 
 The daemon loads bundled plugins through `BuiltinPluginLoader` before configured plugins, including

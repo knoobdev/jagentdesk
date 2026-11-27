@@ -12,7 +12,7 @@ import {
 } from "../bootstrap.js";
 import type { AgentClient, AgentProvider } from "../agent/agent-sdk-types.js";
 import { createTestAgentClients } from "./fake-agent-client.js";
-import type { PushNotificationSender } from "../push/notifications.js";
+import type { PushNotifications, PushNotificationSender } from "../push/index.js";
 
 interface TestJAgentDeskDaemonOptions {
   relay?: { endpoint: string; useTls: boolean };
@@ -52,6 +52,8 @@ interface TestJAgentDeskDaemonOptions {
   dictationFinalTimeoutMs?: number;
   auth?: JAgentDeskDaemonConfig["auth"];
   pushNotificationSender?: PushNotificationSender;
+  pushNotifications?: PushNotifications;
+  pushNotifications?: PushNotifications;
   serviceProxy?: JAgentDeskDaemonConfig["serviceProxy"];
   webUi?: JAgentDeskDaemonConfig["webUi"];
   trustedProxies?: JAgentDeskDaemonConfig["trustedProxies"];
@@ -214,6 +216,7 @@ async function prepareTestDaemonConfig(
     appBaseUrl: "jagentdesk://app",
     auth: options.auth,
     pushNotificationSender: options.pushNotificationSender,
+    pushNotifications: options.pushNotifications,
     serviceProxy: options.serviceProxy,
     webUi: options.webUi,
     trustedProxies: options.trustedProxies,

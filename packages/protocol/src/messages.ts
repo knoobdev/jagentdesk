@@ -45,6 +45,18 @@ import {
   HostsRouteClosedSchema,
 } from "./hosts.js";
 import { PluginIdSchema, PluginRequirementsSchema, PluginSourceSchema } from "./plugin-config.js";
+import { NotificationPreferencesSchema } from "./notification-preferences.js";
+export {
+  DEFAULT_NOTIFICATION_PREFERENCES,
+  NotificationEventsPreferencesSchema,
+  NotificationPluginsPreferencesSchema,
+  NotificationPreferencesSchema,
+  normalizeNotificationPreferences,
+  shouldDeliverNotification,
+  type NotificationKind,
+  type NotificationPreferences,
+  type NotificationPreferencesInput,
+} from "./notification-preferences.js";
 import { z } from "zod";
 import {
   BuiltinPluginConfigSchema,
@@ -4245,6 +4257,7 @@ export const ListCommandsRequestSchema = z.object({
 export const RegisterPushTokenMessageSchema = z.object({
   type: z.literal("register_push_token"),
   token: z.string(),
+  preferences: NotificationPreferencesSchema.optional(),
 });
 
 // ============================================================================
@@ -4739,6 +4752,7 @@ export const SessionEventSubscriptionSchema = z.enum([
   "agent.provider_subagents.update",
   "agent.background_work.update",
   "terminal_attention_required",
+  "plugin.notification",
   "status.server_info",
   "status.daemon_config_changed",
   "status.plugin_catalog_changed",
@@ -5369,6 +5383,10 @@ export const ServerInfoStatusPayloadSchema = z
         forgeSearch: z.boolean().optional(),
         // COMPAT(daemonStatusRpc): added in v0.1.76, remove gate after 2026-11-18.
         daemonStatusRpc: z.boolean().optional(),
+        // COMPAT(pushTokenRevocation): added in v0.12.2, remove gate after 2027-05-27.
+        pushTokenRevocation: z.boolean().optional(),
+        // COMPAT(pushNotificationPreferences): added in v0.12.2, remove gate after 2027-06-01.
+        pushNotificationPreferences: z.boolean().optional(),
         // COMPAT(restartRecovery): added in v0.9.59, remove after 2027-05-24.
         resumeOnStartupSetting: z.boolean().optional(),
         speechSettings: z.boolean().optional(),
@@ -5510,6 +5528,8 @@ export const ServerInfoStatusPayloadSchema = z
         // Plugin settings screens + host-scoped plugin settings storage (split client/server API).
         pluginSettings: z.boolean().optional(),
         pluginSubscriptions: z.boolean().optional(),
+        // COMPAT(pluginNotifications): added in v0.12.2, remove gate after 2027-06-01.
+        pluginNotifications: z.boolean().optional(),
         // Forge Hub (spec 19 / ADR-0015): standalone remote forge management surface.
         // Advertised per release milestone so old clients don't call the new RPCs blind.
         // NOTE: spec 07 describes capabilities as an array of strings, but the daemon
@@ -9235,6 +9255,41 @@ export const TerminalAttentionRequiredSchema = z.object({
   }),
 });
 
+export const PluginNotificationOpenTargetSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("agent"),
+    agentId: z.string(),
+  }),
+  z.object({
+    type: z.literal("workspace"),
+    workspaceId: z.string(),
+  }),
+  z.object({
+    type: z.literal("screen"),
+    screenId: z.string(),
+    params: z.record(z.string(), z.string()).optional(),
+  }),
+]);
+
+export type PluginNotificationOpenTarget = z.infer<typeof PluginNotificationOpenTargetSchema>;
+
+export const PluginNotificationMessageSchema = z.object({
+  type: z.literal("plugin.notification"),
+  payload: z.object({
+    subscriptionId: z.string().optional(),
+    serverId: z.string().optional(),
+    pluginId: z.string(),
+    notificationId: z.string(),
+    title: z.string(),
+    body: z.string(),
+    open: PluginNotificationOpenTargetSchema.optional(),
+    data: z.record(z.string(), JsonWireValueSchema).optional(),
+    shouldNotify: z.boolean(),
+  }),
+});
+
+export type PluginNotificationMessage = z.infer<typeof PluginNotificationMessageSchema>;
+
 export const DaemonUpdateResponseSchema = z.object({
   type: z.literal("daemon.update.response"),
   payload: z.object({
@@ -9887,6 +9942,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   CaptureTerminalResponseSchema,
   TerminalStreamExitSchema,
   TerminalAttentionRequiredSchema,
+  PluginNotificationMessageSchema,
   ChatCreateResponseSchema,
   ChatListResponseSchema,
   ChatInspectResponseSchema,

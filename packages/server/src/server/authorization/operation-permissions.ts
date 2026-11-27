@@ -1175,6 +1175,7 @@ const OUTBOUND_PERMISSION = {
   providers_snapshot_update: "daemon.read",
   pull_request_timeline_response: "workspace.read",
   "push.unregister.response": "workspace.read",
+  "plugin.notification": "workspace.read",
   read_project_config_response: "workspace.read",
   refresh_providers_snapshot_response: "daemon.read",
   // Custom API providers (spec 34.7): responses mirror their request permission.
