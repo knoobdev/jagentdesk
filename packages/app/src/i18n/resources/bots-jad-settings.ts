@@ -8,6 +8,5 @@ export const botsJadSettingsStrings = {
     "Before an item is done, BA, Tester and Pentester reviews check the worker’s changes.",
   // Spec 37.4.7: Orca's bots.connectors.emptyNote with JAgentDesk's connectors.
   whoCanAskEmpty: "Let people reach {{name}} in Slack, GitHub, GitLab and Telegram.",
-  removeInConnector: "Manage in Connectors › {{connector}}",
   shareUnavailable: "Sharing isn’t available in this build of JAgentDesk.",
 } as const;

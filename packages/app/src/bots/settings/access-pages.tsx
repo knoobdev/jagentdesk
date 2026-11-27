@@ -44,6 +44,14 @@ export function WhoCanAskPage({ serverId, bot }: { serverId: string; bot: Bot })
   const toast = useOptionalToast();
   const people = useAllowedPeople(serverId, bot.id);
   const removeSlack = useBotsMutation(serverId, "bots.slack.allowed.remove.request");
+  const removeGitHub = useBotsMutation(serverId, "bots.github.allowed.remove.request");
+  const removeGitLab = useBotsMutation(serverId, "bots.gitlab.allowed.remove.request");
+  const removeTelegram = useBotsMutation(serverId, "bots.telegram.allowed.remove.request");
+  const removing =
+    removeSlack.isPending ||
+    removeGitHub.isPending ||
+    removeGitLab.isPending ||
+    removeTelegram.isPending;
   const groups = useMemo(
     () =>
       SOURCE_ORDER.map((source) => ({
@@ -58,13 +66,25 @@ export function WhoCanAskPage({ serverId, bot }: { serverId: string; bot: Bot })
   );
   const remove = useCallback(
     (person: BotAllowedPerson) => {
-      if (person.source !== "slack") return;
-      removeSlack.mutate(
-        { botId: bot.id, userId: person.id },
-        { onError: (error) => toast?.error(botErrorMessage(error)) },
-      );
+      const failed = { onError: (error: unknown) => toast?.error(botErrorMessage(error)) };
+      // Each connector removes its own people (the id is the Slack or Telegram user id, the GitHub
+      // login or the GitLab username).
+      switch (person.source) {
+        case "slack":
+          removeSlack.mutate({ botId: bot.id, userId: person.id }, failed);
+          return;
+        case "github":
+          removeGitHub.mutate({ botId: bot.id, login: person.id }, failed);
+          return;
+        case "gitlab":
+          removeGitLab.mutate({ botId: bot.id, username: person.id }, failed);
+          return;
+        case "telegram":
+          removeTelegram.mutate({ botId: bot.id, userId: person.id }, failed);
+          return;
+      }
     },
-    [bot.id, removeSlack, toast],
+    [bot.id, removeGitHub, removeGitLab, removeSlack, removeTelegram, toast],
   );
   if (people.isError) return <Text style={styles.muted}>{botErrorMessage(people.error)}</Text>;
   if (!people.data) return null;
@@ -89,7 +109,7 @@ export function WhoCanAskPage({ serverId, bot }: { serverId: string; bot: Bot })
               key={`${person.source}:${person.id}`}
               person={person}
               onRemove={remove}
-              removing={removeSlack.isPending}
+              removing={removing}
             />
           ))}
         </BotSettingsGroup>
@@ -109,30 +129,18 @@ function PersonRow({
 }) {
   const { t } = useTranslation();
   const remove = useCallback(() => onRemove(person), [onRemove, person]);
-  // GitHub, GitLab and Telegram people are removed through bt4's connector RPCs
-  // (bots-hooks-contract.md), which this build's protocol does not carry yet.
-  const removable = person.source === "slack";
   return (
-    <BotSettingsRow
-      title={person.name}
-      detail={
-        removable
-          ? null
-          : t("bots.jad.settings.removeInConnector", { connector: SOURCE_NAMES[person.source] })
-      }
-    >
-      {removable ? (
-        <Button
-          size="xs"
-          variant="ghost"
-          disabled={removing}
-          onPress={remove}
-          accessibilityLabel={t("bots.whoCanAsk.removePerson", { name: person.name })}
-          testID="bot-settings-remove-person"
-        >
-          {t("bots.settingsBots.skills.remove")}
-        </Button>
-      ) : undefined}
+    <BotSettingsRow title={person.name}>
+      <Button
+        size="xs"
+        variant="ghost"
+        disabled={removing}
+        onPress={remove}
+        accessibilityLabel={t("bots.whoCanAsk.removePerson", { name: person.name })}
+        testID="bot-settings-remove-person"
+      >
+        {t("bots.settingsBots.skills.remove")}
+      </Button>
     </BotSettingsRow>
   );
 }
