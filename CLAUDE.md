@@ -32,7 +32,7 @@ At the start of non-trivial work, list `docs/` and skim anything relevant to the
 | [docs/orchestration.md](docs/orchestration.md)                         | ORC (Supervisor → Lead → Peer) — `/orc` entry point, roles, limits, settings                                                           |
 | [docs/cross-provider-continuity.md](docs/cross-provider-continuity.md) | Session ledger, provider switch handoff and resume, usage-limit failover, child agents on other providers                              |
 | [docs/durable-context.md](docs/durable-context.md)                     | Compaction signals, re-grounding block, recitation, 80 % ledger nudge, Claude compact hooks, Rollover, Capture lessons                 |
-| [docs/bots.md](docs/bots.md)                                           | Bots daemon lifecycle, SQLite homes/items/rooms, permission boundary, triggers and client RPC contract                                 |
+| [docs/bots.md](docs/bots.md)                                           | Bots like Orca's: SQLite homes/items, work flow, permissions, triggers, GitHub/GitLab/Telegram/Slack connectors, sharing, RPCs         |
 | [docs/coding-standards.md](docs/coding-standards.md)                   | Type hygiene, error handling, state design, React patterns, file organization                                                          |
 | [docs/design.md](docs/design.md)                                       | Design system — tokens, buttons, hierarchy, density, alignment rails, states, what's forbidden                                         |
 | [docs/themes.md](docs/themes.md)                                       | Gumloop and classic shells, theme-to-shell mapping, stored-theme migration, sidebar and drawer structure                               |
@@ -82,7 +82,7 @@ At the start of non-trivial work, list `docs/` and skim anything relevant to the
 | [docs/ad-hoc-daemon-testing.md](docs/ad-hoc-daemon-testing.md)         | Isolated in-process daemon test harness                                                                                                |
 | [docs/browser-capture-harness.md](docs/browser-capture-harness.md)     | Real-Electron browser screenshot harness and compositor-surface gotcha                                                                 |
 | [docs/android.md](docs/android.md)                                     | App variants, local/cloud builds, EAS workflows, version codes, F-Droid source builds and store metadata                               |
-| [docs/releases/v0.10.0.md](docs/releases/v0.10.0.md)                   | Release notes for v0.10.0                                                                                                              |
+| [docs/releases/v0.12.1.md](docs/releases/v0.12.1.md)                   | Release notes for v0.12.1; older versions sit next to it in `docs/releases/`                                                           |
 | [SECURITY.md](SECURITY.md)                                             | Relay threat model, E2E encryption, DNS rebinding, agent auth                                                                          |
 | [public-docs/security.md](public-docs/security.md)                     | Public security guide — architecture, connection methods, relay encryption, best practices                                             |
 
