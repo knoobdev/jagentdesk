@@ -79,5 +79,22 @@ export const botsJadPanelsStrings = {
     worker: "Worker · {{name}}",
     openWorker: "Open worker",
     notNow: "Not now",
+    // The bot's own cards (spec 37.3.2-37.3.3). Orca's card for a start is the command it ran,
+    // naming the item, the project (`--repo`), a new worktree and the task (`--spec`).
+    workerStart: {
+      title: "Start a worker for {{item}}?",
+      description:
+        "{{bot}} starts a worker in a new worktree of {{project}} ({{path}}). The worker reports back when it is done.",
+      task: "Task",
+    },
+    handoff: {
+      title: {
+        handoff: "Hand this to {{to}}?",
+        question: "Ask {{to}}?",
+        status: "Send {{to}} a status?",
+      },
+      description: "{{bot}} sends {{to}} this message.",
+      message: "Message",
+    },
   },
 } as const;
