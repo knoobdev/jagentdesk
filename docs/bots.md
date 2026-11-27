@@ -120,10 +120,10 @@ queue chat but run no turns or background triggers; resuming catches up one over
 occurrence, then advances from the current time. Slow provider startup and external polling
 do not block other bots' timer checks.
 
-GitHub polling uses the installed `gh` every five minutes, after `gh auth status` succeeds.
-Set `githubLogin` when it differs from the slug. Open PRs with review requests and open issues
-labelled `bot:<slug>` wake the bot once per URL/update time. The bot reads the PR and posts a
-comment review with file:line evidence through `gh` under its permission settings.
+A bot without a GitHub webhook still polls with the installed `gh` every five minutes, after
+`gh auth status` succeeds. Set `githubLogin` when it differs from the slug. Open PRs with review
+requests and open issues labelled `bot:<slug>` wake the bot once per URL/update time. A bot with a
+webhook target hears GitHub through the webhook only (ADR-0061 §2).
 
 Jira uses existing daemon connections, never a separate credential store. `jiraAccounts`
 maps each site's opaque account ref to the bot. Polling also searches `@slug` mentions and
@@ -154,6 +154,33 @@ and manifest. Disable the
 Bots plugin to unregister its hooks without losing its configuration. The local acceptance
 test uses an injected Slack Web API URL and a local Worker; never run it against Slack itself.
 
+### GitHub, GitLab and Telegram
+
+Each connector of a bot has its own hookId on the relay route `/hooks/<kind>/<serverId>/<hookId>`, the same
+path as Slack (spec 37.9). `hooks/connector.ts` owns what they share with Slack: verify before the `200`,
+a 24 h receipt per source event id written before the `200`, and a reply outbox retried every 30 s. The
+Worker forwards only the kind's headers; the daemon reads only those, never the rest of the frame.
+
+- GitHub and GitLab hooks are created with the owner's `gh` / `glab`. Secrets go on stdin (`--input -`),
+  never in argv, where `ps` would show them. Each repo, org, project or group has its own secret, so
+  Rotate on one row does not break the others; verification tries every secret of the bot.
+- Mentions are a line starting with `/<folder>`, not `@`, so GitHub never notifies a real user of that
+  name. Only Who can ask gets a turn; every verified event still goes to `hooks.events` for automations.
+- Replies post as the owner. A comment the daemon posted comes back as a webhook event: it is matched by
+  id (and by body hash while the API call is in flight) and dropped, or the bot would answer itself.
+- GitHub never retries a `503`. On relay reconnect the daemon lists each hook's deliveries of the last
+  72 h and asks GitHub to resend those that failed with 5xx, 429 or a timeout. GitLab has no such API.
+- GitLab sends the secret token in clear in a header through Cloudflare; Telegram sends its secret token
+  the same way (accepted risk, `08.1.1` A10–A11). Pipeline events count once per pipeline and final
+  status, whatever GitLab resends.
+- Telegram: `message_thread_id` is part of the thread key only when `is_topic_message` is true; replies
+  in ordinary groups carry one too.
+
+The RPCs and the client contract are in `bots.github.*`, `bots.gitlab.*` and `bots.telegram.*` of
+`packages/protocol/src/bots/rpc-schemas.ts`, gated on `features.botsHooks`. The local acceptance test
+`packages/server/src/server/bots/hooks.local.e2e.test.ts` runs against `wrangler dev --local --port 8972`
+with local GitHub, GitLab and Telegram simulators; never run it against the real services.
+
 ## Port sources
 
 Orca `dfdb4fda` (MIT, Copyright 2026 Lovecast Inc.):
@@ -166,3 +193,5 @@ Orca `dfdb4fda` (MIT, Copyright 2026 Lovecast Inc.):
 The adaptation keeps local home/context/items/wake/mention behavior, uses JAgentDesk cron
 and ORC instead of Orca orchestration, and applies JAgentDesk permission cards instead of
 Orca's unattended default. The upstream license ships in `packages/server/vendor/orca-bots/LICENSE`.
+The connectors port `src/shared/automation-event-triggers.ts:17-41` (GitHub kinds),
+`src/shared/quoted-text-fence.ts` and `src/main/bots/bot-owner-writes.ts:22-63` ("asked by").

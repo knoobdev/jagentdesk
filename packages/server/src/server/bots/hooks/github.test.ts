@@ -132,6 +132,11 @@ describe("GitHub webhook connector (spec 37.10)", () => {
       allowedUsers: { id: string }[];
     };
     expect(status.targets).toEqual([{ target: "octo/test-repo", state: "waiting" }]);
+    expect(t.github.summary(t.bot.id)).toEqual({
+      connected: false,
+      needsFix: true,
+      label: "octo/test-repo",
+    });
     expect(status.allowedUsers).toEqual([{ id: "owner-login", name: "owner-login" }]);
     expect(
       (await t.post("ping", { zen: "Keep it simple.", hook_id: 101, repository })).status,
@@ -140,6 +145,7 @@ describe("GitHub webhook connector (spec 37.10)", () => {
       targets: { state: string }[];
     };
     expect(after.targets[0].state).toBe("connected");
+    expect(t.github.summary(t.bot.id)).toEqual({ connected: true, label: "octo/test-repo" });
   });
   it("shows the manual step with the secret once when gh cannot create hooks", async () => {
     const t = await setup({ createStatus: 404 });

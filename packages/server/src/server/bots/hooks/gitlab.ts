@@ -356,6 +356,16 @@ export class BotsGitLab extends HookConnector {
   allowed(botId: string): { id: string; name: string }[] {
     return this.connection(botId).allowedUsers;
   }
+  /** Connected once a delivery arrived; a hook that never delivered needs a fix. */
+  summary(botId: string): { connected: boolean; needsFix?: boolean; label?: string } {
+    const targets = this.connection(botId).targets;
+    if (!targets.length) return { connected: false };
+    return {
+      connected: targets.some((t) => t.state === "connected"),
+      ...(targets.some((t) => t.state !== "connected") ? { needsFix: true } : {}),
+      label: targets.map((t) => t.path).join(", "),
+    };
+  }
 
   protected async verify(
     botId: string,

@@ -322,6 +322,16 @@ export class BotsGitHub extends HookConnector {
   allowed(botId: string): { id: string; name: string }[] {
     return this.connection(botId).allowedUsers;
   }
+  /** Connected once GitHub's ping arrived; a hook made by hand that never pinged needs a fix. */
+  summary(botId: string): { connected: boolean; needsFix?: boolean; label?: string } {
+    const targets = this.connection(botId).targets;
+    if (!targets.length) return { connected: false };
+    return {
+      connected: targets.some((t) => t.state === "connected"),
+      ...(targets.some((t) => t.state !== "connected") ? { needsFix: true } : {}),
+      label: targets.map((t) => t.target).join(", "),
+    };
+  }
 
   protected async verify(
     botId: string,

@@ -82,8 +82,6 @@ export const TelegramStatusSchema = z.object({
   allowedUsers: z.array(AllowedUserSchema),
 });
 export type TelegramStatus = z.infer<typeof TelegramStatusSchema>;
-export const BotAllowedEntrySchema = AllowedUserSchema.extend({ connector: z.string() });
-export type BotAllowedEntry = z.infer<typeof BotAllowedEntrySchema>;
 const botId = { botId: z.string() };
 const githubTarget = z
   .string()
@@ -149,7 +147,6 @@ export const BotsRequestSchemas = [
   request("bots.telegram.link_code.request", botId),
   request("bots.telegram.allowed.remove.request", { ...botId, userId: z.string().min(1) }),
   request("bots.telegram.disconnect.request", botId),
-  request("bots.allowed.list.request", botId),
   request("bots.list.request", {}),
   request("bots.create.request", { bot: BotInputSchema }),
   request("bots.update.request", { ...botId, patch: BotPatchSchema }),
@@ -238,7 +235,6 @@ export const BotsResponseSchemas = [
   response("bots.telegram.link_code.response", { code: z.string(), expiresAt_ms: z.number() }),
   response("bots.telegram.allowed.remove.response", { status: TelegramStatusSchema }),
   response("bots.telegram.disconnect.response", { status: TelegramStatusSchema }),
-  response("bots.allowed.list.response", { allowed: z.array(BotAllowedEntrySchema) }),
   response("bots.list.response", { bots: z.array(BotSchema) }),
   response("bots.create.response", { bot: BotSchema }),
   response("bots.update.response", { bot: BotSchema }),

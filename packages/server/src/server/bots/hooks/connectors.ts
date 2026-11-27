@@ -1,4 +1,4 @@
-import type { BotAllowedEntry, BotsRequest } from "@jagentdesk/protocol/bots/rpc-schemas";
+import type { BotsRequest } from "@jagentdesk/protocol/bots/rpc-schemas";
 import type { RelayControlHandler } from "../../relay-transport.js";
 import type { BotsService } from "../service.js";
 import type { BotsSlack } from "../slack.js";
@@ -10,18 +10,26 @@ import { BotsGitLab } from "./gitlab.js";
 import { composeRelayControlHandlers } from "./relay-control.js";
 import { BotsTelegram } from "./telegram.js";
 
-export type BotsHookRequest =
-  | Extract<
-      BotsRequest,
-      { type: `bots.github.${string}` | `bots.gitlab.${string}` | `bots.telegram.${string}` }
-    >
-  | Extract<BotsRequest, { type: "bots.allowed.list.request" }>;
+export type BotsHookRequest = Extract<
+  BotsRequest,
+  { type: `bots.github.${string}` | `bots.gitlab.${string}` | `bots.telegram.${string}` }
+>;
+/** One person on a connector's Who can ask, as bt1's `bots.allowed.list` rows (`{source, id, name}`). */
+export interface BotAllowedPerson {
+  source: "github" | "gitlab" | "telegram";
+  id: string;
+  name: string;
+  username?: string;
+}
+/** A connector's line on the bot record (`Bot.github | gitlab | telegram`, bt1 contract). */
+export interface BotConnectorSummary {
+  connected: boolean;
+  needsFix?: boolean;
+  label?: string;
+}
 
 export function isBotsHookRequest(message: BotsRequest): message is BotsHookRequest {
-  return (
-    /^bots\.(?:github|gitlab|telegram)\./.test(message.type) ||
-    message.type === "bots.allowed.list.request"
-  );
+  return /^bots\.(?:github|gitlab|telegram)\./.test(message.type);
 }
 
 /** GitHub, GitLab and Telegram connectors of every bot, behind one relay control handler. */
@@ -68,22 +76,36 @@ export class BotsHookConnectors {
   async disconnect(botId: string): Promise<void> {
     for (const connector of this.all) await connector.disconnect(botId).catch(() => undefined);
   }
-  /** "Who can ask": every connector's allow-list (ADR-0061 §6 `bots.allowed.list`). */
-  allowed(botId: string): BotAllowedEntry[] {
-    const entries: BotAllowedEntry[] = [];
-    const lists: [string, readonly { id: string; name: string; username?: string }[]][] = [
-      ["slack", this.slack?.status(botId).allowedUsers ?? []],
-      ["github", this.github.allowed(botId)],
-      ["gitlab", this.gitlab.allowed(botId)],
-      ["telegram", this.telegram.allowed(botId)],
+  /** "Who can ask" people of GitHub, GitLab and Telegram; bt1's `bots.allowed.list` adds Slack's. */
+  allowedPeople(botId: string): BotAllowedPerson[] {
+    return [
+      ...this.github
+        .allowed(botId)
+        .map((user): BotAllowedPerson => ({ source: "github", id: user.id, name: user.name })),
+      ...this.gitlab
+        .allowed(botId)
+        .map((user): BotAllowedPerson => ({ source: "gitlab", id: user.id, name: user.name })),
+      ...this.telegram
+        .allowed(botId)
+        .map(
+          (user): BotAllowedPerson => ({
+            source: "telegram",
+            id: user.id,
+            name: user.name,
+            username: user.username,
+          }),
+        ),
     ];
-    for (const [connector, users] of lists)
-      for (const user of users) entries.push({ connector, ...user });
-    return entries;
+  }
+  /** What `bots.list` puts on `Bot.github`, `Bot.gitlab` and `Bot.telegram` (bt1 contract). */
+  summaries(botId: string): Record<"github" | "gitlab" | "telegram", BotConnectorSummary> {
+    return {
+      github: this.github.summary(botId),
+      gitlab: this.gitlab.summary(botId),
+      telegram: this.telegram.summary(botId),
+    };
   }
   async handle(message: BotsHookRequest): Promise<Record<string, unknown>> {
-    if (message.type === "bots.allowed.list.request")
-      return { allowed: this.allowed(message.botId) };
     if (message.type.startsWith("bots.github."))
       return this.github.handle(message as Extract<BotsRequest, { type: `bots.github.${string}` }>);
     if (message.type.startsWith("bots.gitlab."))

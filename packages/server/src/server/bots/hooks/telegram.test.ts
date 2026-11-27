@@ -144,6 +144,7 @@ describe("Telegram connector (spec 37.12)", () => {
       allowedUsers: unknown[];
     };
     expect(status.allowedUsers).toEqual([{ id: "42", name: "Dana", username: "dana" }]);
+    expect(t.telegram.summary(t.bot.id)).toEqual({ connected: true, label: "@local_jad_bot" });
   });
   it("A37.12.4: in a group, a message that does not address the bot is ignored; @bot from an allowed user is one turn and a reply there", async () => {
     const t = await setup();

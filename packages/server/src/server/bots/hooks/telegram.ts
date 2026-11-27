@@ -154,6 +154,12 @@ export class BotsTelegram extends HookConnector {
   allowed(botId: string): z.infer<typeof AllowedUser>[] {
     return this.connection(botId).allowedUsers;
   }
+  summary(botId: string): { connected: boolean; label?: string } {
+    const connection = this.connection(botId);
+    return connection.connected && connection.botUsername
+      ? { connected: true, label: `@${connection.botUsername}` }
+      : { connected: false };
+  }
   async handle(
     message: Extract<BotsRequest, { type: `bots.telegram.${string}` }>,
   ): Promise<Record<string, unknown>> {
