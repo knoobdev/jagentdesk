@@ -5,7 +5,7 @@ release notes live in [`releases/`](releases/v0.12.1.md).
 
 ## Product
 
-- [product.md](product.md) — what JAgentDesk is, who it is for, what ships in this version.
+- [product.md](product.md) — what JAgentDesk is, who it is for, what ships in v0.12.1.
 - [glossary.md](glossary.md) — the terms to use; the UI label wins.
 - [releases/v0.12.1.md](releases/v0.12.1.md) — release notes for v0.12.1.
 - [releases/v0.12.0.md](releases/v0.12.0.md) — release notes for v0.12.0.
@@ -18,11 +18,11 @@ release notes live in [`releases/`](releases/v0.12.1.md).
 
 - [architecture.md](architecture.md) — packages, daemon, clients, WebSocket API and data flow.
 - [data-model.md](data-model.md) — files under `$JAGENTDESK_HOME`, schemas, atomic writes, config keys.
-- [agent-lifecycle.md](agent-lifecycle.md) — agent states, parents and children, archive, idle release, background work.
+- [agent-lifecycle.md](agent-lifecycle.md) — agent states, parents and children, archive, idle release, background work and its detail and live output.
 - [orchestration.md](orchestration.md) — Supervisor → Lead → Peer (ORC).
 - [cross-provider-continuity.md](cross-provider-continuity.md) — session ledger, provider switches, usage-limit failover, children on other providers.
 - [durable-context.md](durable-context.md) — compaction signals, re-grounding after compaction, recitation, ledger nudge, rollover, capture lessons.
-- [bots.md](bots.md) — Bots: daemon lifecycle, storage, permissions, triggers, Slack.
+- [bots.md](bots.md) — Bots laid out like Orca's (sidebar section, bot page with Home Chat and its Home · Connectors · Chats · Files panel): storage, work flow, permissions, triggers, GitHub/GitLab/Telegram/Slack connectors, sharing by link.
 - [timeline-sync.md](timeline-sync.md) — how chat reaches clients and the replica cache.
 - [terminal-worker.md](terminal-worker.md) — the persistent terminal worker.
 - [terminal-performance.md](terminal-performance.md) — terminal latency, coalescing and backpressure.

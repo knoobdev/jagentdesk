@@ -23,7 +23,8 @@ Jira, Argo CD, forges and devices, Bots, and connected hosts.
 ## What can it do?
 
 - **Run and steer agents remotely** — start agents, send prompts, watch replies and tool calls stream
-  in, interrupt, queue or steer, review diffs, all from desktop or phone.
+  in, interrupt, queue or steer, review diffs, all from desktop or phone. Background tasks, subagents and tasks show as
+  pills in one row above the composer; tap a background task for its command, status and live output.
 - **Many providers** — Claude Code, Codex, GitHub Copilot, OpenCode, Pi and OMP, ACP agents, bundled
   provider plugins (Antigravity, Muse Code, Hoplite, fx, goose, Hermes) and your own OpenAI- or
   Anthropic-compatible model servers. Model, effort and permission controls sit in the composer. Every
@@ -44,21 +45,31 @@ Jira, Argo CD, forges and devices, Bots, and connected hosts.
   token and cost insights.
 - **Built-in tools, each a plugin you can switch off per host** — Docker, Kubernetes, Databases, Argo CD,
   SSH servers, Remote tasks, Custom API providers, Jira, Forge Hub, Devices & simulators, Workbench,
-  Skills, Spec mode, Autonomous run, Insights, Session sharing and Agentic browser.
+  Skills, Memory, Spec mode, Autonomous run, Insights, Session sharing and Agentic browser.
 - **Orchestration** — Supervisor → Lead → Peer runtime; agents can list, create and message each other.
 - **Plugins and Marketplace** — extend the app with screens, sidebar items, panels, composer items,
   timeline rows and themes; install from the Marketplace, a folder, Git or npm. Paseo plugins are
   rebranded on install.
 - **Schedules, heartbeats and loops**, voice input, a CLI (`jagentdesk`), and a UI in nine languages.
+- **Settings by This device and Host** — what is stored on the device you hold (appearance, sidebar, chat, saved hosts) is
+  kept apart from each daemon's settings (providers, agents, plugins, pairing).
 
 ---
+
+## ✨ New in v0.12.1
+
+Devices, Clusters, Data and Workbench open again. In v0.12.0 their embedded agent chat crashed the screen with "Something went
+wrong — Error: Invariant failed" as soon as it showed. Details: **[docs/releases/v0.12.1.md](docs/releases/v0.12.1.md)**.
 
 ## ✨ New in v0.12.0
 
 Bots rebuilt the way Orca does them — a Bots section in the sidebar, a bot page with its Home Chat and activity panel, workers
 in their own worktrees, items with quick answers, templates and mascots, on desktop and phones — reachable from GitHub, GitLab
-and Telegram and shareable by link. Background tasks open into a detail view with live output. Details:
+and Telegram and shareable by link. Background tasks open into a detail view with live output, and the trackers above the
+composer are one row of pills. Settings are organised by This device and Host. Details:
 **[docs/releases/v0.12.0.md](docs/releases/v0.12.0.md)**.
+
+![A background task's details with its live output](docs/images/background-task.png)
 
 ## ✨ New in v0.11.1
 
@@ -87,7 +98,7 @@ your plan usage, the connection card and Pair device / Settings / Notifications 
 workspace drills the sidebar into Agents, Terminals, Files and Changes. ⌘\ / Ctrl+\ hides it. Gumloop
 is the default theme; the other colour themes in Settings → Appearance keep the classic layout.
 
-![A Codex agent's reply with its tool calls grouped under it](docs/images/chat.png)
+![An agent's reply with its tool calls grouped under it](docs/images/chat.png)
 
 Completed turns fold behind a **"Worked for …"** summary and tool calls group under the reply. The
 composer carries the model, effort and permission controls, skills from the `/` menu, and a fullscreen
@@ -96,12 +107,12 @@ mode. Changes shows each edit as a selectable diff.
 ![The Changes view with the agent's edit](docs/images/changes.png)
 
 On phones there is no tab bar any more: the sidebar opens as a drawer, panes open as sheets, and
-Settings are grouped tiles.
+Settings are grouped tiles under This device and Host.
 
 <p>
   <img src="docs/images/phone-drawer.png" alt="Phone: the drawer" width="260" />
   <img src="docs/images/phone-chat.png" alt="Phone: a chat with the agent's reply" width="260" />
-  <img src="docs/images/phone-settings.png" alt="Phone: Settings as tiles" width="260" />
+  <img src="docs/images/phone-settings.png" alt="Phone: Settings under This device and Host" width="260" />
 </p>
 
 ### Built-in plugins with a switch per host
@@ -114,12 +125,32 @@ stays. Autonomous run, Session sharing and Agentic browser are off until you tur
 
 ### Bots replace Team mode
 
-A bot has its own identity, chat, items, memory, schedules and settings. It hands real work to worker
-agents in their own worktrees, and a BA / Tester / Pentester cross-review checks the result before the bot
-reports back. When it needs you, the item asks with quick answers. Bots can also talk in Slack through the
-relay.
+A bot is a long-lived assistant with its own soul (SOUL.md), memory, chats, items, automations and settings. Since v0.12.0
+bots look and work the way Orca's do, on desktop and on phones.
 
-![A bot answering in its chat](docs/images/bots.png)
+![A bot's Home Chat with its Home panel](docs/images/bots.png)
+
+- **Bots in the sidebar**, above Projects: each bot with its mascot, a status line (Needs you, Working, Paused, Idle) and its
+  chats and workers nested underneath. The `+` menu has New bot, Templates and From a link.
+- **The bot page** is its Home Chat with a panel beside it: **Home** (Needs you first, items by status, Automations,
+  Suggestions), **Connectors**, **Chats** (each chat with its workers) and **Files** (the bot's home folder).
+- **How it works:** the bot plans, starts worker agents in their own worktrees for code changes and is woken when a worker
+  finishes or asks. Work is tracked as items; an item that needs you asks with quick answers and a recommended choice.
+- **Look around** reads the bot's projects and connected apps and suggests what to do next; **Tidy memory** merges and
+  archives old memory lines overnight. Both are on by default for bots on Claude or Codex, and every run shows in the bot's
+  chat and under Automations; turn either off in the bot's settings.
+- **Templates** start from 11 ready-made bots (pull request review, dependency updates, release readiness, release notes and
+  more). **Hand to bot** gives a workspace to a bot with a note on what to do.
+- **Review before done** _(optional, off by default)_: BA, Tester and Pentester reviews must pass before an item is done.
+- **Phones:** Bots in the drawer, the bot page with its panel as a sheet, quick replies to Needs you and long-press item
+  actions.
+- **Connectors:** reach a bot from GitHub and GitLab (webhooks), Telegram and Slack. Mention the bot and it answers in the
+  thread. Events travel through your own relay Worker; tokens stay in the daemon's secret store.
+- **Share by link:** the bot's soul, skills, automations and, if you pick them, memory notes go into a bundle encrypted on
+  your machine; the key lives only in the link. Sharing needs an R2 bucket on your relay Worker (see the
+  [v0.12.0 upgrade notes](docs/releases/v0.12.0.md#upgrade-notes)).
+
+Details: [docs/bots.md](docs/bots.md).
 
 ### Encrypted relay alongside Tailscale
 

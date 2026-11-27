@@ -68,15 +68,18 @@ Anyone who builds software:
 3. **The daemon as infrastructure.** Server/client architecture enables deployment anywhere.
 4. **Open source outlasts funding.** Open source communities are resilient. Contributors become advocates.
 
-## Current state (v0.10.0)
+## Current state (v0.12.1)
 
 - Desktop (Electron), mobile (iOS/Android, Expo 57 / React Native 0.86), web, CLI
 - Built-in providers: Claude Code (Agent SDK), Codex (app-server), GitHub Copilot (ACP), OpenCode, Pi, OMP. More ship as bundled provider plugins, plus a one-click ACP catalog and custom ACP or API providers ([providers.md](providers.md), [custom-providers.md](custom-providers.md))
-- Gumloop look: one desktop sidebar, a drawer on phones, and Settings grouped into tiles on phones ([themes.md](themes.md))
-- Features are built-in plugins that each host turns on or off under Settings → host → Plugins: Docker, Kubernetes, Databases, Argo CD, SSH servers, Remote tasks, Custom API providers, Jira, Forge Hub, Devices & simulators, Workbench, Skills, Spec mode, Insights, and Bots. Autonomous run, Session sharing and Agentic browser start off ([builtin-plugins.md](builtin-plugins.md))
+- Gumloop look: one desktop sidebar, a drawer on phones, and Settings grouped into tiles on phones ([themes.md](themes.md)). Settings follow Paseo 0.17.6's map: **This device** (stored on the device you hold) and **Host** (the daemon's settings)
+- Features are built-in plugins that each host turns on or off under Settings → Host → Plugins: Docker, Kubernetes, Databases, Argo CD, SSH servers, Remote tasks, Custom API providers, Jira, Forge Hub, Devices & simulators, Workbench, Skills, Spec mode, Insights, Memory and Bots. Autonomous run, Session sharing and Agentic browser start off ([builtin-plugins.md](builtin-plugins.md))
 - Remote access over the embedded Tailscale listener or the end-to-end encrypted relay ([relay.md](relay.md)). New devices pair by comparing a six-digit code on both screens ([permissions.md](permissions.md#device-pairing))
 - Connected hosts: a daemon can pair with another daemon and run agents there ([connected-hosts.md](connected-hosts.md))
-- Bots: long-lived assistants that delegate work and review results, including from Slack ([bots.md](bots.md))
+- Agents keep their context: switch an agent to another provider mid-conversation with a structured handoff, fail over when a provider hits its usage limit, start children on other providers ([cross-provider-continuity.md](cross-provider-continuity.md)), and re-ground after compaction with cited lessons that become project rules only after approval ([durable-context.md](durable-context.md))
+- Memory: project and global memories agents save and recall through local full-text search, with no extra model calls ([memory.md](memory.md))
+- Bots laid out and run like Orca's: a Bots section in the sidebar, a bot page with its Home Chat and a Home · Connectors · Chats · Files panel, workers in their own worktrees, items with quick answers, Look around and Tidy memory, templates and Hand to bot. Bots are reachable from GitHub, GitLab, Telegram and Slack through the relay, and shareable by link once the relay Worker has its R2 bucket ([bots.md](bots.md))
+- Background work: trackers above the composer (background tasks, subagents, tasks, plugin pills) are compact pills in one row; a background task opens into a detail view with live output for Claude and OpenCode ([agent-lifecycle.md](agent-lifecycle.md))
 - Usage shows per-account quotas from usage-source plugins; Insights shows usage history and costs
 - Idle agent runtimes are released after an hour and resume on demand; agent-to-agent messages queue by default ([agent-lifecycle.md](agent-lifecycle.md))
 - Terminals survive daemon restarts and replay their history on reattach ([terminal-worker.md](terminal-worker.md))
