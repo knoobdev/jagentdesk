@@ -335,6 +335,8 @@ const styles = StyleSheet.create((theme) => {
       right: 0,
       bottom: 0,
       left: 0,
+      // Above the terminal's own scrollbar.
+      zIndex: 1,
       backgroundColor: theme.colors.surface2,
     },
     readLayerContent: { padding: theme.spacing[2], paddingRight: theme.spacing[8] },
