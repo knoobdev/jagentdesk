@@ -3120,8 +3120,8 @@ export const zhCN: TranslationResources = {
     workspaces: "工作区",
   },
   browserTabs: {
-    footerOne: "已打开 1 个浏览器标签页",
-    footerMany: "已打开 {{count}} 个浏览器标签页",
+    openOne: "已打开 1 个浏览器标签页",
+    openMany: "已打开 {{count}} 个浏览器标签页",
     title: "浏览器标签页",
     closeAll: "全部关闭",
     show: "显示",
@@ -3132,6 +3132,11 @@ export const zhCN: TranslationResources = {
       loading: "加载中",
       notResponding: "无响应",
       crashed: "已崩溃",
+    },
+    pill: {
+      tooltip: "此智能体打开的浏览器标签页",
+      notResponding: "{{count}} 个无响应",
+      crashed: "{{count}} 个已崩溃",
     },
   },
   marketplace: {

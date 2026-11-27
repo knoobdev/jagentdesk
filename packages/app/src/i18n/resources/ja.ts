@@ -3196,8 +3196,8 @@ export const ja: TranslationResources = {
     workspaces: "ワークスペース",
   },
   browserTabs: {
-    footerOne: "ブラウザタブを1件開いています",
-    footerMany: "ブラウザタブを{{count}}件開いています",
+    openOne: "ブラウザタブを1件開いています",
+    openMany: "ブラウザタブを{{count}}件開いています",
     title: "ブラウザタブ",
     closeAll: "すべて閉じる",
     show: "表示",
@@ -3208,6 +3208,11 @@ export const ja: TranslationResources = {
       loading: "読み込み中",
       notResponding: "応答なし",
       crashed: "クラッシュ",
+    },
+    pill: {
+      tooltip: "このエージェントが開いたブラウザタブ",
+      notResponding: "応答なし {{count}}",
+      crashed: "クラッシュ {{count}}",
     },
   },
   marketplace: {

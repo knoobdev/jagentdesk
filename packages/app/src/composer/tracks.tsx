@@ -37,6 +37,7 @@ import {
   useHorizontalScrollBoundary,
 } from "@/components/ui/horizontal-scroll-boundary";
 import { StatusRing } from "@/components/status-ring";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { STATUS_RING_HALO_INSET } from "@/components/status-ring/geometry";
 import { CHAT_COLUMN_RAIL_DATASET } from "@/chat-rail";
 import { isWeb } from "@/constants/platform";
@@ -178,6 +179,12 @@ export interface ComposerTrackPillProps {
   panelMaxHeight?: number;
   /** Overrides the panel surface's chrome (radius, border) while it shows something other than rows. */
   panelSurfaceStyle?: StyleProp<ViewStyle>;
+  /** The tracker's type icon, drawn before the segments (the browser tabs pill's globe). */
+  leading?: ReactNode;
+  /** Hover tooltip naming what the pill counts, for a pill whose segments are a bare number. */
+  tooltip?: string;
+  /** A fixed panel width, for a panel that reuses a list designed elsewhere at its own width. */
+  panelWidth?: number;
 }
 
 /**
@@ -209,6 +216,9 @@ export function ComposerTrackPill({
   onOpenChange,
   panelMaxHeight = PANEL_MAX_HEIGHT,
   panelSurfaceStyle,
+  leading,
+  tooltip,
+  panelWidth,
 }: ComposerTrackPillProps): ReactElement {
   const chatArea = useContext(ComposerTrackChatAreaContext);
   const chatAreaRef = chatArea?.ref;
@@ -218,21 +228,37 @@ export function ComposerTrackPill({
     [chatAreaRef],
   );
   const maxHeight = panelRoom === null ? panelMaxHeight : Math.min(panelMaxHeight, panelRoom);
+  const trigger = (
+    <ComposerTrackPillTrigger
+      segments={segments}
+      leading={leading}
+      testID={testID}
+      accessibilityLabel={accessibilityLabel ?? segments.map((segment) => segment.text).join(" ")}
+    />
+  );
   return (
     <MenuRoot compactMode="sheet" open={open} onOpenChange={onOpenChange}>
-      <ComposerTrackPillTrigger
-        segments={segments}
-        testID={testID}
-        accessibilityLabel={accessibilityLabel ?? segments.map((segment) => segment.text).join(" ")}
-      />
+      {tooltip ? (
+        <Tooltip delayDuration={300}>
+          <TooltipTrigger asChild>
+            <View>{trigger}</View>
+          </TooltipTrigger>
+          <TooltipContent side="top" align="center" offset={8}>
+            <Text style={styles.tooltip}>{tooltip}</Text>
+          </TooltipContent>
+        </Tooltip>
+      ) : (
+        trigger
+      )}
       <MenuSurface
         side="top"
         align="start"
         offset={PANEL_OFFSET}
         sheetTitle={panelTitle}
         pages={pages}
-        minWidth={PANEL_MIN_WIDTH}
-        maxWidth={PANEL_MAX_WIDTH}
+        width={panelWidth}
+        minWidth={panelWidth === undefined ? PANEL_MIN_WIDTH : undefined}
+        maxWidth={panelWidth === undefined ? PANEL_MAX_WIDTH : undefined}
         maxHeight={maxHeight}
         boundary={boundary}
         surfaceStyle={panelSurfaceStyle}
@@ -247,10 +273,12 @@ export function ComposerTrackPill({
 
 function ComposerTrackPillTrigger({
   segments,
+  leading,
   testID,
   accessibilityLabel,
 }: {
   segments: readonly ComposerTrackPillSegment[];
+  leading: ReactNode;
   testID: string;
   accessibilityLabel: string;
 }): ReactElement {
@@ -280,6 +308,7 @@ function ComposerTrackPillTrigger({
       {...ariaExpandedProps}
       style={pillStyle}
     >
+      {leading}
       <View style={styles.segments}>
         {segments.map((segment, index) => (
           <View
@@ -551,5 +580,6 @@ const styles = StyleSheet.create((theme) => {
     dotFailed: statusDot("failed"),
     dotAttention: statusDot("attention"),
     dotDone: statusDot("done"),
+    tooltip: { fontSize: theme.fontSize.sm, color: theme.colors.popoverForeground },
   };
 });

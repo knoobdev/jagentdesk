@@ -625,8 +625,8 @@ export const vi = {
     workspaces: "Workspace",
   },
   browserTabs: {
-    footerOne: "1 tab trình duyệt đang mở",
-    footerMany: "{{count}} tab trình duyệt đang mở",
+    openOne: "1 tab trình duyệt đang mở",
+    openMany: "{{count}} tab trình duyệt đang mở",
     title: "Tab trình duyệt",
     closeAll: "Đóng tất cả",
     show: "Hiện",
@@ -637,6 +637,11 @@ export const vi = {
       loading: "Đang tải",
       notResponding: "Không phản hồi",
       crashed: "Đã sập",
+    },
+    pill: {
+      tooltip: "Tab trình duyệt agent này đã mở",
+      notResponding: "{{count}} không phản hồi",
+      crashed: "{{count}} đã sập",
     },
   },
   marketplace: {

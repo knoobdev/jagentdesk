@@ -63,8 +63,18 @@ and instance identity survive a renderer reload or daemon reconnect in that wind
 ## Open tabs list and per-tab profiles
 
 Spec 04 §27d. Tabs the user is not looking at stay alive as webviews parked 1 × 1 px in the main
-window (`packages/app/src/desktop/browser/resident-webviews.ts`), so the sidebar footer lists every
-live webview: "N browser tabs open", with Show, Close and Close all.
+window (`packages/app/src/desktop/browser/resident-webviews.ts`), so the desktop app lists every
+live webview, with Show, Close and Close all. Two entry points open the same popover
+(`packages/app/src/desktop/browser/live-tabs/`):
+
+- A globe button with a count badge in the sidebar host row, right before Notifications, listing
+  every live tab. It is absent while no webview is alive. The badge turns warning or danger when a
+  tab is Not responding or Crashed.
+- A globe pill in an agent's composer track rail, listing only the tabs that agent opened
+  (`openedBy` on the browser record). Its Close all closes only those tabs.
+
+Keep the count out of the footer text rows: the user rejected a "N browser tabs open" line above the
+Usage summary as easy to miss and crowding Usage.
 
 - The list comes from the main process, not from tab state. Main sees every attached guest, including
   one whose browser id never registered, and its crash and hang events

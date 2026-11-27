@@ -3197,8 +3197,8 @@ export const ar: TranslationResources = {
     workspaces: "مساحات العمل",
   },
   browserTabs: {
-    footerOne: "علامة تبويب متصفح واحدة مفتوحة",
-    footerMany: "{{count}} علامات تبويب متصفح مفتوحة",
+    openOne: "علامة تبويب متصفح واحدة مفتوحة",
+    openMany: "{{count}} علامات تبويب متصفح مفتوحة",
     title: "علامات تبويب المتصفح",
     closeAll: "إغلاق الكل",
     show: "إظهار",
@@ -3209,6 +3209,11 @@ export const ar: TranslationResources = {
       loading: "جارٍ التحميل",
       notResponding: "لا يستجيب",
       crashed: "تعطّل",
+    },
+    pill: {
+      tooltip: "علامات تبويب المتصفح التي فتحها هذا الوكيل",
+      notResponding: "{{count}} لا يستجيب",
+      crashed: "{{count}} تعطّل",
     },
   },
   marketplace: {
