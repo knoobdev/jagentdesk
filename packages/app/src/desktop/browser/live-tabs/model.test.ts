@@ -7,8 +7,14 @@ import {
   type WorkspaceLayout,
 } from "@/stores/workspace-layout-actions";
 import {
+  browserTabRowDetailParts,
   buildBrowserTabRows,
+  buildBrowserTabsPillSegments,
+  filterBrowserTabRowsForAgent,
   findBrowserTabPlacement,
+  summarizeBrowserTabRows,
+  type BrowserTabRow,
+  type BrowserTabStatus,
   type BuildBrowserTabRowsInput,
 } from "./model";
 
@@ -179,5 +185,153 @@ describe("findBrowserTabPlacement", () => {
       workspaceKey: WORKSPACE_KEY_A,
       tabId: "sheet-tab",
     });
+  });
+});
+
+function makeRow(key: string, extra: Partial<BrowserTabRow> = {}): BrowserTabRow {
+  return {
+    key,
+    browserId: key,
+    webContentsId: 1,
+    title: key,
+    url: "http://localhost:3000/",
+    host: "localhost:3000",
+    faviconUrl: null,
+    status: "ready",
+    placement: null,
+    workspaceName: "A",
+    agentName: null,
+    opener: null,
+    homeWorkspace: null,
+    ...extra,
+  };
+}
+
+function rowsWithStatuses(statuses: BrowserTabStatus[]): BrowserTabRow[] {
+  return statuses.map((status, index) => makeRow(`tab-${index}`, { status }));
+}
+
+describe("filterBrowserTabRowsForAgent", () => {
+  it("keeps only the tabs the agent opened on that host", () => {
+    const rows = [
+      makeRow("mine-1", { opener: { serverId: SERVER, agentId: "agt_1" } }),
+      makeRow("other-agent", { opener: { serverId: SERVER, agentId: "agt_2" } }),
+      makeRow("same-id-other-host", { opener: { serverId: "srv_remote", agentId: "agt_1" } }),
+      makeRow("user-opened"),
+      makeRow("mine-2", { opener: { serverId: SERVER, agentId: "agt_1" } }),
+    ];
+    expect(filterBrowserTabRowsForAgent(rows, SERVER, "agt_1").map((entry) => entry.key)).toEqual([
+      "mine-1",
+      "mine-2",
+    ]);
+    expect(filterBrowserTabRowsForAgent(rows, SERVER, "agt_3")).toEqual([]);
+  });
+
+  it("carries the opener from the browser record onto the row", () => {
+    const opener = { serverId: SERVER, workspaceId: WORKSPACE_A, agentId: "agt_1" };
+    const rows = buildBrowserTabRows(
+      input({
+        liveTabs: [
+          liveTab({ webContentsId: 7, browserId: "tab-1" }),
+          liveTab({ webContentsId: 8, browserId: "tab-2" }),
+        ],
+        browsersById: { "tab-1": record("tab-1", { openedBy: opener }), "tab-2": record("tab-2") },
+      }),
+    );
+    expect(rows.map((entry) => entry.opener)).toEqual([
+      { serverId: SERVER, agentId: "agt_1" },
+      null,
+    ]);
+    expect(filterBrowserTabRowsForAgent(rows, SERVER, "agt_1").map((entry) => entry.key)).toEqual([
+      "tab-1",
+    ]);
+  });
+});
+
+describe("summarizeBrowserTabRows", () => {
+  it("counts tabs with a muted badge when every tab is fine", () => {
+    expect(summarizeBrowserTabRows(rowsWithStatuses(["ready", "loading"]))).toEqual({
+      count: 2,
+      badgeText: "2",
+      tone: "muted",
+      notResponding: 0,
+      crashed: 0,
+    });
+  });
+
+  it("turns the badge warning for a tab that is not responding", () => {
+    expect(summarizeBrowserTabRows(rowsWithStatuses(["ready", "notResponding"]))).toMatchObject({
+      tone: "warning",
+      notResponding: 1,
+      crashed: 0,
+    });
+  });
+
+  it("turns the badge danger when a tab crashed, even with another one not responding", () => {
+    expect(
+      summarizeBrowserTabRows(rowsWithStatuses(["notResponding", "crashed", "notResponding"])),
+    ).toMatchObject({ count: 3, tone: "danger", notResponding: 2, crashed: 1 });
+  });
+
+  it("caps the badge text at 99+", () => {
+    expect(summarizeBrowserTabRows(rowsWithStatuses(Array(99).fill("ready"))).badgeText).toBe("99");
+    expect(summarizeBrowserTabRows(rowsWithStatuses(Array(100).fill("ready"))).badgeText).toBe(
+      "99+",
+    );
+  });
+
+  it("is empty with no tabs", () => {
+    expect(summarizeBrowserTabRows([])).toMatchObject({ count: 0, badgeText: "0", tone: "muted" });
+  });
+});
+
+describe("browserTabRowDetailParts", () => {
+  const options = { notInWorkspace: "Not in a workspace" };
+
+  it("names host, workspace and agent in the full list", () => {
+    const entry = makeRow("tab-1", { agentName: "Fix login flow" });
+    expect(browserTabRowDetailParts(entry, { ...options, includeAgent: true })).toEqual([
+      "localhost:3000",
+      "A",
+      "Fix login flow",
+    ]);
+  });
+
+  it("leaves the agent out of one agent's list", () => {
+    const entry = makeRow("tab-1", { agentName: "Fix login flow" });
+    expect(browserTabRowDetailParts(entry, { ...options, includeAgent: false })).toEqual([
+      "localhost:3000",
+      "A",
+    ]);
+  });
+
+  it("says Not in a workspace for an orphan and skips an empty host", () => {
+    const entry = makeRow("tab-1", { workspaceName: null, host: "" });
+    expect(browserTabRowDetailParts(entry, { ...options, includeAgent: true })).toEqual([
+      "Not in a workspace",
+    ]);
+  });
+});
+
+describe("buildBrowserTabsPillSegments", () => {
+  const labels = {
+    notResponding: (count: number) => `${count} not responding`,
+    crashed: (count: number) => `${count} crashed`,
+  };
+
+  it("is the bare count when every tab is fine", () => {
+    const summary = summarizeBrowserTabRows(rowsWithStatuses(["ready", "loading"]));
+    expect(buildBrowserTabsPillSegments(summary, labels)).toEqual([{ bucket: null, text: "2" }]);
+  });
+
+  it("adds an amber not-responding segment and a red crashed segment", () => {
+    const summary = summarizeBrowserTabRows(
+      rowsWithStatuses(["notResponding", "crashed", "ready"]),
+    );
+    expect(buildBrowserTabsPillSegments(summary, labels)).toEqual([
+      { bucket: null, text: "3" },
+      { bucket: "needs_input", text: "1 not responding" },
+      { bucket: "failed", text: "1 crashed" },
+    ]);
   });
 });

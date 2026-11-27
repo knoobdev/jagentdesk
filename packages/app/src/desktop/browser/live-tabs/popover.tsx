@@ -3,113 +3,34 @@ import { Image, Text, View, type PressableStateCallbackType } from "react-native
 import { Eye, Globe, X } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
-import { getIsElectron } from "@/constants/platform";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-  useDropdownMenuClose,
-} from "@/components/ui/dropdown-menu";
+import { useDropdownMenuClose } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useBrowserStore } from "@/desktop/browser/store";
-import { useSessionStore } from "@/stores/session-store";
-import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
-import { resolveWorkspaceMapKeyByIdentity } from "@/utils/workspace-identity";
 import type { Theme } from "@/styles/theme";
 import { closeAllBrowserTabs, closeBrowserTab, showBrowserTab } from "./actions";
-import { buildBrowserTabRows, type BrowserTabRow, type BrowserTabStatus } from "./model";
-import { useLiveBrowserTabsStore, useLiveBrowserTabsSync } from "./store";
+import { browserTabRowDetailParts, type BrowserTabRow, type BrowserTabStatus } from "./model";
+
+/** Popover width shared by the host-row button and the composer pill (spec 04 §27d.1). */
+export const BROWSER_TABS_POPOVER_WIDTH = 420;
+export const BROWSER_TABS_POPOVER_MAX_HEIGHT = 480;
 
 const ThemedGlobe = withUnistyles(Globe);
 const ThemedEye = withUnistyles(Eye);
 const ThemedX = withUnistyles(X);
 const muted = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 
-function resolveWorkspaceName(serverId: string, workspaceId: string): string | null {
-  const workspaces = useSessionStore.getState().sessions[serverId]?.workspaces;
-  const key = resolveWorkspaceMapKeyByIdentity({ workspaces, workspaceId });
-  const workspace = key ? workspaces?.get(key) : undefined;
-  return workspace ? workspace.title?.trim() || workspace.name : null;
-}
-
-function resolveAgentName(serverId: string, agentId: string): string | null {
-  const agent = useSessionStore.getState().sessions[serverId]?.agents.get(agentId);
-  return agent ? agent.title?.trim() || agent.provider : null;
-}
-
-function useBrowserTabRows(): BrowserTabRow[] {
-  useLiveBrowserTabsSync();
-  const liveTabs = useLiveBrowserTabsStore((state) => state.liveTabs);
-  const elements = useLiveBrowserTabsStore((state) => state.elements);
-  const browsersById = useBrowserStore((state) => state.browsersById);
-  const layoutByWorkspace = useWorkspaceLayoutStore((state) => state.layoutByWorkspace);
-  const sheetsByWorkspace = useWorkspaceLayoutStore((state) => state.sheetsByWorkspace);
-  const serverIds = useSessionStore((state) => Object.keys(state.sessions).join("\n"));
-  return useMemo(
-    () =>
-      buildBrowserTabRows({
-        liveTabs,
-        elements,
-        browsersById,
-        layouts: { layoutByWorkspace, sheetsByWorkspace },
-        serverIds: serverIds ? serverIds.split("\n") : [],
-        resolveWorkspaceName,
-        resolveAgentName,
-      }),
-    [browsersById, elements, layoutByWorkspace, liveTabs, serverIds, sheetsByWorkspace],
-  );
-}
-
-function triggerStyle({ hovered, pressed }: { hovered: boolean; pressed: boolean; open: boolean }) {
-  return [styles.trigger, (hovered || pressed) && styles.triggerHovered];
-}
-
 /**
- * Sidebar footer row "N browser tabs open" and its popover (spec 04 §27d.1). Shown on the
- * desktop app while at least one browser webview is alive, parked ones included.
+ * The "Browser tabs" list (spec 04 §27d.1), shared by both entry points. Lives inside a menu
+ * surface: Show and Close all dismiss it through the menu. `includeAgent` is false in one agent's
+ * list, where every row names the same agent; Close all then closes only those rows.
  */
-export function BrowserTabsSidebarRow() {
-  if (!getIsElectron()) return null;
-  return <BrowserTabsSidebarRowContent />;
-}
-
-function BrowserTabsSidebarRowContent() {
-  const { t } = useTranslation();
-  const rows = useBrowserTabRows();
-  if (rows.length === 0) return null;
-  const label =
-    rows.length === 1
-      ? t("browserTabs.footerOne")
-      : t("browserTabs.footerMany", { count: rows.length });
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        style={triggerStyle}
-        accessibilityLabel={label}
-        testID="sidebar-browser-tabs"
-      >
-        <ThemedGlobe size={16} uniProps={muted} />
-        <Text style={styles.triggerLabel} numberOfLines={1}>
-          {label}
-        </Text>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        side="top"
-        align="start"
-        width={420}
-        maxHeight={480}
-        scrollable
-        surfaceStyle={styles.popover}
-        testID="browser-tabs-popover"
-      >
-        <BrowserTabsPopoverBody rows={rows} />
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-function BrowserTabsPopoverBody({ rows }: { rows: BrowserTabRow[] }) {
+export function BrowserTabsPopoverBody({
+  rows,
+  includeAgent,
+}: {
+  rows: readonly BrowserTabRow[];
+  includeAgent: boolean;
+}) {
   const { t } = useTranslation();
   const close = useDropdownMenuClose();
   const handleCloseAll = useCallback(() => {
@@ -130,7 +51,7 @@ function BrowserTabsPopoverBody({ rows }: { rows: BrowserTabRow[] }) {
         </Button>
       </View>
       {rows.map((row) => (
-        <BrowserTabPopoverRow key={row.key} row={row} onShown={close} />
+        <BrowserTabPopoverRow key={row.key} row={row} includeAgent={includeAgent} onShown={close} />
       ))}
     </View>
   );
@@ -143,11 +64,20 @@ function statusLabelKey(status: BrowserTabStatus): string | null {
   return null;
 }
 
-function BrowserTabPopoverRow({ row, onShown }: { row: BrowserTabRow; onShown: () => void }) {
+function BrowserTabPopoverRow({
+  row,
+  includeAgent,
+  onShown,
+}: {
+  row: BrowserTabRow;
+  includeAgent: boolean;
+  onShown: () => void;
+}) {
   const { t } = useTranslation();
-  const detail = [row.host, row.workspaceName ?? t("browserTabs.notInWorkspace"), row.agentName]
-    .filter((part): part is string => Boolean(part))
-    .join(" · ");
+  const detail = browserTabRowDetailParts(row, {
+    includeAgent,
+    notInWorkspace: t("browserTabs.notInWorkspace"),
+  }).join(" · ");
   const statusKey = statusLabelKey(row.status);
   const handleShow = useCallback(() => {
     if (showBrowserTab(row)) onShown();
@@ -257,24 +187,16 @@ function RowIconButton({
 }
 
 // Geometry from spec 04 §27d.1 and spec 38 §4.6 (two-line rows, status chips).
-const styles = StyleSheet.create((theme: Theme) => ({
-  trigger: {
-    width: "100%",
-    height: { xs: 44, md: 32 },
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[2],
-    paddingHorizontal: theme.spacing[2],
-    borderRadius: theme.borderRadius.lg,
-  },
-  triggerHovered: { backgroundColor: theme.colors.surfaceSidebarHover },
-  triggerLabel: { flex: 1, fontSize: 13, color: theme.colors.foregroundMuted },
+export const browserTabsPopoverStyles = StyleSheet.create((theme: Theme) => ({
   // The menu measures its content, not the surface: padding on the surface would make the
   // popover taller than placed and push it down over its trigger.
-  popover: {
+  surface: {
     borderRadius: theme.borderRadius.xl,
     borderColor: theme.colors.border,
   },
+}));
+
+const styles = StyleSheet.create((theme: Theme) => ({
   body: { padding: theme.spacing[4] },
   header: {
     flexDirection: "row",

@@ -3191,8 +3191,8 @@ export const ptBR: TranslationResources = {
     workspaces: "Workspaces",
   },
   browserTabs: {
-    footerOne: "1 aba do navegador aberta",
-    footerMany: "{{count}} abas do navegador abertas",
+    openOne: "1 aba do navegador aberta",
+    openMany: "{{count}} abas do navegador abertas",
     title: "Abas do navegador",
     closeAll: "Fechar todas",
     show: "Mostrar",
@@ -3203,6 +3203,11 @@ export const ptBR: TranslationResources = {
       loading: "Carregando",
       notResponding: "Não está respondendo",
       crashed: "Travou",
+    },
+    pill: {
+      tooltip: "Abas do navegador que este agente abriu",
+      notResponding: "{{count}} sem resposta",
+      crashed: "{{count}} travou",
     },
   },
   marketplace: {

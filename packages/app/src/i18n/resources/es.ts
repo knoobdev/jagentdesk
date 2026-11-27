@@ -3208,8 +3208,8 @@ export const es: TranslationResources = {
     workspaces: "Espacios de trabajo",
   },
   browserTabs: {
-    footerOne: "1 pestaña del navegador abierta",
-    footerMany: "{{count}} pestañas del navegador abiertas",
+    openOne: "1 pestaña del navegador abierta",
+    openMany: "{{count}} pestañas del navegador abiertas",
     title: "Pestañas del navegador",
     closeAll: "Cerrar todas",
     show: "Mostrar",
@@ -3220,6 +3220,11 @@ export const es: TranslationResources = {
       loading: "Cargando",
       notResponding: "No responde",
       crashed: "Bloqueada",
+    },
+    pill: {
+      tooltip: "Pestañas del navegador que abrió este agente",
+      notResponding: "{{count}} no responde",
+      crashed: "{{count}} bloqueada",
     },
   },
   marketplace: {

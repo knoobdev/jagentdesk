@@ -3256,8 +3256,8 @@ export const ru: TranslationResources = {
     workspaces: "Рабочие пространства",
   },
   browserTabs: {
-    footerOne: "Открыта 1 вкладка браузера",
-    footerMany: "Открыто вкладок браузера: {{count}}",
+    openOne: "Открыта 1 вкладка браузера",
+    openMany: "Открыто вкладок браузера: {{count}}",
     title: "Вкладки браузера",
     closeAll: "Закрыть все",
     show: "Показать",
@@ -3268,6 +3268,11 @@ export const ru: TranslationResources = {
       loading: "Загрузка",
       notResponding: "Не отвечает",
       crashed: "Сбой",
+    },
+    pill: {
+      tooltip: "Вкладки браузера, открытые этим агентом",
+      notResponding: "не отвечает: {{count}}",
+      crashed: "сбой: {{count}}",
     },
   },
   marketplace: {

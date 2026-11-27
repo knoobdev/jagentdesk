@@ -3255,8 +3255,8 @@ export const fr: TranslationResources = {
     workspaces: "Espaces de travail",
   },
   browserTabs: {
-    footerOne: "1 onglet de navigateur ouvert",
-    footerMany: "{{count}} onglets de navigateur ouverts",
+    openOne: "1 onglet de navigateur ouvert",
+    openMany: "{{count}} onglets de navigateur ouverts",
     title: "Onglets du navigateur",
     closeAll: "Tout fermer",
     show: "Afficher",
@@ -3267,6 +3267,11 @@ export const fr: TranslationResources = {
       loading: "Chargement",
       notResponding: "Ne répond pas",
       crashed: "Planté",
+    },
+    pill: {
+      tooltip: "Onglets du navigateur ouverts par cet agent",
+      notResponding: "{{count}} ne répond pas",
+      crashed: "{{count}} planté",
     },
   },
   marketplace: {

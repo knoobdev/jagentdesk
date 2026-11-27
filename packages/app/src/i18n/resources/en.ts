@@ -3208,8 +3208,8 @@ export const en = {
     workspaces: "Workspaces",
   },
   browserTabs: {
-    footerOne: "1 browser tab open",
-    footerMany: "{{count}} browser tabs open",
+    openOne: "1 browser tab open",
+    openMany: "{{count}} browser tabs open",
     title: "Browser tabs",
     closeAll: "Close all",
     show: "Show",
@@ -3220,6 +3220,11 @@ export const en = {
       loading: "Loading",
       notResponding: "Not responding",
       crashed: "Crashed",
+    },
+    pill: {
+      tooltip: "Browser tabs this agent opened",
+      notResponding: "{{count}} not responding",
+      crashed: "{{count}} crashed",
     },
   },
   marketplace: {

@@ -3,6 +3,7 @@ import { memo, useCallback, type ReactElement } from "react";
 import { BackgroundWorkTrack } from "@/background-work";
 import { WorkspaceDiffStatPill } from "@/composer/diff-stat-pill";
 import { ComposerTrackBar } from "@/composer/tracks";
+import { AgentBrowserTabsPill } from "@/desktop/browser/live-tabs/composer-pill";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { usePaneContext } from "@/panels/pane-context";
 import { PluginComposerPills } from "@/plugins";
@@ -21,8 +22,8 @@ import { navigateToAgent } from "@/utils/navigate-to-agent";
 import { buildWorkspaceTabPersistenceKey } from "@/workspace-tabs/model";
 
 /**
- * The pane's ambient context — background work, the parent agent, subagents, plugin pills and
- * workspace changes — as one row of pills above the composer (spec 38 §4.4b, Paseo 0.17.5
+ * The pane's ambient context — background work, the parent agent, subagents, the browser tabs the
+ * agent opened, plugin pills and workspace changes — as one row of pills above the composer (spec 38 §4.4b, Paseo 0.17.5
  * `panels/agent-tracks.tsx`).
  *
  * The row shares the composer's keyboard transform and owns the space between itself and the
@@ -101,6 +102,7 @@ export const AgentTracks = memo(function AgentTracks({
         onArchiveFinished={hideFinishedProviderSubagents}
         onDetachSubagent={canDetachSubagents ? detachSubagent : undefined}
       />
+      <AgentBrowserTabsPill serverId={serverId} agentId={agentId} />
       <PluginComposerPills
         serverId={serverId}
         workspaceId={workspaceId}
