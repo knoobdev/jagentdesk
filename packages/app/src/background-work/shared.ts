@@ -43,42 +43,57 @@ export function useBackgroundWorkSnapshot(
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
-interface TrackOpenRequestState {
-  requests: Record<string, number>;
-  request: (serverId: string, agentId: string) => void;
-  consume: (serverId: string, agentId: string) => void;
+/**
+ * How long a request to open the track waits for that agent's track to come on screen. Long enough
+ * for the navigation that carries it (a sidebar line opening the agent's workspace); short enough
+ * that a request no track took is gone before the user next visits the agent on their own.
+ */
+export const BACKGROUND_WORK_TRACK_OPEN_TTL_MS = 10_000;
+
+interface TrackOpenRequest {
+  key: string;
+  seq: number;
+  requestedAt: number;
 }
 
-/** Pressing a sidebar background line opens the agent with its background track already open. */
-export const useBackgroundWorkTrackOpenRequests = create<TrackOpenRequestState>()((set) => ({
-  requests: {},
-  request: (serverId, agentId) =>
-    set((state) => ({
-      requests: {
-        ...state.requests,
-        [`${serverId}:${agentId}`]: (state.requests[`${serverId}:${agentId}`] ?? 0) + 1,
-      },
-    })),
-  consume: (serverId, agentId) =>
-    set((state) => {
-      const key = `${serverId}:${agentId}`;
-      if (!(key in state.requests)) return state;
-      const requests = { ...state.requests };
-      delete requests[key];
-      return { requests };
-    }),
-}));
+interface TrackOpenRequestState {
+  /** One request at a time: a newer press anywhere replaces it. */
+  pending: TrackOpenRequest | null;
+  seq: number;
+}
+
+/**
+ * Pressing a sidebar background line, or a background row in the transcript, opens the agent's
+ * background track once. The request is not a per-agent flag: a flag kept until that agent's track
+ * mounted was still waiting when the press came from a view with no track (a bot chat, an archived
+ * agent), and opened the panel the next time the user came back to the agent.
+ */
+const useTrackOpenRequests = create<TrackOpenRequestState>()(() => ({ pending: null, seq: 0 }));
+
+function trackKey(serverId: string, agentId: string): string {
+  return `${serverId}:${agentId}`;
+}
 
 export function requestBackgroundWorkTrackOpen(serverId: string, agentId: string): void {
-  useBackgroundWorkTrackOpenRequests.getState().request(serverId, agentId);
+  useTrackOpenRequests.setState((state) => {
+    const seq = state.seq + 1;
+    return { seq, pending: { key: trackKey(serverId, agentId), seq, requestedAt: Date.now() } };
+  });
 }
 
-export function consumeBackgroundWorkTrackOpen(serverId: string, agentId: string): void {
-  useBackgroundWorkTrackOpenRequests.getState().consume(serverId, agentId);
+/**
+ * Takes the pending request if it names this agent; true when it is still fresh and the track
+ * should open. Only one track takes it, so a second copy of the same agent stays closed.
+ */
+export function takeBackgroundWorkTrackOpen(serverId: string, agentId: string): boolean {
+  const { pending } = useTrackOpenRequests.getState();
+  if (!pending || pending.key !== trackKey(serverId, agentId)) return false;
+  useTrackOpenRequests.setState({ pending: null });
+  return Date.now() - pending.requestedAt <= BACKGROUND_WORK_TRACK_OPEN_TTL_MS;
 }
 
+/** The pending request's sequence number when it names this agent, else 0. */
 export function useBackgroundWorkTrackOpenRequest(serverId: string, agentId: string): number {
-  return useBackgroundWorkTrackOpenRequests(
-    (state) => state.requests[`${serverId}:${agentId}`] ?? 0,
-  );
+  const key = trackKey(serverId, agentId);
+  return useTrackOpenRequests((state) => (state.pending?.key === key ? state.pending.seq : 0));
 }
