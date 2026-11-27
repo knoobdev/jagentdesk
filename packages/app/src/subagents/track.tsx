@@ -77,16 +77,19 @@ export function SubagentsTrack({
 }: SubagentsTrackProps): ReactElement | null {
   const { t } = useTranslation();
   const sheetPanePage = useSheetPanePage();
-  // A child on another host has no tab in this workspace, so it never opens as a sheet here.
+  // A child on another host has no tab in this workspace, so it never opens as a sheet here; a
+  // pane outside any workspace (a plugin chat dock) has no sheets at all.
   const sheets = useMemo(
     () =>
       rows.map((row) =>
-        row.kind === "jagentdesk" && row.address.serverId !== serverId ? null : sheetTabFor(row),
+        !sheetPanePage || (row.kind === "jagentdesk" && row.address.serverId !== serverId)
+          ? null
+          : sheetTabFor(row),
       ),
-    [rows, serverId, sheetTabFor],
+    [rows, serverId, sheetTabFor, sheetPanePage],
   );
   const pages = useMemo(
-    () => sheets.flatMap((sheet) => (sheet ? [sheetPanePage(sheet)] : [])),
+    () => (sheetPanePage ? sheets.flatMap((sheet) => (sheet ? [sheetPanePage(sheet)] : [])) : []),
     [sheetPanePage, sheets],
   );
 

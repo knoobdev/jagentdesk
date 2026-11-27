@@ -51,14 +51,24 @@ export function useSheetPaneHost(): SheetPaneHost {
  * host, and the environment of the built-in panels. Pane identity is supplied by the pane itself.
  */
 export function useSheetPaneBridge(): ContextBridge {
-  const host = useSheetPaneHost();
+  const bridge = useSheetPaneBridgeIfAny();
+  invariant(bridge, "SheetPaneHostProvider is required");
+  return bridge;
+}
+
+/**
+ * The sheet bridge of the workspace the caller is in, or null where there is no workspace to show
+ * sheets for: a pane embedded on a plugin screen, or a workspace screen still without a key.
+ */
+export function useSheetPaneBridgeIfAny(): ContextBridge | null {
+  const host = useSheetPaneHostIfAny();
   const editing = useComposerEditingEnvironmentBridge();
   const files = useAssistantFileLinkEnvironmentBridge();
   const active = useRetainedPanelActive();
   const serverId = useHostRouteServerId();
   const navigation = useContext(NavigationContext);
   const route = useContext(NavigationRouteContext);
-  return useCallback(
+  const bridge = useCallback<ContextBridge>(
     (children) => {
       const content = editing(files(children));
       return (
@@ -79,4 +89,5 @@ export function useSheetPaneBridge(): ContextBridge {
     },
     [host, editing, files, active, serverId, navigation, route],
   );
+  return host ? bridge : null;
 }

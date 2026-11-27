@@ -4,9 +4,7 @@ import { withUnistyles } from "react-native-unistyles";
 import { ArrowLeft, MessageSquare, Plus, X } from "lucide-react-native";
 import {
   AgentConversationPanel,
-  createPaneFocusContextValue,
-  PaneFocusProvider,
-  PaneProvider,
+  EmbeddedAgentPaneProvider,
   useHostRuntimeClient,
   useProvidersSnapshot,
   useSessionStore,
@@ -16,10 +14,7 @@ import {
   jiraStyles,
   firstWorkspaceDirectory,
 } from "../../../../packages/app/src/plugins/builtin/host-api";
-import type {
-  PaneContextValue,
-  Agent,
-} from "../../../../packages/app/src/plugins/builtin/host-api";
+import type { Agent } from "../../../../packages/app/src/plugins/builtin/host-api";
 import { JiraAssistantDraft } from "./assistant-draft";
 import {
   JIRA_ASSISTANT_LABEL,
@@ -35,7 +30,6 @@ const ThemedArrowLeft = withUnistyles(ArrowLeft);
 const ThemedMessage = withUnistyles(MessageSquare);
 const ThemedPlus = withUnistyles(Plus);
 const ThemedX = withUnistyles(X);
-const noop = () => {};
 
 function findAssistant(agents: Map<string, Agent> | undefined, scope: string): Agent | null {
   let latest: Agent | null = null;
@@ -87,24 +81,6 @@ export function JiraAssistantPanel({
     return () => viewedTimelineSync.replaceVisibleAgentIds(source, []);
   }, [viewedTimelineSync, serverId, agent]);
 
-  const paneValue = useMemo<PaneContextValue>(
-    () => ({
-      serverId,
-      workspaceId: agent?.workspaceId ?? "",
-      tabId: `jira-assistant-${agent?.agentId ?? "none"}`,
-      target: { kind: "agent", agentId: agent?.agentId ?? "" },
-      openTab: noop,
-      closeCurrentTab: onClose,
-      retargetCurrentTab: noop,
-      openFileInWorkspace: noop,
-      openImportSheet: noop,
-    }),
-    [serverId, agent, onClose],
-  );
-  const focusValue = useMemo(
-    () => createPaneFocusContextValue({ isWorkspaceFocused: true, isPaneFocused: true }),
-    [],
-  );
   const newChat = useCallback(() => setAgent(null), []);
   const handleCreated = useCallback(
     (created: { agentId: string; workspaceId: string | null }) => setAgent(created),
@@ -114,11 +90,15 @@ export function JiraAssistantPanel({
   let body: React.ReactNode;
   if (agent) {
     body = (
-      <PaneProvider value={paneValue}>
-        <PaneFocusProvider value={focusValue}>
-          <AgentConversationPanel />
-        </PaneFocusProvider>
-      </PaneProvider>
+      <EmbeddedAgentPaneProvider
+        serverId={serverId}
+        workspaceId={agent.workspaceId}
+        agentId={agent.agentId}
+        tabId={`jira-assistant-${agent.agentId}`}
+        onClose={onClose}
+      >
+        <AgentConversationPanel />
+      </EmbeddedAgentPaneProvider>
     );
   } else if (ready && cwd) {
     body = (

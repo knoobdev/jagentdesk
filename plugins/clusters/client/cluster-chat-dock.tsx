@@ -11,12 +11,9 @@ import Animated, {
 } from "react-native-reanimated";
 import { Check, History, MessageSquare, Plus, X } from "lucide-react-native";
 import { formatTimeAgo } from "../../../packages/app/src/plugins/builtin/host-api";
-import { AgentConversationPanel } from "../../../packages/app/src/plugins/builtin/host-api";
 import {
-  PaneProvider,
-  PaneFocusProvider,
-  createPaneFocusContextValue,
-  type PaneContextValue,
+  AgentConversationPanel,
+  EmbeddedAgentPaneProvider,
 } from "../../../packages/app/src/plugins/builtin/host-api";
 import { askAgentAboutResource } from "./cluster-ask-agent";
 import { ClusterDraftChat } from "./cluster-draft-chat";
@@ -49,7 +46,6 @@ const ThemedCheck = withUnistyles(Check);
 const accentColor = (theme: Theme) => ({ color: theme.colors.accent });
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const fabIconColor = (theme: Theme) => ({ color: theme.colors.accentForeground });
-const noop = () => {};
 
 /** Most recently active, non-archived agent that was created for this cluster. */
 function findLatestClusterAgent(
@@ -222,24 +218,30 @@ function HistoryItem({
 function ClusterChatBody({
   agentId,
   ready,
-  paneValue,
-  focusValue,
+  serverId,
+  workspaceId,
+  onClose,
   entryComposer,
 }: {
   agentId: string | null;
   ready: boolean;
-  paneValue: PaneContextValue;
-  focusValue: ReturnType<typeof createPaneFocusContextValue>;
+  serverId: string;
+  workspaceId: string | null;
+  onClose: () => void;
   /** Shown before any agent exists: the user creates the agent by sending here. */
   entryComposer: ReactNode;
 }) {
   if (agentId) {
     return (
-      <PaneProvider value={paneValue}>
-        <PaneFocusProvider value={focusValue}>
-          <AgentConversationPanel />
-        </PaneFocusProvider>
-      </PaneProvider>
+      <EmbeddedAgentPaneProvider
+        serverId={serverId}
+        workspaceId={workspaceId}
+        agentId={agentId}
+        tabId={`cluster-chat-${agentId}`}
+        onClose={onClose}
+      >
+        <AgentConversationPanel />
+      </EmbeddedAgentPaneProvider>
     );
   }
   if (ready) {
@@ -491,25 +493,6 @@ export function ClusterChatDock({
     [serverId, clusterId, clusterName, resource, cwd, open, openChat],
   );
 
-  const paneValue = useMemo<PaneContextValue>(
-    () => ({
-      serverId,
-      workspaceId: workspaceId ?? "",
-      tabId: `cluster-chat-${agentId ?? "none"}`,
-      target: { kind: "agent", agentId: agentId ?? "" },
-      openTab: noop,
-      closeCurrentTab: hideChat,
-      retargetCurrentTab: noop,
-      openFileInWorkspace: noop,
-      openImportSheet: noop,
-    }),
-    [serverId, workspaceId, agentId, hideChat],
-  );
-  const focusValue = useMemo(
-    () => createPaneFocusContextValue({ isWorkspaceFocused: true, isPaneFocused: true }),
-    [],
-  );
-
   if (!open) {
     // On phones the closed dock is a floating action button that does NOT take
     // layout width, so the resource table (search box, namespace, AGE) gets the
@@ -569,8 +552,9 @@ export function ClusterChatDock({
           <ClusterChatBody
             agentId={agentId}
             ready={ready}
-            paneValue={paneValue}
-            focusValue={focusValue}
+            serverId={serverId}
+            workspaceId={workspaceId}
+            onClose={hideChat}
             entryComposer={entryComposer}
           />
           {historyOpen ? (

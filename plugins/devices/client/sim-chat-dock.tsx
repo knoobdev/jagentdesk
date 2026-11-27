@@ -3,9 +3,7 @@ import {
   Gesture,
   formatTimeAgo,
   AgentConversationPanel,
-  PaneProvider,
-  PaneFocusProvider,
-  createPaneFocusContextValue,
+  EmbeddedAgentPaneProvider,
   SidebarResizeHandle,
   useHostRuntimeClient,
   useProvidersSnapshot,
@@ -16,7 +14,6 @@ import {
   SIM_CHAT_MAX_WIDTH,
 } from "../../../packages/app/src/plugins/builtin/host-api";
 import type {
-  PaneContextValue,
   Agent,
   WorkspaceDescriptor,
   Theme,
@@ -41,7 +38,6 @@ const ThemedCheck = withUnistyles(Check);
 const accentColor = (theme: Theme) => ({ color: theme.colors.accent });
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const fabIconColor = (theme: Theme) => ({ color: theme.colors.accentForeground });
-const noop = () => {};
 
 /** Most recently active, non-archived agent created for this host's fleet. */
 function findLatestSimAgent(
@@ -165,25 +161,31 @@ function SimChatBody({
   ready,
   hasProvider,
   hasProject,
-  paneValue,
-  focusValue,
+  serverId,
+  workspaceId,
+  onClose,
   entryComposer,
 }: {
   agentId: string | null;
   ready: boolean;
   hasProvider: boolean;
   hasProject: boolean;
-  paneValue: PaneContextValue;
-  focusValue: ReturnType<typeof createPaneFocusContextValue>;
+  serverId: string;
+  workspaceId: string | null;
+  onClose: () => void;
   entryComposer: ReactNode;
 }) {
   if (agentId) {
     return (
-      <PaneProvider value={paneValue}>
-        <PaneFocusProvider value={focusValue}>
-          <AgentConversationPanel />
-        </PaneFocusProvider>
-      </PaneProvider>
+      <EmbeddedAgentPaneProvider
+        serverId={serverId}
+        workspaceId={workspaceId}
+        agentId={agentId}
+        tabId={`sim-chat-${agentId}`}
+        onClose={onClose}
+      >
+        <AgentConversationPanel />
+      </EmbeddedAgentPaneProvider>
     );
   }
   if (ready) {
@@ -381,25 +383,6 @@ export function SimChatDock({
     [serverId, devices, selected, cwd, open, openChat],
   );
 
-  const paneValue = useMemo<PaneContextValue>(
-    () => ({
-      serverId,
-      workspaceId: workspaceId ?? "",
-      tabId: `sim-chat-${agentId ?? "none"}`,
-      target: { kind: "agent", agentId: agentId ?? "" },
-      openTab: noop,
-      closeCurrentTab: hideChat,
-      retargetCurrentTab: noop,
-      openFileInWorkspace: noop,
-      openImportSheet: noop,
-    }),
-    [serverId, workspaceId, agentId, hideChat],
-  );
-  const focusValue = useMemo(
-    () => createPaneFocusContextValue({ isWorkspaceFocused: true, isPaneFocused: true }),
-    [],
-  );
-
   // Closed. On desktop the dock is toggled from the SimFleet header's "Agent"
   // button, so render nothing. On phones the fleet fills the screen and there's no persistent
   // toolbar beside it, so surface a floating button that opens the full-width
@@ -463,8 +446,9 @@ export function SimChatDock({
             ready={ready}
             hasProvider={Boolean(provider)}
             hasProject={Boolean(cwd)}
-            paneValue={paneValue}
-            focusValue={focusValue}
+            serverId={serverId}
+            workspaceId={workspaceId}
+            onClose={hideChat}
             entryComposer={entryComposer}
           />
           {historyOpen ? (
