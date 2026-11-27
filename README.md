@@ -309,7 +309,7 @@ GitHub release. To cut one:
 ```bash
 # set "version" in the root package.json, then sync every workspace:
 npm run version:sync-internal
-git tag v0.12.0
+git tag v0.12.1
 git push origin main --tags
 ```
 

@@ -1,9 +1,19 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.12.0`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.12.1`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.12.1 — 2026-11-27
+
+Fixes Devices, Clusters, Data and Workbench crashing with "Invariant failed" when they show their agent chat. Full notes:
+[docs/releases/v0.12.1.md](docs/releases/v0.12.1.md).
+
+### Fixes
+
+- Embedded agent chats outside a workspace get one shared set-up from the plugin host API; without a workspace sheet host the
+  composer tracker pills no longer open a sheet.
 
 ## v0.12.0 — 2026-11-27
 
