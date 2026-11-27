@@ -12,7 +12,7 @@ both screens and approve on both.
 > **📦 [Download the latest release →](https://github.com/knoobdev/jagentdesk/releases/latest)**
 
 JAgentDesk is an independently developed fork of [Paseo](https://github.com/getpaseo/paseo). It keeps
-up with Paseo (this release includes everything up to Paseo 0.17.5) and adds its own pieces: the relay
+up with Paseo and adds its own pieces: the relay
 next to Tailscale, application-level pairing, built-in tools for Docker, Kubernetes, databases, SSH,
 Jira, Argo CD, forges and devices, Bots, and connected hosts.
 
