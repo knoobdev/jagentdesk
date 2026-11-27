@@ -1,5 +1,6 @@
 import type { BotsSlack } from "./slack.js";
 import { isBotsHookRequest, type BotsHookConnectors } from "./hooks/connectors.js";
+import type { BotsSharing } from "./sharing/service.js";
 import { createHash, randomUUID } from "node:crypto";
 import { appendFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -186,6 +187,8 @@ export class BotsService {
   slack?: BotsSlack;
   /** GitHub, GitLab and Telegram (spec 37.10–37.12). */
   hooks?: BotsHookConnectors;
+  /** Share by link (spec 37.13). */
+  sharing?: BotsSharing;
   readonly memory: BotMemory;
   readonly allowedSources: BotAllowedSource[] = [];
   private readonly replyListeners = new Set<(request: BotMessage, reply: BotMessage) => void>();
@@ -355,6 +358,7 @@ export class BotsService {
     const rooms = this.storage.rooms().filter((room) => room.memberBotIds.includes(id));
     await this.slack?.disconnect(id);
     await this.hooks?.disconnect(id);
+    await this.sharing?.botDeleted(id);
     this.storage.saveBot({ ...bot, paused: true });
     for (const item of this.storage.items(id)) await this.cancel(id, item.id, "Bot deleted");
     if (bot.agentId) await this.runtime.cancel(bot.agentId);
@@ -2478,8 +2482,12 @@ export class BotsService {
     },
   };
 
-  /** Slack, GitHub, GitLab and Telegram requests, or undefined for the rest. */
+  /** Sharing, Slack, GitHub, GitLab and Telegram requests, or undefined for the rest. */
   private routeConnector(msg: BotsRequest): Promise<Record<string, unknown>> | undefined {
+    if (msg.type.startsWith("bots.share.")) {
+      if (!this.sharing) throw new Error("Bot sharing is not available");
+      return this.sharing.handle(msg as Extract<BotsRequest, { type: `bots.share.${string}` }>);
+    }
     if (msg.type.startsWith("bots.slack."))
       return this.handleSlack(msg as Extract<BotsRequest, { type: `bots.slack.${string}` }>);
     if (!isBotsHookRequest(msg)) return undefined;

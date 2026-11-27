@@ -215,10 +215,16 @@ interface FormProps {
   pending: boolean;
   error: Error | null;
   onSaved?: () => void;
+  /** A new bot's starting name (a bot from a share link keeps its sharer's name). */
+  initialName?: string;
 }
-export function BotForm({ serverId, bot, save, pending, error, onSaved }: FormProps) {
+export function BotForm({ serverId, bot, save, pending, error, onSaved, initialName }: FormProps) {
   const { t } = useTranslation();
-  const [model] = useState(() => new BotFormModel(bot));
+  const [model] = useState(() => {
+    const created = new BotFormModel(bot);
+    if (!bot && initialName) created.setName(initialName);
+    return created;
+  });
   const draft = useSyncExternalStore(model.subscribe, model.getState, model.getState);
   const optionalIdentity = useHostFeature(serverId, "botsOptionalIdentity");
   const validation = useMemo(() => validateBotDraft(draft), [draft]);

@@ -21,3 +21,10 @@ class_name = "RelayDurableObject"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RelayDurableObject"]
+
+# Bot share links (spec 37.13.2): sealed bundles only; the key never reaches the Worker.
+# Create once with `wrangler r2 bucket create desk-relay-shares`. `wrangler dev --local`
+# simulates it.
+[[r2_buckets]]
+binding = "SHARES"
+bucket_name = "desk-relay-shares"

@@ -1,4 +1,13 @@
 import { RelayHooks, hookPath, readHookBody } from "./hooks.js";
+import {
+  RelayShares,
+  readShareBody,
+  sharePath,
+  shareObjectKey,
+  shareTombstoneKey,
+  SHARE_SERVER_HEADER,
+  type ShareBucket,
+} from "./shares.js";
 /**
  * Cloudflare Durable Objects adapter for the relay (spec 35.2).
  *
@@ -150,6 +159,8 @@ function resolveRelayVersion(rawValue: string | null): "2" | null {
 
 interface Env {
   RELAY: DurableObjectNamespace;
+  /** R2 bucket `desk-relay-shares` (spec 37.13.2); absent, bot sharing answers 503. */
+  SHARES?: ShareBucket;
 }
 
 interface DurableObjectNamespace {
@@ -243,8 +254,10 @@ export class RelayDurableObject {
   private pendingFrameBytes = new Map<string, number>();
 
   private readonly hooks: RelayHooks;
-  constructor(state: DurableObjectState) {
+  private readonly shares: RelayShares;
+  constructor(state: DurableObjectState, env?: Partial<Env>) {
     this.state = state;
+    this.shares = new RelayShares(state.storage, () => env?.SHARES);
     this.hooks = new RelayHooks(state.storage, () =>
       this.state.getWebSockets("server-control").find((ws) => {
         const attachment = deserializeAttachment(ws);
@@ -736,6 +749,13 @@ export class RelayDurableObject {
     const url = new URL(request.url);
     const hook = hookPath(url.pathname);
     if (hook) return this.hooks.fetch(request, hook.hookId, hook.kind);
+    const shareId = sharePath(url.pathname);
+    if (shareId) {
+      const serverId = request.headers.get(SHARE_SERVER_HEADER) ?? "";
+      const body =
+        request.method === "PUT" ? new Uint8Array(await request.arrayBuffer()) : undefined;
+      return this.shares.fetch(request, shareId, serverId, body);
+    }
     if (url.pathname.startsWith("/hooks/")) return new Response("Unknown hook", { status: 404 });
     const roleRaw = url.searchParams.get("role");
     const role = roleRaw === "server" || roleRaw === "client" ? roleRaw : null;
@@ -760,6 +780,21 @@ export class RelayDurableObject {
     if (reset && (role !== "server" || connectionId))
       return new Response("Reset requires a server control socket", { status: 400 });
     return this.fetchV2(request, role, serverId, connectionId, reset);
+  }
+
+  /** Hook and share frames on the daemon control socket; false for anything else. */
+  private async handleControlFrame(ws: WebSocket, message: string): Promise<boolean> {
+    try {
+      const parsed: unknown = JSON.parse(message);
+      if (!isRecord(parsed)) return false;
+      return (
+        (await this.hooks.controlMessage(ws, parsed)) ||
+        (await this.shares.controlMessage(ws, parsed))
+      );
+    } catch {
+      /* Never log control payloads. */
+      return false;
+    }
   }
 
   /**
@@ -793,15 +828,8 @@ export class RelayDurableObject {
 
     if (!connectionId) {
       // Control channel: support simple app-level keepalive.
-      if (typeof message === "string") {
-        try {
-          const parsed: unknown = JSON.parse(message);
-          if (isRecord(parsed) && (await this.hooks.controlMessage(ws, parsed))) return;
-        } catch {
-          /* Never log control payloads. */
-        }
+      if (typeof message === "string" && !(await this.handleControlFrame(ws, message)))
         this.handleControlKeepalive(ws, message);
-      }
       return;
     }
 
@@ -938,6 +966,47 @@ function checkIpConnectRateLimit(request: Request): Response | null {
   return null;
 }
 
+/**
+ * `/s/<shareId>`: GET/HEAD find the owning serverId from the sealed object's R2 metadata; PUT and
+ * DELETE name it in `x-desk-server-id`, and that DO checks the bearer write token against its list.
+ * Never logs the path, headers or body.
+ */
+async function routeShare(request: Request, env: Env, shareId: string | null): Promise<Response> {
+  if (!shareId) return new Response("Unknown share", { status: 404 });
+  if (!env.SHARES) return new Response("Sharing unavailable", { status: 503 });
+  const forward = (serverId: string, body?: Uint8Array) => {
+    const headers = new Headers();
+    const auth = request.headers.get("authorization");
+    if (auth) headers.set("authorization", auth);
+    headers.set(SHARE_SERVER_HEADER, serverId);
+    return env.RELAY.get(env.RELAY.idFromName(serverId)).fetch(
+      new Request(new URL(request.url).origin + "/s/" + shareId, {
+        method: request.method,
+        headers,
+        body: body ? body.slice().buffer : undefined,
+      }),
+    );
+  };
+  if (request.method === "PUT" || request.method === "DELETE") {
+    const serverId = request.headers.get(SHARE_SERVER_HEADER) ?? "";
+    if (!/^[A-Za-z0-9_-]{1,200}$/.test(serverId))
+      return new Response("Unknown share", { status: 404 });
+    if (request.method === "DELETE") return forward(serverId);
+    // Consume the bounded upload before handing it to a DO, as the hook route does.
+    const body = await readShareBody(request);
+    if (body instanceof Response) return body;
+    return forward(serverId, body);
+  }
+  if (request.method !== "GET" && request.method !== "HEAD")
+    return new Response("Method not allowed", { status: 405 });
+  const object = await env.SHARES.head(shareObjectKey(shareId));
+  const serverId = object?.customMetadata?.serverId;
+  if (serverId) return forward(serverId);
+  if (await env.SHARES.head(shareTombstoneKey(shareId)))
+    return new Response("Link stopped", { status: 410 });
+  return new Response("Unknown share", { status: 404 });
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -961,6 +1030,7 @@ export default {
       );
     }
     if (url.pathname.startsWith("/hooks/")) return new Response("Unknown hook", { status: 404 });
+    if (url.pathname.startsWith("/s/")) return routeShare(request, env, sharePath(url.pathname));
 
     // Every other path is a relay connection attempt; validate before
     // waking a Durable Object so abusive requests stay in the free tier.

@@ -144,6 +144,33 @@ The RPCs and the client contract are in `bots.github.*`, `bots.gitlab.*` and `bo
 `packages/server/src/server/bots/hooks.local.e2e.test.ts` runs against `wrangler dev --local --port 8972`
 with local GitHub, GitLab and Telegram simulators; never run it against the real services.
 
+## Sharing
+
+A bot is shared as a link to an encrypted bundle on the owner's relay Worker (spec 37.13,
+ADR-0061 §5). The daemon builds the bundle, seals it with AES-256-GCM under a per-bot key and
+uploads only ciphertext to R2. The key lives in the bots secret store and in the link's `#k=`
+fragment; HTTP clients never send fragments, so the Worker and Cloudflare never see it. Treat a
+link as the bot's contents: anyone holding it can make a copy, and Stop sharing only blocks new
+downloads.
+
+- The bundle never carries connectors, tokens, allow-lists, `MEMORY.md`, its history or the
+  journal; a skill keeps only its documents and its SKILL.md is rebuilt from `name` and
+  `description`. A secret flag from the safety check blocks publishing.
+- Publishing needs the relay control socket (`share_create`); with Relay off the dialog says so.
+  The 21st live link of one daemon is refused by the Worker, so stop one first.
+- A link from another Worker downloads over https only; plain http is accepted only from this
+  daemon's own relay origin, which is what local `wrangler dev` tests use.
+- Update link re-seals to the same shareId. A review opened before an update fails Create with
+  `bot_share_updated`; review it again. Copies keep the link without the key in state and the key
+  in the secret store, so View original can read the link's current version.
+- Slack, the hook connectors and sharing share the one relay control socket
+  (`relay-control-mux.ts`) and one `FileSecretStore`: two stores on the same file drop each
+  other's writes.
+
+The RPCs are `bots.share.status`, `prepare`, `view`, `publish`, `stop`, `open`, `original` and
+`create` (each `.request` / `.response`), all `daemon.manage`, gated on `features.botsSharing`.
+Errors come back as `bot_share_*` codes that the app maps to copy.
+
 ## Port sources
 
 Orca `dfdb4fda` (MIT, Copyright (c) 2026 Lovecast Inc.); each ported file names its Orca source in
@@ -152,4 +179,7 @@ desktop build copies into its resources and `packages/app/src/legal/third-party-
 carries into the app bundles. The mascots in `packages/app/assets/bot-mascots/` are byte-for-byte
 copies; `packages/app/src/bots/mascot-assets.ts` requires them. The connectors
 port `src/shared/automation-event-triggers.ts:17-41` (GitHub kinds), `src/shared/quoted-text-fence.ts`
-and `src/main/bots/bot-owner-writes.ts:22-63` ("asked by").
+and `src/main/bots/bot-owner-writes.ts:22-63` ("asked by"). Sharing
+ports `src/main/bots/sharing/*` (bundle, archive, content, sources, recipient, reviews, PNG strip),
+`src/shared/bots/bot-package.ts:58-184`, `bot-text-scan.ts` and
+`src/renderer/src/components/bots/sharing/*`, with Orca Cloud replaced by the relay Worker.

@@ -28,6 +28,7 @@ import {
   BotTidyUpViewSchema,
   BotUpNextStateSchema,
 } from "./views.js";
+import { BotsShareRequestSchemas, BotsShareResponseSchemas } from "./share-schemas.js";
 
 const request = <T extends string, S extends z.ZodRawShape>(type: T, shape: S) =>
   z.object({ type: z.literal(type), requestId: z.string(), ...shape });
@@ -300,6 +301,7 @@ export const BotsRequestSchemas = [
   // Orca `bots.avatar.upload` / `.read`: a square PNG, 512-2000 px, at most 2 MB, base64.
   request("bots.avatar.upload.request", { ...botId, png: z.string().min(1).max(2_800_000) }),
   request("bots.avatar.read.request", botId),
+  ...BotsShareRequestSchemas,
 ] as const;
 export const BotsResponseSchemas = [
   response("bots.slack.manifest.response", { manifest: z.string(), requestUrl: z.string() }),
@@ -418,6 +420,7 @@ export const BotsResponseSchemas = [
   response("bots.allowed.list.response", { people: z.array(BotAllowedPersonSchema) }),
   response("bots.avatar.upload.response", { bot: BotSchema }),
   response("bots.avatar.read.response", { png: z.string().nullable() }),
+  ...BotsShareResponseSchemas,
 ] as const;
 export const BotsPushSchemas = [
   z.object({
