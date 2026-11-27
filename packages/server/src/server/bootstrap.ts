@@ -1956,6 +1956,7 @@ export async function createJAgentDeskDaemon(
         logger,
       }),
     push: { send: (payload) => wsServer?.sendBotPush(payload) ?? Promise.resolve() },
+    recordNotice: (notice) => wsServer?.recordBotNotification(notice),
   });
   const botsRelay = () => ({
     ...(relayRuntime?.getConfig() ?? {

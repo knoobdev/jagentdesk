@@ -3288,6 +3288,25 @@ export const fr: TranslationResources = {
       crashed: "{{count}} planté",
     },
   },
+  notificationFeed: {
+    title: "Notifications",
+    unread: "{{count}} notifications non lues",
+    markAllRead: "Tout marquer comme lu",
+    settings: "Paramètres des notifications",
+    emptyTitle: "Aucune notification pour l'instant",
+    emptyBody: "Les agents qui terminent, demandent une autorisation ou échouent apparaissent ici.",
+    loadFailed: "Impossible de charger les notifications",
+    day: {
+      today: "Aujourd'hui",
+      yesterday: "Hier",
+    },
+    time: {
+      now: "maintenant",
+      minutes: "{{count}} min",
+      hours: "{{count}} h",
+      yesterday: "Hier",
+    },
+  },
   marketplace: {
     title: "Plugin Marketplace",
     subtitle: "Discover and install community plugins for JAgentDesk.",

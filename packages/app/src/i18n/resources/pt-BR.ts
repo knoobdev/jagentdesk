@@ -3224,6 +3224,25 @@ export const ptBR: TranslationResources = {
       crashed: "{{count}} travou",
     },
   },
+  notificationFeed: {
+    title: "Notificações",
+    unread: "{{count}} notificações não lidas",
+    markAllRead: "Marcar tudo como lido",
+    settings: "Configurações de notificação",
+    emptyTitle: "Nenhuma notificação ainda",
+    emptyBody: "Agentes que terminam, pedem permissão ou falham aparecem aqui.",
+    loadFailed: "Não foi possível carregar as notificações",
+    day: {
+      today: "Hoje",
+      yesterday: "Ontem",
+    },
+    time: {
+      now: "agora",
+      minutes: "{{count}} min",
+      hours: "{{count}} h",
+      yesterday: "Ontem",
+    },
+  },
   marketplace: {
     title: "Plugin Marketplace",
     subtitle: "Discover and install community plugins for JAgentDesk.",

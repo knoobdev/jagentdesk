@@ -417,6 +417,19 @@ export function buildHostOpenProjectRoute(serverId: string) {
   return `${base}/open-project` as const;
 }
 
+/** The host's notification list on a phone (spec 14 §8.5); desktop shows it in a popover. */
+export function buildHostNotificationsRoute(serverId: string) {
+  const base = buildHostRootRoute(serverId);
+  if (base === "/") {
+    return "/" as const;
+  }
+  return `${base}/notifications` as const;
+}
+
+export function isHostNotificationsPathname(pathname: string): boolean {
+  return /^\/h\/[^/]+\/notifications\/?$/.test(pathname);
+}
+
 export function buildHostSessionsRoute(serverId: string) {
   const base = buildHostRootRoute(serverId);
   if (base === "/") {

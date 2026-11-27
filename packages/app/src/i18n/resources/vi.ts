@@ -645,6 +645,25 @@ export const vi = {
       crashed: "{{count}} đã sập",
     },
   },
+  notificationFeed: {
+    title: "Thông báo",
+    unread: "{{count}} thông báo chưa đọc",
+    markAllRead: "Đánh dấu đã đọc hết",
+    settings: "Cài đặt thông báo",
+    emptyTitle: "Chưa có thông báo",
+    emptyBody: "Agent làm xong, xin quyền hoặc gặp lỗi sẽ hiện ở đây.",
+    loadFailed: "Không tải được thông báo",
+    day: {
+      today: "Hôm nay",
+      yesterday: "Hôm qua",
+    },
+    time: {
+      now: "vừa xong",
+      minutes: "{{count}} phút",
+      hours: "{{count}} giờ",
+      yesterday: "Hôm qua",
+    },
+  },
   marketplace: {
     title: "Chợ plugin",
     subtitle: "Khám phá và cài đặt plugin cộng đồng cho JAgentDesk.",

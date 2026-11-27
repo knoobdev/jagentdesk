@@ -7,7 +7,7 @@ import pino from "pino";
 import { afterEach, expect, it } from "vitest";
 import type { Bot } from "@jagentdesk/protocol/bots/types";
 import { BotStorage, DEFAULT_BOT_IDENTITY } from "./storage.js";
-import { BotsService, RESTART_CONTINUATION_PROMPT } from "./service.js";
+import { BotsService, RESTART_CONTINUATION_PROMPT, type BotNotice } from "./service.js";
 import { FakeBotRuntime } from "./test-utils/fake-runtime.js";
 import { attachBotSchedules } from "./test-utils/schedules.js";
 
@@ -547,4 +547,44 @@ it("cold restart retries an undelivered active wake without also scheduling a co
   await restarted.settled();
   expect(runtime.sent).toEqual([{ id: `supervisor:${bot.id}`, text: "[chat]\nOriginal chat" }]);
   expect(restarted.storage.pending(bot.id)).toEqual([]);
+});
+it("records owner notices for the host's notification list even with push off (ADR-0063)", async () => {
+  const home = mkdtempSync(join(tmpdir(), "bots-service-"));
+  homes.push(home);
+  const notices: BotNotice[] = [];
+  const pushed: unknown[] = [];
+  const service = new BotsService(new BotStorage(home), new Runtime(), {
+    logger: pino({ level: "silent" }),
+    push: { send: async (payload) => void pushed.push(payload) },
+    recordNotice: (notice) => notices.push(notice),
+  });
+  services.push(service);
+  const b = await createBot(service);
+  await service.update(b.id, {
+    notifications: { needsPermission: false, taskComplete: false, couldNotFinish: false },
+  });
+  const i = service.addItem(b.id, "Pick a scope", "Selected");
+  service.setItem(b.id, i.id, {
+    status: "needs_you",
+    questions: [{ text: "Which?", options: ["A", "B"] }],
+  });
+  service.setItem(b.id, i.id, { status: "done" });
+  await service.settled();
+  expect(notices).toEqual([
+    {
+      kind: "bot_needs_you",
+      title: "Builder asked you",
+      body: "Which?",
+      botId: b.id,
+      itemId: i.id,
+    },
+    {
+      kind: "bot_task_complete",
+      title: "Builder finished",
+      body: "Pick a scope",
+      botId: b.id,
+      itemId: i.id,
+    },
+  ]);
+  expect(pushed).toEqual([]);
 });

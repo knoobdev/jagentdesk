@@ -234,6 +234,21 @@ const HANDOFF_VERBS = {
   handoff: "handed off",
 } as const;
 
+export interface BotNotice {
+  kind: "bot_needs_you" | "bot_task_complete" | "bot_could_not_finish";
+  title: string;
+  body: string;
+  botId: string;
+  itemId?: string;
+  agentId?: string;
+}
+
+const BOT_NOTICE_KINDS = {
+  needsPermission: "bot_needs_you",
+  taskComplete: "bot_task_complete",
+  couldNotFinish: "bot_could_not_finish",
+} as const satisfies Record<string, BotNotice["kind"]>;
+
 export class BotsService {
   slack?: BotsSlack;
   /** GitHub, GitLab and Telegram (spec 37.10–37.12). */
@@ -282,6 +297,8 @@ export class BotsService {
       logger: Logger;
       triggers?: BotTriggerSource;
       push?: PushNotificationSender;
+      /** The host's notification list (ADR-0063): every owner notice, pushed or not. */
+      recordNotice?: (notice: BotNotice) => void;
       now?: () => number;
     },
   ) {
@@ -326,6 +343,14 @@ export class BotsService {
       data: Record<string, string>;
     },
   ): void {
+    this.options.recordNotice?.({
+      kind: BOT_NOTICE_KINDS[kind],
+      title: body.title,
+      body: body.body,
+      botId: bot.id,
+      ...(body.data.itemId ? { itemId: body.data.itemId } : {}),
+      ...(body.data.agentId ? { agentId: body.data.agentId } : {}),
+    });
     if (bot.paused || !bot.notifications?.[kind]) return;
     this.launch(this.options.push?.send(body) ?? Promise.resolve());
   }
