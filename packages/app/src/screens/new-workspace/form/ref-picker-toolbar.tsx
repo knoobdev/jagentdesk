@@ -7,8 +7,11 @@ import type { PickerItem, RefAction } from "../../new-workspace-picker-item";
 /** Which list the ref picker shows: branches or pull requests. */
 export type RefList = PickerItem["kind"];
 
-/** Below this width "Pull requests" and the action control do not fit on one row. */
-const SHORT_LABEL_MAX_WIDTH = 390;
+/**
+ * Below this width "Pull requests" and the action control do not fit on one row. JAgentDesk's
+ * segmented control is wider than Paseo's, so a 390px phone already needs the short label.
+ */
+const SHORT_LABEL_MAX_WIDTH = 430;
 
 /**
  * The ref picker's row under its search field: the list on the left, and on the right what a
