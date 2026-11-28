@@ -127,6 +127,8 @@ contextBridge.exposeInMainWorld("jagentdeskDesktop", {
     setWorkspaceActiveBrowser: (input: { workspaceId: string; browserId: string | null }) =>
       ipcRenderer.invoke("jagentdesk:browser:set-workspace-active-browser", input),
     focus: (browserId: string) => ipcRenderer.invoke("jagentdesk:browser:focus", browserId),
+    resolveFavicon: (browserId: string, url: string) =>
+      ipcRenderer.invoke("jagentdesk:browser:resolve-favicon", browserId, url),
     openDevTools: (browserId: string) =>
       ipcRenderer.invoke("jagentdesk:browser:open-devtools", browserId),
     clearProfile: (legacyBrowserIds: string[]) =>

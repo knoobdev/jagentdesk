@@ -6,6 +6,7 @@ import { BrowserPane } from "@/desktop/browser/pane";
 import { usePaneContext, usePaneFocus } from "@/panels/pane-context";
 import type { PanelDescriptor, PanelIconProps, PanelRegistration } from "@/panels/panel-registry";
 import { useBrowserStore } from "@/desktop/browser/store";
+import { tabFaviconSource } from "@/desktop/browser/favicon-source";
 import { useWorkspaceDirectory } from "@/stores/session-store-hooks";
 
 function getBrowserLabel(input: { title: string; url: string }): string {
@@ -24,10 +25,10 @@ function getBrowserLabel(input: { title: string; url: string }): string {
 
 function createBrowserTabIcon(faviconUrl: string | null) {
   return function BrowserTabIcon({ size, color }: PanelIconProps) {
-    const source = useMemo(() => (faviconUrl ? { uri: faviconUrl } : undefined), []);
+    const source = useMemo(() => tabFaviconSource(faviconUrl), []);
     const imageStyle = useMemo(() => ({ width: size, height: size, borderRadius: 3 }), [size]);
 
-    if (faviconUrl) {
+    if (source) {
       return <Image accessibilityIgnoresInvertColors source={source} style={imageStyle} />;
     }
 

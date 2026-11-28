@@ -156,6 +156,7 @@ export interface DesktopLiveBrowserTab {
   workspaceId: string | null;
   url: string;
   title: string;
+  /** A `data:` URL main fetched with the tab's identity, never a site URL. */
   faviconUrl: string | null;
   status: "ready" | "loading" | "notResponding" | "crashed";
 }
@@ -177,6 +178,11 @@ export interface DesktopBrowserBridge {
     browserId: string | null;
   }) => Promise<void>;
   focus?: (browserId: string) => Promise<boolean>;
+  /**
+   * The tab's reported favicon as a `data:` URL, fetched by main through the tab's session with
+   * its identity; null when it is not the tab's current favicon or not an image.
+   */
+  resolveFavicon?: (browserId: string, url: string) => Promise<string | null>;
   openDevTools?: (browserId: string) => Promise<unknown>;
   clearProfile?: (legacyBrowserIds: string[]) => Promise<void>;
   executeAutomationCommand?: (

@@ -852,6 +852,10 @@ export function BrowserPane({
             rememberResolvedBrowserWebviewSize(browserIdRef.current, webview);
           });
 
+    // A favicon's reported URL is never rendered: main fetches it through the tab's session with
+    // the tab's identity and answers with a data: URL (favicon-source.ts). A later update or a
+    // navigation makes an answer still in flight stale.
+    let faviconRequest = 0;
     const handleStartLoading = () => {
       updateBrowser(browserId, { isLoading: true, lastError: null });
       syncNavigationState({ syncUrl: false });
@@ -868,6 +872,7 @@ export function BrowserPane({
       const normalized = normalizeWorkspaceBrowserUrl(nextUrl);
       const previousUrl = browserRef.current?.url ?? initialUrlRef.current;
       pendingNavigationUrlRef.current = null;
+      if (normalized !== previousUrl) faviconRequest += 1;
       updateBrowser(browserIdRef.current, {
         url: normalized,
         ...(normalized !== previousUrl ? { faviconUrl: null } : {}),
@@ -906,7 +911,23 @@ export function BrowserPane({
       const favicons = Array.isArray((event as Event & { favicons?: unknown[] }).favicons)
         ? ((event as Event & { favicons?: string[] }).favicons ?? [])
         : [];
-      updateBrowserRef.current(browserIdRef.current, { faviconUrl: favicons[0] ?? null });
+      const request = ++faviconRequest;
+      const reported = favicons[0];
+      const resolveFavicon = getDesktopHost()?.browser?.resolveFavicon;
+      if (!reported || typeof resolveFavicon !== "function") {
+        updateBrowserRef.current(browserIdRef.current, { faviconUrl: null });
+        return;
+      }
+      void resolveFavicon(browserIdRef.current, reported)
+        .then((faviconUrl) => {
+          if (request === faviconRequest) {
+            updateBrowserRef.current(browserIdRef.current, { faviconUrl });
+          }
+          return undefined;
+        })
+        .catch((error: unknown) => {
+          console.warn("[browser-webview] favicon failed", error);
+        });
     };
     const handleLoadFailed = (event: Event) => {
       const message = getWebviewLoadErrorMessage(event, browserErrorLabelsRef.current.failedToLoad);
