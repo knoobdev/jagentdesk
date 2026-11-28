@@ -56,6 +56,13 @@ Jira, Argo CD, forges and devices, Bots, and connected hosts.
 
 ---
 
+## ✨ New in v0.12.3
+
+A bell with a notification list shared by every device, background task output you can follow (output files, the script,
+what the agent read), a resizable inspector that keeps browser pages alive when you move them, no identity leak through
+favicons, phone fixes for the Memory screen and the background work sheet, push notifications that no longer fail as a
+batch, steadier chat, and Paseo 0.18.1. Details: **[docs/releases/v0.12.3.md](docs/releases/v0.12.3.md)**.
+
 ## ✨ New in v0.12.2
 
 The desktop app no longer quits when an in-app browser tab or the window's renderer dies under load, and every in-app browser
@@ -348,7 +355,7 @@ GitHub release. To cut one:
 ```bash
 # set "version" in the root package.json, then sync every workspace:
 npm run version:sync-internal
-git tag v0.12.2
+git tag v0.12.3
 git push origin main --tags
 ```
 

@@ -1,9 +1,35 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.12.2`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.12.3`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.12.3 — 2026-11-28
+
+Notification list behind the bell, background task output files and scripts, resizable inspector with no-reload pane moves,
+favicon identity fix, phone Memory and background-sheet fixes, push batch fix, steadier chat, Paseo 0.18.1. Full notes:
+[docs/releases/v0.12.3.md](docs/releases/v0.12.3.md).
+
+### Changes
+
+- Bell with an unread count and a notification list kept by the daemon (500 items / 30 days), read state shared by devices.
+- Background task details follow redirect files, show the script and the agent's last read (ADR-0064).
+- Resizable inspector, Open in main pane, Show into the main pane, pages kept alive across panes (Paseo permanent surfaces).
+- Browser tabs count next to the bell and a pill above the agent's composer.
+- Workspace agents on phones; bot tree keeps Home Chat and workers after a restart.
+- Paseo 0.18.1: Pi queueing, OpenCode v2 approvals and idle unload, ACP reopen after idle exit, GitLab fork MR jobs, Kimi/GLM/
+  enterprise usage, host-wide metadata instructions (commit messages and PR text only), Command Center order, ref picker,
+  composer autocomplete, iOS status bar.
+
+### Fixes
+
+- Favicons fetched with the tab's identity (no host UA/Accept-Language leak); agent tabs open the inspector on that tab.
+- One settled compaction row; theme colours for notices; re-grounding/handoff sheets steady while streaming; bot item notes
+  one line and folded.
+- Background work popover/sheet no longer opens by itself (desktop and phones); one header on phone pages; Memory layout.
+- Expo pushes split per project, malformed tokens dropped, error codes logged; Android pushes at high priority.
+- New Workspace existing-worktree and ref actions restored.
 
 ## v0.12.2 — 2026-11-27
 
