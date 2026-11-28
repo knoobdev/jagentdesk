@@ -88,6 +88,7 @@ import {
   type PushNotifications,
   type PushNotificationSender,
 } from "./push/index.js";
+import { NotificationFeed, type NotificationFeedChange } from "./notification-feed/feed.js";
 import { type ScriptHealthState } from "./script-health-monitor.js";
 import { type ServiceProxySubsystem } from "./service-proxy.js";
 import { type WorkspaceScriptRuntimeStore } from "./workspace-script-runtime-store.js";
@@ -763,6 +764,9 @@ export class VoiceAssistantWebSocketServer {
 
   private readonly pushNotificationSender: PushNotificationSender;
 
+  /** The host's notification list (ADR-0063), fed by attention, bots and plugins. */
+  private readonly notificationFeed: NotificationFeed;
+
   // Per agent, the unread finish (by its attention timestamp) that a notification was delivered for.
   private readonly notifiedUnreadFinishAt = new Map<string, number>();
 
@@ -1067,6 +1071,11 @@ export class VoiceAssistantWebSocketServer {
         filePath: join(jagentdeskHome, "push-tokens.json"),
       });
     this.pushNotificationSender = pushNotificationSender ?? this.pushNotifications;
+    this.notificationFeed = new NotificationFeed({
+      logger: this.logger,
+      filePath: join(jagentdeskHome, "notification-feed.json"),
+    });
+    this.notificationFeed.onChange((change) => this.broadcastNotificationFeedChange(change));
 
     this.agentManager.setAgentAttentionCallback((params) => {
       void this.broadcastAgentAttention(params).catch((err) => {
@@ -2225,6 +2234,28 @@ export class VoiceAssistantWebSocketServer {
     return updated;
   }
 
+  /** A bot event the owner hears about (spec 37); recorded whether or not it is pushed. */
+  public recordBotNotification(notice: {
+    kind: "bot_needs_you" | "bot_task_complete" | "bot_could_not_finish";
+    title: string;
+    body: string;
+    botId: string;
+    itemId?: string;
+    agentId?: string;
+  }): void {
+    this.notificationFeed.append({
+      kind: notice.kind,
+      title: notice.title,
+      body: notice.body,
+      target: {
+        type: "bot",
+        botId: notice.botId,
+        ...(notice.itemId ? { itemId: notice.itemId } : {}),
+        ...(notice.agentId ? { agentId: notice.agentId } : {}),
+      },
+    });
+  }
+
   public async sendBotPush(payload: import("./push/index.js").PushPayload): Promise<void> {
     await this.pushNotificationSender.send({
       ...payload,
@@ -2272,6 +2303,7 @@ export class VoiceAssistantWebSocketServer {
       publishScriptStatusUpdate: (message) => this.publishScriptStatusUpdate(message),
       downloadTokenStore: this.downloadTokenStore,
       pushNotifications: this.pushNotifications,
+      notificationFeed: this.notificationFeed,
       jagentdeskHome: this.jagentdeskHome,
       worktreesRoot: this.worktreesRoot,
       agentManager: this.agentManager,
@@ -2793,6 +2825,8 @@ export class VoiceAssistantWebSocketServer {
         resumeOnStartupSetting: true,
         // COMPAT(idleRuntimeCleanupSetting): added in v0.9.59, remove gate after 2027-05-24.
         idleRuntimeCleanupSetting: true,
+        // COMPAT(metadataGenerationInstructions): added in v0.12.3, remove gate after 2027-06-01.
+        metadataGenerationInstructions: true,
         // COMPAT(crossProviderContinuity): added in v0.10.2, remove gate after 2027-05-26.
         crossProviderContinuity: true,
         // COMPAT(durableContext): added in v0.10.2, remove gate after 2027-05-26.
@@ -2811,6 +2845,8 @@ export class VoiceAssistantWebSocketServer {
         agentBackgroundWorkStop: true,
         // COMPAT(backgroundWorkOutput): added in v0.12.0, remove gate after 2027-05-27.
         backgroundWorkOutput: true,
+        // COMPAT(backgroundWorkSources): added in v0.12.3, remove gate after 2027-05-28.
+        backgroundWorkSources: true,
         // COMPAT(projectedSubagentTimeline): added after v0.8.0, remove gates after 2027-03-14; retain advertisement.
         projectedSubagentTimeline: true,
         wholeTurnTimeline: true,
@@ -2904,6 +2940,8 @@ export class VoiceAssistantWebSocketServer {
           ? { builtinPlugins: true, ...this.pluginRuntime.builtin.featureFlags() }
           : {}),
         checkoutDiffAll: true,
+        // COMPAT(notificationFeed): added in v0.12.3, remove gate after 2027-06-01.
+        notificationFeed: true,
         workspaceRequestReceipts: true,
         backgroundWorkspaces: true,
       },
@@ -4205,6 +4243,13 @@ export class VoiceAssistantWebSocketServer {
       agentId: params.agentId,
       permissionRequest: findLatestPermissionRequest(agent.pendingPermissions),
     });
+    this.recordAgentAttention({
+      agentId: params.agentId,
+      workspaceId: agent.workspaceId,
+      reason: params.reason,
+      title: notification.title,
+      body: notification.body,
+    });
 
     const plan = this.planOncePerUnreadFinish(
       params,
@@ -4258,6 +4303,41 @@ export class VoiceAssistantWebSocketServer {
             },
       );
 
+      this.sendToClient(ws, message);
+    }
+  }
+
+  // Like the push below, one unread row per agent and reason: an agent that finishes again while
+  // its earlier finish is still unread does not add a second row.
+  private recordAgentAttention(params: {
+    agentId: string;
+    workspaceId: string;
+    reason: "finished" | "error" | "permission";
+    title: string;
+    body: string;
+  }): void {
+    // Stopping the daemon ends running turns (running → idle); that is not something the agent did.
+    if (!this.acceptingConnections) return;
+    const kind = `agent_${params.reason}` as const;
+    if (this.notificationFeed.hasUnread({ kind, agentId: params.agentId })) return;
+    this.notificationFeed.append({
+      kind,
+      title: params.title,
+      body: params.body,
+      target: { type: "agent", agentId: params.agentId, workspaceId: params.workspaceId },
+    });
+  }
+
+  private broadcastNotificationFeedChange(change: NotificationFeedChange): void {
+    const state = this.notificationFeed.state();
+    const message = wrapSessionMessage({
+      type: "notifications.feed.changed",
+      payload: { ...change, unreadCount: state.unreadCount, unreadPlugins: state.unreadPlugins },
+    });
+    for (const [ws, connection] of this.sessions) {
+      if (connection.kind !== "trusted" || this.pluginSocketIds.has(ws)) continue;
+      if (!connection.session.getPermissions().includes("daemon.read")) continue;
+      if (!connection.session.wantsEvent("notifications.feed.changed", ws)) continue;
       this.sendToClient(ws, message);
     }
   }
@@ -4384,6 +4464,19 @@ export class VoiceAssistantWebSocketServer {
         state: this.getClientActivityState(connection.session),
       });
     }
+
+    this.notificationFeed.append({
+      kind: "plugin",
+      title: params.title,
+      body: params.body,
+      target: {
+        type: "plugin",
+        pluginId: params.pluginId,
+        notificationId: params.notificationId,
+        ...(params.open ? { open: params.open } : {}),
+        ...(params.open?.type === "agent" ? { agentId: params.open.agentId } : {}),
+      },
+    });
 
     const plan = computeNotificationPlan({
       allStates: clientEntries.map((entry) => entry.state),

@@ -1,5 +1,5 @@
-import { useCallback, useMemo } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { useCallback, useMemo, useState } from "react";
+import { Pressable, ScrollView, Text, View, type LayoutChangeEvent } from "react-native";
 import { Check, ChevronRight, KeyRound, Loader, Shield, X } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useShallow } from "zustand/shallow";
@@ -66,13 +66,56 @@ function StepRow({ step, isLast }: { step: BrowserStep; isLast: boolean }) {
   );
 }
 
+/**
+ * Below this pane width the steps column folds into a toolbar toggle, so the page keeps the
+ * width (the inspector opens at 525 px; a 248 px column left the page about 270 px).
+ */
+export const BROWSER_STEPS_INLINE_MIN_WIDTH = 760;
+
+export interface BrowserStepsLayout {
+  onLayout: (event: LayoutChangeEvent) => void;
+  /** The steps column sits left of the page. */
+  inline: boolean;
+  /** The pane is narrow: the toolbar shows the steps toggle and compact pills. */
+  compact: boolean;
+  /** The folded steps panel is open over the page. */
+  overlayOpen: boolean;
+  toggleOverlay: () => void;
+}
+
+export function useBrowserStepsLayout(): BrowserStepsLayout {
+  const [paneWidth, setPaneWidth] = useState(0);
+  const [overlayOpen, setOverlayOpen] = useState(false);
+  const onLayout = useCallback((event: LayoutChangeEvent) => {
+    setPaneWidth(Math.round(event.nativeEvent.layout.width));
+  }, []);
+  const toggleOverlay = useCallback(() => setOverlayOpen((open) => !open), []);
+  const inline = paneWidth >= BROWSER_STEPS_INLINE_MIN_WIDTH;
+  return {
+    onLayout,
+    inline,
+    compact: paneWidth > 0 && !inline,
+    overlayOpen: !inline && overlayOpen,
+    toggleOverlay,
+  };
+}
+
 /** Left cockpit panel: the live step timeline of the agent's browser actions. */
-export function BrowserTaskPanel({ browserId, title }: { browserId: string; title: string }) {
+export function BrowserTaskPanel({
+  browserId,
+  title,
+  overlay = false,
+}: {
+  browserId: string;
+  title: string;
+  /** Folded over the page in a narrow pane instead of a column beside it. */
+  overlay?: boolean;
+}) {
   const steps = useSteps(browserId);
   const driving = steps.some((s) => s.status === "running");
 
   return (
-    <View style={styles.panel}>
+    <View style={overlay ? styles.panelOverlay : styles.panel} testID="browser-steps-panel">
       <View style={styles.panelHead}>
         <Text style={styles.panelKicker}>AGENTIC BROWSER</Text>
         <Text style={styles.panelTitle} numberOfLines={2}>
@@ -103,11 +146,23 @@ export function BrowserTaskPanel({ browserId, title }: { browserId: string; titl
 
 /** Top-bar controls: a working Stealth toggle + Connected-logins count. The pill
  *  reflects and drives the REAL stealth state (see stealth-store → main injection). */
-export function CockpitControls({ connectedLogins }: { connectedLogins: number }) {
+export function CockpitControls({
+  connectedLogins,
+  compact = false,
+}: {
+  connectedLogins: number;
+  /** Narrow pane: icon-only pills, the text stays in the accessibility label. */
+  compact?: boolean;
+}) {
   const stealthOn = useBrowserStealthStore((s) => s.enabled);
   const setEnabled = useBrowserStealthStore((s) => s.setEnabled);
   const toggle = useCallback(() => setEnabled(!stealthOn), [setEnabled, stealthOn]);
   const a11yState = useMemo(() => ({ checked: stealthOn }), [stealthOn]);
+  const stealthLabel = stealthOn ? "Stealth on" : "Stealth off";
+  const loginsLabel =
+    connectedLogins > 0
+      ? `${connectedLogins} login${connectedLogins === 1 ? "" : "s"}`
+      : "No logins";
   return (
     <View style={styles.controls}>
       <Pressable
@@ -118,17 +173,13 @@ export function CockpitControls({ connectedLogins }: { connectedLogins: number }
         accessibilityLabel="Toggle stealth mode"
       >
         <ThemedShield size={13} uniProps={stealthOn ? okColor : mutedColor} />
-        <Text style={stealthOn ? styles.pillTextOn : styles.pillText}>
-          {stealthOn ? "Stealth on" : "Stealth off"}
-        </Text>
+        {compact ? null : (
+          <Text style={stealthOn ? styles.pillTextOn : styles.pillText}>{stealthLabel}</Text>
+        )}
       </Pressable>
-      <View style={styles.pill}>
+      <View style={styles.pill} accessibilityLabel={loginsLabel}>
         <ThemedKey size={13} uniProps={mutedColor} />
-        <Text style={styles.pillText}>
-          {connectedLogins > 0
-            ? `${connectedLogins} login${connectedLogins === 1 ? "" : "s"}`
-            : "No logins"}
-        </Text>
+        {compact ? null : <Text style={styles.pillText}>{loginsLabel}</Text>}
       </View>
     </View>
   );
@@ -144,7 +195,7 @@ export function AntiDetectionStrip({ browserId }: { browserId: string }) {
   return (
     <View style={styles.strip}>
       <ThemedShield size={13} uniProps={stealthOn ? okColor : mutedColor} />
-      <Text style={styles.stripLabel}>
+      <Text style={styles.stripLabel} numberOfLines={1}>
         Anti-detection:{" "}
         <Text style={stealthOn ? styles.stripValueOn : styles.stripValueOff}>
           {stealthOn ? "fingerprint randomized · human input" : "off"}
@@ -171,6 +222,22 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderRightWidth: theme.borderWidth[1],
     borderRightColor: theme.colors.border,
     backgroundColor: theme.colors.surface0,
+  },
+  panelOverlay: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    zIndex: 3,
+    width: 280,
+    maxWidth: "85%",
+    borderRightWidth: theme.borderWidth[1],
+    borderRightColor: theme.colors.border,
+    backgroundColor: theme.colors.surface0,
+    shadowColor: "#000",
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    shadowOffset: { width: 4, height: 0 },
   },
   panelHead: {
     padding: theme.spacing[4],
@@ -275,7 +342,12 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderTopColor: theme.colors.border,
     backgroundColor: theme.colors.surface0,
   },
-  stripLabel: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
+  stripLabel: {
+    flexShrink: 1,
+    minWidth: 0,
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+  },
   stripValueOn: { color: theme.colors.palette.green[500], fontWeight: theme.fontWeight.medium },
   stripValueOff: { color: theme.colors.foregroundMuted, fontWeight: theme.fontWeight.medium },
   stripSep: { width: 1, height: 12, backgroundColor: theme.colors.border },

@@ -78,6 +78,12 @@ export interface PanelState {
 
   // File explorer settings (shared between mobile/desktop)
   explorerTab: ExplorerTab;
+  /**
+   * Bumped by every explicit request to show `explorerTab` (setExplorerTab*). Opening the
+   * inspector only remembers the checkout's tab, so the inspector keeps the tab it shows.
+   * Not persisted.
+   */
+  explorerTabRequest: number;
   explorerTabByCheckout: Record<string, ExplorerTab>;
   expandedPathsByWorkspace: Record<string, string[]>;
   diffExpandedPathsByWorkspace: Record<string, string[]>;
@@ -88,6 +94,8 @@ export interface PanelState {
   diffCollapsedFoldersByWorkspace: Record<string, string[]>;
   sidebarWidth: number;
   explorerWidth: number;
+  /** Gumloop inspector width this client chose by dragging; null keeps the 525 px default. */
+  inspectorWidth: number | null;
   explorerSortOption: SortOption;
   explorerShowHiddenFiles: boolean;
   explorerFilesSplitRatio: number;
@@ -117,6 +125,7 @@ export interface PanelState {
   activateExplorerTabForCheckout: (checkout: ExplorerCheckoutContext) => void;
   setSidebarWidth: (width: number) => void;
   setExplorerWidth: (width: number) => void;
+  setInspectorWidth: (width: number) => void;
   setExplorerSortOption: (option: SortOption) => void;
   toggleExplorerShowHiddenFiles: () => void;
   setExplorerFilesSplitRatio: (ratio: number) => void;
@@ -157,12 +166,14 @@ export const usePanelStore = create<PanelState>()(
 
       // File explorer defaults
       explorerTab: "changes",
+      explorerTabRequest: 0,
       explorerTabByCheckout: {},
       expandedPathsByWorkspace: {},
       diffExpandedPathsByWorkspace: {},
       diffCollapsedFoldersByWorkspace: {},
       sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
       explorerWidth: DEFAULT_EXPLORER_SIDEBAR_WIDTH,
+      inspectorWidth: null,
       explorerSortOption: "name",
       explorerShowHiddenFiles: true,
       explorerFilesSplitRatio: DEFAULT_EXPLORER_FILES_SPLIT_RATIO,
@@ -259,12 +270,16 @@ export const usePanelStore = create<PanelState>()(
       toggleFileExplorerForCheckout: (input) =>
         set((state) => buildToggleFileExplorerPatch(state, input)),
 
-      setExplorerTab: (tab) => set({ explorerTab: tab }),
+      setExplorerTab: (tab) =>
+        set((state) => ({ explorerTab: tab, explorerTabRequest: state.explorerTabRequest + 1 })),
       setExplorerTabForCheckout: ({ serverId, cwd, isGit, tab }) =>
         set((state) => {
           const resolvedTab = coerceExplorerTabForCheckout(tab, isGit);
           const key = buildExplorerCheckoutKey(serverId, cwd);
-          const nextState: Partial<PanelState> = { explorerTab: resolvedTab };
+          const nextState: Partial<PanelState> = {
+            explorerTab: resolvedTab,
+            explorerTabRequest: state.explorerTabRequest + 1,
+          };
           if (key) {
             const current = state.explorerTabByCheckout[key];
             if (current !== resolvedTab) {
@@ -312,6 +327,9 @@ export const usePanelStore = create<PanelState>()(
         })),
       setSidebarWidth: (width) => set({ sidebarWidth: clampSidebarWidth(width) }),
       setExplorerWidth: (width) => set({ explorerWidth: clampExplorerWidth(width) }),
+      setInspectorWidth: (width) => {
+        if (Number.isFinite(width) && width > 0) set({ inspectorWidth: Math.round(width) });
+      },
       setExplorerSortOption: (option) => set({ explorerSortOption: option }),
       toggleExplorerShowHiddenFiles: () =>
         set((state) => ({ explorerShowHiddenFiles: !state.explorerShowHiddenFiles })),
@@ -337,6 +355,7 @@ export const usePanelStore = create<PanelState>()(
         diffCollapsedFoldersByWorkspace: state.diffCollapsedFoldersByWorkspace,
         sidebarWidth: state.sidebarWidth,
         explorerWidth: state.explorerWidth,
+        inspectorWidth: state.inspectorWidth,
         explorerSortOption: state.explorerSortOption,
         explorerShowHiddenFiles: state.explorerShowHiddenFiles,
         explorerFilesSplitRatio: state.explorerFilesSplitRatio,

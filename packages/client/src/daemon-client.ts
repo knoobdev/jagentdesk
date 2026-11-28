@@ -209,6 +209,10 @@ import {
 } from "@jagentdesk/protocol/binary-frames/index";
 import type { HostAdd, HostUpdate, HostDirectory } from "@jagentdesk/protocol/hosts";
 import type { NotificationPreferences } from "@jagentdesk/protocol/notification-preferences";
+import type {
+  NotificationFeedListPayload,
+  NotificationFeedMarkReadPayload,
+} from "@jagentdesk/protocol/notification-feed";
 
 import { messageTooLargeError } from "./daemon-client-transport-utils.js";
 import { MAX_WEBSOCKET_MESSAGE_BYTES } from "@jagentdesk/protocol/websocket-message-limit";
@@ -2101,6 +2105,7 @@ export type AgentBackgroundWorkItem = AgentBackgroundWorkListPayload["items"][nu
 export type AgentBackgroundWorkDetail = NonNullable<
   CorrelatedResponsePayload<"agent.background_work.get_detail.response">["detail"]
 >;
+export type AgentBackgroundWorkSource = NonNullable<AgentBackgroundWorkDetail["sources"]>[number];
 export type AgentBackgroundWorkOutputPayload = Extract<
   SessionOutboundMessage,
   { type: "agent.background_work.output" }
@@ -5081,10 +5086,19 @@ export class DaemonClient {
   async subscribeAgentBackgroundWorkOutput(input: {
     agentId: string;
     itemId: string;
+    /** ADR-0064: one of the detail's `sources`; the provider's output when absent. */
+    sourceId?: string;
     onOutput: (output: AgentBackgroundWorkOutputPayload) => void;
     timeout?: number;
   }): Promise<() => void> {
     this.assertBackgroundWorkOutputSupported();
+    // COMPAT(backgroundWorkSources): added in v0.12.3, remove gate after 2027-05-28.
+    if (
+      input.sourceId !== undefined &&
+      this.lastServerInfoMessage?.features?.backgroundWorkSources !== true
+    ) {
+      throw new Error("Update the host to see a background task's output files.");
+    }
     const subscriptionId = this.createRequestId();
     const release = this.on("agent.background_work.output", (message) => {
       if (message.payload.subscriptionId === subscriptionId) input.onOutput(message.payload);
@@ -5099,6 +5113,7 @@ export class DaemonClient {
               agentId: input.agentId,
               itemId: input.itemId,
               subscriptionId,
+              ...(input.sourceId !== undefined ? { sourceId: input.sourceId } : {}),
             },
           },
         );
@@ -9048,6 +9063,40 @@ export class DaemonClient {
         message: { type: "agent.lessons.capture.request", agentId },
       });
     if (!payload.accepted) throw new Error(payload.error ?? "Capture lessons failed");
+  }
+
+  /** A page of the host's notification feed, newest first (ADR-0063). */
+  async listNotificationFeed(options?: {
+    before?: string;
+    limit?: number;
+    requestId?: string;
+  }): Promise<NotificationFeedListPayload> {
+    this.requireNotificationFeed();
+    return this.sendNamespacedCorrelatedSessionRequest<"notifications.feed.list.response">({
+      requestId: options?.requestId,
+      message: {
+        type: "notifications.feed.list.request",
+        ...(options?.before ? { before: options.before } : {}),
+        ...(options?.limit ? { limit: options.limit } : {}),
+      },
+    });
+  }
+
+  /** Marks feed rows read for every device of the host: some ids, or all of them. */
+  async markNotificationFeedRead(
+    selection: { ids: string[] } | { all: true },
+    options?: { requestId?: string },
+  ): Promise<NotificationFeedMarkReadPayload> {
+    this.requireNotificationFeed();
+    return this.sendNamespacedCorrelatedSessionRequest<"notifications.feed.mark_read.response">({
+      requestId: options?.requestId,
+      message: { type: "notifications.feed.mark_read.request", ...selection },
+    });
+  }
+
+  private requireNotificationFeed(): void {
+    if (this.lastServerInfoMessage?.features?.notificationFeed !== true)
+      throw new Error("Update the host to see its notification list");
   }
 
   /** The session ledger of an agent (spec 40 §2), with its handoffs and provider sessions. */

@@ -11,12 +11,14 @@ import { handoffDisplayText } from "./use-agent-ledger";
 export function HandoffSheet({
   visible,
   onClose,
+  onDismiss,
   handoff,
   isLoading,
   error,
 }: {
   visible: boolean;
   onClose: () => void;
+  onDismiss?: () => void;
   handoff: SessionLedgerHandoff | null;
   isLoading: boolean;
   error: string | null;
@@ -41,6 +43,7 @@ export function HandoffSheet({
       header={header}
       visible={visible}
       onClose={onClose}
+      onDismiss={onDismiss}
       desktopMaxWidth={760}
       testID="handoff-sheet"
     >

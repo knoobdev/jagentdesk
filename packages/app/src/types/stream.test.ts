@@ -415,6 +415,37 @@ describe("stream reducer tool call idempotency", () => {
 });
 
 describe("stream reducer canonical tool calls", () => {
+  it("keeps metadata.intent across lifecycle updates that omit it", () => {
+    const base = { provider: "codex" as const, callId: "call-intent", name: "shell" };
+    const state = hydrateStreamState([
+      {
+        event: canonicalToolTimeline({
+          ...base,
+          status: "running",
+          metadata: { intent: "Inspect" },
+        }),
+        timestamp: new Date(0),
+      },
+      {
+        event: canonicalToolTimeline({ ...base, status: "running" }),
+        timestamp: new Date(1),
+      },
+      {
+        event: canonicalToolTimeline({
+          ...base,
+          status: "completed",
+          metadata: { exitReason: "done" },
+        }),
+        timestamp: new Date(2),
+      },
+    ]);
+
+    expect(findToolByCallId(state, base.callId)?.payload.data.metadata).toEqual({
+      intent: "Inspect",
+      exitReason: "done",
+    });
+  });
+
   it("keeps repeated call ids in different turns as distinct timeline rows", () => {
     const callId = "tool-reused-across-turns";
     const state = hydrateStreamState([
@@ -1143,6 +1174,39 @@ describe("stream reducer canonical tool calls", () => {
     assert.strictEqual(compactions.length, 1);
     assert.strictEqual(compactions[0].status, "completed");
     assert.strictEqual(compactions[0].trigger, "auto");
+  });
+
+  it("settles repeated compacting heartbeats into one completed row", () => {
+    const state = hydrateStreamState([
+      { event: compactionTimeline("loading"), timestamp: new Date("2025-01-01T10:50:00Z") },
+      { event: compactionTimeline("loading"), timestamp: new Date("2025-01-01T10:50:30Z") },
+      { event: compactionTimeline("loading"), timestamp: new Date("2025-01-01T10:51:00Z") },
+      { event: compactionTimeline("loading"), timestamp: new Date("2025-01-01T10:51:30Z") },
+      {
+        event: compactionTimeline("completed", "auto"),
+        timestamp: new Date("2025-01-01T10:51:40Z"),
+      },
+    ]);
+
+    const compactions = state.filter(
+      (item): item is Extract<StreamItem, { kind: "compaction" }> => item.kind === "compaction",
+    );
+
+    assert.deepStrictEqual(
+      compactions.map((item) => [item.status, item.trigger]),
+      [["completed", "auto"]],
+    );
+  });
+
+  it("opens a new row for a compaction after the previous one completed", () => {
+    const state = hydrateStreamState([
+      { event: compactionTimeline("loading"), timestamp: new Date("2025-01-01T10:50:00Z") },
+      { event: compactionTimeline("completed"), timestamp: new Date("2025-01-01T10:50:10Z") },
+      { event: compactionTimeline("loading"), timestamp: new Date("2025-01-01T11:00:00Z") },
+    ]);
+
+    const statuses = state.flatMap((item) => (item.kind === "compaction" ? [item.status] : []));
+    assert.deepStrictEqual(statuses, ["completed", "loading"]);
   });
 
   it("renders Claude TodoWrite as todo_list and suppresses tool call badge", () => {
@@ -1938,15 +2002,26 @@ describe("daemon plugin timeline rows", () => {
         pluginId: "memory",
         kind: "memory-used",
         version: 1,
-        data: { turnKey: "turn-1", memories: Array.from({ length: count }, (_, i) => ({ id: `m${i}` })) },
+        data: {
+          turnKey: "turn-1",
+          memories: Array.from({ length: count }, (_, i) => ({ id: `m${i}` })),
+        },
       },
     });
     const first = reduceStreamUpdate([], pluginEvent(1), new Date(1_000));
     expect(first).toMatchObject([
-      { kind: "plugin", pluginId: "memory", pluginItemId: "memory-used:turn-1", itemKind: "memory-used" },
+      {
+        kind: "plugin",
+        pluginId: "memory",
+        pluginItemId: "memory-used:turn-1",
+        itemKind: "memory-used",
+      },
     ]);
     const second = reduceStreamUpdate(first, pluginEvent(2), new Date(2_000));
     expect(second).toHaveLength(1);
-    expect(second[0]).toMatchObject({ id: first[0]!.id, data: { memories: [{ id: "m0" }, { id: "m1" }] } });
+    expect(second[0]).toMatchObject({
+      id: first[0]!.id,
+      data: { memories: [{ id: "m0" }, { id: "m1" }] },
+    });
   });
 });

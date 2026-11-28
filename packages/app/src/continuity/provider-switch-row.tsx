@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import type { ProviderSwitchNotice } from "@jagentdesk/protocol/agent-types";
 import { ActivityLog } from "@/components/message";
+import { useTimelineRowSheet, type TimelineRowSheetProps } from "@/components/timeline-row-sheet";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/contexts/toast-context";
 import { HandoffSheet } from "./handoff-sheet";
@@ -28,9 +29,7 @@ export function ProviderSwitchRow({
   notice: ProviderSwitchNotice;
 }) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  const ledger = useAgentLedger({ serverId, agentId, enabled: open });
-  const handoff = ledger.data?.handoffs.find((entry) => entry.id === notice.handoffId) ?? null;
+  const { openRowSheet } = useTimelineRowSheet();
   const toast = useToast();
   // Spec 40 §4: a failover is announced once, when its row arrives live.
   useEffect(() => {
@@ -40,8 +39,18 @@ export function ProviderSwitchRow({
     announcedFailovers.add(key);
     toast.show(message);
   }, [agentId, message, notice.reason, timestamp, toast]);
-  const show = useCallback(() => setOpen(true), []);
-  const hide = useCallback(() => setOpen(false), []);
+  const show = useCallback(
+    () =>
+      openRowSheet(`handoff:${agentId}:${notice.handoffId}`, (sheet) => (
+        <ProviderSwitchHandoffSheet
+          serverId={serverId}
+          agentId={agentId}
+          handoffId={notice.handoffId}
+          {...sheet}
+        />
+      )),
+    [agentId, notice.handoffId, openRowSheet, serverId],
+  );
   return (
     <View testID="provider-switch-row">
       <ActivityLog type="info" message={message} timestamp={timestamp} />
@@ -52,16 +61,35 @@ export function ProviderSwitchRow({
           </Button>
         </View>
       ) : null}
-      {open ? (
-        <HandoffSheet
-          visible={open}
-          onClose={hide}
-          handoff={handoff}
-          isLoading={ledger.isLoading}
-          error={ledger.error ? ledger.error.message : null}
-        />
-      ) : null}
     </View>
+  );
+}
+
+/** Hosted by the stream's `TimelineRowSheetProvider`, so it outlives the row (see there). */
+function ProviderSwitchHandoffSheet({
+  serverId,
+  agentId,
+  handoffId,
+  visible,
+  onClose,
+  onDismiss,
+}: TimelineRowSheetProps & {
+  serverId: string;
+  agentId: string;
+  handoffId: ProviderSwitchNotice["handoffId"];
+}) {
+  // A handoff is recorded before its row is appended and never changes: one fetch per open.
+  const ledger = useAgentLedger({ serverId, agentId, enabled: true, follow: false });
+  const handoff = ledger.data?.handoffs.find((entry) => entry.id === handoffId) ?? null;
+  return (
+    <HandoffSheet
+      visible={visible}
+      onClose={onClose}
+      onDismiss={onDismiss}
+      handoff={handoff}
+      isLoading={ledger.isLoading}
+      error={ledger.error ? ledger.error.message : null}
+    />
   );
 }
 

@@ -13,8 +13,11 @@ it on in Settings → host → Plugins.
 
 ## Pages open in the app, never the system browser
 
-Spec 04 §27b.3. A `browser_new_tab` tab opens selected in the inspector pane beside the chat. When a
-launch carries browser tools (`AgentLaunchContext.inAppBrowser`):
+Spec 04 §27b.3. A `browser_new_tab` tab opens selected in the inspector pane beside the chat, and
+opens a closed inspector when the window shows that workspace. Opening the inspector never takes
+focus from the tab it shows; only an explicit request (`setExplorerTab*`, which bumps
+`explorerTabRequest`) brings Files or Changes to the front
+(`packages/app/src/screens/workspace/explorer-pane-sync.ts`). When a launch carries browser tools (`AgentLaunchContext.inAppBrowser`):
 
 - The system instructions require the `browser_*` tools for every page and forbid `open`,
   `xdg-open`, `start` and `Start-Process` with a URL and the provider's own browser tools.
@@ -53,6 +56,17 @@ agent launch, with or without browser tools, also gets shims (spec 04 §27b item
 - Windows: `explorer.cmd` and `BROWSER` only. `start` and `Start-Process` are shell built-ins that
   no PATH entry replaces; the instructions cover them.
 
+## Pane layout
+
+The browser pane shows the agent's steps in a 248 px column left of the page. Below 760 px of pane
+width the column folds into a toolbar toggle that opens it over the page, and the Stealth and logins
+pills drop their text (`pane/cockpit.tsx`). The inspector opens at 525 px, where the column left the
+page about 270 px. Drag the inspector wider, or use "Open in main pane", to see the page beside its
+steps.
+
+A tab moves between panes without reloading because its webview never changes parent; the pane
+only positions the webview's surface ([browser-capture-harness.md](browser-capture-harness.md#mechanism)).
+
 ## Desktop selection
 
 `browser_list_hosts` lists connected windows, including windows with no tabs. With multiple
@@ -82,8 +96,11 @@ Usage summary as easy to miss and crowding Usage.
   that have not attached yet and names each row from the tab that shows it.
 - A webview no tab owns still gets a row, "Not in a workspace". Show gives it a tab in the workspace
   that opened it, or the open workspace.
-- Agent tabs sit in the inspector pane, which only renders while the file explorer is open. Show opens
-  it and selects the tab again after the explorer's own effect has focused Files or Changes.
+- Show moves an inspector tab to the workspace's main pane (spec 38 §4.5), the same move as the
+  inspector's "Open in main pane" button. The tab keeps its browser id, so the main pane adopts the
+  same webview without a reload. Only a workspace with no main pane keeps the tab in the inspector,
+  which renders only while the file explorer is open: Show opens it and selects the tab again after
+  the explorer's own effect has focused Files or Changes.
 - A hung CDP command marks its row "Not responding" through `setJAgentDeskBrowserNotResponding`
   (`browser-webviews/index.ts`).
 
@@ -117,6 +134,12 @@ identity.
   `navigator.platform` in workers. Shared workers are not CDP children of the page and take the
   process default User-Agent, so `app.userAgentFallback` follows the identity; the app window pins
   Electron's own UA.
+- **Favicons.** Electron only reports a tab's favicon URLs; the app's tab strip and browser tabs
+  list must never load them. An `<Image>` in the app window goes through the app's own session:
+  Electron UA, the host's Accept-Language, no profile proxy. Every v0.12.2/v0.12.3 favicon request
+  leaked the host identity that way. Main fetches the icon through the tab's session with the tab's
+  identity headers (`packages/desktop/src/features/browser-webviews/favicons.ts`) and the UI renders
+  only the `data:` URL it returns (`packages/app/src/desktop/browser/favicon-source.ts`).
 - **At startup.** Tabs restored at launch wait (at most 5 s) for the app to send the active profile,
   so nothing they start — a shared worker in particular — keeps a missing identity.
 - **Permissions.** The agentic session refuses `media`, `geolocation`, `display-capture`,

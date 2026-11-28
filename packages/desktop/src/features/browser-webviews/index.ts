@@ -9,6 +9,7 @@ import {
 } from "./window-open.js";
 import { JAgentDeskBrowserWebviewRegistry } from "./registry.js";
 import { BROWSER_LIVE_TABS_EVENT, LiveBrowserTabs, type LiveBrowserTab } from "./live-tabs.js";
+import { GuestFaviconFetcher } from "./favicons.js";
 
 export type { LiveBrowserTab, LiveBrowserTabStatus } from "./live-tabs.js";
 
@@ -34,6 +35,34 @@ const liveBrowserTabs = new LiveBrowserTabs({
     setTimeout(flush, LIVE_TABS_PUBLISH_DELAY_MS);
   },
 });
+
+let faviconIdentityHeaders: (url: string) => Record<string, string> = () => ({});
+const faviconFetcher = new GuestFaviconFetcher({
+  identityHeaders: (url) => faviconIdentityHeaders(url),
+});
+/** The favicon each guest reported last; main fetches only that one. */
+const reportedFavicons = new Map<number, string | null>();
+
+/** main.ts passes the agentic-browser identity (browser-stealth.ts) for favicon requests. */
+export function setJAgentDeskBrowserFaviconIdentity(
+  identityHeaders: (url: string) => Record<string, string>,
+): void {
+  faviconIdentityHeaders = identityHeaders;
+}
+
+/**
+ * The guest's current favicon as a `data:` URL, fetched through the guest's session with its
+ * identity (favicons.ts). `url` must be the favicon the guest reported last.
+ */
+export function resolveJAgentDeskBrowserFavicon(
+  contents: WebContents,
+  url: string,
+): Promise<string | null> {
+  if (contents.isDestroyed() || reportedFavicons.get(contents.id) !== url) {
+    return Promise.resolve(null);
+  }
+  return faviconFetcher.resolve(contents.session, url);
+}
 
 interface BrowserWebContentsIdentity {
   readonly id: number;
@@ -109,6 +138,7 @@ export function trackJAgentDeskBrowserLiveTab(contents: WebContents): void {
     liveBrowserTabs.update(webContentsId, { loading: false });
   });
   contents.on("did-navigate", (_event, url) => {
+    reportedFavicons.set(webContentsId, null);
     liveBrowserTabs.update(webContentsId, { url, faviconUrl: null });
   });
   contents.on("did-navigate-in-page", (_event, url, isMainFrame) => {
@@ -118,7 +148,18 @@ export function trackJAgentDeskBrowserLiveTab(contents: WebContents): void {
     liveBrowserTabs.update(webContentsId, { title });
   });
   contents.on("page-favicon-updated", (_event, favicons) => {
-    liveBrowserTabs.update(webContentsId, { faviconUrl: favicons[0] ?? null });
+    const reported = favicons[0] ?? null;
+    reportedFavicons.set(webContentsId, reported);
+    if (!reported) {
+      liveBrowserTabs.update(webContentsId, { faviconUrl: null });
+      return;
+    }
+    void resolveJAgentDeskBrowserFavicon(contents, reported).then((faviconUrl) => {
+      if (reportedFavicons.get(webContentsId) === reported) {
+        liveBrowserTabs.update(webContentsId, { faviconUrl });
+      }
+      return undefined;
+    });
   });
   contents.on("unresponsive", () => {
     liveBrowserTabs.update(webContentsId, { unresponsive: true });
@@ -130,6 +171,7 @@ export function trackJAgentDeskBrowserLiveTab(contents: WebContents): void {
     liveBrowserTabs.update(webContentsId, { crashed: true, loading: false });
   });
   contents.once("destroyed", () => {
+    reportedFavicons.delete(webContentsId);
     liveBrowserTabs.detach(webContentsId);
   });
 }

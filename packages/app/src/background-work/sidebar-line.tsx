@@ -3,6 +3,7 @@ import { Pressable, Text, View, type GestureResponderEvent } from "react-native"
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
 import { StatusRing } from "@/components/status-ring";
+import { useIsCompactFormFactor } from "@/constants/layout";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
 import type { AgentBackgroundWorkSummary } from "@jagentdesk/protocol/messages";
 import { backgroundWorkText } from "./presentation";
@@ -48,6 +49,7 @@ export const BackgroundWorkLine = memo(function BackgroundWorkLine({
   testID,
 }: BackgroundWorkLineProps): ReactElement | null {
   const { t } = useTranslation();
+  const compact = useIsCompactFormFactor();
   const { items } = useBackgroundWorkSnapshot(serverId, agentId, totalCount > 0);
   const first = items?.[0] ?? null;
   const startedAtMs = first ? Date.parse(first.startedAt) : null;
@@ -71,14 +73,8 @@ export const BackgroundWorkLine = memo(function BackgroundWorkLine({
       label = `${label} · ${formatBackgroundElapsed(now - startedAtMs)}`;
   }
   const extra = Math.max(totalCount, items?.length ?? 0) - 1;
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={t("message.backgroundWork.openTrack", { label })}
-      onPress={open}
-      style={styles.line}
-      testID={testID ?? `background-work-line-${agentId}`}
-    >
+  const content = (
+    <>
       <View style={styles.ring}>
         <StatusRing />
       </View>
@@ -88,12 +84,37 @@ export const BackgroundWorkLine = memo(function BackgroundWorkLine({
       {extra > 0 ? (
         <Text style={styles.more}>{t("message.backgroundWork.more", { count: extra })}</Text>
       ) : null}
+    </>
+  );
+  // On a phone the line is a 16 px strip under the row's name, far below a finger's target: a tap
+  // meant for the row landed on it and brought the agent back with its Background work sheet
+  // open (user report 2026-11-28, iPhone). There it only shows the work; the row opens the agent.
+  if (compact) {
+    return (
+      <View style={styles.line} testID={testID ?? `background-work-line-${agentId}`}>
+        {content}
+      </View>
+    );
+  }
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={t("message.backgroundWork.openTrack", { label })}
+      onPress={open}
+      style={styles.line}
+      testID={testID ?? `background-work-line-${agentId}`}
+    >
+      {content}
     </Pressable>
   );
 });
 
 const styles = StyleSheet.create((theme) => ({
+  // As wide as its text, not the row: the line opens the background track, and a press on the
+  // empty rest of the row's second line has to open the agent like the rest of the row does.
   line: {
+    alignSelf: "flex-start",
+    maxWidth: "100%",
     height: 16,
     flexDirection: "row",
     alignItems: "center",

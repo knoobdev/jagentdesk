@@ -44,7 +44,7 @@ At the start of non-trivial work, list `docs/` and skim anything relevant to the
 | [docs/drag-reorder.md](docs/drag-reorder.md)                           | Drag to reorder — `DraggableList` and its handle, the scroll view that must host the drag, grip placement, phone testing               |
 | [docs/mobile-panels.md](docs/mobile-panels.md)                         | Compact left/center/right panel ownership, worklet motion, gesture revisions, and Fabric constraints                                   |
 | [docs/i18n.md](docs/i18n.md)                                           | UI translations — locales, fallbacks, parity test, English-only shared subtrees                                                        |
-| [docs/notifications.md](docs/notifications.md)                         | OS notification delivery, startup readiness, acknowledgement, and deferred targets                                                     |
+| [docs/notifications.md](docs/notifications.md)                         | OS notification delivery, startup readiness, acknowledgement, deferred targets, and the daemon-kept bell list                          |
 | [docs/expo-router.md](docs/expo-router.md)                             | Expo Router route ownership, startup restore, and native blank-screen gotchas                                                          |
 | [docs/file-icons.md](docs/file-icons.md)                               | Material icon theme integration for the file explorer                                                                                  |
 | [docs/providers.md](docs/providers.md)                                 | Adding a new agent provider end-to-end                                                                                                 |
@@ -82,7 +82,7 @@ At the start of non-trivial work, list `docs/` and skim anything relevant to the
 | [docs/ad-hoc-daemon-testing.md](docs/ad-hoc-daemon-testing.md)         | Isolated in-process daemon test harness                                                                                                |
 | [docs/browser-capture-harness.md](docs/browser-capture-harness.md)     | Real-Electron browser screenshot harness and compositor-surface gotcha                                                                 |
 | [docs/android.md](docs/android.md)                                     | App variants, local/cloud builds, EAS workflows, version codes, F-Droid source builds and store metadata                               |
-| [docs/releases/v0.12.2.md](docs/releases/v0.12.2.md)                   | Release notes for v0.12.2; older versions sit next to it in `docs/releases/`                                                           |
+| [docs/releases/v0.12.3.md](docs/releases/v0.12.3.md)                   | Release notes for v0.12.3; older versions sit next to it in `docs/releases/`                                                           |
 | [SECURITY.md](SECURITY.md)                                             | Relay threat model, E2E encryption, DNS rebinding, agent auth                                                                          |
 | [public-docs/security.md](public-docs/security.md)                     | Public security guide — architecture, connection methods, relay encryption, best practices                                             |
 

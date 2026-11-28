@@ -293,6 +293,39 @@ export function installNavigationClientHints(browserSession: Session): void {
 }
 
 /**
+ * Identity headers for a request main makes on a tab's behalf (its favicon): what the tab's own
+ * page would send. User-Agent always; with a profile also its Accept-Language and, on secure
+ * origins, the low-entropy Client Hints. Without a profile the session's own Accept-Language
+ * applies, as on the tab's requests.
+ */
+export function identityRequestHeaders(
+  url: string,
+  profile: BrowserFingerprintProfile | null,
+  fallbackUserAgent: string,
+): Record<string, string> {
+  const headers: Record<string, string> = {
+    "User-Agent": profile ? profile.userAgent : fallbackUserAgent,
+  };
+  if (profile) {
+    headers["Accept-Language"] = profile.acceptLanguage;
+  }
+  if (isPotentiallyTrustworthy(url)) {
+    Object.assign(
+      headers,
+      navigationClientHintHeaders(
+        profile ? buildUserAgentMetadata(profile) : hostUserAgentMetadata(),
+      ),
+    );
+  }
+  return headers;
+}
+
+/** {@link identityRequestHeaders} for the identity in effect now. */
+export function currentIdentityRequestHeaders(url: string): Record<string, string> {
+  return identityRequestHeaders(url, effectiveProfile(), defaultBrowserUserAgent());
+}
+
+/**
  * Chromium expands the language list it is given into an Accept-Language header with its
  * own q-values, and derives navigator.languages from it; the profile stores the header
  * form ("en-US,en;q=0.9"), so the q-values are dropped here.

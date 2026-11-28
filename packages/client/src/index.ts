@@ -37,6 +37,7 @@ import {
   DaemonClient,
   type AgentBackgroundWorkDetail,
   type AgentBackgroundWorkOutputPayload,
+  type AgentBackgroundWorkSource,
   type AgentBackgroundWorkItem,
   type FetchAgentsEntry,
   type FetchAgentsOptions,
@@ -351,6 +352,7 @@ export interface JAgentDeskAgentTimelineHandle {
 export type JAgentDeskAgentBackgroundWorkItem = AgentBackgroundWorkItem;
 export type JAgentDeskAgentBackgroundWorkDetail = AgentBackgroundWorkDetail;
 export type JAgentDeskAgentBackgroundWorkOutput = AgentBackgroundWorkOutputPayload;
+export type JAgentDeskAgentBackgroundWorkSource = AgentBackgroundWorkSource;
 
 export interface JAgentDeskAgentBackgroundWorkHandle {
   /** Stop one item and wait for provider confirmation. */

@@ -80,6 +80,8 @@ import {
   setJAgentDeskBrowserNotResponding,
   trackJAgentDeskBrowserLiveTab,
   unregisterJAgentDeskBrowserHost,
+  resolveJAgentDeskBrowserFavicon,
+  setJAgentDeskBrowserFaviconIdentity,
 } from "./features/browser-webviews/index.js";
 import {
   perTabBrowserProfileDirectoryExists,
@@ -120,6 +122,7 @@ import {
 import { loadHeldGuestUrlAfterIdentity } from "./features/browser-guest-initial-load.js";
 import {
   applySessionIdentity,
+  currentIdentityRequestHeaders,
   ELECTRON_USER_AGENT,
   installGuestPermissionPolicy,
   applyStealthToWebContents,
@@ -633,6 +636,17 @@ ipcMain.handle("jagentdesk:browser:focus", (event, browserId: unknown): boolean 
   contents.focus();
   return true;
 });
+
+// The tab strip and the browser tabs list show a tab's favicon only as the data: URL main fetched
+// through the tab's session with its identity (browser-webviews/favicons.ts), never by URL.
+ipcMain.handle(
+  "jagentdesk:browser:resolve-favicon",
+  async (event, browserId: unknown, url: unknown): Promise<string | null> => {
+    if (typeof browserId !== "string" || typeof url !== "string") return null;
+    const contents = getJAgentDeskBrowserWebContentsForHostWindow(browserId, event.sender.id);
+    return contents ? resolveJAgentDeskBrowserFavicon(contents, url) : null;
+  },
+);
 
 ipcMain.handle("jagentdesk:browser:open-devtools", (event, browserId: unknown) => {
   if (typeof browserId !== "string" || browserId.trim().length === 0) {
@@ -1396,6 +1410,7 @@ async function bootstrap(): Promise<void> {
   const agenticBrowserSession = session.fromPartition(JAGENTDESK_BROWSER_PROFILE_PARTITION);
   applySessionIdentity(agenticBrowserSession);
   installNavigationClientHints(agenticBrowserSession);
+  setJAgentDeskBrowserFaviconIdentity(currentIdentityRequestHeaders);
   installGuestPermissionPolicy(agenticBrowserSession);
 
   if (await refuseRosettaBuild()) {

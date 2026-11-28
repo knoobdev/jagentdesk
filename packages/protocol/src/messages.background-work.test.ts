@@ -170,3 +170,84 @@ describe("background work detail and output protocol", () => {
     ).toMatchObject({ backgroundWorkOutput: true });
   });
 });
+
+// ADR-0064: redirect files, the script and the agent's latest read as detail sources.
+describe("background work sources protocol", () => {
+  const detail = {
+    ...ITEM,
+    status: "running",
+    endedAt: null,
+    exitCode: null,
+    cwd: "/repo",
+    provider: "codex",
+    outputAvailable: false,
+  };
+
+  test("a detail carries its sources; unknown kinds still parse", () => {
+    const sources = [
+      { id: "provider", kind: "provider", label: "", available: false },
+      {
+        id: "redirect:0",
+        kind: "redirect",
+        label: "t.log",
+        path: "/tmp/t.log",
+        available: true,
+        size: 12,
+        modifiedAt: "2026-11-28T10:00:00.000Z",
+        lastRead: { at: "2026-11-28T10:01:00.000Z", content: "PASS", truncated: false },
+      },
+      {
+        id: "script",
+        kind: "script",
+        label: "wait.sh",
+        script: { content: "sleep 1\n", truncated: false, lineCount: 1 },
+      },
+      { id: "x", kind: "future-kind", label: "x" },
+    ];
+    expect(
+      SessionOutboundMessageSchema.parse({
+        type: "agent.background_work.get_detail.response",
+        payload: {
+          requestId: "r",
+          agentId: "a",
+          itemId: "bash-1",
+          detail: { ...detail, sources },
+          error: null,
+        },
+      }),
+    ).toMatchObject({ payload: { detail: { sources } } });
+  });
+
+  test("subscribe names a source by id and pushes echo it; both stay optional", () => {
+    expect(
+      SessionInboundMessageSchema.parse({
+        type: "agent.background_work.output.subscribe.request",
+        agentId: "a",
+        itemId: "i",
+        subscriptionId: "s",
+        sourceId: "redirect:0",
+        requestId: "r",
+      }),
+    ).toMatchObject({ sourceId: "redirect:0" });
+    expect(
+      SessionOutboundMessageSchema.parse({
+        type: "agent.background_work.output",
+        payload: {
+          subscriptionId: "s",
+          agentId: "a",
+          itemId: "i",
+          sourceId: "redirect:0",
+          chunk: "x",
+          offset: 0,
+        },
+      }),
+    ).toMatchObject({ payload: { sourceId: "redirect:0" } });
+    expect(
+      ServerInfoStatusPayloadSchema.parse({
+        status: "server_info",
+        serverId: "server-1",
+        features: { backgroundWorkSources: true },
+      }).features,
+    ).toMatchObject({ backgroundWorkSources: true });
+  });
+});

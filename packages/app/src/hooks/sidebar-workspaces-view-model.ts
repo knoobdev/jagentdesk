@@ -241,16 +241,29 @@ export function deriveProjectStatusBucket(input: {
 export function buildSidebarWorkspacePlacementModel(input: {
   projects: readonly HostProjectListItem[];
   hiddenWorkspaceKeys?: ReadonlySet<string>;
+  /**
+   * Workspaces a bot owns: they list under the bot (spec 37.4.1). A project whose every workspace
+   * is one of them is the bot's worker repo and would be an empty row, so it leaves the tree too.
+   */
+  botOwnedWorkspaceKeys?: ReadonlySet<string>;
 }): SidebarWorkspacePlacementModel {
   const allProjects = buildSidebarProjectsFromHostProjects({ projects: input.projects });
+  const botOwned = input.botOwnedWorkspaceKeys;
+  const listedProjects = botOwned?.size
+    ? allProjects.filter(
+        (project) =>
+          project.workspaces.length === 0 ||
+          project.workspaces.some((workspace) => !botOwned.has(workspace.workspaceKey)),
+      )
+    : allProjects;
   const projects = input.hiddenWorkspaceKeys?.size
-    ? allProjects.map((project) => ({
+    ? listedProjects.map((project) => ({
         ...project,
         workspaces: project.workspaces.filter(
           (workspace) => !input.hiddenWorkspaceKeys?.has(workspace.workspaceKey),
         ),
       }))
-    : allProjects;
+    : listedProjects;
   return {
     projects,
     workspaces: projects.flatMap((project) => project.workspaces),

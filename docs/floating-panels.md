@@ -247,6 +247,25 @@ Do not treat `onChange(-1)` as a close by itself. In a stacked
 another pushed sheet. Close React state from `onDismiss`; use `onChange` only to
 track phase.
 
+## Gotcha 7 — Read safe-area insets where the overlay draws
+
+`WindowLayoutSurface` on a wide web layout pads the top inset (the status bar of an iOS Home
+Screen web app, `docs/design.md` section 9) and gives its content a top inset of 0. An overlay
+opened from that content that calls `useSafeAreaInsets()` at its call site gets that 0 and draws
+under the status bar. Read the inset where the overlay draws:
+
+- An RN `Modal` passes the call site's context straight through, so wrap its content in
+  `WindowSafeArea` from `@/window-layout` and read the inset below that. It provides the insets of
+  the whole window, published by `WindowLayoutProvider`. Do not put a `SafeAreaProvider` inside the
+  modal: on Android it measures the dialog window, whose bottom inset reads 24, then 0, then 24
+  again over the first frames, and everything padded by it jumps. See `attachment-lightbox.tsx`
+  and the Mermaid fullscreen viewer.
+- A panel in a `FloatingPanelPortalHost` reads `useSafeAreaInsets()` inside the portal, where it
+  resolves at the host's position (Gotcha 2): the root host sits outside the layout surface and
+  gets the window's inset, a workspace host inside it gets 0. See the autocomplete `PopoverFrame`.
+- An absolutely positioned view that covers the surface's padding reads the window's insets with
+  `useWindowSafeAreaInsets()`.
+
 ## Recipe for a new anchored panel
 
 Before you write a new one, ask:

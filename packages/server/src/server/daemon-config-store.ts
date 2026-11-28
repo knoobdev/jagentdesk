@@ -153,6 +153,22 @@ function omitMetadataGenerationProvidersFromConfig<
   } as T;
 }
 
+function normalizeMetadataGeneration<
+  T extends { metadataGeneration?: { providers?: unknown[]; instructions?: string } },
+>(config: T): T {
+  const metadataGeneration = config.metadataGeneration;
+  if (!metadataGeneration || metadataGeneration.instructions === undefined) {
+    return config;
+  }
+
+  const trimmed = metadataGeneration.instructions.trim();
+  const { instructions: _ignored, ...rest } = metadataGeneration;
+  return {
+    ...config,
+    metadataGeneration: trimmed.length > 0 ? { ...rest, instructions: trimmed } : rest,
+  };
+}
+
 function omitProvidersFromOverrides(
   overrides: Record<string, ProviderOverride> | undefined,
   providers: readonly string[],
@@ -339,9 +355,11 @@ export class DaemonConfigStore {
     const speechPersisted = this.readPatchedSpeech(speechPatch, merged);
     const next = MutableDaemonConfigSchema.parse(
       omitPluginsFromConfig(
-        omitMetadataGenerationProvidersFromConfig(
-          omitProvidersFromConfig(merged, removedProviders),
-          removedProviders,
+        normalizeMetadataGeneration(
+          omitMetadataGenerationProvidersFromConfig(
+            omitProvidersFromConfig(merged, removedProviders),
+            removedProviders,
+          ),
         ),
         removedPlugins,
       ),
@@ -479,7 +497,6 @@ function mergeMutableConfigIntoPersistedConfig(params: {
   const browserToolsEnabled = readBrowserToolsEnabled(mutable);
   const autorunEnabled = readAutorunEnabled(mutable);
   const sessionSharingEnabled = readSessionSharingEnabled(mutable);
-  const metadataGenerationProviders = readMetadataGenerationProviders(mutable);
   const persistedProviderOverrides = omitProvidersFromOverrides(
     persisted.agents?.providers as Record<string, ProviderOverride> | undefined,
     removeProviders,
@@ -489,11 +506,11 @@ function mergeMutableConfigIntoPersistedConfig(params: {
     mutable.providers,
   );
   const persistedAgents = omitProvidersFromPersistedAgents(persisted.agents);
-  const persistedMetadataGeneration = {
-    providers: metadataGenerationProviders,
-  };
+  const persistedMetadataGeneration = readPersistedMetadataGeneration(mutable);
   const shouldPersistMetadataGeneration =
-    metadataGenerationProviders.length > 0 || persisted.agents?.metadataGeneration !== undefined;
+    persistedMetadataGeneration.providers.length > 0 ||
+    persistedMetadataGeneration.instructions !== undefined ||
+    persisted.agents?.metadataGeneration !== undefined;
 
   let nextAgents = {
     ...persistedAgents,
@@ -592,6 +609,17 @@ function readSessionSharingEnabled(mutable: MutableDaemonConfig): boolean {
     return false;
   }
   return sharing["enabled"] === true;
+}
+
+function readPersistedMetadataGeneration(mutable: MutableDaemonConfig): {
+  providers: ReturnType<typeof readMetadataGenerationProviders>;
+  instructions?: string;
+} {
+  const instructions = mutable.metadataGeneration?.instructions?.trim();
+  return {
+    providers: readMetadataGenerationProviders(mutable),
+    ...(instructions ? { instructions } : {}),
+  };
 }
 
 function readMetadataGenerationProviders(

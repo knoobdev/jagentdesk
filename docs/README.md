@@ -1,12 +1,13 @@
 # JAgentDesk docs
 
 Docs for people working on JAgentDesk. User-facing guides live in [`public-docs/`](../public-docs/index.md);
-release notes live in [`releases/`](releases/v0.12.2.md).
+release notes live in [`releases/`](releases/v0.12.3.md).
 
 ## Product
 
-- [product.md](product.md) — what JAgentDesk is, who it is for, what ships in v0.12.2.
+- [product.md](product.md) — what JAgentDesk is, who it is for, what ships in v0.12.3.
 - [glossary.md](glossary.md) — the terms to use; the UI label wins.
+- [releases/v0.12.3.md](releases/v0.12.3.md) — release notes for v0.12.3.
 - [releases/v0.12.2.md](releases/v0.12.2.md) — release notes for v0.12.2.
 - [releases/v0.12.1.md](releases/v0.12.1.md) — release notes for v0.12.1.
 - [releases/v0.12.0.md](releases/v0.12.0.md) — release notes for v0.12.0.
@@ -30,7 +31,7 @@ release notes live in [`releases/`](releases/v0.12.2.md).
 - [terminal-activity.md](terminal-activity.md) — terminal activity indicators and hook providers.
 - [agent-stream-performance.md](agent-stream-performance.md) — assistant text coalescing and paced reveal.
 - [markdown-renderer.md](markdown-renderer.md) — the vendored Markdown engine fork, its layout and backports.
-- [notifications.md](notifications.md) — OS notifications, startup readiness, deferred targets.
+- [notifications.md](notifications.md) — OS notifications, startup readiness, deferred targets, the bell list.
 
 ## Protocol and security
 

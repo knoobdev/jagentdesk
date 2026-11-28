@@ -69,6 +69,11 @@ import {
   type BackgroundWorkOutputChunk,
   type StopFollowing,
 } from "./agent/background-work/output-stream.js";
+import {
+  describeBackgroundWorkSources,
+  isOutputSourceAvailable,
+  resolveBackgroundWorkOutputSource,
+} from "./agent/background-work/sources.js";
 import equal from "fast-deep-equal";
 import { v4 as uuidv4 } from "uuid";
 import { lstat, mkdir, mkdtemp, rename, rm, stat } from "node:fs/promises";
@@ -100,6 +105,7 @@ import {
   type TerminalWorkspaceContributionChangedEvent,
 } from "../terminal/terminal-manager.js";
 import { type CustomProviderService } from "./custom-providers/types.js";
+import type { TerminalSession } from "../terminal/terminal.js";
 import { TerminalSessionController } from "../terminal/terminal-session-controller.js";
 import { type TerminalActivity } from "@jagentdesk/protocol/terminal-activity";
 import {
@@ -249,6 +255,7 @@ import { HubExecutionController } from "./hub/execution-controller.js";
 import { type HubExecutionAgents } from "./hub/daemon-executions.js";
 import { DownloadTokenStore } from "./file-download/token-store.js";
 import type { PushNotifications } from "./push/index.js";
+import type { NotificationFeed } from "./notification-feed/feed.js";
 import {
   archivePersistedWorkspaceRecord,
   archiveWorkspaceContents,
@@ -609,6 +616,9 @@ export interface SessionOptions {
   downloadTokenStore: DownloadTokenStore;
 
   pushNotifications: PushNotifications;
+
+  /** The host's notification list (ADR-0063); absent in tests that do not need it. */
+  notificationFeed?: NotificationFeed;
 
   jagentdeskHome: string;
 
@@ -1099,6 +1109,7 @@ export class Session {
   private readonly hostToolInstaller: HostToolInstaller | null | undefined;
 
   private readonly pushNotifications: PushNotifications;
+  private readonly notificationFeed: NotificationFeed | null;
   private registeredPushToken: string | null = null;
 
   private unsubscribeAgentEvents: (() => void) | null = null;
@@ -1309,6 +1320,7 @@ export class Session {
     this.onWorkspaceArchiveUpdate = options.publishWorkspaceArchiveUpdates;
     this.onWorkspaceRecovered = onWorkspaceRecovered ?? null;
     this.pushNotifications = pushNotifications;
+    this.notificationFeed = options.notificationFeed ?? null;
     this.jagentdeskHome = jagentdeskHome;
     this.messageReceipts = options.messageReceipts;
     this.creationService = resolveWorkspaceCreationService(options);
@@ -1420,6 +1432,8 @@ export class Session {
       checkoutDiffManager,
       gitMetadataGenerator: createGitMetadataGenerator({
         workspaceGitService: this.workspaceGitService,
+        readHostInstructions: () =>
+          this.readStructuredGenerationDaemonConfig().metadataGeneration?.instructions,
         generation: createAgentStructuredTextGeneration({
           agentManager: this.agentManager,
           providerSnapshotManager,
@@ -3056,7 +3070,14 @@ export class Session {
       () => this.dispatchProviderMessage(msg),
       () => this.dispatchTerminalMessage(msg, source),
       () => this.dispatchChatScheduleLoopMessage(msg),
-      () => this.botsSession?.dispatch(msg),
+      () => this.dispatchNotificationFeedMessage(msg),
+      () => {
+        // Opening a bot item on any client reads its notification rows (ADR-0063).
+        if (msg.type === "bots.items.show.request") {
+          this.notificationFeed?.markOpened({ botId: msg.botId, itemId: msg.itemId });
+        }
+        return this.botsSession?.dispatch(msg);
+      },
       () =>
         this.builtinSession.dispatch(msg, {
           supports: (capability) =>
@@ -4167,6 +4188,36 @@ export class Session {
         payload: { requestId: msg.requestId, result: null, error: message },
       });
     }
+  }
+
+  private dispatchNotificationFeedMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    const feed = this.notificationFeed;
+    if (msg.type === "notifications.feed.list.request") {
+      if (!feed) throw new Error("Notification feed is not available on this host");
+      const page = feed.list({ before: msg.before, limit: msg.limit });
+      const state = feed.state();
+      this.emit({
+        type: "notifications.feed.list.response",
+        payload: {
+          requestId: msg.requestId,
+          items: page.items,
+          hasMore: page.hasMore,
+          unreadCount: state.unreadCount,
+          unreadPlugins: state.unreadPlugins,
+        },
+      });
+      return Promise.resolve();
+    }
+    if (msg.type === "notifications.feed.mark_read.request") {
+      if (!feed) throw new Error("Notification feed is not available on this host");
+      const readIds = feed.markRead({ ids: msg.ids, all: msg.all });
+      this.emit({
+        type: "notifications.feed.mark_read.response",
+        payload: { requestId: msg.requestId, readIds, unreadCount: feed.state().unreadCount },
+      });
+      return Promise.resolve();
+    }
+    return undefined;
   }
 
   private async dispatchMiscMessage(msg: SessionInboundMessage): Promise<void> {
@@ -6044,6 +6095,7 @@ export class Session {
         ),
       );
       await Promise.all(agentIds.map((id) => this.agentManager.clearAgentAttention(id)));
+      for (const id of agentIds) this.notificationFeed?.markOpened({ agentId: id });
       if (requestId) {
         const agents = (
           await Promise.all(
@@ -6093,6 +6145,10 @@ export class Session {
     };
     if (msg.appVisible && focusedTerminalId) {
       void this.clearFocusedTerminalAttention(focusedTerminalId);
+    }
+    // An agent on screen in any client reads its notification rows (ADR-0063).
+    if (msg.appVisible && msg.focusedAgentId) {
+      this.notificationFeed?.markOpened({ agentId: msg.focusedAgentId });
     }
     if (this.registeredPushToken) {
       this.pushNotifications.renew(this.registeredPushToken);
@@ -6346,9 +6402,7 @@ export class Session {
     );
   }
 
-  private async listTerminalActivityContributions(): Promise<
-    Array<{ cwd: string; workspaceId?: string; activity: TerminalActivity | null }>
-  > {
+  private async listAllTerminals(): Promise<TerminalSession[]> {
     const terminalManager = this.terminalManager;
     if (!terminalManager) {
       return [];
@@ -6357,7 +6411,30 @@ export class Session {
     const terminalsByDirectory = await Promise.all(
       directories.map((cwd) => terminalManager.getTerminals(cwd)),
     );
-    return terminalsByDirectory.flat().map((session) => {
+    return terminalsByDirectory.flat();
+  }
+
+  // A terminal belongs to the workspace it carries, whatever its cwd. Needs-input stays: the
+  // terminal is still waiting on the user, like an agent's pending permission.
+  private async clearWorkspaceTerminalAttention(workspaceId: string): Promise<void> {
+    const terminalManager = this.terminalManager;
+    if (!terminalManager) {
+      return;
+    }
+    const finishedTerminals = (await this.listAllTerminals()).filter(
+      (terminal) =>
+        terminal.workspaceId === workspaceId &&
+        terminal.getActivity()?.attentionReason === "finished",
+    );
+    for (const terminal of finishedTerminals) {
+      await terminalManager.clearTerminalAttention(terminal.id);
+    }
+  }
+
+  private async listTerminalActivityContributions(): Promise<
+    Array<{ cwd: string; workspaceId?: string; activity: TerminalActivity | null }>
+  > {
+    return (await this.listAllTerminals()).map((session) => {
       const contribution: { cwd: string; workspaceId?: string; activity: TerminalActivity | null } =
         {
           cwd: session.cwd,
@@ -8730,6 +8807,7 @@ export class Session {
           });
           clearedAgentIds.push(agentId);
         }
+        await this.clearWorkspaceTerminalAttention(workspace.workspaceId);
 
         await this.emitWorkspaceUpdateForWorkspaceId(workspace.workspaceId);
         results.push({
@@ -9158,11 +9236,17 @@ export class Session {
       const detail = this.agentManager.getAgentBackgroundWorkDetail(msg.agentId, msg.itemId);
       if (!detail) throw new Error("Background work not found");
       const [item] = this.projectBackgroundWorkItems([detail.item]);
-      const output = detail.output;
-      const outputAvailable =
-        output?.type === "reader" ||
-        (output?.type === "file" && (await output.locate().catch(() => null)) !== null);
       const owner = target.agent ?? target.record;
+      const daemonItem = isDaemonBackgroundWorkItem(item);
+      // Provider work starts in the agent's folder unless the provider says otherwise.
+      const agentCwd = daemonItem ? null : (owner?.cwd ?? null);
+      const sources = daemonItem
+        ? undefined
+        : await describeBackgroundWorkSources({
+            detail,
+            agentCwd,
+            readTimeline: () => this.agentManager.readAgentTimelineRows(msg.agentId),
+          });
       reply({
         detail: {
           id: item.id,
@@ -9173,12 +9257,12 @@ export class Session {
           status: detail.status,
           endedAt: detail.endedAt,
           exitCode: detail.exitCode,
-          // Provider work starts in the agent's folder unless the provider says otherwise.
-          cwd: detail.cwd ?? (isDaemonBackgroundWorkItem(item) ? null : (owner?.cwd ?? null)),
+          cwd: detail.cwd ?? agentCwd,
           provider: owner?.provider ?? "",
-          outputAvailable,
+          outputAvailable: await isOutputSourceAvailable(detail.output),
           ...(item.canStop ? { canStop: true } : {}),
           ...(item.stopToken ? { stopToken: item.stopToken } : {}),
+          ...(sources ? { sources } : {}),
         },
         error: null,
       });
@@ -9190,7 +9274,7 @@ export class Session {
   private async handleAgentBackgroundWorkOutputSubscribeRequest(
     msg: Extract<SessionInboundMessage, { type: "agent.background_work.output.subscribe.request" }>,
   ): Promise<void> {
-    const { agentId, itemId, subscriptionId } = msg;
+    const { agentId, itemId, subscriptionId, sourceId } = msg;
     const respond = (error: string | null) =>
       this.emit({
         type: "agent.background_work.output.subscribe.response",
@@ -9211,6 +9295,7 @@ export class Session {
           subscriptionId,
           agentId,
           itemId,
+          ...(sourceId !== undefined ? { sourceId } : {}),
           chunk: chunk.chunk,
           offset: chunk.offset,
           nextOffset: chunk.nextOffset,
@@ -9225,9 +9310,18 @@ export class Session {
       // ADR-0062 §3: only the source attached to this agent's own item is read.
       const detail = this.agentManager.getAgentBackgroundWorkDetail(agentId, itemId);
       if (!detail) throw new Error("Background work not found");
-      if (!detail.output) throw new Error("Output isn't available for this background task");
+      // ADR-0064: a redirect source is re-derived from this item's own command.
+      const owner = target.agent ?? target.record;
+      const source = resolveBackgroundWorkOutputSource({
+        detail,
+        agentCwd: isDaemonBackgroundWorkItem(detail.item) ? null : (owner?.cwd ?? null),
+        sourceId,
+        isRunning: () =>
+          this.agentManager.getAgentBackgroundWorkDetail(agentId, itemId)?.status === "running",
+      });
+      if (!source) throw new Error("Output isn't available for this background task");
       const stop = await followBackgroundWorkOutput({
-        source: detail.output,
+        source,
         onChunk: (chunk) => {
           if (pending) pending.push(chunk);
           else push(chunk);
@@ -9241,6 +9335,7 @@ export class Session {
               subscriptionId,
               agentId,
               itemId,
+              ...(sourceId !== undefined ? { sourceId } : {}),
               chunk: "",
               offset: 0,
               error: "Output is no longer readable",
@@ -10087,7 +10182,11 @@ export class Session {
       : this.clientCapabilities;
     // Old apps parse outbound messages strictly and do not know these types.
     if (!capabilities?.has(CLIENT_CAPS.explicitEventSubscriptions))
-      return event !== "agent.background_work.update" && event !== "plugin.notification";
+      return (
+        event !== "agent.background_work.update" &&
+        event !== "plugin.notification" &&
+        event !== "notifications.feed.changed"
+      );
     return [...this.eventSubscriptions.values()].some(
       ({ owner, events }) =>
         (!source || owner.source === source) && events.has(event as SessionEventSubscription),

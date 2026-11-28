@@ -490,6 +490,15 @@ export const ru: TranslationResources = {
         loading: "Загрузка сведений…",
         notFound: "Хост больше не знает эту фоновую задачу",
         tabTitle: "Фоновая задача",
+        waitingForFile: "Ожидание {{file}}…",
+        scriptSummary: "Скрипт · {{file}} · строк: {{lines}}",
+        showingFirst64Kb: "Показаны первые 64 КБ",
+        copyScript: "Копировать скрипт",
+        readByAgent: "Прочитано агентом {{time}}",
+        showWhatItRead: "Показать прочитанное",
+        hideWhatItRead: "Скрыть прочитанное",
+        copyWhatItRead: "Копировать прочитанное",
+        printsNothing: "Эта команда ничего не выводит; чего она ждёт, видно в скрипте выше.",
       },
     },
     todo: {
@@ -668,6 +677,8 @@ export const ru: TranslationResources = {
         screenshotCopied: "Снимок скопирован в буфер обмена",
         elementCopied: "Элемент скопирован в буфер обмена",
         screenshotFailed: "Не удалось скопировать снимок",
+        showSteps: "Показать шаги браузера",
+        hideSteps: "Скрыть шаги браузера",
       },
       annotate: {
         title: "Аннотировать элемент",
@@ -765,6 +776,7 @@ export const ru: TranslationResources = {
         open: "Открыть проводник",
         close: "Закрыть проводник",
         toggle: "Переключить проводник",
+        openInMainPane: "Открыть в основной панели",
         changes: "Изменения",
         files: "Файлы",
       },
@@ -1399,7 +1411,6 @@ export const ru: TranslationResources = {
     },
     refPicker: {
       chooseStart: "Выберите, с чего начать",
-      searchPlaceholder: "Поиск филиалов и PR",
       startingRef: "Исходная точка",
       intoBase: "в ветку {{baseRef}}",
       searching: "Идет поиск...",
@@ -1425,6 +1436,11 @@ export const ru: TranslationResources = {
       inWorktree: "В worktree",
       title: "Начать с",
     },
+    worktreePicker: {
+      title: "Worktree",
+      searchPlaceholder: "Поиск worktree",
+      empty: "Нет подходящих worktree.",
+    },
     launch: {
       commandPlaceholder:
         "Введите команду или оставьте поле пустым, чтобы открыть терминал без запуска команды",
@@ -1440,6 +1456,7 @@ export const ru: TranslationResources = {
       host: "Выберите хост",
       isolation: "Выберите уровень изоляции",
       startingRef: "Выберите, с чего начать",
+      worktree: "Выберите worktree для работы",
       launch: "Выберите, что запустить",
     },
   },
@@ -2323,6 +2340,27 @@ export const ru: TranslationResources = {
         not_running: "Installed, not running",
         unsupported_os: "Not available on this OS",
       },
+    },
+    metadataGeneration: {
+      title: "Генерация метаданных",
+      description:
+        "Выберите модель и инструкции, которые JAgentDesk будет использовать для сообщений коммитов и черновиков PR",
+      selection: "Выбор модели",
+      automatic: "Автоматически",
+      preferred: "Вручную",
+      automaticHint: "JAgentDesk выбирает быструю доступную модель",
+      preferredHint: "Выберите модель, которую использует JAgentDesk",
+      model: "Модель",
+      modelHint:
+        "Используется только эта модель. Если она не сработает, JAgentDesk не будет пробовать другую модель",
+      saveError: "Не удалось обновить настройки генерации метаданных",
+      instructions: "Инструкции",
+      instructionsHint:
+        "Применяются к сообщениям коммитов и черновикам PR, создаваемым на этом хосте",
+      instructionsPlaceholder:
+        "Пример: Пиши на русском языке. Сохраняй единый стиль в коммитах и PR. Не используй длинное тире.",
+      editInstructions: "Изменить",
+      saveInstructions: "Сохранить",
     },
     voice: {
       offline: "Подключитесь к этому хосту, чтобы настроить голос.",
@@ -3274,6 +3312,26 @@ export const ru: TranslationResources = {
       tooltip: "Вкладки браузера, открытые этим агентом",
       notResponding: "не отвечает: {{count}}",
       crashed: "сбой: {{count}}",
+    },
+  },
+  notificationFeed: {
+    title: "Уведомления",
+    unread: "Непрочитанных уведомлений: {{count}}",
+    markAllRead: "Отметить все как прочитанные",
+    settings: "Настройки уведомлений",
+    emptyTitle: "Уведомлений пока нет",
+    emptyBody:
+      "Здесь появляются агенты, которые завершили работу, запросили разрешение или завершились с ошибкой.",
+    loadFailed: "Не удалось загрузить уведомления",
+    day: {
+      today: "Сегодня",
+      yesterday: "Вчера",
+    },
+    time: {
+      now: "сейчас",
+      minutes: "{{count}} мин",
+      hours: "{{count}} ч",
+      yesterday: "Вчера",
     },
   },
   marketplace: {

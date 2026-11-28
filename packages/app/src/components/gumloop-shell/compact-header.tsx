@@ -8,11 +8,11 @@ import {
   WindowLayoutActions,
 } from "@/window-layout";
 import { WindowChromeSafeArea } from "@/utils/desktop-window";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, type ReactNode } from "react";
 import { Text, View } from "react-native";
-import { usePathname } from "expo-router";
+import { router, usePathname, type Href } from "expo-router";
 import { PortalHost } from "@gorhom/portal";
-import { Menu, PanelRight, Plus } from "lucide-react-native";
+import { Menu, PanelRight, Plus, Settings } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
@@ -21,9 +21,14 @@ import { useAppNavItems, useNewWorkspaceNavigate } from "@/components/sidebar/us
 import { HeaderToggleButton } from "@/components/headers/header-toggle-button";
 import { usePanelStore } from "@/stores/panel-store";
 import { useWorkspace } from "@/stores/session-store-hooks";
-import { parseHostWorkspaceRouteFromPathname } from "@/utils/host-routes";
+import {
+  buildSettingsSectionRoute,
+  isHostNotificationsPathname,
+  parseHostWorkspaceRouteFromPathname,
+} from "@/utils/host-routes";
 import { formatCompactWorkspaceTitle } from "@/screens/workspace/workspace-header-source";
 import { useIsGumloopTheme } from "./use-gumloop-chrome";
+import { useCompactPageAction, type CompactPageAction } from "./compact-page-action";
 import { GUMLOOP_COMPACT_ACTIONS_HOST } from "./sidebar-state";
 import type { Theme } from "@/styles/theme";
 import {
@@ -35,7 +40,9 @@ import {
 const ThemedMenu = withUnistyles(Menu);
 const ThemedPanelRight = withUnistyles(PanelRight);
 const ThemedPlus = withUnistyles(Plus);
+const ThemedSettings = withUnistyles(Settings);
 const foreground = (theme: Theme) => ({ color: theme.colors.foreground });
+const muted = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const NO_KEYS: [] = [];
 
 // In a workspace the title is the workspace, not the agent: the tab switcher row
@@ -49,6 +56,7 @@ function resolveHeaderTitle(
 ): string {
   if (workspace) return name ?? t("workspace.header.title");
   if (pathname.includes("/settings")) return t("sidebar.actions.settings");
+  if (isHostNotificationsPathname(pathname)) return t("notificationFeed.title");
   return active ?? t("sidebar.actions.home");
 }
 
@@ -92,9 +100,25 @@ export function GumloopCompactHeader({ enabled }: { enabled: boolean }) {
     });
   }, [route, workspace?.workspaceDirectory, toggleExplorer]);
   const rootStyle = useMemo(() => [styles.root, { paddingTop: insets.top }], [insets.top]);
-  const action = pathname.includes("/settings") ? (
-    <View style={styles.button} />
-  ) : (
+  // The Notifications page carries its settings gear here (spec 14 §8.5).
+  const notificationsPage = isHostNotificationsPathname(pathname);
+  const openNotificationSettings = useCallback(() => {
+    router.push(buildSettingsSectionRoute("notifications") as Href);
+  }, []);
+  const settingsGear = (
+    <HeaderToggleButton
+      onPress={openNotificationSettings}
+      tooltipLabel={t("notificationFeed.settings")}
+      tooltipKeys={NO_KEYS}
+      tooltipSide="bottom"
+      accessibilityLabel={t("notificationFeed.settings")}
+      testID="notification-feed-settings"
+      style={styles.button}
+    >
+      <ThemedSettings size={22} uniProps={foreground} />
+    </HeaderToggleButton>
+  );
+  const defaultAction = (
     <HeaderToggleButton
       onPress={route ? inspect : newAgent}
       tooltipLabel={
@@ -115,6 +139,9 @@ export function GumloopCompactHeader({ enabled }: { enabled: boolean }) {
       )}
     </HeaderToggleButton>
   );
+  let action = <PageActionOrDefault pathname={pathname}>{defaultAction}</PageActionOrDefault>;
+  if (pathname.includes("/settings")) action = <View style={styles.button} />;
+  else if (notificationsPage) action = settingsGear;
   if (!enabled || !compact || !gumloop) return null;
   return (
     <View style={rootStyle} testID="gumloop-compact-header">
@@ -152,6 +179,31 @@ export function GumloopCompactHeader({ enabled }: { enabled: boolean }) {
     </View>
   );
 }
+/** A page's own primary action ("Add memory") replaces the generic "+" (spec 38 §5). */
+function PageActionOrDefault({ pathname, children }: { pathname: string; children: ReactNode }) {
+  const pageAction = useCompactPageAction(pathname);
+  return pageAction ? <PageActionButton action={pageAction} /> : children;
+}
+
+function PageActionButton({ action }: { action: CompactPageAction }) {
+  const Icon = action.icon;
+  const ThemedIcon = useMemo(() => withUnistyles(Icon), [Icon]);
+  return (
+    <HeaderToggleButton
+      onPress={action.onPress}
+      disabled={action.disabled}
+      tooltipLabel={action.label}
+      tooltipKeys={NO_KEYS}
+      tooltipSide="bottom"
+      accessibilityLabel={action.label}
+      testID={action.testID}
+      style={styles.button}
+    >
+      <ThemedIcon size={22} uniProps={action.disabled ? muted : foreground} />
+    </HeaderToggleButton>
+  );
+}
+
 const styles = StyleSheet.create((theme: Theme) => ({
   root: {
     backgroundColor: theme.colors.surface0,

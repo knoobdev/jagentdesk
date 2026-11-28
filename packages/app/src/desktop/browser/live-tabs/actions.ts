@@ -8,7 +8,7 @@ import {
   getLastWorkspaceSelection,
   navigateToWorkspace,
 } from "@/stores/navigation-active-workspace-store";
-import { selectIsFileExplorerOpen, usePanelStore } from "@/stores/panel-store";
+import { openWorkspaceInspector } from "@/desktop/browser/inspector";
 import { useSessionStore } from "@/stores/session-store";
 import { collectAllTabs, findPaneContainingTab } from "@/stores/workspace-layout-actions";
 import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
@@ -59,13 +59,40 @@ export function showBrowserTab(row: BrowserTabRow): boolean {
     workspaceId: destination.workspaceId,
     target: { kind: "browser", browserId },
   });
-  revealInspectorPane({ ...destination, browserId });
+  if (!showInMainPane({ ...destination, browserId })) {
+    revealInspectorPane({ ...destination, browserId });
+  }
   return true;
 }
 
+function findBrowserTabId(workspaceKey: string, browserId: string): string | null {
+  const layout = useWorkspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
+  if (!layout) return null;
+  const tab = collectAllTabs(layout.root).find(
+    (candidate) => candidate.target.kind === "browser" && candidate.target.browserId === browserId,
+  );
+  return tab?.tabId ?? null;
+}
+
 /**
- * Agent tabs live in the inspector pane (spec 04 §27b.3), which only shows while the file
- * explorer is open. Open it so the selected tab is on screen, as plugin navigation does.
+ * Agent tabs open in the inspector (spec 04 §27b.3); Show moves the same webview to the
+ * workspace's main pane when it has one (spec 38 §4.5), so the page gets the full width.
+ */
+function showInMainPane(input: {
+  serverId: string;
+  workspaceId: string;
+  browserId: string;
+}): boolean {
+  const workspaceKey = `${input.serverId}:${input.workspaceId}`;
+  const tabId = findBrowserTabId(workspaceKey, input.browserId);
+  if (!tabId) return false;
+  return useWorkspaceLayoutStore.getState().moveTabToMainPane(workspaceKey, tabId);
+}
+
+/**
+ * A workspace without a main pane keeps the tab in the inspector, which only shows while the file
+ * explorer is open. Open it so the selected tab is on screen, as plugin navigation does; the
+ * inspector keeps that tab in front (screens/workspace/explorer-pane-sync.ts).
  */
 function revealInspectorPane(input: { serverId: string; workspaceId: string; browserId: string }) {
   const workspaceKey = `${input.serverId}:${input.workspaceId}`;
@@ -78,50 +105,7 @@ function revealInspectorPane(input: { serverId: string; workspaceId: string; bro
       candidate.target.kind === "browser" && candidate.target.browserId === input.browserId,
   );
   if (!tab || findPaneContainingTab(layout.root, tab.tabId)?.id !== explorerPaneId) return;
-  const workspaces = useSessionStore.getState().sessions[input.serverId]?.workspaces;
-  const key = resolveWorkspaceMapKeyByIdentity({ workspaces, workspaceId: input.workspaceId });
-  const workspace = key ? workspaces?.get(key) : null;
-  if (!workspace?.workspaceDirectory) return;
-  if (selectIsFileExplorerOpen(usePanelStore.getState(), { isCompact: false })) return;
-  refocusWhenLayoutSettles(workspaceKey, input.browserId);
-  usePanelStore.getState().openFileExplorerForCheckout({
-    isCompact: false,
-    checkout: {
-      serverId: input.serverId,
-      cwd: workspace.workspaceDirectory,
-      isGit: workspace.projectKind === "git",
-    },
-  });
-}
-
-const LAYOUT_SETTLE_MS = 150;
-const LAYOUT_SETTLE_LIMIT_MS = 2000;
-
-/**
- * Opening the inspector runs its own effect a render later, which focuses its default tab
- * (Files or Changes). Select the browser tab again once the layout stops changing.
- */
-function refocusWhenLayoutSettles(workspaceKey: string, browserId: string): void {
-  let settleTimer: ReturnType<typeof setTimeout> | null = null;
-  const refocus = () => {
-    unsubscribe();
-    clearTimeout(limitTimer);
-    if (settleTimer) clearTimeout(settleTimer);
-    const store = useWorkspaceLayoutStore.getState();
-    const layout = store.layoutByWorkspace[workspaceKey];
-    const tab = layout
-      ? collectAllTabs(layout.root).find(
-          (candidate) =>
-            candidate.target.kind === "browser" && candidate.target.browserId === browserId,
-        )
-      : null;
-    if (tab) store.focusTab(workspaceKey, tab.tabId);
-  };
-  const unsubscribe = useWorkspaceLayoutStore.subscribe(() => {
-    if (settleTimer) clearTimeout(settleTimer);
-    settleTimer = setTimeout(refocus, LAYOUT_SETTLE_MS);
-  });
-  const limitTimer = setTimeout(refocus, LAYOUT_SETTLE_LIMIT_MS);
+  openWorkspaceInspector(input);
 }
 
 /** Closes the row's tab and destroys its webview. */

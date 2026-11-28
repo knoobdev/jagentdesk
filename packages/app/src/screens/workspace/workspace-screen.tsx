@@ -42,7 +42,7 @@ import {
 } from "react";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import { useIsFocused } from "expo-router/react-navigation";
-import { BackHandler, Keyboard, Pressable, Text, View } from "react-native";
+import { BackHandler, Keyboard, Pressable, Text, View, type LayoutChangeEvent } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, type Href } from "expo-router";
 import * as Clipboard from "expo-clipboard";
@@ -65,6 +65,7 @@ import {
   Settings,
   SquarePen,
   SquareTerminal,
+  Users,
   X,
 } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -99,6 +100,7 @@ import {
   FloatingPanelPortalHostNameProvider,
 } from "@/components/ui/floating-panel-portal";
 import { ExplorerSidebar } from "@/components/explorer-sidebar";
+import { createExplorerPaneSync } from "@/screens/workspace/explorer-pane-sync";
 import {
   SplitContainer,
   WorkspaceTabDragProvider,
@@ -258,6 +260,7 @@ import {
   OrchestrationAgentsColumn,
   useWorkspaceOrchestrationRosterCount,
 } from "@/screens/workspace/orchestration-agents-column";
+import { CompactWorkspaceAgents } from "@/screens/workspace/workspace-agents-sheet";
 
 const WORKSPACE_SETUP_AUTO_OPEN_WINDOW_MS = 30_000;
 const WORKSPACE_FLOATING_PANEL_PORTAL_HOST_PREFIX = "workspace-floating-panels";
@@ -318,6 +321,7 @@ const ThemedGlobe = withUnistyles(Globe);
 const ThemedImport = withUnistyles(ImportIcon);
 const ThemedSettings = withUnistyles(Settings);
 const ThemedPanelRight = withUnistyles(PanelRight);
+const ThemedUsers = withUnistyles(Users);
 const ThemedSourceControlPanelIcon = withUnistyles(SourceControlPanelIcon);
 
 interface DynamicProviderIconProps {
@@ -1968,6 +1972,16 @@ function WorkspaceChromeRow({
 }: WorkspaceChromeRowProps) {
   const explorerRendered = showExplorerSidebar && explorerOpen && workspaceRoot !== null;
   const leftRendered = leftDock != null;
+  // The inspector resizes within the row it shares with the workspace body (left dock excluded).
+  const [rowWidth, setRowWidth] = useState(0);
+  const [leftDockWidth, setLeftDockWidth] = useState(0);
+  const handleRowLayout = useCallback((event: LayoutChangeEvent) => {
+    setRowWidth(event.nativeEvent.layout.width);
+  }, []);
+  const handleLeftDockLayout = useCallback((event: LayoutChangeEvent) => {
+    setLeftDockWidth(event.nativeEvent.layout.width);
+  }, []);
+  const explorerContainerWidth = Math.max(0, rowWidth - (leftRendered ? leftDockWidth : 0));
   let centerCorners: "none" | "top-right" | "top-left" | "both";
   if (leftRendered) {
     centerCorners = explorerRendered ? "none" : "top-right";
@@ -1976,8 +1990,14 @@ function WorkspaceChromeRow({
   }
 
   return (
-    <View style={styles.threePaneRow}>
-      {leftRendered ? <WindowChromeRegion corners="top-left">{leftDock}</WindowChromeRegion> : null}
+    <View style={styles.threePaneRow} onLayout={handleRowLayout}>
+      {leftRendered ? (
+        <WindowChromeRegion corners="top-left">
+          <View style={styles.leftDockSlot} onLayout={handleLeftDockLayout}>
+            {leftDock}
+          </View>
+        </WindowChromeRegion>
+      ) : null}
 
       <WindowChromeRegion corners={centerCorners}>
         <FloatingPanelPortalHostNameProvider hostName={portalHostName}>
@@ -1989,7 +2009,11 @@ function WorkspaceChromeRow({
 
       {showExplorerSidebar && workspaceRoot ? (
         <WindowChromeRegion corners="top-right">
-          <ExplorerSidebar {...explorerProps} workspaceRoot={workspaceRoot}>
+          <ExplorerSidebar
+            {...explorerProps}
+            workspaceRoot={workspaceRoot}
+            containerWidth={explorerContainerWidth}
+          >
             {explorerContent}
           </ExplorerSidebar>
         </WindowChromeRegion>
@@ -1998,14 +2022,6 @@ function WorkspaceChromeRow({
   );
 }
 
-function resolveExplorerPanelKind(
-  tab: string,
-  isGit: boolean,
-): "files" | "changes_tree" | "pull_request" | "ledger" {
-  if (tab === "ledger") return "ledger";
-  if (!isGit || tab === "files") return "files";
-  return tab === "pr" ? "pull_request" : "changes_tree";
-}
 function useExplorerPane({
   serverId,
   cwd,
@@ -2049,33 +2065,29 @@ function useExplorerPane({
       .observePullRequest(workspaceKey, `${prPane.forge}:${prPane.prNumber}`);
   }, [explorerPaneId, open, prPane.forge, prPane.prNumber, workspaceKey]);
   const requestedExplorerTab = usePanelStore((state) => state.explorerTab);
-  const previousIntent = useRef({ workspaceKey, tab: requestedExplorerTab });
+  const explorerTabRequest = usePanelStore((state) => state.explorerTabRequest);
+  const [syncExplorerPane] = useState(() =>
+    createExplorerPaneSync(() => useWorkspaceLayoutStore.getState()),
+  );
   useEffect(() => {
     if (!checkoutReady || !workspaceKey || compact || !supportsDesktopPaneSplits()) return;
-    const store = useWorkspaceLayoutStore.getState();
-    const paneId = store.explorerPaneIdByWorkspace[workspaceKey];
-    if (!open) {
-      if (paneId) store.hidePane(workspaceKey, paneId);
-      return;
-    }
-    const tabIntentChanged =
-      previousIntent.current.workspaceKey === workspaceKey &&
-      previousIntent.current.tab !== requestedExplorerTab;
-    previousIntent.current = { workspaceKey, tab: requestedExplorerTab };
-    const result = store.ensureExplorerPane(workspaceKey);
-    if (!result) return;
-    if (!result.created && !tabIntentChanged) return;
-    if (result.created) {
-      if (isGit)
-        store.openTabInExplorerPaneFocused(workspaceKey, { target: { kind: "changes_tree" } });
-      store.openTabInExplorerPaneFocused(workspaceKey, { target: { kind: "files" } });
-    }
-    store.openTabInExplorerPaneFocused(workspaceKey, {
-      target: {
-        kind: resolveExplorerPanelKind(requestedExplorerTab, isGit),
-      },
+    syncExplorerPane({
+      workspaceKey,
+      open,
+      isGit,
+      explorerTab: requestedExplorerTab,
+      explorerTabRequest,
     });
-  }, [checkoutReady, open, isGit, compact, workspaceKey, requestedExplorerTab]);
+  }, [
+    checkoutReady,
+    open,
+    isGit,
+    compact,
+    workspaceKey,
+    requestedExplorerTab,
+    explorerTabRequest,
+    syncExplorerPane,
+  ]);
   return explorerPane;
 }
 
@@ -2258,6 +2270,9 @@ function WorkspaceScreenContent({
   const workspaceDirectory = workspaceDescriptor?.workspaceDirectory || null;
   const isMissingWorkspaceDirectory = Boolean(workspaceDescriptor) && !workspaceDirectory;
   const [isImportSheetVisible, setIsImportSheetVisible] = useState(false);
+  const [isWorkspaceAgentsSheetVisible, setIsWorkspaceAgentsSheetVisible] = useState(false);
+  const openWorkspaceAgentsSheet = useCallback(() => setIsWorkspaceAgentsSheetVisible(true), []);
+  const closeWorkspaceAgentsSheet = useCallback(() => setIsWorkspaceAgentsSheetVisible(false), []);
   const canOpenImportSheet = [client, isConnected, workspaceDirectory].every(Boolean);
   const openImportSheet = useCallback(() => {
     setIsImportSheetVisible(true);
@@ -4404,21 +4419,43 @@ function WorkspaceScreenContent({
   );
   const compactWorkspaceActions = useMemo(
     () => (
-      <CompactWorkspaceActions
-        serverId={normalizedServerId}
-        workspaceId={normalizedWorkspaceId}
-        scripts={workspaceScripts}
-        liveTerminalIds={liveTerminalIds}
-        onScriptTerminalStarted={handleScriptTerminalStarted}
-        onViewTerminal={handleViewScriptTerminal}
-        onOpenUrlInBrowserTab={handleOpenUrlInBrowserTab}
-        onImport={openImportSheet}
-        importDisabled={!canOpenImportSheet}
-        onCopyPath={handleCopyWorkspacePath}
-        copyPathDisabled={!workspaceDirectory}
-      />
+      <>
+        {/* Phones reach the workspace's Supervisor → Lead → Peer roster here (spec 37.4.2). */}
+        {isMobile && orchestrationRosterCount > 0 ? (
+          <Pressable
+            testID="workspace-agents-button"
+            onPress={openWorkspaceAgentsSheet}
+            accessibilityRole="button"
+            accessibilityLabel={t("bots.jad.panels.workspaceAgents.button")}
+            style={styles.workspaceAgentsButton}
+          >
+            <ThemedUsers
+              size={20}
+              uniProps={isWorkspaceAgentsSheetVisible ? foregroundColorMapping : mutedColorMapping}
+            />
+          </Pressable>
+        ) : null}
+        <CompactWorkspaceActions
+          serverId={normalizedServerId}
+          workspaceId={normalizedWorkspaceId}
+          scripts={workspaceScripts}
+          liveTerminalIds={liveTerminalIds}
+          onScriptTerminalStarted={handleScriptTerminalStarted}
+          onViewTerminal={handleViewScriptTerminal}
+          onOpenUrlInBrowserTab={handleOpenUrlInBrowserTab}
+          onImport={openImportSheet}
+          importDisabled={!canOpenImportSheet}
+          onCopyPath={handleCopyWorkspacePath}
+          copyPathDisabled={!workspaceDirectory}
+        />
+      </>
     ),
     [
+      isMobile,
+      orchestrationRosterCount,
+      openWorkspaceAgentsSheet,
+      isWorkspaceAgentsSheetVisible,
+      t,
       normalizedServerId,
       normalizedWorkspaceId,
       workspaceScripts,
@@ -4498,13 +4535,13 @@ function WorkspaceScreenContent({
 
       {isMobile || compactSinglePane ? (
         <>
-          {orchestrationRosterCount > 0 ? (
-            <OrchestrationAgentsColumn
-              serverId={normalizedServerId}
-              workspaceId={normalizedWorkspaceId}
-              compact
-            />
-          ) : null}
+          <CompactWorkspaceAgents
+            serverId={normalizedServerId}
+            workspaceId={normalizedWorkspaceId}
+            isMobile={isMobile}
+            sheetVisible={isWorkspaceAgentsSheetVisible && isRouteFocused}
+            onCloseSheet={closeWorkspaceAgentsSheet}
+          />
           <MobileWorkspaceTabSwitcher
             onCreateDraftTab={handleCreateDraftTab}
             onCreateTerminal={handleCreateTerminal}
@@ -4684,6 +4721,10 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: "row",
     alignItems: "stretch",
   },
+  leftDockSlot: {
+    flexDirection: "row",
+    flexShrink: 0,
+  },
   centerColumn: {
     flex: 1,
     minHeight: 0,
@@ -4780,6 +4821,13 @@ const styles = StyleSheet.create((theme) => ({
     opacity: 0.25,
   },
   verticalHeaderRight: { flexDirection: "column" },
+  // The compact header's 44 px touch target, as the `⋯` workspace menu beside it.
+  workspaceAgentsButton: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   headerRight: {
     flexDirection: "row",
     alignItems: "center",

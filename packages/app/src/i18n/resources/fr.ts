@@ -475,6 +475,16 @@ export const fr: TranslationResources = {
         loading: "Chargement des détails…",
         notFound: "L'hôte ne connaît plus cette tâche en arrière-plan",
         tabTitle: "Tâche en arrière-plan",
+        waitingForFile: "En attente de {{file}}…",
+        scriptSummary: "Script · {{file}} · {{lines}} lignes",
+        showingFirst64Kb: "Affichage des 64 premiers Ko",
+        copyScript: "Copier le script",
+        readByAgent: "Lu par l'agent {{time}}",
+        showWhatItRead: "Afficher ce qu'il a lu",
+        hideWhatItRead: "Masquer ce qu'il a lu",
+        copyWhatItRead: "Copier ce qu'il a lu",
+        printsNothing:
+          "Cette commande n'affiche rien ; voyez le script ci-dessus pour savoir ce qu'elle attend.",
       },
     },
     todo: {
@@ -649,6 +659,8 @@ export const fr: TranslationResources = {
         screenshotCopied: "Capture d\u2019\u00E9cran copi\u00E9e dans le presse-papiers",
         elementCopied: "Élément copié dans le presse-papiers",
         screenshotFailed: "Impossible de copier la capture d\u2019\u00E9cran",
+        showSteps: "Afficher les étapes du navigateur",
+        hideSteps: "Masquer les étapes du navigateur",
       },
       annotate: {
         title: "Annoter l\u2019\u00E9l\u00E9ment",
@@ -746,6 +758,7 @@ export const fr: TranslationResources = {
         open: "Ouvrir l'explorateur",
         close: "Fermer l'explorateur",
         toggle: "Basculer l'explorateur",
+        openInMainPane: "Ouvrir dans le panneau principal",
         changes: "Changements",
         files: "Fichiers",
       },
@@ -1364,7 +1377,6 @@ export const fr: TranslationResources = {
     },
     refPicker: {
       chooseStart: "Choisissez par où commencer",
-      searchPlaceholder: "Rechercher des branches et des PR",
       startingRef: "R\u00E9f. de d\u00E9part",
       intoBase: "vers {{baseRef}}",
       searching: "Recherche\u2026",
@@ -1390,6 +1402,11 @@ export const fr: TranslationResources = {
       inWorktree: "Dans un worktree",
       title: "Partir de",
     },
+    worktreePicker: {
+      title: "Worktree",
+      searchPlaceholder: "Rechercher des worktrees",
+      empty: "Aucun worktree correspondant.",
+    },
     launch: {
       commandPlaceholder: "Saisissez une commande, ou laissez vide pour un terminal vierge",
       promptPlaceholder: "Prompt pour {{name}}",
@@ -1404,6 +1421,7 @@ export const fr: TranslationResources = {
       host: "Choisir l’hôte",
       isolation: "Choisir le niveau d’isolation",
       startingRef: "Choisir le point de départ",
+      worktree: "Choisir le worktree où travailler",
       launch: "Choisir quoi lancer",
     },
   },
@@ -2305,6 +2323,26 @@ export const fr: TranslationResources = {
         not_running: "Installed, not running",
         unsupported_os: "Not available on this OS",
       },
+    },
+    metadataGeneration: {
+      title: "Génération de métadonnées",
+      description:
+        "Choisissez le modèle et les instructions utilisés par JAgentDesk pour les messages de commit et les brouillons de pull request",
+      selection: "Sélection du modèle",
+      automatic: "Automatique",
+      preferred: "Manuel",
+      automaticHint: "JAgentDesk choisit un modèle rapide disponible",
+      preferredHint: "Choisissez le modèle utilisé par JAgentDesk",
+      model: "Modèle",
+      modelHint: "Seul ce modèle est utilisé. S’il échoue, JAgentDesk n’essaie pas d’autre modèle",
+      saveError: "Impossible de mettre à jour la génération de métadonnées",
+      instructions: "Instructions",
+      instructionsHint:
+        "Appliquées aux messages de commit et brouillons de pull request générés sur cet hôte",
+      instructionsPlaceholder:
+        "Exemple : Écrire en français. Garder une formulation cohérente entre les commits et les pull requests. Ne pas utiliser de tirets cadratins.",
+      editInstructions: "Modifier",
+      saveInstructions: "Enregistrer",
     },
     voice: {
       offline: "Connectez-vous à cet hôte pour configurer la voix.",
@@ -3273,6 +3311,25 @@ export const fr: TranslationResources = {
       tooltip: "Onglets du navigateur ouverts par cet agent",
       notResponding: "{{count}} ne répond pas",
       crashed: "{{count}} planté",
+    },
+  },
+  notificationFeed: {
+    title: "Notifications",
+    unread: "{{count}} notifications non lues",
+    markAllRead: "Tout marquer comme lu",
+    settings: "Paramètres des notifications",
+    emptyTitle: "Aucune notification pour l'instant",
+    emptyBody: "Les agents qui terminent, demandent une autorisation ou échouent apparaissent ici.",
+    loadFailed: "Impossible de charger les notifications",
+    day: {
+      today: "Aujourd'hui",
+      yesterday: "Hier",
+    },
+    time: {
+      now: "maintenant",
+      minutes: "{{count}} min",
+      hours: "{{count}} h",
+      yesterday: "Hier",
     },
   },
   marketplace: {

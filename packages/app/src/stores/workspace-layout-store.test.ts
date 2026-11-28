@@ -34,6 +34,7 @@ import {
   type SplitNode,
   type SplitPane,
 } from "@/stores/workspace-layout-store";
+import { resolveMainPaneId } from "@/stores/workspace-layout-actions";
 
 const SERVER_ID = "server-1";
 const WORKSPACE_ID = "ws-main";
@@ -2006,6 +2007,51 @@ describe("workspace-layout-store actions", () => {
     expect(findPaneById(layout.root, explorerPane?.paneId)?.hidden).toBeUndefined();
     expect(layout.focusedPaneId).toBe(explorerPane?.paneId);
     expect(findPaneById(layout.root, explorerPane?.paneId)?.focusedTabId).toBe(tabId);
+  });
+
+  it("moves a browser tab from the inspector to the main pane, keeping its browser id", () => {
+    const workspaceKey = createWorkspaceKey();
+    const store = workspaceLayoutStore.getState();
+    useWorkspaceLayoutIds("explorer");
+    const tabId = store.openTabInExplorerPaneFocused(workspaceKey, {
+      target: { kind: "browser", browserId: "browser-a" },
+    });
+    const explorerPaneId = workspaceLayoutStore.getState().explorerPaneIdByWorkspace[workspaceKey];
+
+    expect(store.moveTabToMainPane(workspaceKey, tabId!)).toBe(true);
+
+    const layout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
+    const mainPane = findPaneContainingTab(layout.root, tabId!);
+    expect(mainPane?.id).not.toBe(explorerPaneId);
+    expect(mainPane?.focusedTabId).toBe(tabId);
+    expect(layout.focusedPaneId).toBe(mainPane?.id);
+    expect(collectAllTabs(layout.root).find((tab) => tab.tabId === tabId)?.target).toEqual({
+      kind: "browser",
+      browserId: "browser-a",
+    });
+    // Already in the main pane: nothing to move.
+    expect(store.moveTabToMainPane(workspaceKey, tabId!)).toBe(false);
+  });
+
+  it("resolves the main pane past a focused inspector, and none when only the inspector shows", () => {
+    const workspaceKey = createWorkspaceKey();
+    const store = workspaceLayoutStore.getState();
+    useWorkspaceLayoutIds("explorer");
+    const tabId = store.openTabInExplorerPaneFocused(workspaceKey, {
+      target: { kind: "browser", browserId: "browser-b" },
+    });
+    const state = workspaceLayoutStore.getState();
+    const explorerPaneId = state.explorerPaneIdByWorkspace[workspaceKey]!;
+    const layout = state.layoutByWorkspace[workspaceKey];
+    const explorerPane = findPaneById(layout.root, explorerPaneId)!;
+    const mainPane = collectAllPanes(layout.root).find((pane) => pane.id !== explorerPaneId)!;
+
+    expect(layout.focusedPaneId).toBe(explorerPaneId);
+    expect(resolveMainPaneId(layout, explorerPaneId)).toBe(mainPane.id);
+    expect(
+      resolveMainPaneId({ ...layout, root: { kind: "pane", pane: explorerPane } }, explorerPaneId),
+    ).toBeNull();
+    expect(findPaneContainingTab(layout.root, tabId!)?.id).toBe(explorerPaneId);
   });
 });
 

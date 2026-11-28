@@ -46,6 +46,11 @@ One 324px sidebar (`sidebar.tsx`) holds all app navigation.
 - **Footer, fixed:** the usage row, the connection card (Direct, Tailscale, or Relay), and the account
   row with Pair device, Settings, Notifications, and More as 32px icon buttons (`account-button.tsx`).
 
+The right inspector (the explorer pane) opens at 525px and resizes from its left edge like Paseo's
+explorer sidebar: the split `ResizeHandle`, at least 240px, and 360px always left for the workspace
+body (`components/explorer-sidebar-layout.ts`). Each client remembers its width (`inspectorWidth` in
+the panel store). A fixed width left browser tabs there too narrow to use.
+
 Destinations come from `useAppNavItems` and the plugin registries, so a plugin turned on or off on the
 host adds or removes its entry without a reload. A destination only shows while its plugin is
 enabled. Tools and Projects start open, and their folds persist per device (`sidebar-state.ts`). Keep
@@ -73,7 +78,10 @@ panel store remembers the choice.
 
 There is no tab bar. The same `GumloopSidebar` opens as a drawer (`drawer.tsx`), `min(324, 85%)` of
 the window wide. `compact-header.tsx` shows the menu button, a left-aligned title, and one action.
-Panes, files, and subagents open on the shared sheet stack; the explorer opens full screen through
+That top bar is the page's only title row: under it `<PageHeader>` drops its own title and keeps the
+description, secondary actions and tabs. A page's `primaryAction` ("Add memory") becomes the top
+bar's right button in place of the generic `+`. Page bodies keep their own 16 px side padding,
+because `useGumloopPageGutterStyle()` is `null` on phones. Panes, files, and subagents open on the shared sheet stack; the explorer opens full screen through
 `GUMLOOP_INSPECTOR_HOST`. Motion and visibility belong to the mobile panel model in
 [mobile-panels.md](mobile-panels.md).
 

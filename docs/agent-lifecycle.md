@@ -36,7 +36,9 @@ Idle runtimes are released after one hour while their saved conversations remain
 Reopening a runtime starts a fresh idle window without changing sidebar activity timestamps.
 Tracked background work, outstanding local finish subscriptions, queued messages, and provider
 safety vetoes keep runtimes resident. Claude session crons and `/loop` wakeups are process-local
-work and prevent release. Hosts can disable cleanup live with Settings → host → Daemon → **Release idle agents**
+work and prevent release. OpenCode v2 servers are shared: another session's running execution vetoes
+release only when releasing the lease would stop the server, since the server stays up after its
+last lease goes. Hosts can disable cleanup live with Settings → host → Daemon → **Release idle agents**
 (`agents.idleRuntimeCleanup`). The timer lives in
 `packages/server/src/server/agent/idle-runtime-cleanup/`.
 
@@ -147,7 +149,7 @@ output as `agent.background_work.output` pushes: the last 256 KiB on open, then 
 Gate both on `features.backgroundWorkOutput` (ADR-0062).
 
 Neither RPC takes a path. A provider attaches one output source to its own item, and the daemon
-reads only that:
+reads that and the extra sources below:
 
 | Provider | Source                                                                                                                                                                                   |
 | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -158,6 +160,29 @@ reads only that:
 
 A file source is opened only when it resolves inside the provider's own temp folder and is not a
 symlink (`agent/background-work/output-stream.ts`). Output never goes into the daemon log.
+
+### Output files, script and the agent's last read
+
+Models often run `cmd > /tmp/x.log 2>&1` or a script that prints nothing, so the provider's output is
+empty. The detail's `sources` (gated on `features.backgroundWorkSources`, ADR-0064) add what the
+item's own command names, re-derived from the command on every request
+(`agent/background-work/command-parse.ts`, `extra-sources.ts`):
+
+- **Redirect files**: `>`, `>>`, `1>`, `2>`, `&>`, `| tee [-a]`, also inside `sh -c` / `bash -lc`.
+  `output.subscribe` follows one by `sourceId` (`redirect:<n>`), waiting for the file while the work
+  runs.
+- **Script**: the file an interpreter (`sh`, `bash`, `zsh`, `fish`, `node`, `python`, `ruby`, `bun`,
+  `deno run`) or `./x.sh` runs; the first 64 KiB goes inline in the detail.
+- **Last read**: the agent's latest `cat`/`tail`/`head`/`less` or read-file call on a redirect file
+  after the work started, taken from its own timeline.
+
+The command reader takes literal words only. A word with a variable, glob or brace is skipped; command
+substitution, a subshell or a here-doc drops the whole command. A path counts only inside the
+agent's folder or a system temp folder and never matches a secret pattern (`.env*`, `*.pem`, `*.key`,
+`id_*`, `.ssh/`, `.aws/`, `.config/gh/`, `.gnupg/`, `.netrc`, keychains). The file is opened with
+`O_NOFOLLOW | O_NONBLOCK` and checked again after opening (regular file, real path still inside, same
+inode), so a symlink out, a FIFO or a device gets no source. This works for every provider that
+reports the command, Codex included.
 
 ## Archive
 

@@ -1,6 +1,6 @@
 ---
 title: Metadata generation
-description: How JAgentDesk uses providers to generate branch names, commit messages, and pull request text, and how to configure them.
+description: How JAgentDesk uses providers to generate commit messages and pull request text, and how to configure them.
 nav: Metadata generation
 order: 42
 category: Configuration
@@ -8,38 +8,41 @@ category: Configuration
 
 # Metadata generation
 
-JAgentDesk asks a language model to write short pieces of text for you so you don't have to. This is separate from the agent you're talking to: it's a small, one-shot call made in the background.
+When you commit or open a pull request without writing the text yourself, JAgentDesk asks a language model to draft it. This is separate from the agent you're talking to: it's a small, one-shot call made only for that commit or pull request.
 
-JAgentDesk generates these kinds of metadata:
+JAgentDesk generates these kinds of metadata with a model:
 
-- **Workspace titles** — a short, task-shaped label for a workspace, shown in the sidebar.
-- **Worktree branch names** — a slug for a new worktree-isolated workspace's branch.
-- **Commit messages** — a concise message for the changes you're committing.
-- **Pull request title and body** — drafted from the diff when you open a PR.
+- **Commit messages** — a concise message for the changes you're committing, when you leave the message empty.
+- **Pull request title and body** — drafted from the diff when you open a PR and leave either field empty.
 
-A workspace title and its branch name are produced together from the same prompt, but you configure their wording independently (see below).
+Workspace titles and worktree branch names do not use a model. JAgentDesk derives them from the first line of the first prompt (or its attachments), so creating an agent never starts a second provider process or spends tokens.
 
 ## How a model is chosen
 
-You don't have to configure anything — JAgentDesk picks a model automatically. It builds an ordered list of candidates and tries each one until a generation succeeds, so a slow or unavailable model falls through to the next.
+JAgentDesk has two modes. **Automatic** is the default and needs no configuration. **Manual** uses only the models you choose.
 
-The candidate list is assembled in this order:
+In Automatic mode, JAgentDesk builds an ordered list of candidates and tries each one until a generation succeeds, so a slow or unavailable model falls through to the next:
 
-1. **Providers you configured**, in the order you list them (see below).
-2. **Built-in defaults**, matched against the models of the providers you have enabled:
+1. **Built-in defaults**, matched against the models of the providers you have enabled:
    1. a `haiku` model
    2. `gpt-5.4-mini` (low reasoning)
    3. `minimax-m3`
    4. `nemotron-3-super`
-3. **The model currently selected** for that agent or draft, as a last resort.
+2. **The model currently selected** for that agent or draft, as a last resort.
 
-Each default is a match on the model id or name, so the first enabled provider that ships a matching model wins. Anything that can't be resolved against an enabled provider is skipped. Duplicates are removed, then generation tries the list top to bottom.
+Each default is a match on the model id or name, so the first enabled provider that ships a matching model wins. Defaults with no match are skipped. Duplicates are removed, then generation tries the list top to bottom. The default order prefers small, fast, cheap models for these short tasks before falling back to whatever you have selected.
 
-The intent of the default order is to prefer small, fast, cheap models for these short tasks before falling back to whatever you have selected.
+In Manual mode, JAgentDesk tries only your configured models, in your order. It never adds the built-in defaults or the selected model, so your prompts and diffs only go to providers you chose. If every configured model fails, generation fails: commits and pull requests get placeholder text. Pick a model that works for these tasks.
 
-## Configuring the providers
+Every failure is written to `$JAGENTDESK_HOME/daemon.log` (`~/.jagentdesk/daemon.log` by default) with the provider, the model and the error. Look there when a manual model doesn't produce commit messages or pull request text.
 
-To control which models JAgentDesk uses — for example to keep all metadata generation on one provider, or to prefer a local model — set `agents.metadataGeneration.providers` in `~/.jagentdesk/config.json`. Your entries are tried before the built-in defaults.
+## Choose a model
+
+Open **Settings → Host → Workspaces** and select **Automatic** or **Manual**. In Manual mode, pick the model JAgentDesk uses. Choosing a model replaces the first entry in `agents.metadataGeneration.providers` and preserves the rest of the list. Switching back to Automatic clears the list.
+
+## Configure a custom fallback order
+
+To use more than one model in Manual mode, list them in `agents.metadataGeneration.providers` in `~/.jagentdesk/config.json`. JAgentDesk tries your entries in order and nothing else. An empty list means Automatic.
 
 ```json
 {
@@ -60,7 +63,23 @@ Each entry accepts:
 - `model` (optional) — a specific model id. Omit it to use that provider's default model.
 - `thinkingOptionId` (optional) — a reasoning/thinking level for models that support one. Falls back to the model's default if the value isn't valid for that model.
 
-Restart the daemon after editing the file.
+The Settings screen replaces only the first entry and preserves the rest of a custom list. Restart the daemon after editing the file directly.
+
+## Host-wide instructions
+
+To guide all metadata generated on a host, open **Settings → Host → Workspaces** and edit **Instructions** under **Metadata generation**, or set `agents.metadataGeneration.instructions` in `~/.jagentdesk/config.json`.
+
+```json
+{
+  "agents": {
+    "metadataGeneration": {
+      "instructions": "Write in Simplified Chinese. Keep phrasing consistent across commits and pull requests. Do not use em dashes."
+    }
+  }
+}
+```
+
+Host instructions apply to commit messages and pull request drafts alongside JAgentDesk's default styles. Leave the field empty to use the defaults only. If a project sets its own `jagentdesk.json` style instructions, both apply and the project style takes precedence when they conflict. The JSON output format always applies.
 
 ## Per-project instructions
 
@@ -77,4 +96,4 @@ You can steer the wording of each kind of metadata per repository with a `jagent
 }
 ```
 
-Each key is optional; only the ones you set are affected. Your instructions **replace** the default style for that metadata type — they are not appended to it — so your wording never competes with JAgentDesk's defaults. The functional requirements (what to produce and the output format) always apply and cannot be overridden.
+Each key is optional; only the ones you set are affected. `title` and `branchName` are read only by older hosts that generated workspace names with a model; current hosts derive names without one. Your instructions **replace** the default style for that metadata type — they are not appended to it — so your wording never competes with JAgentDesk's defaults. The functional requirements (what to produce and the output format) always apply and cannot be overridden.

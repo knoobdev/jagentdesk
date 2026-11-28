@@ -16,6 +16,7 @@ import {
   useComposerTrackPanelRoom,
 } from "@/composer/tracks";
 import { LiveElapsed } from "@/components/message";
+import { useRetainedPanelActive } from "@/components/retained-panel";
 import { Button } from "@/components/ui/button";
 import { useMenuContext, type MenuPageDefinition } from "@/components/ui/menu";
 import { useIsCompactFormFactor } from "@/constants/layout";
@@ -30,8 +31,8 @@ import {
   type BackgroundWorkRowState,
 } from "./presentation";
 import {
-  consumeBackgroundWorkTrackOpen,
   getBackgroundWorkModel,
+  takeBackgroundWorkTrackOpen,
   useBackgroundWorkTrackOpenRequest,
   type BackgroundWorkModel,
 } from "./shared";
@@ -112,13 +113,15 @@ export function BackgroundWorkTrack({
       content: <SheetDetailPage serverId={serverId} agentId={agentId} item={row.item} />,
     }));
   }, [agentId, isCompact, rows, serverId]);
-  // A sidebar line asks for the track to open when it navigates here.
+  // A sidebar line asks for the track to open when it navigates here. Only a track on screen takes
+  // the request: a retained pane that is hidden would open the panel behind the scenes, and the
+  // menu closes a hidden panel at once, so the navigation would arrive to a closed pill.
+  const active = useRetainedPanelActive();
   const openRequest = useBackgroundWorkTrackOpenRequest(serverId, agentId);
   useEffect(() => {
-    if (openRequest === 0) return;
-    setOpen(true);
-    consumeBackgroundWorkTrackOpen(serverId, agentId);
-  }, [agentId, openRequest, serverId, setOpen]);
+    if (openRequest === 0 || !active) return;
+    if (takeBackgroundWorkTrackOpen(serverId, agentId)) setOpen(true);
+  }, [active, agentId, openRequest, serverId, setOpen]);
   const closeDetail = useCallback(() => setSelected(null), []);
   const openSelectedInTab = useCallback(() => {
     if (!selected || !onOpenInTab) return;

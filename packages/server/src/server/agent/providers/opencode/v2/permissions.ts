@@ -23,6 +23,8 @@ export class SessionPermissions {
   private readonly pending = new Map<string, AgentPermissionRequest>();
   private readonly permissionOwners = new Map<string, string>();
   private readonly forms = new Map<string, FormInfo>();
+  // Requests with a reply in flight: reconcile must not expire them while OpenCode answers.
+  private readonly replying = new Set<string>();
   constructor(
     private readonly getClient: () => V2Api,
     private readonly id: string,
@@ -51,6 +53,7 @@ export class SessionPermissions {
     );
   }
   async respondToPermission(requestId: string, response: AgentPermissionResponse) {
+    this.replying.add(requestId);
     try {
       await this.reply(requestId, response);
     } catch (error) {
@@ -60,6 +63,8 @@ export class SessionPermissions {
       const notPending = new PermissionNotPendingError(requestId, { cause: error });
       this.expire(requestId, notPending.message);
       throw notPending;
+    } finally {
+      this.replying.delete(requestId);
     }
     this.resolvePending(requestId, response);
   }
@@ -106,7 +111,11 @@ export class SessionPermissions {
     // request was answered or cancelled while the event stream was away).
     const live = new Set([...permissions, ...forms].map((request) => request.id));
     for (const requestId of this.pending.keys())
-      if (this.ownerOf(requestId) === sessionID && !live.has(requestId))
+      if (
+        this.ownerOf(requestId) === sessionID &&
+        !live.has(requestId) &&
+        !this.replying.has(requestId)
+      )
         this.expire(requestId, new PermissionNotPendingError(requestId).message);
     for (const request of permissions) {
       if (this.pending.has(request.id)) continue;

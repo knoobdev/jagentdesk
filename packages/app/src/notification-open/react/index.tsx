@@ -9,7 +9,7 @@ import {
 } from "@/stores/navigation-active-workspace-store";
 import { useSidebarViewStore } from "@/stores/sidebar-view-store";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
-import { createNotificationOpenRouter } from "../model";
+import { createNotificationOpenRouter, type NotificationOpenTarget } from "../model";
 import { createNotificationOpenSource } from "../source";
 
 let ready = false;
@@ -26,6 +26,24 @@ function navigateFromNotification(route: string): void {
   router.navigate(route as Href);
 }
 
+/** Opens a plugin notification like a tap on it: handlers first, then its declared target. */
+export function openPluginNotificationTarget(
+  target: Extract<NotificationOpenTarget, { kind: "plugin" }>,
+): Promise<void> {
+  return openPluginNotification(target, {
+    registry: pluginRegistry,
+    openAgent: (agentTarget) => navigateToAgent({ ...agentTarget, pin: true }),
+    openWorkspace: (workspaceTarget) => navigateToWorkspace(workspaceTarget),
+    openRoute: navigateFromNotification,
+    getClient: (targetServerId) => getHostRuntimeStore().getClient(targetServerId),
+    isHostRegistered: (targetServerId) =>
+      getHostRuntimeStore()
+        .getHosts()
+        .some((host) => host.serverId === targetServerId),
+    focusHost: (targetServerId) => useSidebarViewStore.getState().focusHost(targetServerId),
+  });
+}
+
 const notificationRouter = createNotificationOpenRouter({
   source: createNotificationOpenSource(),
   openAgent: (target) => navigateToAgent({ ...target, pin: true }),
@@ -35,19 +53,7 @@ const notificationRouter = createNotificationOpenRouter({
       workspaceId,
       target: { kind: "terminal", terminalId },
     }),
-  openPlugin: (target) =>
-    openPluginNotification(target, {
-      registry: pluginRegistry,
-      openAgent: (agentTarget) => navigateToAgent({ ...agentTarget, pin: true }),
-      openWorkspace: (workspaceTarget) => navigateToWorkspace(workspaceTarget),
-      openRoute: navigateFromNotification,
-      getClient: (targetServerId) => getHostRuntimeStore().getClient(targetServerId),
-      isHostRegistered: (targetServerId) =>
-        getHostRuntimeStore()
-          .getHosts()
-          .some((host) => host.serverId === targetServerId),
-      focusHost: (targetServerId) => useSidebarViewStore.getState().focusHost(targetServerId),
-    }),
+  openPlugin: openPluginNotificationTarget,
   openRoute: (route) => router.navigate(route as Href),
   whenReadyToNavigate: () =>
     ready

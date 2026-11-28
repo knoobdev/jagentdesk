@@ -178,7 +178,7 @@ export function LedgerPane({
   const { t } = useTranslation();
   const supported = useHostFeature(serverId, "crossProviderContinuity");
   const agentId = useLedgerAgentId(serverId, workspaceId);
-  const ledger = useAgentLedger({ serverId, agentId, enabled: supported });
+  const ledger = useAgentLedger({ serverId, agentId, enabled: supported, follow: true });
   const [viewing, setViewing] = useState<SessionLedgerHandoff | null>(null);
   const closeHandoff = useCallback(() => setViewing(null), []);
   const handleExport = useCallback(() => {

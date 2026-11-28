@@ -190,6 +190,11 @@ export class AgentStorage {
     return Array.from(this.cache.values());
   }
 
+  /** The records read so far, for synchronous read models; empty until the first load. */
+  listLoaded(): StoredAgentRecord[] {
+    return Array.from(this.cache.values());
+  }
+
   async get(agentId: string): Promise<StoredAgentRecord | null> {
     await this.load();
     return this.cache.get(agentId) ?? null;

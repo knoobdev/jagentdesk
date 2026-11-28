@@ -984,6 +984,7 @@ it("retains semantic agent messages across disk-cache reconstruction", async () 
           status: "completed",
           error: null,
           detail: { type: "plain_text", text: "Done" },
+          metadata: { intent: "Deliver result" },
           agentMessage: {
             event: "finished",
             sender: { id: "remote::worker", title: "Reviewer" },
