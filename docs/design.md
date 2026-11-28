@@ -156,6 +156,8 @@ On a narrow desktop route, app navigation yields to the rendered content topolog
 
 Electron window controls are top-corner obstructions, not a compact-layout condition. Rendered surfaces declare which top corners they physically occupy (`WindowChromeRegion corners=…`); only those corners receive clearance. Full-window overlays redeclare both corners. A focused split pane owns both corners; if focus restoration temporarily exposes the full split tree, the split boundary reserves one top strip instead of assigning a control rectangle to an arbitrarily narrow leaf.
 
+`WindowLayoutSurface` owns the horizontal safe-area insets, and on wide web layouts it also owns the top inset: it pads the status bar of an iOS Home Screen web app once and gives its content a top inset of 0. Native window chrome keeps its own top band. Content inside the surface that draws against the window instead of the padded content reads the window's insets; see Gotcha 7 in `docs/floating-panels.md`.
+
 A new list+detail feature copies the settings shell. A new workspace-shaped feature copies the workspace shell. Inventing a third shape happens in design review, not in a PR.
 
 ---
