@@ -55,4 +55,32 @@ describe("buildDesktopFrameStyle", () => {
       maxWidth: 400,
     });
   });
+
+  it("clamps a fixed height's minHeight and maxHeight to the available viewport height", () => {
+    const styles = buildDesktopFrameStyle({
+      desktopMinWidth: 440,
+      referenceWidth: 120,
+      desktopFixedHeight: 400,
+      desktopPositionStyle: { left: 0, top: 0 },
+      shouldHideDesktopContent: false,
+      availableHeight: 280,
+    }) as Array<ViewStyle | null>;
+
+    expect(styles[1]).toEqual({ minHeight: 280, maxHeight: 280 });
+    expect(styles[4]).toBeNull();
+  });
+
+  it("keeps the requested fixed height when viewport space exceeds it", () => {
+    const styles = buildDesktopFrameStyle({
+      desktopMinWidth: 440,
+      referenceWidth: 120,
+      desktopFixedHeight: 400,
+      desktopPositionStyle: { left: 0, top: 0 },
+      shouldHideDesktopContent: false,
+      availableHeight: 600,
+    }) as Array<ViewStyle | null>;
+
+    expect(styles[1]).toEqual({ minHeight: 400, maxHeight: 400 });
+    expect(styles[4]).toBeNull();
+  });
 });

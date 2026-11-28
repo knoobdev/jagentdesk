@@ -168,6 +168,8 @@ export interface ComboboxProps {
   /** Content rendered above the scroll area on desktop (sticky header). */
   stickyHeader?: ReactNode;
 
+  /** Controls rendered between the search field and the options, such as list tabs. */
+  toolbar?: ReactNode;
   /** Content rendered below the scroll area. */
   footer?: ReactNode;
 
@@ -288,6 +290,8 @@ export function SearchInput({
 
 export interface ComboboxItemProps {
   label: string;
+  /** Muted text before the label, such as a pull request number. */
+  labelPrefix?: string;
   description?: string;
   kind?: "directory" | "file";
   leadingSlot?: ReactNode;
@@ -309,6 +313,7 @@ export interface ComboboxItemProps {
 
 export function ComboboxItem({
   label,
+  labelPrefix,
   description,
   kind,
   leadingSlot,
@@ -353,8 +358,15 @@ export function ComboboxItem({
   );
 
   const itemContentStyle = useMemo(
-    () => [styles.comboboxItemContent, description && styles.comboboxItemContentInline],
-    [description],
+    () => [
+      styles.comboboxItemContent,
+      (description || labelPrefix) && styles.comboboxItemContentInline,
+    ],
+    [description, labelPrefix],
+  );
+  const labelStyle = useMemo(
+    () => [styles.comboboxItemLabel, labelPrefix && styles.comboboxItemLabelAfterPrefix],
+    [labelPrefix],
   );
 
   const [hovered, setHovered] = useState(false);
@@ -382,7 +394,12 @@ export function ComboboxItem({
     <>
       {leadingContent}
       <View style={itemContentStyle}>
-        <Text numberOfLines={1} style={styles.comboboxItemLabel}>
+        {labelPrefix ? (
+          <Text numberOfLines={1} style={styles.comboboxItemLabelPrefix}>
+            {labelPrefix}
+          </Text>
+        ) : null}
+        <Text numberOfLines={1} style={labelStyle}>
           {label}
         </Text>
         {description ? (
@@ -1056,6 +1073,7 @@ interface MobileBodyProps {
   header: SheetHeader | undefined;
   onClose: () => void;
   stickyHeader: ReactNode;
+  toolbar: ReactNode;
   footer: ReactNode;
   searchable: boolean;
   hasChildren: boolean;
@@ -1160,6 +1178,7 @@ function MobileComboboxSheet(props: MobileBodyProps): ReactElement {
                 resetKey={props.searchResetKey}
               />
             ) : null}
+            {props.toolbar ? <View style={styles.toolbar}>{props.toolbar}</View> : null}
           </>
         )}
         {props.hasChildren && !props.mobileChildrenScrollEnabled ? (
@@ -1200,6 +1219,7 @@ interface DesktopBodyProps {
   handleDesktopContentLayout: (event: LayoutChangeEvent) => void;
   header: SheetHeader | undefined;
   stickyHeader: ReactNode;
+  toolbar: ReactNode;
   footer: ReactNode;
   searchable: boolean;
   searchPlaceholder: string;
@@ -1245,6 +1265,7 @@ function DesktopComboboxChildrenBody(props: {
 function DesktopComboboxOptionsBody(props: {
   header: SheetHeader | undefined;
   stickyHeader: ReactNode;
+  toolbar: ReactNode;
   searchable: boolean;
   searchPlaceholder: string;
   searchQuery: string;
@@ -1284,6 +1305,7 @@ function DesktopComboboxOptionsBody(props: {
           useBottomSheetInput={false}
         />
       )}
+      {props.toolbar ? <View style={styles.toolbar}>{props.toolbar}</View> : null}
       {props.effectiveOptionsPosition === "above-search" ? (
         <ScrollView
           ref={props.desktopOptionsScrollRef}
@@ -1364,6 +1386,7 @@ function DesktopComboboxBody(props: DesktopBodyProps): ReactElement | null {
             <DesktopComboboxOptionsBody
               header={props.header}
               stickyHeader={props.stickyHeader}
+              toolbar={props.toolbar}
               searchable={props.searchable}
               searchPlaceholder={props.searchPlaceholder}
               searchQuery={props.searchQuery}
@@ -1445,6 +1468,7 @@ export function Combobox({
   desktopChildrenScrollEnabled = true,
   desktopFixedHeight,
   stickyHeader,
+  toolbar,
   footer,
   keepOpenOnSelect = false,
   anchorRef,
@@ -1786,6 +1810,7 @@ export function Combobox({
         header={header}
         onClose={handleClose}
         stickyHeader={stickyHeader}
+        toolbar={toolbar}
         footer={footer}
         searchable={searchable}
         hasChildren={hasChildren}
@@ -1826,6 +1851,7 @@ export function Combobox({
       handleDesktopContentLayout={handleDesktopContentLayout}
       header={header}
       stickyHeader={stickyHeader}
+      toolbar={toolbar}
       footer={footer}
       searchable={searchable}
       searchPlaceholder={effectiveSearchPlaceholder}
@@ -1864,6 +1890,18 @@ const styles = StyleSheet.create((theme) => ({
     paddingHorizontal: theme.spacing[3],
     gap: theme.spacing[2],
     backgroundColor: theme.colors.surface1,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
+    ...(IS_WEB ? {} : { marginHorizontal: theme.spacing[1] }),
+  },
+  toolbar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: theme.spacing[2],
+    // The search field's inset, so a filled control starts on the rows' leading rail.
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.border,
     ...(IS_WEB ? {} : { marginHorizontal: theme.spacing[1] }),
@@ -1956,6 +1994,16 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.sm,
     color: theme.colors.foreground,
     flexShrink: 0,
+  },
+  comboboxItemLabelPrefix: {
+    fontSize: theme.fontSize.base,
+    color: theme.colors.foregroundMuted,
+    fontVariant: ["tabular-nums"],
+    flexShrink: 0,
+  },
+  // The prefix holds its width; the label gives way.
+  comboboxItemLabelAfterPrefix: {
+    flexShrink: 1,
   },
   comboboxItemDescription: {
     fontSize: theme.fontSize.xs,

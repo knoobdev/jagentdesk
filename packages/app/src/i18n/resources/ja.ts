@@ -1371,7 +1371,6 @@ export const ja: TranslationResources = {
       intoBase: "{{baseRef}}に",
       searching: "検索中...",
       noMatchingRefs: "一致するRefがありません。",
-      searchPlaceholder: "ブランチとPRを検索",
       searchBranches: "ブランチを検索",
       searchPullRequests: "プルリクエストを検索",
       searchPullRequests_mr: "MRを検索",
@@ -1393,6 +1392,11 @@ export const ja: TranslationResources = {
       inWorktree: "ワークツリー内",
       title: "開始点",
     },
+    worktreePicker: {
+      title: "ワークツリー",
+      searchPlaceholder: "ワークツリーを検索",
+      empty: "一致するワークツリーがありません。",
+    },
     launch: {
       commandPlaceholder: "Run a command, or leave empty for a blank terminal",
       promptPlaceholder: "Prompt {{name}}",
@@ -1407,6 +1411,7 @@ export const ja: TranslationResources = {
       host: "Choose the host",
       isolation: "Choose the isolation level",
       startingRef: "開始点を選択",
+      worktree: "作業するワークツリーを選択",
       launch: "Choose what to launch",
     },
   },

@@ -1368,7 +1368,6 @@ export const ptBR: TranslationResources = {
       intoBase: "em {{baseRef}}",
       searching: "Buscando...",
       noMatchingRefs: "Nenhuma ref correspondente.",
-      searchPlaceholder: "Buscar branches e PRs",
       searchBranches: "Buscar branches",
       searchPullRequests: "Buscar pull requests",
       searchPullRequests_mr: "Buscar merge requests",
@@ -1390,6 +1389,11 @@ export const ptBR: TranslationResources = {
       inWorktree: "Em um worktree",
       title: "Começar de",
     },
+    worktreePicker: {
+      title: "Worktree",
+      searchPlaceholder: "Buscar worktrees",
+      empty: "Nenhum worktree correspondente.",
+    },
     launch: {
       commandPlaceholder: "Run a command, or leave empty for a blank terminal",
       promptPlaceholder: "Prompt {{name}}",
@@ -1404,6 +1408,7 @@ export const ptBR: TranslationResources = {
       host: "Choose the host",
       isolation: "Choose the isolation level",
       startingRef: "Escolha de onde começar",
+      worktree: "Escolha o worktree em que trabalhar",
       launch: "Choose what to launch",
     },
   },

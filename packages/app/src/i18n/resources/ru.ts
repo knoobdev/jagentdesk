@@ -1411,7 +1411,6 @@ export const ru: TranslationResources = {
     },
     refPicker: {
       chooseStart: "Выберите, с чего начать",
-      searchPlaceholder: "Поиск филиалов и PR",
       startingRef: "Исходная точка",
       intoBase: "в ветку {{baseRef}}",
       searching: "Идет поиск...",
@@ -1437,6 +1436,11 @@ export const ru: TranslationResources = {
       inWorktree: "В worktree",
       title: "Начать с",
     },
+    worktreePicker: {
+      title: "Worktree",
+      searchPlaceholder: "Поиск worktree",
+      empty: "Нет подходящих worktree.",
+    },
     launch: {
       commandPlaceholder:
         "Введите команду или оставьте поле пустым, чтобы открыть терминал без запуска команды",
@@ -1452,6 +1456,7 @@ export const ru: TranslationResources = {
       host: "Выберите хост",
       isolation: "Выберите уровень изоляции",
       startingRef: "Выберите, с чего начать",
+      worktree: "Выберите worktree для работы",
       launch: "Выберите, что запустить",
     },
   },
