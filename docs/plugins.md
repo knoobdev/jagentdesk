@@ -178,6 +178,12 @@ duration and stats. Read a reply with `getAssistantReply` (`packages/app/src/typ
 instead of checking `kind === "assistant_message"`. Client renderers run inside the installation's
 existing runtime, including its translations and state source.
 
+A provider-only fact about a tool call goes in the item's `metadata` (`Record<string, unknown>`),
+which transformers already receive; check the key and its type before you use it. Do not add a
+shared tool-call field for it. OMP sets `metadata.intent`, a short string that says why the agent
+made the call. It is absent when OMP records no intent: OMP 19 and later record it only with OMP's
+`tools.intentTracing` setting or `PI_INTENT_TRACING`. The built-in timeline does not display it.
+
 `server.notifications.send(input)` reaches every connected app and the host's push tokens.
 `PluginNotificationDispatcher` (`packages/server/src/server/plugins/notifications.ts`) truncates
 `title` to 160 and `body` to 500 characters, caps `open` and `data` at 1,024 UTF-8 bytes each so
