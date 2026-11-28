@@ -1384,7 +1384,6 @@ export const ar: TranslationResources = {
       intoBase: "إلى {{baseRef}}",
       searching: "جارٍ البحث...",
       noMatchingRefs: "لا توجد مراجع مطابقة.",
-      searchPlaceholder: "بحث الفروع والعلاقات العامة",
       searchBranches: "ابحث في الفروع",
       searchPullRequests: "ابحث في طلبات الدمج",
       searchPullRequests_mr: "ابحث في MR",
@@ -1406,6 +1405,11 @@ export const ar: TranslationResources = {
       inWorktree: "في شجرة عمل",
       title: "ابدأ من",
     },
+    worktreePicker: {
+      title: "شجرة العمل",
+      searchPlaceholder: "ابحث في أشجار العمل",
+      empty: "لا توجد أشجار عمل مطابقة.",
+    },
     launch: {
       commandPlaceholder: "Run a command, or leave empty for a blank terminal",
       promptPlaceholder: "Prompt {{name}}",
@@ -1420,6 +1424,7 @@ export const ar: TranslationResources = {
       host: "Choose the host",
       isolation: "Choose the isolation level",
       startingRef: "اختر من أين تبدأ",
+      worktree: "اختر شجرة العمل التي تعمل فيها",
       launch: "Choose what to launch",
     },
   },

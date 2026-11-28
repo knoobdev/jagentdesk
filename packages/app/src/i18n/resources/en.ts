@@ -1363,7 +1363,6 @@ export const en = {
       intoBase: "into {{baseRef}}",
       searching: "Searching...",
       noMatchingRefs: "No matching refs.",
-      searchPlaceholder: "Search branches and PRs",
       searchBranches: "Search branches",
       searchPullRequests: "Search pull requests",
       searchPullRequests_mr: "Search merge requests",
@@ -1385,6 +1384,11 @@ export const en = {
       inWorktree: "In a worktree",
       title: "Start from",
     },
+    worktreePicker: {
+      title: "Worktree",
+      searchPlaceholder: "Search worktrees",
+      empty: "No matching worktrees.",
+    },
     launch: {
       commandPlaceholder: "Run a command, or leave empty for a blank terminal",
       promptPlaceholder: "Prompt {{name}}",
@@ -1399,6 +1403,7 @@ export const en = {
       host: "Choose the host",
       isolation: "Choose the isolation level",
       startingRef: "Choose where to start from",
+      worktree: "Choose the worktree to work in",
       launch: "Choose what to launch",
     },
   },

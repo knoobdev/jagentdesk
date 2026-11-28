@@ -1377,7 +1377,6 @@ export const fr: TranslationResources = {
     },
     refPicker: {
       chooseStart: "Choisissez par où commencer",
-      searchPlaceholder: "Rechercher des branches et des PR",
       startingRef: "R\u00E9f. de d\u00E9part",
       intoBase: "vers {{baseRef}}",
       searching: "Recherche\u2026",
@@ -1403,6 +1402,11 @@ export const fr: TranslationResources = {
       inWorktree: "Dans un worktree",
       title: "Partir de",
     },
+    worktreePicker: {
+      title: "Worktree",
+      searchPlaceholder: "Rechercher des worktrees",
+      empty: "Aucun worktree correspondant.",
+    },
     launch: {
       commandPlaceholder: "Saisissez une commande, ou laissez vide pour un terminal vierge",
       promptPlaceholder: "Prompt pour {{name}}",
@@ -1417,6 +1421,7 @@ export const fr: TranslationResources = {
       host: "Choisir l’hôte",
       isolation: "Choisir le niveau d’isolation",
       startingRef: "Choisir le point de départ",
+      worktree: "Choisir le worktree où travailler",
       launch: "Choisir quoi lancer",
     },
   },

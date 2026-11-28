@@ -1380,7 +1380,6 @@ export const es: TranslationResources = {
       intoBase: "en {{baseRef}}",
       searching: "Búsqueda...",
       noMatchingRefs: "No hay árbitros coincidentes.",
-      searchPlaceholder: "Buscar sucursales y relaciones públicas",
       searchBranches: "Buscar ramas",
       searchPullRequests: "Buscar pull requests",
       searchPullRequests_mr: "Buscar merge requests",
@@ -1402,6 +1401,11 @@ export const es: TranslationResources = {
       inWorktree: "En un worktree",
       title: "Empezar desde",
     },
+    worktreePicker: {
+      title: "Worktree",
+      searchPlaceholder: "Buscar worktrees",
+      empty: "No hay worktrees que coincidan.",
+    },
     launch: {
       commandPlaceholder: "Run a command, or leave empty for a blank terminal",
       promptPlaceholder: "Prompt {{name}}",
@@ -1416,6 +1420,7 @@ export const es: TranslationResources = {
       host: "Choose the host",
       isolation: "Choose the isolation level",
       startingRef: "Elige por dónde empezar",
+      worktree: "Elige el worktree en el que trabajar",
       launch: "Choose what to launch",
     },
   },

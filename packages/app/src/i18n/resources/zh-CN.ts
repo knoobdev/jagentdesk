@@ -1330,7 +1330,6 @@ export const zhCN: TranslationResources = {
       intoBase: "进入 {{baseRef}}",
       searching: "正在搜索...",
       noMatchingRefs: "没有匹配的 refs。",
-      searchPlaceholder: "搜索分支和 PR",
       searchBranches: "搜索分支",
       searchPullRequests: "搜索 PR",
       searchPullRequests_mr: "搜索 MR",
@@ -1352,6 +1351,11 @@ export const zhCN: TranslationResources = {
       inWorktree: "在 worktree 中",
       title: "起始位置",
     },
+    worktreePicker: {
+      title: "Worktree",
+      searchPlaceholder: "搜索 worktree",
+      empty: "没有匹配的 worktree。",
+    },
     launch: {
       commandPlaceholder: "Run a command, or leave empty for a blank terminal",
       promptPlaceholder: "Prompt {{name}}",
@@ -1366,6 +1370,7 @@ export const zhCN: TranslationResources = {
       host: "Choose the host",
       isolation: "Choose the isolation level",
       startingRef: "选择起始位置",
+      worktree: "选择要工作的 worktree",
       launch: "Choose what to launch",
     },
   },
