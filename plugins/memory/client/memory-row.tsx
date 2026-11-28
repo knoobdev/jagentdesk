@@ -2,7 +2,7 @@ import { memo, useCallback } from "react";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
-import { Pencil, Pin, PinOff, Trash2 } from "lucide-react-native";
+import { Pencil, Pin, PinOff, RefreshCw, Trash2 } from "lucide-react-native";
 import type { MemoryRecordWire } from "@jagentdesk/protocol/memory";
 import {
   confirmDialog,
@@ -14,7 +14,7 @@ import {
   useToast,
   type Theme,
 } from "../../../packages/app/src/plugins/builtin/host-api";
-import { LessonDetails } from "./lesson-details";
+import { LessonDetails, canValidateLesson, useValidateLesson } from "./lesson-details";
 
 export interface MemoryRowProps {
   serverId: string;
@@ -88,9 +88,21 @@ export const MemoryRow = memo(function MemoryRow({
   }, [client, memory.id, t, toast]);
   const handleRemove = useCallback(() => void remove(), [remove]);
   const edit = useCallback(() => onEdit(memory), [memory, onEdit]);
+  const validate = useValidateLesson(serverId, memory.id);
+  // Phones have no room for a "Validate now" text button under the text: it joins the icons.
+  const validateIcon = compact && canValidateLesson(memory);
 
   const actions = (
-    <View style={styles.actions}>
+    <View style={compact ? styles.actionsCompact : styles.actions}>
+      {validateIcon ? (
+        <IconButton
+          label={t("memory.lesson.validate")}
+          onPress={validate}
+          testID="memory-row-validate"
+        >
+          <ThemedRefresh size={16} uniProps={mutedColor} />
+        </IconButton>
+      ) : null}
       <IconButton
         label={memory.pinned ? t("memory.actions.unpin") : t("memory.actions.pin")}
         onPress={togglePin}
@@ -116,6 +128,7 @@ export const MemoryRow = memo(function MemoryRow({
   );
   const source = (
     <Pressable
+      style={compact ? styles.sourceCompact : null}
       onPress={openSource}
       disabled={!memory.source.agentId}
       accessibilityRole={memory.source.agentId ? "link" : undefined}
@@ -142,7 +155,12 @@ export const MemoryRow = memo(function MemoryRow({
         </View>
       ) : null}
       {note ? <Text style={styles.meta}>{note}</Text> : null}
-      <LessonDetails serverId={serverId} memory={memory} projectRoot={projectRoot} />
+      <LessonDetails
+        serverId={serverId}
+        memory={memory}
+        projectRoot={projectRoot}
+        hideValidate={validateIcon}
+      />
     </View>
   );
 
@@ -150,10 +168,14 @@ export const MemoryRow = memo(function MemoryRow({
     return (
       <View style={[styles.row, styles.rowCompact]} testID="memory-row">
         {body}
+        {/* Second line: source · used · last used on the left, the icon actions on the right. */}
         <View style={styles.compactMeta}>
-          {source}
-          <Text style={styles.meta}>{` · ${used} · ${lastUsed}`}</Text>
-          <View style={styles.spacer} />
+          <View style={styles.compactMetaText} testID="memory-row-meta">
+            {source}
+            <Text style={[styles.meta, styles.noShrink]} numberOfLines={1}>
+              {`· ${used} · ${lastUsed}`}
+            </Text>
+          </View>
           {actions}
         </View>
       </View>
@@ -202,6 +224,7 @@ const ThemedPin = withUnistyles(Pin);
 const ThemedPinOff = withUnistyles(PinOff);
 const ThemedPencil = withUnistyles(Pencil);
 const ThemedTrash = withUnistyles(Trash2);
+const ThemedRefresh = withUnistyles(RefreshCw);
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 
 export const MEMORY_COLUMN_WIDTHS = { source: 160, used: 80, lastUsed: 110, actions: 104 };
@@ -216,7 +239,14 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.border,
   },
-  rowCompact: { flexDirection: "column", alignItems: "stretch", gap: theme.spacing[1] },
+  // Spec 38 §4.6: a two-line row is at least 56 px.
+  rowCompact: {
+    minHeight: 56,
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: theme.spacing[1],
+    paddingVertical: theme.spacing[3],
+  },
   textColumn: { flex: 1, minWidth: 0, gap: 4 },
   text: { fontSize: 14, lineHeight: 20, color: theme.colors.foreground },
   pinnedTag: { color: theme.colors.foregroundMuted, fontWeight: "500" },
@@ -234,9 +264,14 @@ const styles = StyleSheet.create((theme: Theme) => ({
   sourceColumn: { width: MEMORY_COLUMN_WIDTHS.source },
   usedColumn: { width: MEMORY_COLUMN_WIDTHS.used },
   lastColumn: { width: MEMORY_COLUMN_WIDTHS.lastUsed },
-  compactMeta: { flexDirection: "row", alignItems: "center", flexWrap: "wrap" },
-  spacer: { flex: 1 },
+  compactMeta: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
+  // A leading space in the second text collapses on web; the gap keeps "You · 2 times" apart.
+  compactMetaText: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 4 },
+  sourceCompact: { flexShrink: 1, minWidth: 0 },
+  noShrink: { flexShrink: 0 },
   actions: { flexDirection: "row", alignItems: "center", width: MEMORY_COLUMN_WIDTHS.actions },
+  // The icons end on the row's right edge (the page padding), not 8 px inside it.
+  actionsCompact: { flexDirection: "row", alignItems: "center", marginRight: -theme.spacing[2] },
   iconButton: {
     width: 32,
     height: 32,

@@ -4,19 +4,16 @@ import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
 import { Brain, Plus, Search } from "lucide-react-native";
 import type {
-  MemoryKindWire,
   MemoryProject,
   MemoryRecordWire,
   MemoryStatusWire,
 } from "@jagentdesk/protocol/memory";
-import { MEMORY_STATUSES, type MemoryScope } from "../shared/types";
+import type { MemoryScope } from "../shared/types";
 import {
   Alert,
   Button,
   PageHeader,
-  SegmentedControl,
-  SelectField,
-  type SegmentedControlOption,
+  type PageHeaderPrimaryAction,
   useGumloopPageGutterStyle,
   useHostRuntimeIsConnected,
   useHostRuntimeClient,
@@ -24,6 +21,7 @@ import {
   useToast,
   type Theme,
 } from "../../../packages/app/src/plugins/builtin/host-api";
+import { MemoryFilters, type KindFilter } from "./filters";
 import { MemoryEditorSheet, type MemoryEditorTarget } from "./memory-editor-sheet";
 import { MEMORY_COLUMN_WIDTHS, MemoryRow } from "./memory-row";
 import { useMemoryList } from "./use-memory";
@@ -83,146 +81,52 @@ export function MemoryScreen({ serverId }: { serverId: string }) {
     );
   }, [client, projectId, t, toast]);
 
+  // "Validate now" is the secondary action; "Add memory" is the page's primary one, which a
+  // phone shows as the top bar's "+" (spec 38 §5).
   const headerActions = useMemo(
-    () => (
-      <View style={styles.headerActions}>
-        {scope === "project" ? (
-          <Button
-            size="sm"
-            variant="secondary"
-            onPress={validateAll}
-            disabled={!connected || !projectId}
-            testID="memory-validate-all"
-          >
-            {t("memory.lesson.validate")}
-          </Button>
-        ) : null}
+    () =>
+      scope === "project" ? (
         <Button
           size="sm"
-          variant="default"
-          leftIcon={Plus}
-          onPress={openCreate}
-          disabled={!connected || (scope === "project" && !projectId)}
-          testID="memory-add"
+          variant="secondary"
+          onPress={validateAll}
+          disabled={!connected || !projectId}
+          testID="memory-validate-all"
         >
-          {t("memory.add")}
+          {t("memory.lesson.validate")}
         </Button>
-      </View>
-    ),
-    [connected, openCreate, projectId, scope, t, validateAll],
+      ) : null,
+    [connected, projectId, scope, t, validateAll],
   );
-  const kindOptions = useMemo<SegmentedControlOption<KindFilter>[]>(
-    () => [
-      { value: "all", label: t("memory.filters.all"), testID: "memory-kind-all" },
-      { value: "memory", label: t("memory.filters.memories"), testID: "memory-kind-memory" },
-      { value: "lesson", label: t("memory.filters.lessons"), testID: "memory-kind-lesson" },
-    ],
-    [t],
-  );
-  const statusOptions = useMemo(
-    () => [
-      { id: ANY_STATUS, value: ANY_STATUS as StatusFilter, label: t("memory.filters.anyStatus") },
-      ...MEMORY_STATUSES.map((value) => ({
-        id: value,
-        value: value as StatusFilter,
-        label: t(`memory.status.${value}`),
-      })),
-    ],
-    [t],
-  );
-  const changeStatus = useCallback(
-    (value: StatusFilter) => setStatus(value === ANY_STATUS ? null : value),
-    [],
-  );
-  const statusDisplay = useMemo(
-    () => ({ label: status ? t(`memory.status.${status}`) : t("memory.filters.anyStatus") }),
-    [status, t],
-  );
-
-  const projectOptions = useMemo(
-    () =>
-      projects.map((project) => ({
-        id: project.projectId,
-        value: project.projectId,
-        label: project.name,
-        description: project.rootPath,
-      })),
-    [projects],
+  const addLabel = t("memory.add");
+  const addDisabled = !connected || (scope === "project" && !projectId);
+  const primaryAction = useMemo<PageHeaderPrimaryAction>(
+    () => ({
+      icon: Plus,
+      label: addLabel,
+      onPress: openCreate,
+      disabled: addDisabled,
+      testID: "memory-add",
+    }),
+    [addDisabled, addLabel, openCreate],
   );
   const selectedProject = projects.find((project) => project.projectId === projectId) ?? null;
-  const selectedDisplay = useMemo(
-    () => (selectedProject ? { label: selectedProject.name } : null),
-    [selectedProject],
-  );
-  const scopeOptions = useMemo<SegmentedControlOption<MemoryScope>[]>(
-    () => [
-      { value: "project", label: t("memory.tabs.project"), testID: "memory-tab-project" },
-      { value: "global", label: t("memory.tabs.global"), testID: "memory-tab-global" },
-    ],
-    [t],
-  );
-
   const tabs = useMemo(
     () => (
-      <View style={styles.bar}>
-        <SegmentedControl
-          options={scopeOptions}
-          value={scope}
-          onValueChange={setScope}
-          testID="memory-tabs"
-        />
-        <SegmentedControl
-          options={kindOptions}
-          value={kind}
-          onValueChange={setKind}
-          testID="memory-kind-filter"
-        />
-        <View style={styles.statusSelect}>
-          <SelectField
-            label={t("memory.filters.status")}
-            value={status ?? ANY_STATUS}
-            selectedDisplay={statusDisplay}
-            options={statusOptions}
-            onChange={changeStatus}
-            placeholder={t("memory.filters.anyStatus")}
-            emptyText={t("memory.filters.anyStatus")}
-            field={false}
-            size="sm"
-            testID="memory-status-filter"
-          />
-        </View>
-        {scope === "project" ? (
-          <View style={styles.projectSelect}>
-            <SelectField
-              label={t("memory.project.label")}
-              value={projectId}
-              selectedDisplay={selectedDisplay}
-              options={projectOptions}
-              onChange={setProjectId}
-              placeholder={t("memory.project.label")}
-              emptyText={t("memory.project.none")}
-              field={false}
-              size="sm"
-              testID="memory-project-select"
-            />
-          </View>
-        ) : null}
-      </View>
+      <MemoryFilters
+        compact={compact}
+        scope={scope}
+        onScopeChange={setScope}
+        kind={kind}
+        onKindChange={setKind}
+        status={status}
+        onStatusChange={setStatus}
+        projects={projects}
+        projectId={projectId}
+        onProjectChange={setProjectId}
+      />
     ),
-    [
-      kind,
-      kindOptions,
-      projectId,
-      projectOptions,
-      scope,
-      scopeOptions,
-      selectedDisplay,
-      status,
-      statusDisplay,
-      statusOptions,
-      changeStatus,
-      t,
-    ],
+    [compact, kind, projectId, projects, scope, status],
   );
 
   const memories = useMemo(() => pendingFirst(data?.memories ?? EMPTY_MEMORIES), [data]);
@@ -235,6 +139,7 @@ export function MemoryScreen({ serverId }: { serverId: string }) {
         title={t("memory.title")}
         description={t("memory.description")}
         actions={headerActions}
+        primaryAction={primaryAction}
         tabs={tabs}
       />
       <ScrollView contentContainerStyle={[styles.content, gutter]}>
@@ -297,10 +202,6 @@ export function MemoryScreen({ serverId }: { serverId: string }) {
   );
 }
 
-type KindFilter = "all" | MemoryKindWire;
-const ANY_STATUS = "any";
-type StatusFilter = MemoryStatusWire | typeof ANY_STATUS;
-
 /** Spec 42 §7: pending lessons from Capture lessons sit on top until the user reviews them. */
 function pendingFirst(memories: MemoryRecordWire[]): MemoryRecordWire[] {
   const pending = memories.filter((memory) => memory.status === "pending");
@@ -317,15 +218,6 @@ const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 
 const styles = StyleSheet.create((theme: Theme) => ({
   root: { flex: 1, backgroundColor: theme.colors.surface0 },
-  bar: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    alignItems: "center",
-    gap: theme.spacing[3],
-  },
-  projectSelect: { minWidth: 220, maxWidth: 360, flexGrow: 1 },
-  statusSelect: { minWidth: 160, maxWidth: 220 },
-  headerActions: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
   sectionTitle: {
     fontSize: 13,
     fontWeight: "600",
@@ -334,7 +226,13 @@ const styles = StyleSheet.create((theme: Theme) => ({
     paddingBottom: theme.spacing[1],
   },
   sectionGap: { height: theme.spacing[4] },
-  content: { paddingTop: theme.spacing[4], paddingBottom: theme.spacing[8], gap: 0 },
+  // 16 px page padding on phones and classic themes; the Gumloop desktop gutter overrides it.
+  content: {
+    paddingTop: theme.spacing[4],
+    paddingBottom: theme.spacing[8],
+    paddingHorizontal: theme.spacing[4],
+    gap: 0,
+  },
   searchBox: {
     height: 46,
     borderRadius: 10,

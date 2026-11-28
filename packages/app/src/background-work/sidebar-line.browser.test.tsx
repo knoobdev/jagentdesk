@@ -2,10 +2,16 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { Pressable, Text, View } from "react-native";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { takeBackgroundWorkTrackOpen } from "./shared";
 import { BackgroundWorkLine } from "./sidebar-line";
 
 const navigateToAgent = vi.hoisted(() => vi.fn());
 vi.mock("@/utils/navigate-to-agent", () => ({ navigateToAgent }));
+const compactLayout = vi.hoisted(() => ({ compact: false }));
+vi.mock("@/constants/layout", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/constants/layout")>()),
+  useIsCompactFormFactor: () => compactLayout.compact,
+}));
 
 // App sources compile against the classic JSX runtime, which expects React on the global.
 beforeEach(() => vi.stubGlobal("React", React));
@@ -28,6 +34,8 @@ afterEach(() => {
     entry.container.remove();
   }
   navigateToAgent.mockClear();
+  compactLayout.compact = false;
+  takeBackgroundWorkTrackOpen("sidebar-line-host", "agent");
 });
 
 function byTestId(testID: string): HTMLElement {
@@ -36,7 +44,48 @@ function byTestId(testID: string): HTMLElement {
   return element;
 }
 
+function renderRow(openRow: () => void) {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  act(() =>
+    root.render(
+      <View style={ROW_FRAME}>
+        <Pressable accessibilityRole="button" testID="row" onPress={openRow}>
+          <View testID="column">
+            <Text numberOfLines={1}>Agent title</Text>
+            <BackgroundWorkLine
+              serverId="sidebar-line-host"
+              agentId="agent"
+              totalCount={1}
+              testID="line"
+            />
+          </View>
+        </Pressable>
+      </View>,
+    ),
+  );
+  mounted.push({ root, container });
+}
+
 describe("background work sidebar line", () => {
+  /**
+   * On a phone the line is 16 px under the agent's name in a drawer row: far below a finger's
+   * target, so a tap meant for the row ("go back to that agent") landed on it and the agent came
+   * back with its Background work sheet open (user report 2026-11-28, iPhone). There the line
+   * only shows the work; the whole row opens the agent.
+   */
+  it("on a phone, a tap on the line opens the agent like the rest of the row", () => {
+    compactLayout.compact = true;
+    const openRow = vi.fn();
+    renderRow(openRow);
+
+    act(() => byTestId("line").click());
+    expect(openRow).toHaveBeenCalledTimes(1);
+    expect(navigateToAgent).not.toHaveBeenCalled();
+    expect(takeBackgroundWorkTrackOpen("sidebar-line-host", "agent")).toBe(false);
+  });
+
   it("leaves the empty part of the row's second line to the row", () => {
     const openRow = vi.fn();
     const container = document.createElement("div");

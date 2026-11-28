@@ -8,7 +8,7 @@ import {
   WindowLayoutActions,
 } from "@/window-layout";
 import { WindowChromeSafeArea } from "@/utils/desktop-window";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, type ReactNode } from "react";
 import { Text, View } from "react-native";
 import { router, usePathname, type Href } from "expo-router";
 import { PortalHost } from "@gorhom/portal";
@@ -28,6 +28,7 @@ import {
 } from "@/utils/host-routes";
 import { formatCompactWorkspaceTitle } from "@/screens/workspace/workspace-header-source";
 import { useIsGumloopTheme } from "./use-gumloop-chrome";
+import { useCompactPageAction, type CompactPageAction } from "./compact-page-action";
 import { GUMLOOP_COMPACT_ACTIONS_HOST } from "./sidebar-state";
 import type { Theme } from "@/styles/theme";
 import {
@@ -41,6 +42,7 @@ const ThemedPanelRight = withUnistyles(PanelRight);
 const ThemedPlus = withUnistyles(Plus);
 const ThemedSettings = withUnistyles(Settings);
 const foreground = (theme: Theme) => ({ color: theme.colors.foreground });
+const muted = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const NO_KEYS: [] = [];
 
 // In a workspace the title is the workspace, not the agent: the tab switcher row
@@ -137,7 +139,7 @@ export function GumloopCompactHeader({ enabled }: { enabled: boolean }) {
       )}
     </HeaderToggleButton>
   );
-  let action = defaultAction;
+  let action = <PageActionOrDefault pathname={pathname}>{defaultAction}</PageActionOrDefault>;
   if (pathname.includes("/settings")) action = <View style={styles.button} />;
   else if (notificationsPage) action = settingsGear;
   if (!enabled || !compact || !gumloop) return null;
@@ -177,6 +179,31 @@ export function GumloopCompactHeader({ enabled }: { enabled: boolean }) {
     </View>
   );
 }
+/** A page's own primary action ("Add memory") replaces the generic "+" (spec 38 §5). */
+function PageActionOrDefault({ pathname, children }: { pathname: string; children: ReactNode }) {
+  const pageAction = useCompactPageAction(pathname);
+  return pageAction ? <PageActionButton action={pageAction} /> : children;
+}
+
+function PageActionButton({ action }: { action: CompactPageAction }) {
+  const Icon = action.icon;
+  const ThemedIcon = useMemo(() => withUnistyles(Icon), [Icon]);
+  return (
+    <HeaderToggleButton
+      onPress={action.onPress}
+      disabled={action.disabled}
+      tooltipLabel={action.label}
+      tooltipKeys={NO_KEYS}
+      tooltipSide="bottom"
+      accessibilityLabel={action.label}
+      testID={action.testID}
+      style={styles.button}
+    >
+      <ThemedIcon size={22} uniProps={action.disabled ? muted : foreground} />
+    </HeaderToggleButton>
+  );
+}
+
 const styles = StyleSheet.create((theme: Theme) => ({
   root: {
     backgroundColor: theme.colors.surface0,

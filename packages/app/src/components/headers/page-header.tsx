@@ -3,13 +3,19 @@ import {
   useIsGumloopTheme,
 } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { GUMLOOP_PAGE_GUTTER } from "@/components/gumloop-shell/list-styles";
+import {
+  usePublishCompactPageAction,
+  type CompactPageAction,
+} from "@/components/gumloop-shell/compact-page-action";
 import { useMemo, useRef, type ReactNode } from "react";
 import { Text, View } from "react-native";
+import { usePathname } from "expo-router";
 import type { LucideIcon } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import type { Theme } from "@/styles/theme";
+import { Button } from "@/components/ui/button";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { CompactBackButton } from "./compact-back-button";
 import { PageHeaderActionContext } from "./page-header-context";
@@ -28,6 +34,11 @@ interface PageHeaderProps {
   description?: string | null;
   /** Right-side buttons: use `<Button size="sm" leftIcon={…}>`, so every page matches. */
   actions?: ReactNode;
+  /**
+   * The page's main action ("Add memory"). Rendered as the last primary button with the actions;
+   * on a Gumloop phone it becomes the top bar's right button instead (spec 38 §5). Memoize it.
+   */
+  primaryAction?: CompactPageAction | null;
   /** Small status next to the actions (e.g. Docker's "Live"). */
   accessory?: ReactNode;
   /** The page's tab row. Sits right under the title row, on the title's left edge. */
@@ -44,17 +55,86 @@ interface PageHeaderProps {
 /**
  * The one page header every full-screen page uses (Home, History, Docker, Skills, Bots, …):
  * back arrow on phones, the section icon and a bold title on one row with same-size action
- * buttons on the right, a one-line description below, then the page's tabs.
+ * buttons on the right, a one-line description below, then the page's tabs. Under the Gumloop
+ * phone top bar it drops the title row (`PhonePageHeader`).
  *
  * In the Gumloop desktop shell the title row is the page's top row: 60 px (72 px with a
  * description), so the title lines up with the sidebar's brand row (spec 38 §4.1, A38.4e). It
  * sits on the shared 32 px page gutter (`GUMLOOP_PAGE_GUTTER`); the page body uses the same one.
  */
-export function PageHeader({
+export function PageHeader(props: PageHeaderProps) {
+  // Phones in the Gumloop theme sit under the shell's phone top bar (spec 38 §5).
+  const gumloop = useIsGumloopTheme();
+  const compact = useIsCompactFormFactor();
+  return gumloop && compact ? <PhonePageHeader {...props} /> : <StandardPageHeader {...props} />;
+}
+
+/**
+ * A page under the Gumloop phone top bar. The top bar names the page and carries its primary
+ * action as its right button (spec 38 §5), so the page keeps only its description, secondary
+ * actions and tabs, on the 16 px page padding; a second title row would repeat the top bar.
+ */
+function PhonePageHeader({
+  description,
+  actions,
+  primaryAction = null,
+  accessory,
+  tabs,
+  testID,
+  scrolled,
+}: PageHeaderProps) {
+  const pathname = usePathname();
+  usePublishCompactPageAction(pathname, primaryAction);
+  const headerRef = useRef<View>(null);
+  // Solid header with a divider once the page scrolls (spec 38 §4.4c).
+  const detectedScrolled = usePageScrolled(headerRef, scrolled === undefined);
+  const showDivider = scrolled ?? detectedScrolled;
+  return (
+    <View ref={headerRef} style={[styles.container, styles.phoneContainer]} testID={testID}>
+      {description ? (
+        <Text style={styles.description} testID="page-header-description">
+          {description}
+        </Text>
+      ) : null}
+      {accessory || actions ? (
+        <View style={styles.phoneActions}>
+          <PageHeaderActionContext.Provider value>
+            <View style={styles.actions}>
+              {accessory}
+              {actions}
+            </View>
+          </PageHeaderActionContext.Provider>
+        </View>
+      ) : null}
+      {tabs}
+      {showDivider ? (
+        <View style={styles.scrollDivider} pointerEvents="none" testID="page-header-divider" />
+      ) : null}
+    </View>
+  );
+}
+
+function PrimaryActionButton({ action }: { action: CompactPageAction }) {
+  return (
+    <Button
+      size="sm"
+      variant="default"
+      leftIcon={action.icon}
+      onPress={action.onPress}
+      disabled={action.disabled}
+      testID={action.testID}
+    >
+      {action.label}
+    </Button>
+  );
+}
+
+function StandardPageHeader({
   icon,
   title,
   description,
   actions,
+  primaryAction = null,
   accessory,
   tabs,
   testID,
@@ -62,14 +142,8 @@ export function PageHeader({
 }: PageHeaderProps) {
   const gumloop = useGumloopDesktopShell(true);
   const isCompact = useIsCompactFormFactor();
-  // Phones in the Gumloop theme get the same solid header and divider (spec 38 §4.4c); classic
-  // themes keep their header as it was.
-  const gumloopPhone = useIsGumloopTheme() && isCompact;
   const headerRef = useRef<View>(null);
-  const detectedScrolled = usePageScrolled(
-    headerRef,
-    (gumloop || gumloopPhone) && scrolled === undefined,
-  );
+  const detectedScrolled = usePageScrolled(headerRef, gumloop && scrolled === undefined);
   const showDivider = scrolled ?? detectedScrolled;
   const insets = useSafeAreaInsets();
   const ThemedIcon = useMemo(() => withUnistyles(icon), [icon]);
@@ -77,17 +151,17 @@ export function PageHeader({
     () => [
       styles.container,
       gumloop && styles.gumloopContainer,
-      gumloopPhone && styles.gumloopPhoneContainer,
       isCompact ? { paddingTop: insets.top + 12 } : null,
     ],
-    [gumloop, gumloopPhone, insets.top, isCompact],
+    [gumloop, insets.top, isCompact],
   );
   const rightSide =
-    accessory || actions ? (
+    accessory || actions || primaryAction ? (
       <PageHeaderActionContext.Provider value>
         <View style={[styles.actions, gumloop && styles.gumloopActions]}>
           {accessory}
           {actions}
+          {primaryAction ? <PrimaryActionButton action={primaryAction} /> : null}
         </View>
       </PageHeaderActionContext.Provider>
     ) : null;
@@ -135,9 +209,6 @@ export function PageHeader({
       </View>
       {description ? <Text style={styles.description}>{description}</Text> : null}
       {tabs ? <View style={styles.tabs}>{tabs}</View> : null}
-      {gumloopPhone && showDivider ? (
-        <View style={styles.scrollDivider} pointerEvents="none" testID="page-header-divider" />
-      ) : null}
     </View>
   );
 }
@@ -156,7 +227,12 @@ const styles = StyleSheet.create((theme: Theme) => ({
     // the header's bottom padding and has to paint over it.
     backgroundColor: theme.colors.surface0,
   },
-  gumloopPhoneContainer: { backgroundColor: theme.colors.surface0 },
+  phoneContainer: {
+    backgroundColor: theme.colors.surface0,
+    paddingTop: theme.spacing[1],
+    gap: theme.spacing[2],
+  },
+  phoneActions: { flexDirection: "row" },
   scrollDivider: {
     position: "absolute",
     left: 0,
