@@ -95,6 +95,7 @@ import {
   useAgentToolCallExpansion,
   useExpandedToolCallGroups,
 } from "@/tool-calls/expansion-context";
+import { TimelineRowSheetProvider } from "@/components/timeline-row-sheet";
 import { ToolCallSheetProvider } from "@/components/tool-call-sheet";
 import { OverviewToolCallGroupView } from "@/tool-calls/detail-level/overview/view";
 import { IndentRail } from "@/components/indent-rail";
@@ -163,6 +164,15 @@ function renderLiveAuxiliaryNode(input: {
         <BottomOverlayInset height={input.bottomOverlayInset} />
       ) : null}
     </>
+  );
+}
+
+/** Sheets opened from rows live above the list, so a row that unmounts does not close them. */
+function StreamSheetProviders({ children }: { children: ReactNode }) {
+  return (
+    <ToolCallSheetProvider>
+      <TimelineRowSheetProvider>{children}</TimelineRowSheetProvider>
+    </ToolCallSheetProvider>
   );
 }
 
@@ -1391,7 +1401,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
 
     return (
       <MessageActionsAgentContext.Provider value={messageActionsAgent}>
-        <ToolCallSheetProvider>
+        <StreamSheetProviders>
           <AssistantSelectionCopySurface style={stylesheet.container}>
             <MessageOuterSpacingProvider disableOuterSpacing>
               <ChatFind
@@ -1455,7 +1465,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
               </View>
             )}
           </AssistantSelectionCopySurface>
-        </ToolCallSheetProvider>
+        </StreamSheetProviders>
       </MessageActionsAgentContext.Provider>
     );
   },
