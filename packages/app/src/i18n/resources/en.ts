@@ -2303,7 +2303,7 @@ export const en = {
     metadataGeneration: {
       title: "Metadata generation",
       description:
-        "Choose the model JAgentDesk uses for workspace titles, branch names, commit messages, and pull request drafts",
+        "Choose the model and instructions JAgentDesk uses for commit messages and pull request drafts",
       selection: "Model selection",
       automatic: "Automatic",
       preferred: "Manual",
@@ -2312,6 +2312,12 @@ export const en = {
       model: "Model",
       modelHint: "Only this model is used. If it fails, JAgentDesk does not try another model",
       saveError: "Unable to update metadata generation",
+      instructions: "Instructions",
+      instructionsHint: "Applied to commit messages and pull request drafts generated on this host",
+      instructionsPlaceholder:
+        "Example: Write in Simplified Chinese. Keep phrasing consistent across commits and pull requests. Do not use em dashes.",
+      editInstructions: "Edit",
+      saveInstructions: "Save",
     },
     voice: {
       offline: "Connect to this host to configure voice.",

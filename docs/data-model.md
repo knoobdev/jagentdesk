@@ -180,7 +180,7 @@ Environment variables override `config.json`:
 daemon after changing the file or environment. Run `jagentdesk daemon restart` for a standalone daemon.
 For a desktop-managed daemon, fully quit and reopen JAgentDesk Desktop.
 
-`agents.metadataGeneration.providers` controls the preferred structured-generation fallback order for daemon-side metadata tasks such as commit messages, PR text, branch names, and generated agent titles. Entries are tried first in the configured order, then JAgentDesk falls through to dynamically discovered defaults and finally the current selection when available.
+`agents.metadataGeneration.providers` selects the models for daemon-side metadata tasks: commit messages and PR text (workspace titles and branch names are derived without a model, `packages/server/src/server/worktree-branch-name-generator.ts`). An empty list is Automatic; a non-empty list is Manual and only those models are tried. `agents.metadataGeneration.instructions` adds host-wide guidance to those prompts alongside the built-in or per-project style. See [public-docs/metadata-generation.md](../public-docs/metadata-generation.md#how-a-model-is-chosen).
 
 ### Speech settings
 

@@ -2294,7 +2294,7 @@ export const ar: TranslationResources = {
     metadataGeneration: {
       title: "إنشاء البيانات الوصفية",
       description:
-        "اختر النموذج الذي يستخدمه JAgentDesk لعناوين مساحات العمل وأسماء الفروع ورسائل الالتزام ومسودات طلبات السحب",
+        "اختر النموذج والتعليمات التي يستخدمها JAgentDesk لرسائل الالتزام ومسودات طلبات السحب",
       selection: "اختيار النموذج",
       automatic: "تلقائي",
       preferred: "يدوي",
@@ -2303,6 +2303,12 @@ export const ar: TranslationResources = {
       model: "النموذج",
       modelHint: "يُستخدم هذا النموذج فقط. إذا فشل، لا يجرّب JAgentDesk نموذجًا آخر",
       saveError: "تعذر تحديث إنشاء البيانات الوصفية",
+      instructions: "التعليمات",
+      instructionsHint: "تُطبَّق على رسائل الالتزام ومسودات طلبات السحب المنشأة على هذا المضيف",
+      instructionsPlaceholder:
+        "مثال: اكتب باللغة العربية. حافظ على أسلوب متسق بين رسائل الالتزام وطلبات السحب. لا تستخدم الشرطات الطويلة.",
+      editInstructions: "تعديل",
+      saveInstructions: "حفظ",
     },
     voice: {
       offline: "اتصل بهذا المضيف لضبط الصوت.",

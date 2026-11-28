@@ -23,7 +23,10 @@ test("editors accept the daemon's browser, profile, plugin and metadata configur
     pluginsEnabled: true,
     plugins: {},
     agents: {
-      metadataGeneration: { providers: [{ provider: "claude", model: "claude-opus-5" }] },
+      metadataGeneration: {
+        providers: [{ provider: "claude", model: "claude-opus-5" }],
+        instructions: "Write in Simplified Chinese. Do not use em dashes.",
+      },
     },
   };
   expect(PersistedConfigSchema.parse(config)).toEqual(config);
@@ -68,6 +71,7 @@ test.each([
   { pluginsEnabled: "yes" },
   { plugins: [] },
   { agents: { metadataGeneration: { providers: [{ provider: "" }] } } },
+  { agents: { metadataGeneration: { instructions: 42 } } },
   { unknownSetting: true },
 ])("editors still reject invalid configuration: %j", (config) => {
   expect(PersistedConfigSchema.safeParse(config).success).toBe(false);

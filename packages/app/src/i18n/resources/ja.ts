@@ -2283,8 +2283,7 @@ export const ja: TranslationResources = {
     },
     metadataGeneration: {
       title: "メタデータ生成",
-      description:
-        "ワークスペースのタイトル、ブランチ名、コミットメッセージ、プルリクエストの下書きに使用するモデルを選択します",
+      description: "コミットメッセージとプルリクエストの下書きに使用するモデルと指示を選択します",
       selection: "モデル選択",
       automatic: "自動",
       preferred: "手動",
@@ -2293,6 +2292,13 @@ export const ja: TranslationResources = {
       model: "モデル",
       modelHint: "このモデルのみを使用します。失敗しても、JAgentDesk は別のモデルを試しません",
       saveError: "メタデータ生成を更新できません",
+      instructions: "指示",
+      instructionsHint:
+        "このホストで生成されるコミットメッセージとプルリクエストの下書きに適用されます",
+      instructionsPlaceholder:
+        "例：日本語で書く。コミットメッセージとプルリクエストの表現を統一する。全角ダッシュを使わない。",
+      editInstructions: "編集",
+      saveInstructions: "保存",
     },
     voice: {
       offline: "音声を設定するには、このホストに接続してください。",

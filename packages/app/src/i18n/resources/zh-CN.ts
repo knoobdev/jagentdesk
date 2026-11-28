@@ -2223,7 +2223,7 @@ export const zhCN: TranslationResources = {
     },
     metadataGeneration: {
       title: "元数据生成",
-      description: "选择 JAgentDesk 用于工作区标题、分支名称、提交消息和拉取请求草稿的模型",
+      description: "选择 JAgentDesk 用于提交消息和拉取请求草稿的模型和指令",
       selection: "模型选择",
       automatic: "自动",
       preferred: "手动",
@@ -2232,6 +2232,12 @@ export const zhCN: TranslationResources = {
       model: "模型",
       modelHint: "只使用此模型。如果失败，JAgentDesk 不会尝试其他模型",
       saveError: "无法更新元数据生成设置",
+      instructions: "指令",
+      instructionsHint: "应用于此主机上生成的提交消息和拉取请求草稿",
+      instructionsPlaceholder:
+        "例如：使用简体中文编写。保持提交信息与拉取请求的风格一致。不要使用破折号。",
+      editInstructions: "编辑",
+      saveInstructions: "保存",
     },
     voice: {
       offline: "连接到此主机以配置语音。",

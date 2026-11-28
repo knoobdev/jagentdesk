@@ -2292,7 +2292,7 @@ export const es: TranslationResources = {
     metadataGeneration: {
       title: "Generación de metadatos",
       description:
-        "Elige el modelo que JAgentDesk usa para títulos de espacios de trabajo, nombres de ramas, mensajes de commit y borradores de pull requests",
+        "Elige el modelo y las instrucciones que JAgentDesk usa para mensajes de commit y borradores de pull requests",
       selection: "Selección de modelo",
       automatic: "Automática",
       preferred: "Manual",
@@ -2301,6 +2301,13 @@ export const es: TranslationResources = {
       model: "Modelo",
       modelHint: "Solo se usa este modelo. Si falla, JAgentDesk no prueba otro modelo",
       saveError: "No se pudo actualizar la generación de metadatos",
+      instructions: "Instrucciones",
+      instructionsHint:
+        "Se aplican a los mensajes de commit y borradores de pull requests generados en este host",
+      instructionsPlaceholder:
+        "Ejemplo: Escribe en español. Mantén un estilo coherente entre commits y pull requests. No uses rayas largas.",
+      editInstructions: "Editar",
+      saveInstructions: "Guardar",
     },
     voice: {
       offline: "Conéctate a este host para configurar la voz.",

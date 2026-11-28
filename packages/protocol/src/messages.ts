@@ -397,6 +397,16 @@ const MutableStructuredGenerationProviderSchema = z
 const MutableMetadataGenerationConfigSchema = z
   .object({
     providers: z.array(MutableStructuredGenerationProviderSchema).default([]),
+    // COMPAT(metadataGenerationInstructions): added in v0.12.3, keep optional while older daemons omit it.
+    instructions: z.string().optional(),
+  })
+  .passthrough();
+
+const MutableMetadataGenerationConfigPatchSchema = z
+  .object({
+    providers: z.array(MutableStructuredGenerationProviderSchema).optional(),
+    // COMPAT(metadataGenerationInstructions): added in v0.12.3, keep optional while older daemons omit it.
+    instructions: z.string().optional(),
   })
   .passthrough();
 
@@ -522,7 +532,7 @@ export const MutableDaemonConfigPatchSchema = z
       .record(z.string(), MutableDaemonProviderConfigSchema.partial().passthrough())
       .optional(),
     removeProviders: z.array(z.string().min(1)).optional(),
-    metadataGeneration: MutableMetadataGenerationConfigSchema.partial().optional(),
+    metadataGeneration: MutableMetadataGenerationConfigPatchSchema.optional(),
     autorun: z.object({ enabled: z.boolean().optional() }).passthrough().optional(),
     sessionSharing: z.object({ enabled: z.boolean().optional() }).passthrough().optional(),
     // Explicit optional fields (NOT relaySchema.partial()): an omitted field must stay
@@ -5406,6 +5416,8 @@ export const ServerInfoStatusPayloadSchema = z
         speechSettings: z.boolean().optional(),
         // COMPAT(idleRuntimeCleanupSetting): added in v0.9.59, remove gate after 2027-05-24.
         idleRuntimeCleanupSetting: z.boolean().optional(),
+        // COMPAT(metadataGenerationInstructions): added in v0.12.3, remove gate after 2027-06-01.
+        metadataGenerationInstructions: z.boolean().optional(),
         // COMPAT(crossProviderContinuity): added in v0.10.2, remove gate after 2027-05-26.
         crossProviderContinuity: z.boolean().optional(),
         // COMPAT(durableContext): added in v0.10.2, remove gate after 2027-05-26.

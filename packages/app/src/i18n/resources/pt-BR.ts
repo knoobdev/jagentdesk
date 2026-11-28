@@ -2277,7 +2277,7 @@ export const ptBR: TranslationResources = {
     metadataGeneration: {
       title: "Geração de metadados",
       description:
-        "Escolha o modelo usado pelo JAgentDesk para títulos de espaços de trabalho, nomes de branches, mensagens de commit e rascunhos de pull request",
+        "Escolha o modelo e as instruções usados pelo JAgentDesk para mensagens de commit e rascunhos de pull request",
       selection: "Seleção de modelo",
       automatic: "Automática",
       preferred: "Manual",
@@ -2286,6 +2286,13 @@ export const ptBR: TranslationResources = {
       model: "Modelo",
       modelHint: "Somente este modelo é usado. Se ele falhar, o JAgentDesk não tenta outro modelo",
       saveError: "Não foi possível atualizar a geração de metadados",
+      instructions: "Instruções",
+      instructionsHint:
+        "Aplicadas às mensagens de commit e rascunhos de pull request gerados neste host",
+      instructionsPlaceholder:
+        "Exemplo: Escreva em português. Mantenha o estilo coerente entre commits e pull requests. Não use travessões.",
+      editInstructions: "Editar",
+      saveInstructions: "Salvar",
     },
     voice: {
       offline: "Conecte-se a este host para configurar a voz.",

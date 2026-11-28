@@ -171,6 +171,11 @@ export const FormTextInput = forwardRef<TextInput, FormTextInputProps>(function 
   const [focused, setFocused] = useState(false);
   const isDisabled = editable === false;
   const chromeSizeStyle = size === "sm" ? formInputStyles.chromeSm : formInputStyles.chromeMd;
+  let chromeMultilineStyle = null;
+  if (props.multiline) {
+    chromeMultilineStyle =
+      size === "sm" ? formInputStyles.chromeMultilineSm : formInputStyles.chromeMultilineMd;
+  }
   const inputSizeStyle = size === "sm" ? formInputStyles.inputSm : formInputStyles.inputMd;
   const splitStyle = useMemo(() => splitFormTextInputStyle(style), [style]);
   const setInputRef = useCallback(
@@ -201,6 +206,7 @@ export const FormTextInput = forwardRef<TextInput, FormTextInputProps>(function 
     ({ hovered = false }: PressableStateCallbackType & { hovered?: boolean }) => [
       formInputStyles.chrome,
       chromeSizeStyle,
+      chromeMultilineStyle,
       leading ? formInputStyles.chromeWithLeading : null,
       resolveControlInteractionStyles(
         {
@@ -218,7 +224,15 @@ export const FormTextInput = forwardRef<TextInput, FormTextInputProps>(function 
       invalid ? formInputStyles.controlInvalid : null,
       splitStyle.chromeStyle,
     ],
-    [chromeSizeStyle, focused, invalid, isDisabled, leading, splitStyle.chromeStyle],
+    [
+      chromeMultilineStyle,
+      chromeSizeStyle,
+      focused,
+      invalid,
+      isDisabled,
+      leading,
+      splitStyle.chromeStyle,
+    ],
   );
 
   return (
@@ -284,6 +298,12 @@ const formInputStyles = StyleSheet.create((theme) => {
     },
     chromeMd: {
       ...geometry.fieldControlMd,
+    },
+    chromeMultilineSm: {
+      paddingVertical: theme.spacing[2],
+    },
+    chromeMultilineMd: {
+      paddingVertical: theme.spacing[3],
     },
     controlRest: {
       ...geometry.controlRest,

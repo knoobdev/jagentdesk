@@ -90,8 +90,9 @@ interface PromptForDiffInput {
 export function createGitMetadataGenerator(deps: {
   workspaceGitService: GitMetadataDiffSource;
   generation: StructuredTextGeneration;
+  readHostInstructions?: () => string | undefined;
 }): GitMetadataGenerator {
-  const { workspaceGitService, generation } = deps;
+  const { workspaceGitService, generation, readHostInstructions } = deps;
 
   async function buildPromptForDiff(input: PromptForDiffInput): Promise<string> {
     const diff = await workspaceGitService.getCheckoutDiff(input.cwd, input.diffOptions);
@@ -100,6 +101,7 @@ export function createGitMetadataGenerator(deps: {
     return buildMetadataPrompt({
       cwd: input.cwd,
       workspaceGitService,
+      hostInstructions: readHostInstructions?.(),
       contract: input.contract,
       styles: [{ configKey: input.styleConfigKey, default: input.styleDefault }],
       after: [

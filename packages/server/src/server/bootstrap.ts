@@ -582,6 +582,7 @@ export interface JAgentDeskDaemonConfig {
       model?: string;
       thinkingOptionId?: string;
     }>;
+    instructions?: string;
   };
   providerOverrides?: Record<string, ProviderOverride>;
   log?: PersistedConfig["log"];
@@ -677,6 +678,16 @@ function createInitialRelayConfig(config: JAgentDeskDaemonConfig): MutableDaemon
   };
 }
 
+function createInitialMetadataGenerationConfig(
+  config: JAgentDeskDaemonConfig,
+): MutableDaemonConfig["metadataGeneration"] {
+  const instructions = config.metadataGeneration?.instructions?.trim();
+  return {
+    providers: config.metadataGeneration?.providers ?? [],
+    ...(instructions ? { instructions } : {}),
+  };
+}
+
 function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): MutableDaemonConfig {
   const providers: MutableDaemonConfig["providers"] = Object.fromEntries(
     Object.entries(config.providerOverrides ?? {}).map(([providerId, override]) => {
@@ -705,9 +716,7 @@ function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): Mutab
     sessionSharing: { enabled: config.sessionSharingEnabled ?? false },
     relay: createInitialRelayConfig(config),
     providers,
-    metadataGeneration: {
-      providers: config.metadataGeneration?.providers ?? [],
-    },
+    metadataGeneration: createInitialMetadataGenerationConfig(config),
     autoArchiveAfterMerge: config.autoArchiveAfterMerge ?? false,
     enableTerminalAgentHooks: config.enableTerminalAgentHooks ?? false,
     idleRuntimeCleanup: config.idleRuntimeCleanup !== false,
