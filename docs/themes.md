@@ -78,7 +78,10 @@ panel store remembers the choice.
 
 There is no tab bar. The same `GumloopSidebar` opens as a drawer (`drawer.tsx`), `min(324, 85%)` of
 the window wide. `compact-header.tsx` shows the menu button, a left-aligned title, and one action.
-Panes, files, and subagents open on the shared sheet stack; the explorer opens full screen through
+That top bar is the page's only title row: under it `<PageHeader>` drops its own title and keeps the
+description, secondary actions and tabs. A page's `primaryAction` ("Add memory") becomes the top
+bar's right button in place of the generic `+`. Page bodies keep their own 16 px side padding,
+because `useGumloopPageGutterStyle()` is `null` on phones. Panes, files, and subagents open on the shared sheet stack; the explorer opens full screen through
 `GUMLOOP_INSPECTOR_HOST`. Motion and visibility belong to the mobile panel model in
 [mobile-panels.md](mobile-panels.md).
 

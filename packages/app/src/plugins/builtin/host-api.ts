@@ -1,4 +1,5 @@
 export { PageHeader } from "@/components/headers/page-header";
+export type { CompactPageAction as PageHeaderPrimaryAction } from "@/components/gumloop-shell/compact-page-action";
 export { usePageScroll } from "@/components/headers/use-page-scroll";
 export {
   GUMLOOP_PAGE_GUTTER,
