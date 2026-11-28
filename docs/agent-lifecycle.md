@@ -36,7 +36,9 @@ Idle runtimes are released after one hour while their saved conversations remain
 Reopening a runtime starts a fresh idle window without changing sidebar activity timestamps.
 Tracked background work, outstanding local finish subscriptions, queued messages, and provider
 safety vetoes keep runtimes resident. Claude session crons and `/loop` wakeups are process-local
-work and prevent release. Hosts can disable cleanup live with Settings → host → Daemon → **Release idle agents**
+work and prevent release. OpenCode v2 servers are shared: another session's running execution vetoes
+release only when releasing the lease would stop the server, since the server stays up after its
+last lease goes. Hosts can disable cleanup live with Settings → host → Daemon → **Release idle agents**
 (`agents.idleRuntimeCleanup`). The timer lives in
 `packages/server/src/server/agent/idle-runtime-cleanup/`.
 

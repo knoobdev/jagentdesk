@@ -35,6 +35,7 @@ export class V2Harness {
   readonly mcpAddInputs: Array<Parameters<V2Api["mcp"]["add"]>[0]> = [];
   readonly instructions = new Map<string, string>();
   releases = 0;
+  releaseStopsServer = false;
   /** What the server reports for spec 33.7; `legacy` stands for OpenCode before 2.0.29. */
   mcpPathResult: OpenCodeMcpPath = "session";
   active = false;
@@ -291,6 +292,7 @@ export class V2Harness {
       this.releases += 1;
     },
     retain: () => this.connection,
+    releaseStopsServer: () => this.releaseStopsServer,
     exited: new Promise<Error>(() => undefined),
   };
   readonly runtime = { acquire: async () => this.connection, shutdown: async () => undefined };
