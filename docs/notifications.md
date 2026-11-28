@@ -51,6 +51,24 @@ app was closed. `NotificationFeed` (`packages/server/src/server/notification-fee
 A host without the feature keeps the bell as a shortcut to Settings → This device →
 Notifications.
 
+## Expo push sending
+
+`PushService` (`packages/server/src/server/push/push-service.ts`) posts to Expo's push API.
+
+- Expo rejects a whole request with 400 `PUSH_TOO_MANY_EXPERIENCE_IDS` when its tokens come from
+  more than one Expo project. One host collects tokens from every build that ever connected, and
+  the app's project id changed once (`app.config.js`, `EAS_PROJECT_ID`). The sender resends one
+  request per project from the error's `details`.
+- A token not in `ExponentPushToken[…]` form is dropped and revoked before sending, so it cannot
+  fail the other devices' request.
+- Request errors log Expo's `errors[].code`; ticket errors log `details.error`. Logs carry a
+  token fingerprint, never the token.
+- A token only proves the device registered. Delivery still needs Expo-side credentials for the
+  build: an FCM V1 key for an Android build made with `google-services.json`, and an APNs key for
+  the bundle id an iOS build was signed with. The CI APK has no `google-services.json` and the CI
+  IPA is unsigned.
+- Android pushes go at `priority: "high"`; Expo's default is held back by FCM during Doze.
+
 ## Native delivery
 
 Keep the router instance at module scope. Android's `singleTask` Activity can
