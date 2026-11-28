@@ -33,11 +33,14 @@ const ThemedBottomSheetModal = withUnistyles(IsolatedBottomSheetModal, (theme) =
 export function DetailsSheet({
   open,
   onClose,
+  onDismiss,
   title,
   children,
 }: {
   open: boolean;
   onClose: () => void;
+  /** The sheet finished closing. */
+  onDismiss?: () => void;
   title: string;
   children: ReactNode;
 }) {
@@ -55,6 +58,10 @@ export function DetailsSheet({
     visible: open,
     onClose,
   });
+  const handleDismiss = useCallback(() => {
+    handleSheetDismiss();
+    onDismiss?.();
+  }, [handleSheetDismiss, onDismiss]);
 
   return (
     <ThemedBottomSheetModal
@@ -65,7 +72,7 @@ export function DetailsSheet({
       enableDynamicSizing
       maxDynamicContentSize={height * 0.8}
       onChange={handleSheetChange}
-      onDismiss={handleSheetDismiss}
+      onDismiss={handleDismiss}
       backdropComponent={renderBackdrop}
       enablePanDownToClose
     >

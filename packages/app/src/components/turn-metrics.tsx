@@ -1,4 +1,4 @@
-import { memo, useCallback, useState } from "react";
+import { memo, useCallback, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Text, View } from "react-native";
 import { ChartNoAxesColumn } from "lucide-react-native";
@@ -10,6 +10,7 @@ import {
   HoverCardTrigger,
   useHoverCardOpen,
 } from "@/components/ui/hover-card";
+import { useTimelineRowSheet } from "@/components/timeline-row-sheet";
 import { PressHighlight } from "@/components/ui/press-highlight";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useIsCompactFormFactor } from "@/constants/layout";
@@ -37,26 +38,36 @@ export const TurnMetricsButton = memo(function TurnMetricsButton({
   return <TurnMetricsHoverCardButton metrics={metrics} />;
 });
 
+/** The sheet lives in the stream's `TimelineRowSheetProvider`, so it outlives the turn's row. */
 function TurnMetricsSheetButton({ metrics }: { metrics: AgentMetric[] }) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  const openSheet = useCallback(() => setOpen(true), []);
-  const closeSheet = useCallback(() => setOpen(false), []);
+  const key = `turn-metrics:${useId()}`;
+  const { openRowSheet, openKey } = useTimelineRowSheet();
+  const open = openKey === key;
+  const openSheet = useCallback(
+    () =>
+      openRowSheet(key, ({ visible, onClose, onDismiss }) => (
+        <DetailsSheet
+          open={visible}
+          onClose={onClose}
+          onDismiss={onDismiss}
+          title={t("message.actions.turnStats")}
+        >
+          <MetricsList metrics={metrics} />
+        </DetailsSheet>
+      )),
+    [key, metrics, openRowSheet, t],
+  );
   return (
-    <>
-      <PressHighlight
-        style={styles.trigger}
-        accessibilityRole="button"
-        accessibilityLabel={t("message.actions.turnStats")}
-        onPress={openSheet}
-        testID="turn-metrics-trigger"
-      >
-        {({ hovered }) => <TurnMetricsIcon active={open || Boolean(hovered)} />}
-      </PressHighlight>
-      <DetailsSheet open={open} onClose={closeSheet} title={t("message.actions.turnStats")}>
-        <MetricsList metrics={metrics} />
-      </DetailsSheet>
-    </>
+    <PressHighlight
+      style={styles.trigger}
+      accessibilityRole="button"
+      accessibilityLabel={t("message.actions.turnStats")}
+      onPress={openSheet}
+      testID="turn-metrics-trigger"
+    >
+      {({ hovered }) => <TurnMetricsIcon active={open || Boolean(hovered)} />}
+    </PressHighlight>
   );
 }
 
