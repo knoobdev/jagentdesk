@@ -1,3 +1,5 @@
+import { isTabFaviconDataUrl } from "@/desktop/browser/favicon-source";
+
 /** The agent whose `browser_new_tab` opened the tab (spec 04 §27d.1); absent for user tabs. */
 export interface BrowserTabOpener {
   serverId: string;
@@ -128,6 +130,16 @@ export function removeBrowserFromIndex<S extends BrowserIndexState>(
   return { ...state, browsersById: next };
 }
 
+/** Small icons survive a restart; a large one comes back when the tab loads again. */
+const MAX_PERSISTED_FAVICON_LENGTH = 16 * 1024;
+
+function persistableFavicon(faviconUrl: string | null): string | null {
+  // A site URL stored by an older build is dropped: the app never loads one (favicon-source.ts).
+  return isTabFaviconDataUrl(faviconUrl) && faviconUrl.length <= MAX_PERSISTED_FAVICON_LENGTH
+    ? faviconUrl
+    : null;
+}
+
 export function sanitizeBrowsersForPersist(state: BrowserIndexState): {
   browsersById: Record<string, BrowserRecord>;
 } {
@@ -135,7 +147,12 @@ export function sanitizeBrowsersForPersist(state: BrowserIndexState): {
     browsersById: Object.fromEntries(
       Object.entries(state.browsersById).map(([browserId, browser]) => [
         browserId,
-        { ...browser, isLoading: false, lastError: null },
+        {
+          ...browser,
+          isLoading: false,
+          lastError: null,
+          faviconUrl: persistableFavicon(browser.faviconUrl),
+        },
       ]),
     ),
   };

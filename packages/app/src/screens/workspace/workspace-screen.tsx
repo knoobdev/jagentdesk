@@ -100,6 +100,7 @@ import {
   FloatingPanelPortalHostNameProvider,
 } from "@/components/ui/floating-panel-portal";
 import { ExplorerSidebar } from "@/components/explorer-sidebar";
+import { createExplorerPaneSync } from "@/screens/workspace/explorer-pane-sync";
 import {
   SplitContainer,
   WorkspaceTabDragProvider,
@@ -2021,14 +2022,6 @@ function WorkspaceChromeRow({
   );
 }
 
-function resolveExplorerPanelKind(
-  tab: string,
-  isGit: boolean,
-): "files" | "changes_tree" | "pull_request" | "ledger" {
-  if (tab === "ledger") return "ledger";
-  if (!isGit || tab === "files") return "files";
-  return tab === "pr" ? "pull_request" : "changes_tree";
-}
 function useExplorerPane({
   serverId,
   cwd,
@@ -2072,33 +2065,29 @@ function useExplorerPane({
       .observePullRequest(workspaceKey, `${prPane.forge}:${prPane.prNumber}`);
   }, [explorerPaneId, open, prPane.forge, prPane.prNumber, workspaceKey]);
   const requestedExplorerTab = usePanelStore((state) => state.explorerTab);
-  const previousIntent = useRef({ workspaceKey, tab: requestedExplorerTab });
+  const explorerTabRequest = usePanelStore((state) => state.explorerTabRequest);
+  const [syncExplorerPane] = useState(() =>
+    createExplorerPaneSync(() => useWorkspaceLayoutStore.getState()),
+  );
   useEffect(() => {
     if (!checkoutReady || !workspaceKey || compact || !supportsDesktopPaneSplits()) return;
-    const store = useWorkspaceLayoutStore.getState();
-    const paneId = store.explorerPaneIdByWorkspace[workspaceKey];
-    if (!open) {
-      if (paneId) store.hidePane(workspaceKey, paneId);
-      return;
-    }
-    const tabIntentChanged =
-      previousIntent.current.workspaceKey === workspaceKey &&
-      previousIntent.current.tab !== requestedExplorerTab;
-    previousIntent.current = { workspaceKey, tab: requestedExplorerTab };
-    const result = store.ensureExplorerPane(workspaceKey);
-    if (!result) return;
-    if (!result.created && !tabIntentChanged) return;
-    if (result.created) {
-      if (isGit)
-        store.openTabInExplorerPaneFocused(workspaceKey, { target: { kind: "changes_tree" } });
-      store.openTabInExplorerPaneFocused(workspaceKey, { target: { kind: "files" } });
-    }
-    store.openTabInExplorerPaneFocused(workspaceKey, {
-      target: {
-        kind: resolveExplorerPanelKind(requestedExplorerTab, isGit),
-      },
+    syncExplorerPane({
+      workspaceKey,
+      open,
+      isGit,
+      explorerTab: requestedExplorerTab,
+      explorerTabRequest,
     });
-  }, [checkoutReady, open, isGit, compact, workspaceKey, requestedExplorerTab]);
+  }, [
+    checkoutReady,
+    open,
+    isGit,
+    compact,
+    workspaceKey,
+    requestedExplorerTab,
+    explorerTabRequest,
+    syncExplorerPane,
+  ]);
   return explorerPane;
 }
 

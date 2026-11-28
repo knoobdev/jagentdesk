@@ -12,6 +12,7 @@ import { createWorkspaceBrowser, getBrowserRecord, useBrowserStore } from "@/des
 import { collectAllTabs, useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
 import { buildWorkspaceTabPersistenceKey } from "@/workspace-tabs/model";
 import { useBrowserActivityStore } from "@/desktop/browser/automation/activity-store";
+import { isShownWorkspace, openWorkspaceInspector } from "@/desktop/browser/inspector";
 
 function readArgBrowserId(request: BrowserAutomationExecuteRequest): string | null {
   const args = request.command.args as Record<string, unknown> | undefined;
@@ -388,10 +389,14 @@ async function openBrowserTabForRequest(params: {
     });
   }
   // Spec 04 §27b.3: the agent's tab is selected in the inspector pane right away, next to the
-  // chat, so the user sees the page open in the app rather than looking for it.
+  // chat, so the user sees the page open in the app rather than looking for it. A closed
+  // inspector opens when the window shows this workspace.
   useWorkspaceLayoutStore.getState().openTabInExplorerPaneFocused(workspaceKey, {
     target: { kind: "browser", browserId },
   });
+  if (isShownWorkspace({ serverId, workspaceId })) {
+    openWorkspaceInspector({ serverId, workspaceId });
+  }
 
   if (browserHost?.executeAutomationCommand) {
     ensureResidentBrowserWebview({ browserId, workspaceId, url: normalizedUrl });

@@ -19,6 +19,8 @@ const {
   browserUserAgentFromElectron,
   hostUserAgentMetadata,
   navigationClientHintHeaders,
+  identityRequestHeaders,
+  currentIdentityRequestHeaders,
 } = await import("./browser-stealth.js");
 
 const profile = generateFingerprintProfile({
@@ -77,6 +79,51 @@ describe("browser identity helpers", () => {
       "Sec-CH-UA-Mobile": "?0",
       "Sec-CH-UA-Platform": expect.stringMatching(/^"(macOS|Windows|Linux)"$/),
     });
+  });
+});
+
+describe("identity headers for requests main makes for a tab (favicons)", () => {
+  const ELECTRON_UA =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) JAgentDesk/0.9.44 Chrome/146.0.7680.179 Electron/41.2.0 Safari/537.36";
+  const plainUa = browserUserAgentFromElectron(ELECTRON_UA);
+
+  it("sends the profile's UA, Accept-Language and Client Hints on a secure origin", () => {
+    const headers = identityRequestHeaders("https://shop.test/favicon.ico", profile, plainUa);
+    expect(headers["User-Agent"]).toBe(profile.userAgent);
+    expect(headers["Accept-Language"]).toBe(profile.acceptLanguage);
+    expect(headers["Sec-CH-UA-Platform"]).toBe('"Windows"');
+    expect(headers["Sec-CH-UA-Mobile"]).toBe("?0");
+    expect(headers["Sec-CH-UA"]).toContain('"Google Chrome"');
+  });
+
+  it("treats localhost as secure and plain http as not, like Chrome", () => {
+    expect(
+      identityRequestHeaders("http://127.0.0.1:6974/favicon.ico", profile, plainUa)["Sec-CH-UA"],
+    ).toBeDefined();
+    const insecure = identityRequestHeaders("http://shop.test/favicon.ico", profile, plainUa);
+    expect(Object.keys(insecure).some((name) => name.startsWith("Sec-CH-"))).toBe(false);
+    expect(insecure["User-Agent"]).toBe(profile.userAgent);
+  });
+
+  it("sends the plain Chrome UA without a profile, never the app's Electron UA", () => {
+    const headers = identityRequestHeaders("https://shop.test/favicon.ico", null, plainUa);
+    expect(headers["User-Agent"]).toBe(plainUa);
+    expect(headers["Accept-Language"]).toBeUndefined();
+    for (const value of Object.values(headers)) {
+      expect(value).not.toMatch(/Electron|JAgentDesk/);
+    }
+  });
+
+  it("follows the active profile, aligned with the engine", () => {
+    setActiveFingerprintProfile({ ...profile, stealthEnabled: true });
+    const headers = currentIdentityRequestHeaders("https://shop.test/favicon.ico");
+    expect(headers["User-Agent"]).toContain("Windows NT 10.0");
+    expect(headers["User-Agent"]).not.toMatch(/Electron|JAgentDesk|Macintosh/);
+    expect(headers["Accept-Language"]).toBe(profile.acceptLanguage);
+    setActiveFingerprintProfile(null);
+    expect(currentIdentityRequestHeaders("https://shop.test/favicon.ico")["User-Agent"]).toBe(
+      plainUa,
+    );
   });
 });
 

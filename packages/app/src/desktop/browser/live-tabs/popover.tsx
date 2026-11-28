@@ -9,6 +9,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import type { Theme } from "@/styles/theme";
 import { closeAllBrowserTabs, closeBrowserTab, showBrowserTab } from "./actions";
 import { browserTabRowDetailParts, type BrowserTabRow, type BrowserTabStatus } from "./model";
+import { tabFaviconSource } from "@/desktop/browser/favicon-source";
 
 /** Popover width shared by the host-row button and the composer pill (spec 04 §27d.1). */
 export const BROWSER_TABS_POPOVER_WIDTH = 420;
@@ -135,7 +136,7 @@ function BrowserTabPopoverRow({
 
 function BrowserTabFavicon({ faviconUrl }: { faviconUrl: string | null }) {
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
-  const source = useMemo(() => (faviconUrl ? { uri: faviconUrl } : undefined), [faviconUrl]);
+  const source = useMemo(() => tabFaviconSource(faviconUrl), [faviconUrl]);
   const handleError = useCallback(() => setFailedUrl(faviconUrl), [faviconUrl]);
   if (!source || failedUrl === faviconUrl) {
     return <ThemedGlobe size={16} uniProps={muted} />;

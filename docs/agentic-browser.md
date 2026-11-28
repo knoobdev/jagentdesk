@@ -13,8 +13,11 @@ it on in Settings → host → Plugins.
 
 ## Pages open in the app, never the system browser
 
-Spec 04 §27b.3. A `browser_new_tab` tab opens selected in the inspector pane beside the chat. When a
-launch carries browser tools (`AgentLaunchContext.inAppBrowser`):
+Spec 04 §27b.3. A `browser_new_tab` tab opens selected in the inspector pane beside the chat, and
+opens a closed inspector when the window shows that workspace. Opening the inspector never takes
+focus from the tab it shows; only an explicit request (`setExplorerTab*`, which bumps
+`explorerTabRequest`) brings Files or Changes to the front
+(`packages/app/src/screens/workspace/explorer-pane-sync.ts`). When a launch carries browser tools (`AgentLaunchContext.inAppBrowser`):
 
 - The system instructions require the `browser_*` tools for every page and forbid `open`,
   `xdg-open`, `start` and `Start-Process` with a URL and the provider's own browser tools.
@@ -131,6 +134,12 @@ identity.
   `navigator.platform` in workers. Shared workers are not CDP children of the page and take the
   process default User-Agent, so `app.userAgentFallback` follows the identity; the app window pins
   Electron's own UA.
+- **Favicons.** Electron only reports a tab's favicon URLs; the app's tab strip and browser tabs
+  list must never load them. An `<Image>` in the app window goes through the app's own session:
+  Electron UA, the host's Accept-Language, no profile proxy. Every v0.12.2/v0.12.3 favicon request
+  leaked the host identity that way. Main fetches the icon through the tab's session with the tab's
+  identity headers (`packages/desktop/src/features/browser-webviews/favicons.ts`) and the UI renders
+  only the `data:` URL it returns (`packages/app/src/desktop/browser/favicon-source.ts`).
 - **At startup.** Tabs restored at launch wait (at most 5 s) for the app to send the active profile,
   so nothing they start — a shared worker in particular — keeps a missing identity.
 - **Permissions.** The agentic session refuses `media`, `geolocation`, `display-capture`,
