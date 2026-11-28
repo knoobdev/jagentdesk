@@ -62,14 +62,41 @@ function StatusLine({ memory }: { memory: MemoryRecordWire }) {
   );
 }
 
+/** "Validate now" applies to active and stale lessons (spec 42 §8). */
+export function canValidateLesson(memory: MemoryRecordWire): boolean {
+  const status = memory.status ?? "active";
+  return (memory.kind ?? "memory") === "lesson" && (status === "active" || status === "stale");
+}
+
+/** Re-checks one lesson's citations and reports the result in a toast. */
+export function useValidateLesson(serverId: string, memoryId: string): () => void {
+  const { t } = useTranslation();
+  const toast = useToast();
+  const client = useHostRuntimeClient(serverId);
+  return useCallback(() => {
+    client?.validateMemories({ id: memoryId }).then(
+      ({ memories }) => {
+        const result = memories[0];
+        if (result?.status === "stale")
+          toast.error(result.statusReason ?? t("memory.status.stale"));
+        else toast.show(t("memory.lesson.validated"));
+        return undefined;
+      },
+      (error: unknown) => toast.error(errorText(error)),
+    );
+  }, [client, memoryId, t, toast]);
+}
+
 function LessonActions({
   serverId,
   memory,
   onGraduate,
+  hideValidate,
 }: {
   serverId: string;
   memory: MemoryRecordWire;
   onGraduate: () => void;
+  hideValidate: boolean;
 }) {
   const { t } = useTranslation();
   const toast = useToast();
@@ -80,18 +107,17 @@ function LessonActions({
       toast.error(errorText(error));
     });
   }, [client, memory.id, toast]);
-  const validate = useCallback(() => {
-    client?.validateMemories({ id: memory.id }).then(
-      ({ memories }) => {
-        const result = memories[0];
-        if (result?.status === "stale")
-          toast.error(result.statusReason ?? t("memory.status.stale"));
-        else toast.show(t("memory.lesson.validated"));
-        return undefined;
-      },
-      (error: unknown) => toast.error(errorText(error)),
-    );
-  }, [client, memory.id, t, toast]);
+  const validate = useValidateLesson(serverId, memory.id);
+  const showValidate = canValidateLesson(memory) && !hideValidate;
+  const showGraduated = status === "graduated" && Boolean(memory.graduatedPath);
+  const anyAction =
+    status === "pending" ||
+    status === "stale" ||
+    status === "deprecated" ||
+    showValidate ||
+    memory.graduationReady === true ||
+    showGraduated;
+  if (!anyAction) return null;
   return (
     <View style={styles.line}>
       {status === "pending" ? (
@@ -104,7 +130,7 @@ function LessonActions({
           {t("memory.lesson.restore")}
         </Button>
       ) : null}
-      {status === "active" || status === "stale" ? (
+      {showValidate ? (
         <Button size="sm" variant="ghost" onPress={validate} testID="memory-row-validate">
           {t("memory.lesson.validate")}
         </Button>
@@ -114,7 +140,7 @@ function LessonActions({
           {t("memory.lesson.graduate")}
         </Button>
       ) : null}
-      {status === "graduated" && memory.graduatedPath ? (
+      {showGraduated ? (
         <Text style={styles.meta}>
           {t("memory.lesson.graduatedTo", { path: memory.graduatedPath })}
         </Text>
@@ -131,10 +157,13 @@ export function LessonDetails({
   serverId,
   memory,
   projectRoot,
+  hideValidate = false,
 }: {
   serverId: string;
   memory: MemoryRecordWire;
   projectRoot: string | null;
+  /** The row shows "Validate now" with its own icon actions (phones). */
+  hideValidate?: boolean;
 }) {
   const [citation, setCitation] = useState<MemoryCitationWire | null>(null);
   const [graduating, setGraduating] = useState(false);
@@ -164,7 +193,12 @@ export function LessonDetails({
         </View>
       ) : null}
       {kind === "lesson" ? (
-        <LessonActions serverId={serverId} memory={memory} onGraduate={openGraduation} />
+        <LessonActions
+          serverId={serverId}
+          memory={memory}
+          onGraduate={openGraduation}
+          hideValidate={hideValidate}
+        />
       ) : null}
       {citation ? (
         <CitationSheet
