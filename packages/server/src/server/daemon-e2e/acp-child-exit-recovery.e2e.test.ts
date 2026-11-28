@@ -37,7 +37,10 @@ async function startAcpEchoDaemon(fixtureArgs: string[] = []) {
   });
   cleanups.push(() => daemon.close());
   // Clients older than 0.1.45 only see the legacy providers.
-  const client = new DaemonClient({ url: `ws://127.0.0.1:${daemon.port}/ws`, appVersion: "0.1.45" });
+  const client = new DaemonClient({
+    url: `ws://127.0.0.1:${daemon.port}/ws`,
+    appVersion: "0.1.45",
+  });
   cleanups.push(() => client.close());
   await client.connect();
   await client.fetchAgents({ subscribe: {} });
