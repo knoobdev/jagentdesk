@@ -2281,6 +2281,19 @@ export const ja: TranslationResources = {
         unsupported_os: "Not available on this OS",
       },
     },
+    metadataGeneration: {
+      title: "メタデータ生成",
+      description:
+        "ワークスペースのタイトル、ブランチ名、コミットメッセージ、プルリクエストの下書きに使用するモデルを選択します",
+      selection: "モデル選択",
+      automatic: "自動",
+      preferred: "手動",
+      automaticHint: "JAgentDesk が利用可能な高速モデルを選択します",
+      preferredHint: "JAgentDesk が使用するモデルを選択します",
+      model: "モデル",
+      modelHint: "このモデルのみを使用します。失敗しても、JAgentDesk は別のモデルを試しません",
+      saveError: "メタデータ生成を更新できません",
+    },
     voice: {
       offline: "音声を設定するには、このホストに接続してください。",
       updateHost: "音声を設定するには、ホストを更新してください。",

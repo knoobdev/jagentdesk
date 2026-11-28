@@ -2319,6 +2319,19 @@ export const fr: TranslationResources = {
         unsupported_os: "Not available on this OS",
       },
     },
+    metadataGeneration: {
+      title: "Génération de métadonnées",
+      description:
+        "Choisissez le modèle utilisé par JAgentDesk pour les titres d’espaces de travail, les noms de branches, les messages de commit et les brouillons de pull request",
+      selection: "Sélection du modèle",
+      automatic: "Automatique",
+      preferred: "Manuel",
+      automaticHint: "JAgentDesk choisit un modèle rapide disponible",
+      preferredHint: "Choisissez le modèle utilisé par JAgentDesk",
+      model: "Modèle",
+      modelHint: "Seul ce modèle est utilisé. S’il échoue, JAgentDesk n’essaie pas d’autre modèle",
+      saveError: "Impossible de mettre à jour la génération de métadonnées",
+    },
     voice: {
       offline: "Connectez-vous à cet hôte pour configurer la voix.",
       updateHost: "Mettez à jour l'hôte pour configurer la voix.",

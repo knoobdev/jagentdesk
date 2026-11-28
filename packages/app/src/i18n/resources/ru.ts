@@ -2336,6 +2336,20 @@ export const ru: TranslationResources = {
         unsupported_os: "Not available on this OS",
       },
     },
+    metadataGeneration: {
+      title: "Генерация метаданных",
+      description:
+        "Выберите модель, которую JAgentDesk будет использовать для названий рабочих пространств и веток, сообщений коммитов и черновиков PR",
+      selection: "Выбор модели",
+      automatic: "Автоматически",
+      preferred: "Вручную",
+      automaticHint: "JAgentDesk выбирает быструю доступную модель",
+      preferredHint: "Выберите модель, которую использует JAgentDesk",
+      model: "Модель",
+      modelHint:
+        "Используется только эта модель. Если она не сработает, JAgentDesk не будет пробовать другую модель",
+      saveError: "Не удалось обновить настройки генерации метаданных",
+    },
     voice: {
       offline: "Подключитесь к этому хосту, чтобы настроить голос.",
       updateHost: "Обновите хост, чтобы настроить голос.",

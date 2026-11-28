@@ -2221,6 +2221,18 @@ export const zhCN: TranslationResources = {
         unsupported_os: "Not available on this OS",
       },
     },
+    metadataGeneration: {
+      title: "元数据生成",
+      description: "选择 JAgentDesk 用于工作区标题、分支名称、提交消息和拉取请求草稿的模型",
+      selection: "模型选择",
+      automatic: "自动",
+      preferred: "手动",
+      automaticHint: "JAgentDesk 会选择一个可用的快速模型",
+      preferredHint: "选择 JAgentDesk 使用的模型",
+      model: "模型",
+      modelHint: "只使用此模型。如果失败，JAgentDesk 不会尝试其他模型",
+      saveError: "无法更新元数据生成设置",
+    },
     voice: {
       offline: "连接到此主机以配置语音。",
       updateHost: "请更新主机以配置语音。",

@@ -2300,6 +2300,19 @@ export const en = {
         unsupported_os: "Not available on this OS",
       },
     },
+    metadataGeneration: {
+      title: "Metadata generation",
+      description:
+        "Choose the model JAgentDesk uses for workspace titles, branch names, commit messages, and pull request drafts",
+      selection: "Model selection",
+      automatic: "Automatic",
+      preferred: "Manual",
+      automaticHint: "JAgentDesk picks a fast available model",
+      preferredHint: "Choose the model JAgentDesk uses",
+      model: "Model",
+      modelHint: "Only this model is used. If it fails, JAgentDesk does not try another model",
+      saveError: "Unable to update metadata generation",
+    },
     voice: {
       offline: "Connect to this host to configure voice.",
       updateHost: "Update the host to configure voice.",

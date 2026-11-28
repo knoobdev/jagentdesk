@@ -2291,6 +2291,19 @@ export const ar: TranslationResources = {
         unsupported_os: "Not available on this OS",
       },
     },
+    metadataGeneration: {
+      title: "إنشاء البيانات الوصفية",
+      description:
+        "اختر النموذج الذي يستخدمه JAgentDesk لعناوين مساحات العمل وأسماء الفروع ورسائل الالتزام ومسودات طلبات السحب",
+      selection: "اختيار النموذج",
+      automatic: "تلقائي",
+      preferred: "يدوي",
+      automaticHint: "يختار JAgentDesk نموذجًا سريعًا متاحًا",
+      preferredHint: "اختر النموذج الذي يستخدمه JAgentDesk",
+      model: "النموذج",
+      modelHint: "يُستخدم هذا النموذج فقط. إذا فشل، لا يجرّب JAgentDesk نموذجًا آخر",
+      saveError: "تعذر تحديث إنشاء البيانات الوصفية",
+    },
     voice: {
       offline: "اتصل بهذا المضيف لضبط الصوت.",
       updateHost: "حدّث المضيف لضبط الصوت.",

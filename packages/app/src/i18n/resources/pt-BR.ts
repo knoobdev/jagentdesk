@@ -2274,6 +2274,19 @@ export const ptBR: TranslationResources = {
         unsupported_os: "Not available on this OS",
       },
     },
+    metadataGeneration: {
+      title: "Geração de metadados",
+      description:
+        "Escolha o modelo usado pelo JAgentDesk para títulos de espaços de trabalho, nomes de branches, mensagens de commit e rascunhos de pull request",
+      selection: "Seleção de modelo",
+      automatic: "Automática",
+      preferred: "Manual",
+      automaticHint: "O JAgentDesk escolhe um modelo rápido disponível",
+      preferredHint: "Escolha o modelo que o JAgentDesk usa",
+      model: "Modelo",
+      modelHint: "Somente este modelo é usado. Se ele falhar, o JAgentDesk não tenta outro modelo",
+      saveError: "Não foi possível atualizar a geração de metadados",
+    },
     voice: {
       offline: "Conecte-se a este host para configurar a voz.",
       updateHost: "Atualize o host para configurar a voz.",

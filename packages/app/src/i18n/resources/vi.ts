@@ -362,6 +362,19 @@ export const vi = {
     },
   },
   settings: {
+    metadataGeneration: {
+      title: "Sinh metadata",
+      description:
+        "Chọn model JAgentDesk dùng để đặt tiêu đề workspace, tên branch, commit message và bản nháp pull request",
+      selection: "Chọn model",
+      automatic: "Tự động",
+      preferred: "Thủ công",
+      automaticHint: "JAgentDesk chọn một model nhanh đang có",
+      preferredHint: "Chọn model JAgentDesk dùng",
+      model: "Model",
+      modelHint: "Chỉ dùng model này. Nếu model lỗi, JAgentDesk không thử model khác",
+      saveError: "Không cập nhật được cài đặt sinh metadata",
+    },
     groups: {
       app: "Thiết bị này",
       host: "Host",
