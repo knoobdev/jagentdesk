@@ -78,6 +78,12 @@ export interface PanelState {
 
   // File explorer settings (shared between mobile/desktop)
   explorerTab: ExplorerTab;
+  /**
+   * Bumped by every explicit request to show `explorerTab` (setExplorerTab*). Opening the
+   * inspector only remembers the checkout's tab, so the inspector keeps the tab it shows.
+   * Not persisted.
+   */
+  explorerTabRequest: number;
   explorerTabByCheckout: Record<string, ExplorerTab>;
   expandedPathsByWorkspace: Record<string, string[]>;
   diffExpandedPathsByWorkspace: Record<string, string[]>;
@@ -160,6 +166,7 @@ export const usePanelStore = create<PanelState>()(
 
       // File explorer defaults
       explorerTab: "changes",
+      explorerTabRequest: 0,
       explorerTabByCheckout: {},
       expandedPathsByWorkspace: {},
       diffExpandedPathsByWorkspace: {},
@@ -263,12 +270,16 @@ export const usePanelStore = create<PanelState>()(
       toggleFileExplorerForCheckout: (input) =>
         set((state) => buildToggleFileExplorerPatch(state, input)),
 
-      setExplorerTab: (tab) => set({ explorerTab: tab }),
+      setExplorerTab: (tab) =>
+        set((state) => ({ explorerTab: tab, explorerTabRequest: state.explorerTabRequest + 1 })),
       setExplorerTabForCheckout: ({ serverId, cwd, isGit, tab }) =>
         set((state) => {
           const resolvedTab = coerceExplorerTabForCheckout(tab, isGit);
           const key = buildExplorerCheckoutKey(serverId, cwd);
-          const nextState: Partial<PanelState> = { explorerTab: resolvedTab };
+          const nextState: Partial<PanelState> = {
+            explorerTab: resolvedTab,
+            explorerTabRequest: state.explorerTabRequest + 1,
+          };
           if (key) {
             const current = state.explorerTabByCheckout[key];
             if (current !== resolvedTab) {

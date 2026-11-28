@@ -8,7 +8,7 @@ import {
   getLastWorkspaceSelection,
   navigateToWorkspace,
 } from "@/stores/navigation-active-workspace-store";
-import { selectIsFileExplorerOpen, usePanelStore } from "@/stores/panel-store";
+import { openWorkspaceInspector } from "@/desktop/browser/inspector";
 import { useSessionStore } from "@/stores/session-store";
 import { collectAllTabs, findPaneContainingTab } from "@/stores/workspace-layout-actions";
 import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
@@ -91,7 +91,8 @@ function showInMainPane(input: {
 
 /**
  * A workspace without a main pane keeps the tab in the inspector, which only shows while the file
- * explorer is open. Open it so the selected tab is on screen, as plugin navigation does.
+ * explorer is open. Open it so the selected tab is on screen, as plugin navigation does; the
+ * inspector keeps that tab in front (screens/workspace/explorer-pane-sync.ts).
  */
 function revealInspectorPane(input: { serverId: string; workspaceId: string; browserId: string }) {
   const workspaceKey = `${input.serverId}:${input.workspaceId}`;
@@ -104,50 +105,7 @@ function revealInspectorPane(input: { serverId: string; workspaceId: string; bro
       candidate.target.kind === "browser" && candidate.target.browserId === input.browserId,
   );
   if (!tab || findPaneContainingTab(layout.root, tab.tabId)?.id !== explorerPaneId) return;
-  const workspaces = useSessionStore.getState().sessions[input.serverId]?.workspaces;
-  const key = resolveWorkspaceMapKeyByIdentity({ workspaces, workspaceId: input.workspaceId });
-  const workspace = key ? workspaces?.get(key) : null;
-  if (!workspace?.workspaceDirectory) return;
-  if (selectIsFileExplorerOpen(usePanelStore.getState(), { isCompact: false })) return;
-  refocusWhenLayoutSettles(workspaceKey, input.browserId);
-  usePanelStore.getState().openFileExplorerForCheckout({
-    isCompact: false,
-    checkout: {
-      serverId: input.serverId,
-      cwd: workspace.workspaceDirectory,
-      isGit: workspace.projectKind === "git",
-    },
-  });
-}
-
-const LAYOUT_SETTLE_MS = 150;
-const LAYOUT_SETTLE_LIMIT_MS = 2000;
-
-/**
- * Opening the inspector runs its own effect a render later, which focuses its default tab
- * (Files or Changes). Select the browser tab again once the layout stops changing.
- */
-function refocusWhenLayoutSettles(workspaceKey: string, browserId: string): void {
-  let settleTimer: ReturnType<typeof setTimeout> | null = null;
-  const refocus = () => {
-    unsubscribe();
-    clearTimeout(limitTimer);
-    if (settleTimer) clearTimeout(settleTimer);
-    const store = useWorkspaceLayoutStore.getState();
-    const layout = store.layoutByWorkspace[workspaceKey];
-    const tab = layout
-      ? collectAllTabs(layout.root).find(
-          (candidate) =>
-            candidate.target.kind === "browser" && candidate.target.browserId === browserId,
-        )
-      : null;
-    if (tab) store.focusTab(workspaceKey, tab.tabId);
-  };
-  const unsubscribe = useWorkspaceLayoutStore.subscribe(() => {
-    if (settleTimer) clearTimeout(settleTimer);
-    settleTimer = setTimeout(refocus, LAYOUT_SETTLE_MS);
-  });
-  const limitTimer = setTimeout(refocus, LAYOUT_SETTLE_LIMIT_MS);
+  openWorkspaceInspector(input);
 }
 
 /** Closes the row's tab and destroys its webview. */
