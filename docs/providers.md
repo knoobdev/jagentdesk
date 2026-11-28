@@ -117,6 +117,10 @@ A client may expose `installation` with `installUrl`, `updateUrl`, `inspect`, `c
 
 Usage comes from bundled `*-usage-source` plugins. A source calls `server.registerUsageSource({ id, label, providers, input, discover, fetch })` (see `plugins/kimi-usage-source/index.server.ts`), and the app reads reports through `usage.list_reports.request`. Keep report shapes provider-agnostic: windows, balances and details render generically. `provider.usage.list.request` and `packages/server/src/services/quota-fetcher/` serve older clients only (`COMPAT(providerUsageList)`).
 
+Claude's OAuth usage endpoint is undocumented. Extra-usage amounts are reported in minor currency
+units and displayed only for USD; the balance contract does not represent other currencies.
+Codex individual spending limits provide percentages, not dollar amounts.
+
 ## Provider notes
 
 ### Claude
