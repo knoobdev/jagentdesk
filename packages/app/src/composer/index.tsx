@@ -2682,7 +2682,7 @@ function ComposerContentImpl({
               recall={recall}
               inputRef={messageInputRef}
               anchorStyle={messageInputContainerStyle}
-              show={mode.showAutocomplete && !isFullscreen}
+              show={mode.showAutocomplete && !isFullscreen && !isComposerLocked}
               ref={autocompleteRef}
               configuration={autocompleteConfiguration}
             >
